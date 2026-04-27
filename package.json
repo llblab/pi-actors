@@ -1,0 +1,31 @@
+{
+  "name": "@llblab/pi-auto-tools",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Persistent script-backed tools for pi",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "tools",
+    "automation"
+  ],
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "scripts": {
+    "check": "node -e \"console.log('pi-auto-tools: TypeScript extension is loaded by pi via jiti')\"",
+    "pack:dry": "npm pack --dry-run"
+  }
+}

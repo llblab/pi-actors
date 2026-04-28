@@ -1,10 +1,18 @@
 {
   "name": "@llblab/pi-auto-tools",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "Persistent script-backed tools for pi",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/llblab/pi-auto-tools.git"
+  },
+  "homepage": "https://github.com/llblab/pi-auto-tools",
+  "bugs": {
+    "url": "https://github.com/llblab/pi-auto-tools/issues"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",

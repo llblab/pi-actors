@@ -4,7 +4,8 @@ Living index of all documentation in the `/docs` directory.
 
 ## Documents
 
-- [command-templates.md](./command-templates.md) — Shared command-template contract for template-backed tool execution
+- [command-templates.md](./command-templates.md) — Portable command-template standard core
+- [tool-registry.md](./tool-registry.md) — Local `pi-auto-tools` registry storage and `register_tool` adaptation
 
 ## Root Context
 

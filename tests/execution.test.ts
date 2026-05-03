@@ -21,7 +21,8 @@ const tool: RegisteredTool = {
 };
 
 test("Registered tool execution expands command and returns formatted payload", async () => {
-  const calls: Array<{ command: string; args: string[]; timeout?: number }> = [];
+  const calls: Array<{ command: string; args: string[]; timeout?: number }> =
+    [];
   const result = await executeRegisteredTool(
     tool,
     { file: "/tmp/a b.ogg" },
@@ -49,7 +50,12 @@ test("Registered tool execution throws formatted command failures", async () => 
     executeRegisteredTool(
       tool,
       { file: "/tmp/a.ogg" },
-      async () => ({ stdout: "partial", stderr: "boom", code: 1, killed: false }),
+      async () => ({
+        stdout: "partial",
+        stderr: "boom",
+        code: 1,
+        killed: false,
+      }),
       "/work",
     ),
     /Exit code 1[\s\S]*stderr:\nboom[\s\S]*stdout:\npartial/,

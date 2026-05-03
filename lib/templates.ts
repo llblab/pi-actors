@@ -59,7 +59,9 @@ export function getTemplateArgValue(
   params: Record<string, unknown>,
   defaults: Record<string, string>,
 ): string {
-  return params[arg] === undefined ? (defaults[arg] ?? "") : String(params[arg]);
+  return params[arg] === undefined
+    ? (defaults[arg] ?? "")
+    : String(params[arg]);
 }
 
 export function substituteTemplateToken(

@@ -20,11 +20,15 @@ import {
 const reserved = new Set(["bash", "register_tool"]);
 
 test("Stored tool normalization accepts template-backed tools", () => {
-  const result = normalizeStoredTool("Transcribe", {
-    template: "~/bin/transcribe {file} {lang}",
-    args: ["file", "lang=ru"],
-    description: "Transcribe audio",
-  }, reserved);
+  const result = normalizeStoredTool(
+    "Transcribe",
+    {
+      template: "~/bin/transcribe {file} {lang}",
+      args: ["file", "lang=ru"],
+      description: "Transcribe audio",
+    },
+    reserved,
+  );
   assert.equal(result.warning, undefined);
   assert.equal(result.changed, true);
   assert.deepEqual(result.cfg, {
@@ -57,7 +61,10 @@ test("Config save and load round-trip template-backed tools", async () => {
       defaults: {},
     };
     assert.equal(saveTools(path, new Map([[tool.name, tool]])), undefined);
-    assert.deepEqual(JSON.parse(await readFile(path, "utf8")), serializeTools(new Map([[tool.name, tool]])));
+    assert.deepEqual(
+      JSON.parse(await readFile(path, "utf8")),
+      serializeTools(new Map([[tool.name, tool]])),
+    );
     const loaded = loadToolConfig(path, reserved);
     assert.equal(loaded.changed, false);
     assert.deepEqual([...loaded.tools.values()], [tool]);
@@ -70,13 +77,19 @@ test("Config load keeps last duplicate and reports warning", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-auto-tools-config-"));
   const path = join(dir, "auto-tools.json");
   try {
-    await writeFile(path, JSON.stringify([
-      { name: "dup", template: "first", description: "First" },
-      { name: "dup", template: "second", description: "Second" },
-    ]));
+    await writeFile(
+      path,
+      JSON.stringify([
+        { name: "dup", template: "first", description: "First" },
+        { name: "dup", template: "second", description: "Second" },
+      ]),
+    );
     const loaded = loadToolConfig(path, reserved);
     assert.equal(loaded.tools.get("dup")?.template, "second");
-    assert.match(loaded.warnings.join("\n"), /Duplicate tool kept from last entry/);
+    assert.match(
+      loaded.warnings.join("\n"),
+      /Duplicate tool kept from last entry/,
+    );
     assert.equal(loaded.changed, true);
   } finally {
     await rm(dir, { recursive: true, force: true });

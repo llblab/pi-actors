@@ -6,11 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  formatArgs,
-  normalizeStoredArgs,
-  parseArgs,
-} from "../lib/args.ts";
+import { formatArgs, normalizeStoredArgs, parseArgs } from "../lib/args.ts";
 import {
   normalizeArgName,
   normalizeToolName,

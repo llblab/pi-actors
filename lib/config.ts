@@ -68,7 +68,9 @@ export function saveTools(
   }
 }
 
-export function getStoredEntries(raw: unknown): Array<[string | undefined, unknown]> {
+export function getStoredEntries(
+  raw: unknown,
+): Array<[string | undefined, unknown]> {
   if (Array.isArray(raw)) return raw.map((value) => [undefined, value]);
   if (raw && typeof raw === "object") {
     return Object.entries(raw as Record<string, unknown>);
@@ -154,7 +156,9 @@ export function loadToolConfig(
       if (result.warning) warnings.push(result.warning);
       if (!result.cfg) continue;
       if (tools.has(result.cfg.name)) {
-        warnings.push(`Duplicate tool kept from last entry: ${result.cfg.name}`);
+        warnings.push(
+          `Duplicate tool kept from last entry: ${result.cfg.name}`,
+        );
       }
       if (tools.has(result.cfg.name)) changed = true;
       tools.set(result.cfg.name, result.cfg);

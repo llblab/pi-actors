@@ -4,11 +4,7 @@
  */
 
 import type { RegisteredTool } from "./config.ts";
-import {
-  formatFailureOutput,
-  formatOutput,
-  formatToolText,
-} from "./output.ts";
+import { formatFailureOutput, formatOutput, formatToolText } from "./output.ts";
 import {
   buildTemplateInvocation,
   resolveTemplateCommand,
@@ -66,7 +62,8 @@ export async function executeRegisteredTool(
     cfg.defaults,
   );
   const command = invocation.command;
-  if (!command) throw new Error(formatToolText("Tool template produced an empty command."));
+  if (!command)
+    throw new Error(formatToolText("Tool template produced an empty command."));
   const result = await exec(resolveTemplateCommand(command), invocation.args, {
     cwd,
     signal,

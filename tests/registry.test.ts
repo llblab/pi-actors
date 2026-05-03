@@ -27,7 +27,8 @@ async function createHarness() {
       getExternalToolConflict: () => undefined,
       getTools: () => tools,
       notify: (_ctx: unknown, message: string) => notifications.push(message),
-      registerRuntimeTool: (cfg: RegisteredTool) => runtimeRegistered.push(cfg.name),
+      registerRuntimeTool: (cfg: RegisteredTool) =>
+        runtimeRegistered.push(cfg.name),
       reservedToolNames: new Set(["bash", "register_tool"]),
       setActiveTools: (toolNames: string[]) => {
         activeTools = toolNames;

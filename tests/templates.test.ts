@@ -15,12 +15,10 @@ import {
 } from "../lib/templates.ts";
 
 test("Template splitter honors simple quotes and escapes", () => {
-  assert.deepEqual(splitShellWords("cmd 'literal words' \"more words\" a\\ b"), [
-    "cmd",
-    "literal words",
-    "more words",
-    "a b",
-  ]);
+  assert.deepEqual(
+    splitShellWords("cmd 'literal words' \"more words\" a\\ b"),
+    ["cmd", "literal words", "more words", "a b"],
+  );
 });
 
 test("Template invocation substitutes placeholders after splitting", () => {
@@ -50,7 +48,10 @@ test("Template invocation preserves embedded placeholder values as one argv item
 });
 
 test("Template command resolver expands only home-prefixed commands", () => {
-  assert.equal(resolveTemplateCommand("~/bin/tool"), join(homedir(), "bin/tool"));
+  assert.equal(
+    resolveTemplateCommand("~/bin/tool"),
+    join(homedir(), "bin/tool"),
+  );
   assert.equal(resolveTemplateCommand("tool"), "tool");
   assert.equal(resolveTemplateCommand("./tool"), "./tool");
 });

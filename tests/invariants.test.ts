@@ -7,14 +7,20 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const indexSource = await readFile(new URL("../index.ts", import.meta.url), "utf8");
+const indexSource = await readFile(
+  new URL("../index.ts", import.meta.url),
+  "utf8",
+);
 
 test("Entrypoint imports local domains through namespace imports", () => {
-  const localImports = [...indexSource.matchAll(/^import\s+(.+?)\s+from\s+"\.\/lib\//gm)].map(
-    (match) => match[1],
-  );
+  const localImports = [
+    ...indexSource.matchAll(/^import\s+(.+?)\s+from\s+"\.\/lib\//gm),
+  ].map((match) => match[1]);
   assert.equal(localImports.length > 0, true);
-  assert.equal(localImports.every((statement) => statement.startsWith("* as ")), true);
+  assert.equal(
+    localImports.every((statement) => statement.startsWith("* as ")),
+    true,
+  );
 });
 
 test("Entrypoint stays free of direct typebox and environment access", () => {

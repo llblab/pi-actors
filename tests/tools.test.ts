@@ -31,7 +31,10 @@ test("Register tool definition exposes a JSON schema with name as the only requi
   assert.deepEqual(definition.parameters.required, ["name"]);
   assert.equal(definition.parameters.properties.name.type, "string");
   assert.equal(definition.parameters.properties.update.type, "boolean");
-  assert.equal(Array.isArray(definition.parameters.properties.template.anyOf), true);
+  assert.equal(
+    Array.isArray(definition.parameters.properties.template.anyOf),
+    true,
+  );
 });
 
 test("Runtime tool definition marks defaulted args optional", () => {

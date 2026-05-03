@@ -22,7 +22,11 @@ export interface RegisterToolRuntimeDeps<TContext> {
   getExternalToolConflict: (name: string) => string | undefined;
   getTools: () => Map<string, Config.RegisteredTool>;
   getActiveTools: () => string[];
-  notify: (ctx: TContext, message: string, type: "info" | "warning" | "error") => void;
+  notify: (
+    ctx: TContext,
+    message: string,
+    type: "info" | "warning" | "error",
+  ) => void;
   registerRuntimeTool: (cfg: Config.RegisteredTool) => void;
   reservedToolNames: Set<string>;
   setActiveTools: (toolNames: string[]) => void;
@@ -40,7 +44,9 @@ function deleteTool<TContext>(
   const tools = deps.getTools();
   if (!tools.has(name)) {
     return {
-      content: [textContent(Output.formatToolText(`Tool "${name}" not found.`))],
+      content: [
+        textContent(Output.formatToolText(`Tool "${name}" not found.`)),
+      ],
       details: { tool: name },
     };
   }
@@ -53,7 +59,9 @@ function deleteTool<TContext>(
     );
   }
   tools.delete(name);
-  deps.setActiveTools(deps.getActiveTools().filter((toolName) => toolName !== name));
+  deps.setActiveTools(
+    deps.getActiveTools().filter((toolName) => toolName !== name),
+  );
   deps.notify(ctx, `Deleted tool: ${name}`, "info");
   return {
     content: [
@@ -76,14 +84,16 @@ function buildConfig(
     input.args === undefined
       ? { args: existing?.args ?? [], defaults: existing?.defaults ?? {} }
       : Args.parseArgs(input.args);
-  if (parsedArgs.error) throw new Error(Output.formatToolText(parsedArgs.error));
+  if (parsedArgs.error)
+    throw new Error(Output.formatToolText(parsedArgs.error));
   const description = (input.description ?? existing?.description ?? "").trim();
   if (!description) {
     throw new Error(
       Output.formatToolText("Tool description is required unless deleting."),
     );
   }
-  const template = typeof input.template === "string" ? input.template.trim() : input.template;
+  const template =
+    typeof input.template === "string" ? input.template.trim() : input.template;
   return {
     name,
     label: input.label?.trim() || existing?.label || name,
@@ -106,7 +116,8 @@ export async function executeRegisterTool<TContext>(
     throw new Error(Output.formatToolText(`Reserved tool name: ${name}`));
   }
   const templateProvided = Object.hasOwn(input, "template");
-  const template = typeof input.template === "string" ? input.template.trim() : input.template;
+  const template =
+    typeof input.template === "string" ? input.template.trim() : input.template;
   if (templateProvided && !template) return deleteTool(name, ctx, deps);
   const tools = deps.getTools();
   const existing = tools.get(name);
@@ -130,7 +141,9 @@ export async function executeRegisterTool<TContext>(
   const saveError = Config.saveTools(deps.configPath, nextTools);
   if (saveError) {
     throw new Error(
-      Output.formatToolText(`Failed to persist tool registration: ${saveError}`),
+      Output.formatToolText(
+        `Failed to persist tool registration: ${saveError}`,
+      ),
     );
   }
   tools.set(name, cfg);

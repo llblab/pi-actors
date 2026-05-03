@@ -26,8 +26,7 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   template:
     "Command template with {arg} placeholders. Omitted updates keep the old template. Empty string deletes the tool.",
   templateNull: "Delete the tool when template is null.",
-  args:
-    "Comma-separated argument names with optional defaults. Omitted updates keep old args; empty string clears args. Example: file,lang,model=openai-codex/gpt-5.5",
+  args: "Comma-separated argument names with optional defaults. Omitted updates keep old args; empty string clears args. Example: file,lang,model=openai-codex/gpt-5.5",
   update: "Set to true to overwrite an existing auto-tool registration.",
 } as const;
 

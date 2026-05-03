@@ -11,10 +11,11 @@ Persistent template-backed tool registry extension for the pi coding agent.
 
 ## Key Features
 
-- **Persistent Tools**: Stores tool definitions in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
-- **Command Templates**: Wraps trusted local commands as callable pi tools using split-first argv construction, placeholder substitution, and no shell evaluation.
-- **Skill Scripts as Tools**: Registers scripts from agent skills, such as STT/TTS helpers, as ordinary agent tools.
-- **Named Defaults**: Declares tool args as comma-separated names with optional defaults, e.g. `file,lang=ru,model=voxtral-mini-latest`.
+- **Commands Become Capabilities**: Turns stable local workflows into semantic agent tools, so the agent chooses what it can do instead of reconstructing how to run shell commands.
+- **Persistent Tool Registry**: Stores tool definitions in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
+- **Compact Semantic Interface**: Exposes short tool names, descriptions, named args, and defaults instead of long paths, positional command-arg order, and repeated command boilerplate.
+- **Safer Local Automation**: Wraps trusted command templates as narrow tools using split-first command-arg construction, placeholder substitution, and no shell evaluation.
+- **Reusable Building Blocks**: Makes skill scripts, sub-agent wrappers, diagnostics, and project workflows available as composable agent capabilities.
 - **Immediate Updates**: Registered and updated tools become callable in the active session; deleted tools are removed from active tools and fully disappear after reload.
 - **Bounded Output**: Tool stdout is returned to the agent with truncation safeguards; full oversized output is saved to a temp file.
 
@@ -43,7 +44,7 @@ pi install git:github.com/llblab/pi-auto-tools
 ```text
 register_tool name=transcribe_groq \
   description="Transcribe audio files using Groq Whisper API" \
-  template="~/.agents/skills/groq-stt/scripts/transcribe.sh {file} {lang} {model}" \
+  template="~/.pi/agent/skills/groq-stt/scripts/transcribe.sh {file} {lang} {model}" \
   args="file,lang=ru,model=whisper-large-v3-turbo"
 ```
 
@@ -80,7 +81,7 @@ The commands above persist entries like this in `~/.pi/agent/auto-tools.json`:
   "transcribe_groq": {
     "name": "transcribe_groq",
     "description": "Transcribe audio files using Groq Whisper API",
-    "template": "~/.agents/skills/groq-stt/scripts/transcribe.sh {file} {lang} {model}",
+    "template": "~/.pi/agent/skills/groq-stt/scripts/transcribe.mjs {file} {lang} {model}",
     "args": ["file", "lang", "model"],
     "defaults": {
       "lang": "ru",
@@ -105,12 +106,12 @@ This file is the durable registry. `register_tool` is the interactive API; `auto
 
 - Tool names are normalized to snake_case.
 - Reserved built-in names are blocked.
-- Templates are split into shell-like words first, then placeholders are substituted per argv token.
+- Templates are split into shell-like words first, then placeholders are substituted per command arg.
 - Commands execute through `pi.exec` without shell evaluation.
-- For local file path args, prefer `{file}` over ambiguous `{filename}`.
+- Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 
-See [`docs/command-templates.md`](./docs/command-templates.md) for the full command-template contract.
+See [`docs/command-templates.md`](./docs/command-templates.md) for the portable command-template contract and [`docs/tool-registry.md`](./docs/tool-registry.md) for the registry storage shape.
 
 ## Notes
 

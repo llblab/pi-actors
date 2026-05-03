@@ -11,9 +11,13 @@ export interface ParsedArgs {
   error?: string;
 }
 
-export function parseArgToken(value: string): { arg: string; defaultValue?: string } {
+export function parseArgToken(value: string): {
+  arg: string;
+  defaultValue?: string;
+} {
   const separatorIndex = value.indexOf("=");
-  const rawName = separatorIndex === -1 ? value : value.slice(0, separatorIndex);
+  const rawName =
+    separatorIndex === -1 ? value : value.slice(0, separatorIndex);
   const arg = normalizeArgName(rawName);
   const defaultValue =
     separatorIndex === -1 ? undefined : value.slice(separatorIndex + 1).trim();
@@ -35,7 +39,8 @@ export function parseArgs(value: string): ParsedArgs {
     if (seen.has(parsed.arg)) duplicates.add(parsed.arg);
     seen.add(parsed.arg);
     args.push(parsed.arg);
-    if (parsed.defaultValue !== undefined) defaults[parsed.arg] = parsed.defaultValue;
+    if (parsed.defaultValue !== undefined)
+      defaults[parsed.arg] = parsed.defaultValue;
   }
   if (duplicates.size > 0) {
     return {
@@ -70,7 +75,8 @@ export function normalizeStoredArgs(
     args.push(parsed.arg);
     const storedDefault = rawDefaults[parsed.arg];
     if (typeof storedDefault === "string") defaults[parsed.arg] = storedDefault;
-    else if (parsed.defaultValue !== undefined) defaults[parsed.arg] = parsed.defaultValue;
+    else if (parsed.defaultValue !== undefined)
+      defaults[parsed.arg] = parsed.defaultValue;
   }
   return { args, defaults };
 }

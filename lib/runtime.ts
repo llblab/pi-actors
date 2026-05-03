@@ -22,7 +22,9 @@ export interface AutoToolsRuntimeDeps {
   configPath: string;
   exec: RegisteredToolExec;
   getAllTools: () => ToolInfoLike[];
-  registerTool: (definition: ReturnType<typeof Tools.createRuntimeToolDefinition>) => void;
+  registerTool: (
+    definition: ReturnType<typeof Tools.createRuntimeToolDefinition>,
+  ) => void;
   reservedToolNames: Set<string>;
 }
 
@@ -30,11 +32,17 @@ export interface AutoToolsRuntime {
   getExternalToolConflict(name: string): string | undefined;
   getTools(): Map<string, Config.RegisteredTool>;
   loadTools(ctx: RuntimeContext): void;
-  notify(ctx: RuntimeContext, message: string, type: "info" | "warning" | "error"): void;
+  notify(
+    ctx: RuntimeContext,
+    message: string,
+    type: "info" | "warning" | "error",
+  ): void;
   registerRuntimeTool(cfg: Config.RegisteredTool): void;
 }
 
-export function createAutoToolsRuntime(deps: AutoToolsRuntimeDeps): AutoToolsRuntime {
+export function createAutoToolsRuntime(
+  deps: AutoToolsRuntimeDeps,
+): AutoToolsRuntime {
   const tools = new Map<string, Config.RegisteredTool>();
   const runtimeTools = new Set<string>();
   function notify(
@@ -56,7 +64,10 @@ export function createAutoToolsRuntime(deps: AutoToolsRuntimeDeps): AutoToolsRun
     runtimeTools.add(cfg.name);
   }
   function loadTools(ctx: RuntimeContext) {
-    const loaded = Config.loadToolConfig(deps.configPath, deps.reservedToolNames);
+    const loaded = Config.loadToolConfig(
+      deps.configPath,
+      deps.reservedToolNames,
+    );
     tools.clear();
     for (const [name, cfg] of loaded.tools) tools.set(name, cfg);
     if (loaded.changed) {

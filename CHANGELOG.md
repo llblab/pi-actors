@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-No unreleased changes.
+- `[Docs]` Harmonized the portable command-template standard wording with `pi-telegram`, using `template`/`args`/`defaults`, command-arg terminology, and `{file}` as the canonical local file path arg. Impact: both extensions now describe the same integration contract without `argv`, `command`, or `{filename}` ambiguity.
+
+## 0.2.1
+
+- `[Docs]` Split command-template documentation into a portable standard core (`docs/command-templates.md`) and local registry adaptation (`docs/tool-registry.md`). Impact: the shared command-template contract can be copied across extensions without coupling their internals, while `pi-auto-tools` keeps its registry storage shape documented separately.
 
 ## 0.2.0
 

@@ -11,12 +11,20 @@ import * as Prompts from "../lib/prompts.ts";
 test("Register tool prompt copy names the register_tool tool explicitly", () => {
   assert.match(Prompts.REGISTER_TOOL_DESCRIPTION, /persistent custom tool/);
   assert.match(Prompts.REGISTER_TOOL_PROMPT_SNIPPET, /command templates/);
-  assert.equal(Prompts.REGISTER_TOOL_GUIDELINES.every((item) => item.includes("register_tool")), true);
+  assert.equal(
+    Prompts.REGISTER_TOOL_GUIDELINES.every((item) =>
+      item.includes("register_tool"),
+    ),
+    true,
+  );
 });
 
 test("Register tool parameter descriptions cover public input fields", () => {
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name, /snake_case/);
-  assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template, /Command template/);
+  assert.match(
+    Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template,
+    /Command template/,
+  );
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.args, /file,lang/);
 });
 

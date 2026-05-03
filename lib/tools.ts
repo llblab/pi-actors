@@ -9,7 +9,8 @@ import * as Prompts from "./prompts.ts";
 import * as Registry from "./registry.ts";
 
 export type RegisterToolInput = Registry.RegisterToolInput;
-export type RegisterToolRuntimeDeps<TContext> = Registry.RegisterToolRuntimeDeps<TContext>;
+export type RegisterToolRuntimeDeps<TContext> =
+  Registry.RegisterToolRuntimeDeps<TContext>;
 
 type JsonSchema = Record<string, unknown>;
 

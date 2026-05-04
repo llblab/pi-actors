@@ -37,15 +37,14 @@ pi install git:github.com/llblab/pi-auto-tools
 
 `register_tool` registers, updates, or deletes one persistent tool.
 
-### Skill script: transcription
+### Local command: transcription
 
-`pi-auto-tools` is useful for exposing scripts from agent skills as normal tools. For example, register a Groq STT skill script:
+`pi-auto-tools` is useful for exposing stable local commands as normal tools. For example, register an STT command:
 
 ```text
-register_tool name=transcribe_groq \
-  description="Transcribe audio files using Groq Whisper API" \
-  template="~/.pi/agent/skills/groq-stt/scripts/transcribe.sh {file} {lang} {model}" \
-  args="file,lang=ru,model=whisper-large-v3-turbo"
+register_tool name=transcribe \
+  description="Transcribe a local audio file" \
+  template="/path/to/stt --file {file} --lang {lang=ru}"
 ```
 
 ### Sub-agent
@@ -53,8 +52,7 @@ register_tool name=transcribe_groq \
 ```text
 register_tool name=call_subagent \
   description="Run pi as a non-interactive sub-agent" \
-  template="pi -p --model {model} --no-tools {prompt}" \
-  args="prompt,model=openai-codex/gpt-5.5"
+  template="pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
 ```
 
 Use `update=true` to overwrite an existing tool. Omit `template` during update to keep the previous template:
@@ -62,7 +60,6 @@ Use `update=true` to overwrite an existing tool. Omit `template` during update t
 ```text
 register_tool name=call_subagent \
   description="Run a focused pi sub-agent without tools" \
-  args="prompt,model=openai-codex/gpt-5.5" \
   update=true
 ```
 
@@ -74,28 +71,17 @@ register_tool name=call_subagent template=null
 
 ## Resulting Config
 
-The commands above persist entries like this in `~/.pi/agent/auto-tools.json`:
+The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; tool names come from the top-level keys:
 
 ```json
 {
-  "transcribe_groq": {
-    "name": "transcribe_groq",
-    "description": "Transcribe audio files using Groq Whisper API",
-    "template": "~/.pi/agent/skills/groq-stt/scripts/transcribe.mjs {file} {lang} {model}",
-    "args": ["file", "lang", "model"],
-    "defaults": {
-      "lang": "ru",
-      "model": "whisper-large-v3-turbo"
-    }
+  "transcribe": {
+    "description": "Transcribe a local audio file",
+    "template": "/path/to/stt --file {file} --lang {lang=ru}"
   },
   "call_subagent": {
-    "name": "call_subagent",
     "description": "Run pi as a non-interactive sub-agent",
-    "template": "pi -p --model {model} --no-tools {prompt}",
-    "args": ["prompt", "model"],
-    "defaults": {
-      "model": "openai-codex/gpt-5.5"
-    }
+    "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
   }
 }
 ```
@@ -107,7 +93,10 @@ This file is the durable registry. `register_tool` is the interactive API; `auto
 - Tool names are normalized to snake_case.
 - Reserved built-in names are blocked.
 - Templates are split into shell-like words first, then placeholders are substituted per command arg.
-- Commands execute through `pi.exec` without shell evaluation.
+- Tool args are derived from placeholders when `args` is omitted.
+- `{arg=default}` inline defaults resolve after runtime values and stored `defaults`.
+- `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
+- Commands execute directly without shell evaluation.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 

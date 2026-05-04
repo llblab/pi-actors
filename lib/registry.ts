@@ -3,16 +3,16 @@
  * Owns register/update/delete validation, persistence, runtime side effects, and result payloads
  */
 
-import * as Args from "./args.ts";
 import * as Config from "./config.ts";
 import * as Identity from "./identity.ts";
 import * as Output from "./output.ts";
+import * as CommandTemplates from "./command-templates.ts";
+import * as Schema from "./schema.ts";
 
 export interface RegisterToolInput {
   name: string;
-  label?: string;
   description?: string;
-  template?: string | null;
+  template?: CommandTemplates.CommandTemplateValue | null;
   args?: string;
   update?: boolean;
 }
@@ -75,32 +75,56 @@ function deleteTool<TContext>(
   };
 }
 
+function getInputTemplate(
+  value: CommandTemplates.CommandTemplateValue | null | undefined,
+): CommandTemplates.CommandTemplateValue | null | undefined {
+  if (typeof value === "string") return value.trim();
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    const steps = CommandTemplates.expandCommandTemplateConfigs({ template: value });
+    if (steps.length === 0)
+      throw new Error(Output.formatToolText("Tool template sequence is empty."));
+    return value;
+  }
+  throw new Error(Output.formatToolText("Tool template must be a string or sequence."));
+}
+
 function buildConfig(
   name: string,
   input: RegisterToolInput,
   existing: Config.RegisteredTool | undefined,
 ): Config.RegisteredTool {
-  const parsedArgs =
+  const explicitArgs =
     input.args === undefined
-      ? { args: existing?.args ?? [], defaults: existing?.defaults ?? {} }
-      : Args.parseArgs(input.args);
-  if (parsedArgs.error)
-    throw new Error(Output.formatToolText(parsedArgs.error));
+      ? undefined
+      : Schema.parseToolArgDeclarations(input.args);
+  if (explicitArgs?.error)
+    throw new Error(Output.formatToolText(explicitArgs.error));
   const description = (input.description ?? existing?.description ?? "").trim();
   if (!description) {
     throw new Error(
       Output.formatToolText("Tool description is required unless deleting."),
     );
   }
-  const template =
-    typeof input.template === "string" ? input.template.trim() : input.template;
+  const template = getInputTemplate(input.template);
+  const finalTemplate =
+    template === undefined || template === "" ? existing!.template : template;
+  const defaults = explicitArgs?.defaults ?? existing?.storedDefaults ?? {};
+  const storedArgs = explicitArgs ? explicitArgs.args : existing?.storedArgs;
+  const storedDefaults =
+    Object.keys(defaults).length > 0 ? defaults : undefined;
   return {
     name,
-    label: input.label?.trim() || existing?.label || name,
     description,
-    template: template || existing!.template,
-    args: parsedArgs.args,
-    defaults: parsedArgs.defaults,
+    template: finalTemplate,
+    args: Schema.getToolArgNames({
+      args: storedArgs,
+      defaults,
+      template: finalTemplate,
+    }),
+    defaults,
+    ...(storedArgs !== undefined ? { storedArgs } : {}),
+    ...(storedDefaults !== undefined ? { storedDefaults } : {}),
   };
 }
 
@@ -116,9 +140,9 @@ export async function executeRegisterTool<TContext>(
     throw new Error(Output.formatToolText(`Reserved tool name: ${name}`));
   }
   const templateProvided = Object.hasOwn(input, "template");
-  const template =
-    typeof input.template === "string" ? input.template.trim() : input.template;
-  if (templateProvided && !template) return deleteTool(name, ctx, deps);
+  const template = getInputTemplate(input.template);
+  if (templateProvided && (template === null || template === ""))
+    return deleteTool(name, ctx, deps);
   const tools = deps.getTools();
   const existing = tools.get(name);
   const conflict = deps.getExternalToolConflict(name);
@@ -130,7 +154,7 @@ export async function executeRegisterTool<TContext>(
       ),
     );
   }
-  if (!template && !existing) {
+  if (template === undefined && !existing) {
     throw new Error(
       Output.formatToolText("Tool template is required for new registrations."),
     );
@@ -153,7 +177,7 @@ export async function executeRegisterTool<TContext>(
     content: [
       textContent(
         Output.formatToolText(
-          `${existing ? "Updated" : "Registered"} tool "${name}" (args: ${Args.formatArgs(cfg.args)}).`,
+          `${existing ? "Updated" : "Registered"} tool "${name}" (args: ${Schema.formatToolArgs(cfg.args)}).`,
         ),
       ),
     ],

@@ -13,16 +13,19 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
-import { normalizeStoredArgs } from "./args.ts";
 import { normalizeToolName } from "./identity.ts";
+import * as CommandTemplates from "./command-templates.ts";
+import * as Schema from "./schema.ts";
+import type { CommandTemplateValue } from "./command-templates.ts";
 
 export interface RegisteredTool {
   name: string;
-  label: string;
   description: string;
-  template: string;
+  template: CommandTemplateValue;
   args: string[];
   defaults: Record<string, string>;
+  storedArgs?: string[];
+  storedDefaults?: Record<string, string>;
 }
 
 export interface LoadConfigResult {
@@ -33,10 +36,20 @@ export interface LoadConfigResult {
 
 export function serializeTools(
   source: Map<string, RegisteredTool>,
-): Record<string, RegisteredTool> {
+): Record<string, unknown> {
   const entries = [...source.entries()].sort(([a], [b]) => a.localeCompare(b));
-  const result: Record<string, RegisteredTool> = {};
-  for (const [name, cfg] of entries) result[name] = cfg;
+  const result: Record<string, unknown> = {};
+  for (const [name, cfg] of entries) {
+    const entry: Record<string, unknown> = {
+      description: cfg.description,
+      template: cfg.template,
+    };
+    if (cfg.storedArgs && cfg.storedArgs.length > 0)
+      entry.args = cfg.storedArgs;
+    if (cfg.storedDefaults && Object.keys(cfg.storedDefaults).length > 0)
+      entry.defaults = cfg.storedDefaults;
+    result[name] = entry;
+  }
   return result;
 }
 
@@ -78,6 +91,19 @@ export function getStoredEntries(
   return [];
 }
 
+function getStoredTemplate(value: unknown): CommandTemplateValue | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (!Array.isArray(value)) return undefined;
+  const template = value as CommandTemplates.CommandTemplateConfig[];
+  return CommandTemplates.expandCommandTemplateConfigs({ template }).length > 0
+    ? template
+    : undefined;
+}
+
+function formatTemplateForDescription(template: CommandTemplateValue): string {
+  return typeof template === "string" ? template : JSON.stringify(template);
+}
+
 export function normalizeStoredTool(
   key: string | undefined,
   value: unknown,
@@ -101,41 +127,48 @@ export function normalizeStoredTool(
   if (reservedToolNames.has(name)) {
     return { changed: true, warning: `Reserved tool name skipped: ${name}` };
   }
-  const rawTemplate =
-    typeof record.template === "string" ? record.template.trim() : "";
-  if (!rawTemplate && typeof record.script === "string") {
+  const template = getStoredTemplate(record.template);
+  if (!template && typeof record.script === "string") {
     return {
       changed: false,
       warning: `Tool "${name}" uses legacy script config. Migrate to template because pi-auto-tools v0.2.0 cannot load it.`,
     };
   }
-  if (!rawTemplate) {
+  if (!template) {
     return { changed: true, warning: `Tool "${name}" has no template` };
   }
-  const label =
-    typeof record.label === "string" && record.label.trim()
-      ? record.label.trim()
-      : name;
   const description =
     typeof record.description === "string" && record.description.trim()
       ? record.description.trim()
-      : `Execute command template: ${rawTemplate}`;
-  const parsed = normalizeStoredArgs(record.args, record.defaults);
+      : `Execute command template: ${formatTemplateForDescription(template)}`;
+  const declarations = Schema.normalizeStoredToolArgDeclarations(
+    record.args,
+    record.defaults,
+  );
+  const storedArgs = declarations.provided ? declarations.args : undefined;
+  const storedDefaults =
+    declarations.provided && Object.keys(declarations.defaults).length > 0
+      ? declarations.defaults
+      : undefined;
   const cfg = {
     name,
-    label,
     description,
-    template: rawTemplate,
-    args: parsed.args,
-    defaults: parsed.defaults,
+    template,
+    args: Schema.getToolArgNames({
+      args: storedArgs,
+      defaults: declarations.defaults,
+      template,
+    }),
+    defaults: declarations.defaults,
+    ...(storedArgs !== undefined ? { storedArgs } : {}),
+    ...(storedDefaults !== undefined ? { storedDefaults } : {}),
   };
   const changed =
-    record.name !== name ||
-    record.template !== rawTemplate ||
-    label !== record.label ||
+    record.name !== undefined ||
+    record.label !== undefined ||
+    JSON.stringify(record.template) !== JSON.stringify(template) ||
     description !== record.description ||
-    JSON.stringify(parsed.args) !== JSON.stringify(record.args ?? []) ||
-    JSON.stringify(parsed.defaults) !== JSON.stringify(record.defaults ?? {});
+    declarations.changed;
   return { cfg, changed };
 }
 

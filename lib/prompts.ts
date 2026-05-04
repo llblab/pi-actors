@@ -20,16 +20,18 @@ export const REGISTER_TOOL_GUIDELINES = [
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",
-  label: "Human-readable label (e.g., 'Transcribe Audio')",
   description:
     "Describe what the tool does for the LLM. Required unless deleting; omitted updates keep the old description.",
   template:
-    "Command template with {arg} placeholders. Omitted updates keep the old template. Empty string deletes the tool.",
+    "Command template with {arg} or {arg=default} placeholders. Omitted updates keep the old template. Empty string deletes the tool.",
+  templateArray:
+    "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout.",
   templateNull: "Delete the tool when template is null.",
-  args: "Comma-separated argument names with optional defaults. Omitted updates keep old args; empty string clears args. Example: file,lang,model=openai-codex/gpt-5.5",
+  args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,model=openai-codex/gpt-5.5",
   update: "Set to true to overwrite an existing auto-tool registration.",
 } as const;
 
-export function formatRegisteredToolPromptSnippet(template: string): string {
-  return `Execute command template: ${template}`;
+export function formatRegisteredToolPromptSnippet(template: unknown): string {
+  const rendered = typeof template === "string" ? template : JSON.stringify(template);
+  return `Execute command template: ${rendered}`;
 }

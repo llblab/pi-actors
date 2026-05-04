@@ -7,6 +7,7 @@ import type { RegisteredTool } from "./config.ts";
 import * as Execution from "./execution.ts";
 import * as Prompts from "./prompts.ts";
 import * as Registry from "./registry.ts";
+import * as Schema from "./schema.ts";
 
 export type RegisterToolInput = Registry.RegisterToolInput;
 export type RegisterToolRuntimeDeps<TContext> =
@@ -24,6 +25,10 @@ function booleanSchema(description: string): JsonSchema {
 
 function nullSchema(description: string): JsonSchema {
   return { description, type: "null" };
+}
+
+function arraySchema(description: string): JsonSchema {
+  return { description, items: {}, type: "array" };
 }
 
 function unionSchema(anyOf: JsonSchema[]): JsonSchema {
@@ -52,10 +57,10 @@ export function createRegisterToolDefinition<TContext>(
         description: stringSchema(
           Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.description,
         ),
-        label: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.label),
         name: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name),
         template: unionSchema([
           stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template),
+          arraySchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateArray),
           nullSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateNull),
         ]),
         update: booleanSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.update),
@@ -78,13 +83,18 @@ export function createRuntimeToolDefinition(
 ) {
   const paramSchema: Record<string, JsonSchema> = {};
   const required: string[] = [];
+  const requiredArgs = Schema.getRequiredToolArgNames({
+    args: cfg.args,
+    defaults: cfg.defaults,
+    template: cfg.template,
+  });
   for (const arg of cfg.args) {
     paramSchema[arg] = stringSchema(`Argument: ${arg}`);
-    if (!Object.hasOwn(cfg.defaults, arg)) required.push(arg);
+    if (requiredArgs.has(arg)) required.push(arg);
   }
   return {
     name: cfg.name,
-    label: cfg.label || cfg.name,
+    label: cfg.name,
     description: cfg.description,
     parameters: objectSchema(paramSchema, required),
     promptSnippet: Prompts.formatRegisteredToolPromptSnippet(cfg.template),

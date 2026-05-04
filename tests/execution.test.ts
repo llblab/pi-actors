@@ -13,7 +13,6 @@ import type { RegisteredTool } from "../lib/config.ts";
 
 const tool: RegisteredTool = {
   name: "transcribe",
-  label: "Transcribe",
   description: "Transcribe audio",
   template: "~/bin/transcribe {file} {lang}",
   args: ["file", "lang"],
@@ -41,8 +40,57 @@ test("Registered tool execution expands command and returns formatted payload", 
   ]);
   assert.deepEqual(result.content, [{ type: "text", text: "\ntext" }]);
   assert.equal(result.details.tool, "transcribe");
-  assert.equal(result.details.command, "~/bin/transcribe");
+  assert.equal(result.details.command, join(homedir(), "bin/transcribe"));
   assert.equal(result.details.truncated, false);
+});
+
+test("Registered tool execution runs template sequences with previous stdout as stdin", async () => {
+  const calls: Array<{
+    command: string;
+    args: string[];
+    stdin?: string;
+    timeout?: number;
+  }> = [];
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        "./first {file}",
+        { template: "./second {lang=ru}", timeout: 123 },
+      ],
+    },
+    { file: "/tmp/a.ogg" },
+    async (command, args, options) => {
+      calls.push({
+        command,
+        args,
+        stdin: options?.stdin,
+        timeout: options?.timeout,
+      });
+      return {
+        stdout: command.endsWith("first") ? "first out" : "second out",
+        stderr: "",
+        code: 0,
+        killed: false,
+      };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, [
+    {
+      command: "/work/first",
+      args: ["/tmp/a.ogg"],
+      stdin: undefined,
+      timeout: 120_000,
+    },
+    {
+      command: "/work/second",
+      args: ["ru"],
+      stdin: "first out",
+      timeout: 123,
+    },
+  ]);
+  assert.deepEqual(result.content, [{ type: "text", text: "\nsecond out" }]);
 });
 
 test("Registered tool execution throws formatted command failures", async () => {

@@ -11,18 +11,25 @@ This document is the local adaptation of the portable [Command Template Standard
 ```text
 register_tool name=transcribe_groq \
   description="Transcribe audio files using Groq Whisper API" \
-  template="~/.pi/agent/skills/groq-stt/scripts/transcribe.sh {file} {lang} {model}" \
-  args="file,lang=ru,model=whisper-large-v3-turbo"
+  template="~/.pi/agent/skills/groq-stt/scripts/transcribe.mjs {file} {lang=ru} {model=whisper-large-v3-turbo}"
 ```
 
 ```text
 register_tool name=call_subagent \
   description="Run pi as a non-interactive sub-agent" \
-  template="pi -p --model {model} --no-tools {prompt}" \
-  args="prompt,model=openai-codex/gpt-5.5"
+  template="pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
 ```
 
 Use `update=true` to overwrite an existing tool. Omit `template` during update to keep the previous template.
+
+`template` may also be a standard command-template sequence for multi-step tools:
+
+```json
+[
+  "~/bin/tts --text {text} --out {mp3}",
+  { "template": "ffmpeg -y -i {mp3} -c:a libopus {ogg}", "timeout": 30000 }
+]
+```
 
 Delete a tool with `template=null`:
 
@@ -32,42 +39,32 @@ register_tool name=call_subagent template=null
 
 ## Stored Shape
 
-The commands above persist entries like this:
+Tool names come from the top-level registry keys. The commands above persist entries like this:
 
 ```json
 {
   "transcribe_groq": {
-    "name": "transcribe_groq",
     "description": "Transcribe audio files using Groq Whisper API",
-    "template": "~/.pi/agent/skills/groq-stt/scripts/transcribe.mjs {file} {lang} {model}",
-    "args": ["file", "lang", "model"],
-    "defaults": {
-      "lang": "ru",
-      "model": "whisper-large-v3-turbo"
-    }
+    "template": "~/.pi/agent/skills/groq-stt/scripts/transcribe.mjs {file} {lang=ru} {model=whisper-large-v3-turbo}"
   },
   "call_subagent": {
-    "name": "call_subagent",
     "description": "Run pi as a non-interactive sub-agent",
-    "template": "pi -p --model {model} --no-tools {prompt}",
-    "args": ["prompt", "model"],
-    "defaults": {
-      "model": "openai-codex/gpt-5.5"
-    }
+    "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
   }
 }
 ```
 
 ## Args and Defaults
 
-Every declared arg creates one placeholder with the same normalized name:
+When `args` is omitted, `pi-auto-tools` derives tool parameters from placeholders in `template`:
 
 ```text
-args="file,lang=ru,model=whisper-large-v3-turbo"
-template="~/bin/transcribe {file} {lang} {model}"
+template="~/bin/transcribe {file} {lang=ru} {model=whisper-large-v3-turbo}"
 ```
 
-Defaults are applied before substitution. Missing required values are rejected by the generated tool schema before execution.
+The optional `args` field is only an explicit placeholder declaration, matching the command-template standard. Defaults should be stored in `defaults` or written inline as `{name=default}`; legacy interactive shorthand such as `args="file,lang=ru"` is normalized before persistence.
+
+Defaults are applied before substitution, with resolution order runtime values → stored `defaults` → inline default → error. Missing required values are rejected before or during execution.
 
 ## File Argument Naming
 

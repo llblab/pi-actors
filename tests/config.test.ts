@@ -33,12 +33,48 @@ test("Stored tool normalization accepts template-backed tools", () => {
   assert.equal(result.changed, true);
   assert.deepEqual(result.cfg, {
     name: "transcribe",
-    label: "transcribe",
     description: "Transcribe audio",
     template: "~/bin/transcribe {file} {lang}",
     args: ["file", "lang"],
     defaults: { lang: "ru" },
+    storedArgs: ["file", "lang"],
+    storedDefaults: { lang: "ru" },
   });
+});
+
+test("Stored tool normalization derives args from standard inline placeholders", () => {
+  const result = normalizeStoredTool(
+    "transcribe_groq",
+    {
+      description: "Transcribe audio",
+      template: "~/bin/transcribe {file} {lang=ru} {model=whisper}",
+    },
+    reserved,
+  );
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.cfg?.args, ["file", "lang", "model"]);
+  assert.deepEqual(result.cfg?.defaults, {});
+  assert.equal(result.cfg?.storedArgs, undefined);
+});
+
+test("Stored tool normalization accepts command-template sequences", () => {
+  const result = normalizeStoredTool(
+    "voice",
+    {
+      template: [
+        "tts --text {text} --out {mp3}",
+        { template: "ffmpeg -i {mp3} {ogg}", timeout: 123 },
+      ],
+      args: ["text", "mp3", "ogg"],
+      description: "Create voice artifact",
+    },
+    reserved,
+  );
+  assert.equal(result.warning, undefined);
+  assert.deepEqual(result.cfg?.template, [
+    "tts --text {text} --out {mp3}",
+    { template: "ffmpeg -i {mp3} {ogg}", timeout: 123 },
+  ]);
 });
 
 test("Stored tool normalization rejects legacy script entries", () => {
@@ -54,7 +90,6 @@ test("Config save and load round-trip template-backed tools", async () => {
   try {
     const tool: RegisteredTool = {
       name: "transcribe",
-      label: "Transcribe",
       description: "Transcribe audio",
       template: "~/bin/transcribe {file}",
       args: ["file"],

@@ -61,13 +61,37 @@ test("Registry mutations register template-backed tools", async () => {
   }
 });
 
+test("Registry mutations register command-template sequences", async () => {
+  const harness = await createHarness();
+  try {
+    await executeRegisterTool(
+      {
+        args: "text,mp3,ogg",
+        description: "Create voice artifact",
+        name: "voice_tool",
+        template: [
+          "tts --text {text} --out {mp3}",
+          { template: "ffmpeg -i {mp3} {ogg}", timeout: 123 },
+        ],
+      },
+      {},
+      harness.deps,
+    );
+    assert.deepEqual(harness.tools.get("voice_tool")?.template, [
+      "tts --text {text} --out {mp3}",
+      { template: "ffmpeg -i {mp3} {ogg}", timeout: 123 },
+    ]);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("Registry mutations reject overwrites without update=true", async () => {
   const harness = await createHarness();
   harness.tools.set("smoke", {
     args: [],
     defaults: {},
     description: "Old",
-    label: "smoke",
     name: "smoke",
     template: "old",
   });
@@ -95,7 +119,6 @@ test("Registry mutations delete tools and deactivate them", async () => {
     args: [],
     defaults: {},
     description: "Old",
-    label: "smoke",
     name: "smoke",
     template: "old",
   });

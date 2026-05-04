@@ -14,8 +14,8 @@
 ## Topology
 
 - `/index.ts`: Minimal extension coordinator/composition root; it wires live pi ports and should avoid owning domain behavior
-- `/lib/*.ts`: Flat Domain DAG modules for cohesive reusable behavior; `templates.ts` owns command-template parsing and invocation assembly, `args.ts`/`identity.ts` own names and defaults, `config.ts` owns config persistence, `registry.ts` owns registry register/update/delete use-cases, `output.ts` owns result formatting/truncation, `execution.ts` owns registered-tool execution, `prompts.ts` owns LLM-facing copy, `tools.ts` owns pi-facing tool definitions for both `register_tool` and generated runtime tools, `runtime.ts` owns load/conflict/registration coordination, and `paths.ts` owns config path resolution
-- `index.ts` should import local domains as namespaces (`import * as Args from "./lib/args.ts"`) so orchestration reads through domain names instead of flat helper imports
+- `/lib/*.ts`: Flat Domain DAG modules for cohesive reusable behavior; `command-templates.ts` mirrors the shared portable command-template standard, `schema.ts` owns auto-tools arg declarations and placeholder-derived tool schemas, `identity.ts` owns names, `config.ts` owns config persistence, `registry.ts` owns registry register/update/delete use-cases, `output.ts` owns result formatting/truncation, `execution.ts` owns registered-tool execution, `prompts.ts` owns LLM-facing copy, `tools.ts` owns pi-facing tool definitions for both `register_tool` and generated runtime tools, `runtime.ts` owns load/conflict/registration coordination, and `paths.ts` owns config path resolution
+- `index.ts` should import local domains as namespaces (`import * as CommandTemplates from "./lib/command-templates.ts"`) so orchestration reads through domain names instead of flat helper imports
 - `/tests/*.test.ts`: Focused regression tests for pure domains
 - `/README.md`: Human-facing install, usage, and runtime semantics
 - `/BACKLOG.md`: Canonical open work; keep it empty when no actionable or gated work remains
@@ -31,7 +31,7 @@
 ## Durable Conventions
 
 - `Tool registry source`: `~/.pi/agent/auto-tools.json` is the persistent user config | Trigger: Any runtime registration or migration work | Action: Preserve atomic writes and avoid hidden format changes without an explicit compatibility path
-- `Current runtime contract`: v0.2.0 registers trusted command templates with named args, optional defaults, split-first argv construction, and `{file}` as the canonical local file path arg | Trigger: Changing registration or invocation behavior | Action: Keep README, command-template docs, implementation, and migration notes aligned
+- `Current runtime contract`: v0.3.0 registers trusted command templates with tool names from registry keys, placeholder-derived args, inline/default config fallback, split-first command-arg construction, optional sequential composition, direct no-shell execution, and `{file}` as the canonical local file path arg | Trigger: Changing registration or invocation behavior | Action: Keep README, command-template docs, implementation, and migration notes aligned
 - `Template migration boundary`: v0.2.0 replaces `script` with `template` as a breaking change | Trigger: Loading or editing persisted config | Action: Reject legacy `script` entries explicitly and do not silently rewrite user config outside the repo
 - `Reserved tool names`: Built-in or core tool names must not be shadowed | Trigger: Adding or renaming registration logic | Action: Keep conflict checks before persistence and runtime registration
 - `Output discipline`: Tool stdout is returned with bounded context impact | Trigger: Changing execution or formatting | Action: Keep tail truncation, full-output temp files, and failure formatting intact

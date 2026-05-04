@@ -12,6 +12,7 @@ import type {
 
 import * as Paths from "./lib/paths.ts";
 import * as Runtime from "./lib/runtime.ts";
+import * as CommandTemplates from "./lib/command-templates.ts";
 import * as Tools from "./lib/tools.ts";
 
 const CONFIG_PATH = Paths.getConfigPath();
@@ -29,7 +30,7 @@ const RESERVED_TOOL_NAMES = new Set([
 export default function toolRegistryExtension(pi: ExtensionAPI) {
   const runtime = Runtime.createAutoToolsRuntime({
     configPath: CONFIG_PATH,
-    exec: pi.exec,
+    exec: CommandTemplates.execCommandTemplate,
     getAllTools: () => pi.getAllTools(),
     registerTool: (definition) => pi.registerTool(definition),
     reservedToolNames: RESERVED_TOOL_NAMES,

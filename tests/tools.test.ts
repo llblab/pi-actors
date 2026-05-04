@@ -43,7 +43,6 @@ test("Runtime tool definition marks defaulted args optional", () => {
       args: ["file", "lang"],
       defaults: { lang: "ru" },
       description: "Transcribe audio",
-      label: "Transcribe",
       name: "transcribe",
       template: "transcribe {file} {lang}",
     },
@@ -52,4 +51,18 @@ test("Runtime tool definition marks defaulted args optional", () => {
   assert.deepEqual(definition.parameters.required, ["file"]);
   assert.equal(definition.parameters.properties.file.type, "string");
   assert.equal(definition.parameters.properties.lang.type, "string");
+});
+
+test("Runtime tool definition treats inline-default args as optional", () => {
+  const definition = createRuntimeToolDefinition(
+    {
+      args: ["text", "lang"],
+      defaults: {},
+      description: "Speak text",
+      name: "speak",
+      template: "speak --text {text} --lang {lang=ru}",
+    },
+    async () => ({ stdout: "ok" }),
+  );
+  assert.deepEqual(definition.parameters.required, ["text"]);
 });

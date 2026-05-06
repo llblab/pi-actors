@@ -25,7 +25,7 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   template:
     "Command template with {arg} or {arg=default} placeholders. Omitted updates keep the old template. Empty string deletes the tool.",
   templateArray:
-    "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout.",
+    "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/critical.",
   templateNull: "Delete the tool when template is null.",
   args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,model=openai-codex/gpt-5.5",
   update: "Set to true to overwrite an existing auto-tool registration.",

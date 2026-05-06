@@ -12,6 +12,7 @@ export interface ToolExecOptions {
   signal?: AbortSignal;
   stdin?: string;
   timeout?: number;
+  retry?: number;
 }
 
 export interface ToolExecResult {
@@ -28,6 +29,7 @@ export interface RegisteredToolExecutionResult {
     command: string;
     fullOutputPath?: string;
     killed: boolean;
+    nonCriticalFailures?: Array<{ code: number; command: string; killed: boolean }>;
     template: CommandTemplates.CommandTemplateValue;
     tool: string;
     truncated: boolean;
@@ -40,7 +42,7 @@ export type RegisteredToolExec = (
   options?: ToolExecOptions,
 ) => Promise<ToolExecResult>;
 
-const TOOL_TIMEOUT_MS = 120_000;
+const TOOL_TIMEOUT_MS = CommandTemplates.DEFAULT_COMMAND_TIMEOUT_MS;
 
 function textContent(text: string) {
   return { type: "text" as const, text };
@@ -60,11 +62,16 @@ async function executeTemplateSteps(
   exec: RegisteredToolExec,
   cwd: string,
   signal?: AbortSignal,
-): Promise<{ commands: string[]; result: ToolExecResult }> {
+): Promise<{
+  commands: string[];
+  failures: Array<{ code: number; command: string; killed: boolean }>;
+  result: ToolExecResult;
+}> {
   const steps = CommandTemplates.expandCommandTemplateConfigs(createTemplateConfig(cfg));
   if (steps.length === 0)
     throw new Error(formatToolText("Tool template produced no command steps."));
   const commands: string[] = [];
+  const failures: Array<{ code: number; command: string; killed: boolean }> = [];
   let stdin: string | undefined;
   let result: ToolExecResult | undefined;
   for (const step of steps) {
@@ -80,11 +87,22 @@ async function executeTemplateSteps(
       signal,
       stdin,
       timeout: step.timeout ?? TOOL_TIMEOUT_MS,
+      ...(step.retry !== undefined ? { retry: step.retry } : {}),
     });
-    if (result.code !== 0) return { commands, result };
+    if (result.code !== 0) {
+      if (step.critical || steps.length === 1) return { commands, failures, result };
+      failures.push({
+        code: result.code,
+        command: invocation.command,
+        killed: result.killed,
+      });
+      result = { ...result, code: 0, stdout: "" };
+      stdin = "";
+      continue;
+    }
     stdin = result.stdout;
   }
-  return { commands, result: result! };
+  return { commands, failures, result: result! };
 }
 
 export async function executeRegisteredTool(
@@ -115,6 +133,9 @@ export async function executeRegisteredTool(
       command,
       fullOutputPath: formatted.fullOutputPath,
       killed: result.killed,
+      ...(executed.failures.length > 0
+        ? { nonCriticalFailures: executed.failures }
+        : {}),
       template: cfg.template,
       tool: cfg.name,
       truncated: formatted.truncated,

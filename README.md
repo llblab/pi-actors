@@ -96,6 +96,8 @@ This file is the durable registry. `register_tool` is the interactive API; `auto
 - Tool args are derived from placeholders when `args` is omitted.
 - `{arg=default}` inline defaults resolve after runtime values and stored `defaults`.
 - `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
+- Non-critical composition step failures continue with empty stdin; `critical: true` aborts the sequence.
+- `retry` retries a step immediately on non-zero exit; default attempts is `1`.
 - Commands execute directly without shell evaluation.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.

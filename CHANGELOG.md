@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-No unreleased changes.
+- `[Command Templates]` Prepared the 0.4.0 runtime profile for the current portable command-template contract: default 30s command timeout, per-step retry propagation, fail-open composition for non-critical failures, and `critical: true` abort semantics. Impact: registered auto-tools now behave like the reference command-template handler profile used by `pi-telegram`.
+- `[Docs]` Cleaned the backlog and synchronized README plus command-template docs with the strengthened 0.4.0 contract. Impact: release notes, open work, and user-facing runtime semantics now describe the same behavior.
 
 ## 0.3.0
 

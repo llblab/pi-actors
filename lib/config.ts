@@ -1,5 +1,6 @@
 /**
  * Persistent tool registry config helpers
+ * Zones: registry config, persistence, migration boundary
  * Owns auto-tools.json loading, normalization, legacy rejection, serialization, and atomic writes
  */
 
@@ -21,9 +22,10 @@ import type { CommandTemplateValue } from "./command-templates.ts";
 export interface RegisteredTool {
   name: string;
   description: string;
-  template: CommandTemplateValue;
   args: string[];
   defaults: Record<string, string>;
+  job?: string;
+  template?: CommandTemplateValue;
   storedArgs?: string[];
   storedDefaults?: Record<string, string>;
 }
@@ -47,7 +49,8 @@ export function serializeTools(
       entry.args = cfg.storedArgs;
     if (cfg.storedDefaults && Object.keys(cfg.storedDefaults).length > 0)
       entry.defaults = cfg.storedDefaults;
-    entry.template = cfg.template;
+    if (cfg.job) entry.job = cfg.job;
+    if (cfg.template) entry.template = cfg.template;
     result[name] = entry;
   }
   return result;
@@ -104,6 +107,10 @@ function formatTemplateForDescription(template: CommandTemplateValue): string {
   return typeof template === "string" ? template : JSON.stringify(template);
 }
 
+function getStoredJob(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 export function normalizeStoredTool(
   key: string | undefined,
   value: unknown,
@@ -128,19 +135,25 @@ export function normalizeStoredTool(
     return { changed: true, warning: `Reserved tool name skipped: ${name}` };
   }
   const template = getStoredTemplate(record.template);
-  if (!template && typeof record.script === "string") {
+  const job = getStoredJob(record.job);
+  if (!template && !job && typeof record.script === "string") {
     return {
       changed: false,
       warning: `Tool "${name}" uses legacy script config. Migrate to template because pi-auto-tools v0.2.0 cannot load it.`,
     };
   }
-  if (!template) {
-    return { changed: true, warning: `Tool "${name}" has no template` };
+  if (template && job) {
+    return { changed: true, warning: `Tool "${name}" cannot define both template and job` };
+  }
+  if (!template && !job) {
+    return { changed: true, warning: `Tool "${name}" has no template or job` };
   }
   const description =
     typeof record.description === "string" && record.description.trim()
       ? record.description.trim()
-      : `Execute command template: ${formatTemplateForDescription(template)}`;
+      : template
+        ? `Execute command template: ${formatTemplateForDescription(template)}`
+        : `Start template job: ${job}`;
   const declarations = Schema.normalizeStoredToolArgDeclarations(
     record.args,
     record.defaults,
@@ -153,13 +166,16 @@ export function normalizeStoredTool(
   const cfg = {
     name,
     description,
-    template,
-    args: Schema.getToolArgNames({
-      args: storedArgs,
-      defaults: declarations.defaults,
-      template,
-    }),
+    args: template
+      ? Schema.getToolArgNames({
+        args: storedArgs,
+        defaults: declarations.defaults,
+        template,
+      })
+      : Schema.getExplicitToolArgNames(storedArgs),
     defaults: declarations.defaults,
+    ...(job ? { job } : {}),
+    ...(template ? { template } : {}),
     ...(storedArgs !== undefined ? { storedArgs } : {}),
     ...(storedDefaults !== undefined ? { storedDefaults } : {}),
   };
@@ -167,6 +183,7 @@ export function normalizeStoredTool(
     record.name !== undefined ||
     record.label !== undefined ||
     JSON.stringify(record.template) !== JSON.stringify(template) ||
+    record.job !== job ||
     description !== record.description ||
     declarations.changed;
   return { cfg, changed };

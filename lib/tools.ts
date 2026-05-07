@@ -1,5 +1,6 @@
 /**
  * Pi-facing tool definition helpers
+ * Zones: pi tools, registry tools, job launchers
  * Owns generated runtime tool schemas and the register_tool management tool schema
  */
 
@@ -67,6 +68,7 @@ export function createRegisterToolDefinition<TContext>(
           Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.description,
         ),
         name: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name),
+        job: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.job),
         template: unionSchema([
           stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template),
           arraySchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateArray),
@@ -157,24 +159,30 @@ export function createJobToolDefinition<TContext extends { cwd: string }>(
 export function createRuntimeToolDefinition(
   cfg: RegisteredTool,
   exec: Execution.RegisteredToolExec,
-) {
+  getTools?: () => Map<string, RegisteredTool>,
+): any {
   const paramSchema: Record<string, JsonSchema> = {};
   const required: string[] = [];
-  const requiredArgs = Schema.getRequiredToolArgNames({
-    args: cfg.args,
-    defaults: cfg.defaults,
-    template: cfg.template,
-  });
+  const requiredArgs = cfg.template
+    ? Schema.getRequiredToolArgNames({
+      args: cfg.args,
+      defaults: cfg.defaults,
+      template: cfg.template,
+    })
+    : new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)));
   for (const arg of cfg.args) {
     paramSchema[arg] = stringSchema(`Argument: ${arg}`);
     if (requiredArgs.has(arg)) required.push(arg);
   }
+  if (cfg.job) paramSchema.job_id = stringSchema("Optional job id override for this job-backed tool invocation.");
   return {
     name: cfg.name,
     label: cfg.name,
     description: cfg.description,
     parameters: objectSchema(paramSchema, required),
-    promptSnippet: Prompts.formatRegisteredToolPromptSnippet(cfg.template),
+    promptSnippet: cfg.template
+      ? Prompts.formatRegisteredToolPromptSnippet(cfg.template)
+      : Prompts.formatJobBackedToolPromptSnippet(cfg.job!),
     async execute(
       _toolCallId: string,
       params: unknown,
@@ -182,6 +190,23 @@ export function createRuntimeToolDefinition(
       _onUpdate: unknown,
       ctx: { cwd: string },
     ) {
+      if (cfg.job) {
+        const input = params as Record<string, unknown>;
+        const { job_id, ...values } = input;
+        const meta = Jobs.startJob(
+          {
+            file: cfg.job,
+            job: typeof job_id === "string" && job_id.trim()
+              ? job_id.trim()
+              : `${cfg.name}-${Date.now()}`,
+            state_dir: "",
+            values: { ...cfg.defaults, ...values },
+          },
+          ctx.cwd,
+          getTools?.(),
+        );
+        return { content: [{ type: "text" as const, text: jsonText(meta) }], details: meta };
+      }
       return Execution.executeRegisteredTool(
         cfg,
         params as Record<string, unknown>,

@@ -1,5 +1,6 @@
 /**
  * Extension temp-directory helpers
+ * Zones: temp directory, cleanup, runtime files
  * Owns pi-agent tmp directory preparation and stale-entry cleanup
  */
 

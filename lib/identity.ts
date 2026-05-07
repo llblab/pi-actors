@@ -1,5 +1,6 @@
 /**
  * Identifier normalization helpers
+ * Zones: registry identity, shared validation
  * Owns stable tool, argument, and file-label identifier normalization
  */
 

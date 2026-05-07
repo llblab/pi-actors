@@ -1,5 +1,6 @@
 /**
  * Registry path helpers
+ * Zones: paths, registry config, temp directory
  * Owns agent directory and auto-tools config path resolution
  */
 

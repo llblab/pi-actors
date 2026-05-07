@@ -1,6 +1,6 @@
 # Tool Registry
 
-`pi-auto-tools` stores registered command-template tools in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
+`pi-auto-tools` stores registered command-template and job-launch tools in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
 
 This document is the local adaptation of the portable [Command Template Standard](./command-templates.md).
 
@@ -20,7 +20,7 @@ register_tool name=call_subagent \
   template="pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
 ```
 
-Use `update=true` to overwrite an existing tool. Omit `template` during update to keep the previous template.
+Use `update=true` to overwrite an existing tool. Omit `template` or `job` during update to keep the previous execution binding.
 
 `template` may also be a standard command-template sequence for multi-step tools. Long-running agent calls should set explicit `timeout` values because the command-template default is 30 seconds:
 
@@ -31,6 +31,17 @@ Use `update=true` to overwrite an existing tool. Omit `template` during update t
 ]
 ```
 
+For long-running agentic work, register a small tool that starts a reusable job recipe instead of embedding a large parallel template in the tool itself:
+
+```text
+register_tool name=shader_ring_job \
+  description="Start the shader ring job" \
+  job="shader-ring-8-parallel" \
+  args="theme,out_dir"
+```
+
+This stores the job recipe name in the registry. Calling the tool starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` through the template-job runtime and returns job metadata immediately.
+
 Delete a tool with `template=null`:
 
 ```text
@@ -39,7 +50,7 @@ register_tool name=call_subagent template=null
 
 ## Stored Shape
 
-Tool names come from the top-level registry keys. Tool entries keep `template` last, matching the command-template readability rule. The commands above persist entries like this:
+Tool names come from the top-level registry keys. Tool entries either define `template` or `job`, never both. Template entries keep `template` last, matching the command-template readability rule. The commands above persist entries like this:
 
 ```json
 {
@@ -50,6 +61,11 @@ Tool names come from the top-level registry keys. Tool entries keep `template` l
   "call_subagent": {
     "description": "Run pi as a non-interactive sub-agent",
     "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
+  },
+  "shader_ring_job": {
+    "description": "Start the shader ring job",
+    "args": ["theme", "out_dir"],
+    "job": "shader-ring-8-parallel"
   }
 }
 ```
@@ -65,6 +81,8 @@ template="~/bin/transcribe {file} {lang=ru} {model=whisper-large-v3-turbo}"
 The optional `args` field is only an explicit placeholder declaration, matching the command-template standard. Defaults should be stored in `defaults` or written inline as `{name=default}`; legacy interactive shorthand such as `args="file,lang=ru"` is normalized before persistence.
 
 Defaults are applied before substitution, with resolution order runtime values → stored `defaults` → inline default → error. Missing required values are rejected before or during execution.
+
+Job-backed tools do not have a local command template to inspect, so their public arguments come from explicit `args` declarations. Runtime values are passed to the job as `values`. Every job-backed tool also accepts optional `job_id` to override the generated run id.
 
 ## File Argument Naming
 

@@ -4,6 +4,11 @@
 
 No unreleased changes.
 
+## 0.5.2
+
+- `[Job Launch Tools]` Added job-backed registered tools. A tool may now define `job` instead of `template`; calling it starts the named template-job recipe asynchronously and returns job metadata. Impact: heavyweight agent fanout can keep `template(mode: "parallel")` inside `~/.pi/agent/jobs/*.json` while exposing a compact callable tool.
+- `[Docs]` Documented the `tool → job recipe → template(mode: "parallel")` model across README and adapter docs. Added compact operator onboarding and the `task` vs `template` vs `job` distinction. Impact: job recipes can become the source of truth for async agent scenarios instead of duplicating large templates in tool definitions, and new operators get the job mental model without reading every subsystem note.
+
 ## 0.5.1
 
 - `[Job Observability]` Made detached job status triangles use runner-reported active command counts across all running jobs instead of only process-tree probing. Impact: async parallel jobs keep stable per-sub-agent indicators while work is active, with the animation wave moving across the current aggregate set.

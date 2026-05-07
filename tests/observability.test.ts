@@ -18,6 +18,7 @@ async function writeJob(
   job: string,
   status: "running" | "done" | "exited",
   failures: unknown[] = [],
+  activeSubagents = 0,
 ): Promise<void> {
   const dir = join(root, job);
   await mkdir(dir, { recursive: true });
@@ -27,7 +28,7 @@ async function writeJob(
   );
   await writeFile(
     join(dir, "progress.json"),
-    JSON.stringify({ completed: status === "running" ? 0 : 1, failures, updatedAt: `2026-01-01T00:00:0${job.length}.000Z` }),
+    JSON.stringify({ activeSubagents, completed: status === "running" ? 0 : 1, failures, updatedAt: `2026-01-01T00:00:0${job.length}.000Z` }),
   );
   if (status === "done") await writeFile(join(dir, "result.json"), JSON.stringify({ code: 0 }));
 }
@@ -71,6 +72,20 @@ test("Job observability renders animated subagent triangles", () => {
   assert.equal(renderSubagentStatus(3, 1), "▷ ▶ ▷");
   assert.equal(renderSubagentStatus(3, 2), "▷ ▷ ▶");
   assert.equal(renderSubagentStatus(3, 3), "▶ ▷ ▷");
+});
+
+test("Job observability sums active subagents from running jobs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  try {
+    await writeJob(root, "alpha", "running", [], 3);
+    await writeJob(root, "beta", "running", [], 2);
+    await writeJob(root, "done", "done", [], 9);
+    const summary = summarizeJobs(root);
+    assert.equal(summary.runningSubagents, 5);
+    assert.equal(renderJobStatus(summary, 4), "▷ ▷ ▷ ▷ ▶");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Job observability hides status when no subagents are running", () => {

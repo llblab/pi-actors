@@ -55,9 +55,38 @@ function progress(phase, extra = {}) {
     ...extra,
   });
 }
+let activeSubagents = 0;
+let completedSubagents = 0;
+const subagentFailures = [];
+function progressRunning() {
+  progress("running", {
+    activeSubagents,
+    completed: completedSubagents,
+    failures: subagentFailures,
+  });
+}
+async function observedExec(command, args, options) {
+  activeSubagents += 1;
+  event("command.start", { activeSubagents, command });
+  progressRunning();
+  const result = await execCommandTemplate(command, args, options);
+  activeSubagents = Math.max(0, activeSubagents - 1);
+  completedSubagents += 1;
+  if (result.code !== 0) {
+    subagentFailures.push({ code: result.code, command, killed: result.killed });
+  }
+  event("command.done", {
+    activeSubagents,
+    code: result.code,
+    command,
+    killed: result.killed,
+  });
+  progressRunning();
+  return result;
+}
 try {
   event("job.runner.start", { pid: process.pid });
-  progress("running", { completed: 0, failures: [] });
+  progressRunning();
   /**
    * Reuse the same registered-tool execution path as foreground tools.
    *
@@ -73,7 +102,7 @@ try {
       defaults: {},
     },
     meta.values || {},
-    execCommandTemplate,
+    observedExec,
     meta.cwd,
   );
   /**

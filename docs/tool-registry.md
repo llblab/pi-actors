@@ -6,7 +6,7 @@ This document is the local adaptation of the portable [Command Template Standard
 
 ## Registering Tools
 
-`register_tool` is the interactive API for creating, updating, or deleting persistent tools.
+`register_tool` is the interactive API for listing, creating, updating, or deleting persistent tools. Call it without arguments to list registered auto-tools.
 
 ```text
 register_tool name=transcribe_groq \
@@ -22,12 +22,12 @@ register_tool name=call_subagent \
 
 Use `update=true` to overwrite an existing tool. Omit `template` during update to keep the previous template.
 
-`template` may also be a standard command-template sequence for multi-step tools:
+`template` may also be a standard command-template sequence for multi-step tools. Long-running agent calls should set explicit `timeout` values because the command-template default is 30 seconds:
 
 ```json
 [
   "~/bin/tts --text {text} --out {mp3}",
-  { "template": "ffmpeg -y -i {mp3} -c:a libopus {ogg}", "timeout": 30000 }
+  { "timeout": 30000, "template": "ffmpeg -y -i {mp3} -c:a libopus {ogg}" }
 ]
 ```
 
@@ -39,7 +39,7 @@ register_tool name=call_subagent template=null
 
 ## Stored Shape
 
-Tool names come from the top-level registry keys. The commands above persist entries like this:
+Tool names come from the top-level registry keys. Tool entries keep `template` last, matching the command-template readability rule. The commands above persist entries like this:
 
 ```json
 {

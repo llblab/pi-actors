@@ -10,11 +10,16 @@ import { isAbsolute, resolve } from "node:path";
 
 export const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 
+export type CommandTemplateMode = "sequence" | "parallel";
+
 export interface CommandTemplateObjectConfig {
+  label?: string;
+  mode?: CommandTemplateMode;
   template?: CommandTemplateValue;
   args?: string[];
   defaults?: Record<string, unknown>;
   timeout?: number;
+  delay?: number;
   output?: string;
   retry?: number;
   critical?: boolean;

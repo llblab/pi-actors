@@ -5,6 +5,7 @@
 
 import type { RegisteredTool } from "./config.ts";
 import * as Execution from "./execution.ts";
+import * as Jobs from "./jobs.ts";
 import * as Prompts from "./prompts.ts";
 import * as Registry from "./registry.ts";
 import * as Schema from "./schema.ts";
@@ -42,6 +43,14 @@ function objectSchema(
   return { additionalProperties: false, properties, required, type: "object" };
 }
 
+function looseObjectSchema(description: string): JsonSchema {
+  return { additionalProperties: true, description, type: "object" };
+}
+
+function jsonText(value: unknown): string {
+  return `\n${JSON.stringify(value, null, 2)}`;
+}
+
 export function createRegisterToolDefinition<TContext>(
   deps: RegisterToolRuntimeDeps<TContext>,
 ) {
@@ -65,7 +74,7 @@ export function createRegisterToolDefinition<TContext>(
         ]),
         update: booleanSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.update),
       },
-      ["name"],
+      [],
     ),
     execute: async (
       _toolCallId: string,
@@ -74,6 +83,74 @@ export function createRegisterToolDefinition<TContext>(
       _onUpdate: unknown,
       ctx: TContext,
     ) => Registry.executeRegisterTool(params, ctx, deps),
+  };
+}
+
+export function createJobToolDefinition<TContext extends { cwd: string }>(
+  deps: { getTools: () => Map<string, RegisteredTool> },
+): any {
+  return {
+    name: "template_job",
+    label: "Template Job",
+    description: "Manage detached template jobs. Actions: start, status, tail, list, cancel.",
+    parameters: objectSchema(
+      {
+        action: stringSchema("Action: start, status, tail, list, or cancel."),
+        file: stringSchema("Optional template job JSON file for start. Bare names resolve under ~/.pi/agent/jobs."),
+        job: stringSchema("Job id or state directory. Required for status, tail, and cancel. Optional for start."),
+        lines: stringSchema("Tail line count for tail. Default 40."),
+        state_dir: stringSchema("Optional job state directory for start. Defaults to ~/.pi/agent/tmp/pi-auto-tools/jobs/{job}."),
+        state_root: stringSchema("Optional state root for list. Defaults to ~/.pi/agent/tmp/pi-auto-tools/jobs."),
+        template: unionSchema([
+          stringSchema("Command template string for start"),
+          arraySchema("Command template sequence or mode tree for start"),
+        ]),
+        tool: stringSchema("Optional registered auto-tool name to run as a detached job for start."),
+        values: looseObjectSchema("Runtime placeholder values passed to the template for start"),
+      },
+      ["action"],
+    ),
+    async execute(
+      _toolCallId: string,
+      params: unknown,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      ctx: TContext,
+    ) {
+      const input = params as Jobs.JobStartParams & {
+        action?: string;
+        job?: string;
+        lines?: string;
+        state_root?: string;
+      };
+      switch (input.action) {
+        case "start": {
+          const meta = Jobs.startJob(input, ctx.cwd, deps.getTools());
+          return { content: [{ type: "text" as const, text: jsonText(meta) }], details: meta };
+        }
+        case "status": {
+          if (!input.job) throw new Error("template_job action=status requires job.");
+          const status = Jobs.getJobStatus(String(input.job));
+          return { content: [{ type: "text" as const, text: jsonText(status) }], details: status };
+        }
+        case "tail": {
+          if (!input.job) throw new Error("template_job action=tail requires job.");
+          const text = Jobs.tailJob(String(input.job), Number(input.lines || 40));
+          return { content: [{ type: "text" as const, text: `\n${text}` }], details: {} };
+        }
+        case "list": {
+          const jobs = Jobs.listJobs(input.state_root);
+          return { content: [{ type: "text" as const, text: jsonText(jobs) }], details: { jobs } };
+        }
+        case "cancel": {
+          if (!input.job) throw new Error("template_job action=cancel requires job.");
+          const result = Jobs.cancelJob(String(input.job));
+          return { content: [{ type: "text" as const, text: jsonText(result) }], details: result };
+        }
+        default:
+          throw new Error("template_job action must be one of: start, status, tail, list, cancel.");
+      }
+    },
   };
 }
 

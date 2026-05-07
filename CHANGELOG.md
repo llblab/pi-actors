@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+No unreleased changes.
+
+## 0.5.0
+
+- `[Command Templates]` Added `mode` for template object nodes, with `sequence` as the default and `parallel` for concurrent child execution. Object-form examples and persisted tool entries now keep `template` last, with regression coverage for serialization order. Parallel nodes now expose soft-quorum branch labels, statuses, and coverage details. Added compact per-node `delay` in milliseconds for launch pacing without scheduler semantics. Impact: one `template` property now describes sequential and parallel command trees with stable flag-first reading, graceful degradation, optional staged launch, and no separate workflow DSL.
+- `[Template Jobs]` Added the unified `template_job` action tool for detached template job lifecycle: start, status, tail, list, and cancel. Jobs use state files, log files, a thin runner process, and stale-state cancellation guardrails. `template_job action=start` can start from a template job JSON file, an inline command template, or a registered auto-tool name. Job state now defaults to `~/.pi/agent/tmp/pi-auto-tools/jobs` and stale temp entries are pruned on session start. Impact: Swarm-style async orchestration can move generic process observation into pi-auto-tools while domain quorum semantics stay in Swarm.
+- `[Job Observability]` Added ambient interactive UI status for active sub-agent count and compact completion events for detached jobs. Removed persistent prompt-area widgets and done/exited counters. The running indicator now shows one `▷` per concrete sub-agent with a faster moving dim `▶` wave, single-subagent blink, and a late-sorting status key. Impact: long-running swarms are visible while active, then become actionable context only when they finish.
+- `[Command Template Standard]` Folded template job and temp-directory primitives into `docs/command-templates.md`; `docs/job-primitives.md` is now the pi-auto-tools adapter note. Impact: the portable standard is self-contained and consumers point inward instead of chaining across external standards.
+- `[Template Job Library]` Added `~/.pi/agent/jobs/*.json` as the reusable template job library. Kept reusable recipes as documentation guidance instead of packaged root files because model and tool names are local policy. Impact: async recipes can be reused compactly without expanding tool config or shipping operator-specific examples.
+- `[Registry Tools]` Made `register_tool` callable without args to return a compact list of registered auto-tools. Impact: agents can inspect the extension registry without reading `auto-tools.json` directly.
+- `[Registry Activation]` Made every successful `register_tool` call activate all registered auto-tools in the current session. Impact: registered tools stay fresh and callable immediately after list, register, update, or delete operations.
+- `[Release Validation]` Added `npm run validate` for CI and release checks. Impact: TypeScript, extension import, tests, and dry-run packing are available through one command.
+- `[Docs]` Reworked README and job docs around a compact mental model: command, command template, registered tool, template job. Impact: the new async job concept is easier to explain without implying a scheduler or second workflow language.
+
+## 0.4.0
+
 - `[Command Templates]` Prepared the 0.4.0 runtime profile for the current portable command-template contract: default 30s command timeout, per-step retry propagation, fail-open composition for non-critical failures, and `critical: true` abort semantics. Impact: registered auto-tools now behave like the reference command-template handler profile used by `pi-telegram`.
 - `[Docs]` Cleaned the backlog and synchronized README plus command-template docs with the strengthened 0.4.0 contract. Impact: release notes, open work, and user-facing runtime semantics now describe the same behavior.
 

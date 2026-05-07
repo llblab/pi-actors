@@ -84,6 +84,22 @@ test("Stored tool normalization rejects legacy script entries", () => {
   assert.match(result.warning ?? "", /legacy script config/);
 });
 
+test("Serialized tool entries keep template last", () => {
+  const tool: RegisteredTool = {
+    name: "voice",
+    description: "Create voice artifact",
+    template: "tts {text}",
+    args: ["text"],
+    defaults: {},
+    storedArgs: ["text"],
+  };
+  assert.deepEqual(Object.keys(serializeTools(new Map([[tool.name, tool]])).voice as Record<string, unknown>), [
+    "description",
+    "args",
+    "template",
+  ]);
+});
+
 test("Config save and load round-trip template-backed tools", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-auto-tools-config-"));
   const path = join(dir, "auto-tools.json");

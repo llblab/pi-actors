@@ -10,11 +10,24 @@ import * as CommandTemplates from "./command-templates.ts";
 import * as Schema from "./schema.ts";
 
 export interface RegisterToolInput {
-  name: string;
+  name?: string;
   description?: string;
   template?: CommandTemplates.CommandTemplateValue | null;
   args?: string;
   update?: boolean;
+}
+
+export interface RegisterToolResultDetails {
+  args?: string[];
+  config?: string;
+  defaults?: Record<string, string>;
+  template?: CommandTemplates.CommandTemplateValue;
+  tool: string;
+}
+
+export interface RegisterToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  details: RegisterToolResultDetails;
 }
 
 export interface RegisterToolRuntimeDeps<TContext> {
@@ -36,11 +49,29 @@ function textContent(text: string) {
   return { type: "text" as const, text };
 }
 
+function listTools<TContext>(
+  deps: RegisterToolRuntimeDeps<TContext>,
+): RegisterToolResult {
+  const names = [...deps.getTools().keys()].sort();
+  return {
+    content: [
+      textContent(
+        Output.formatToolText(
+          names.length > 0
+            ? `Registered auto-tools:\n${names.map((name) => `- ${name}`).join("\n")}`
+            : "No registered auto-tools.",
+        ),
+      ),
+    ],
+    details: { tool: "register_tool" },
+  };
+}
+
 function deleteTool<TContext>(
   name: string,
   ctx: TContext,
   deps: RegisterToolRuntimeDeps<TContext>,
-) {
+): RegisterToolResult {
   const tools = deps.getTools();
   if (!tools.has(name)) {
     return {
@@ -107,6 +138,9 @@ function buildConfig(
     );
   }
   const template = getInputTemplate(input.template);
+  if (template === null) {
+    throw new Error(Output.formatToolText("Tool template cannot be null here."));
+  }
   const finalTemplate =
     template === undefined || template === "" ? existing!.template : template;
   const defaults = explicitArgs?.defaults ?? existing?.storedDefaults ?? {};
@@ -132,8 +166,9 @@ export async function executeRegisterTool<TContext>(
   params: unknown,
   ctx: TContext,
   deps: RegisterToolRuntimeDeps<TContext>,
-) {
+): Promise<RegisterToolResult> {
   const input = params as RegisterToolInput;
+  if (!input.name) return listTools(deps);
   const name = Identity.normalizeToolName(input.name);
   if (!name) throw new Error(Output.formatToolText("Invalid tool name."));
   if (deps.reservedToolNames.has(name)) {

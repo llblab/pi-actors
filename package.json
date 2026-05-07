@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-auto-tools",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": false,
   "description": "Persistent template-backed tools for pi",
   "type": "module",
@@ -23,11 +23,13 @@
   "scripts": {
     "check": "node --experimental-strip-types -e \"await import('./index.ts'); console.log('pi-auto-tools: extension import ok')\"",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "pack:dry": "npm pack --dry-run"
+    "pack:dry": "npm pack --dry-run",
+    "validate": "npx tsc --noEmit && npm run check && npm test && npm run pack:dry"
   },
   "files": [
     "index.ts",
     "lib",
+    "scripts",
     "README.md",
     "AGENTS.md",
     "BACKLOG.md",
@@ -41,5 +43,9 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest"
   }
 }

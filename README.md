@@ -18,6 +18,8 @@ Persistent template-backed tool registry extension for the pi coding agent.
 - **Reusable Building Blocks**: Makes skill scripts, sub-agent wrappers, diagnostics, and project workflows available as composable agent capabilities.
 - **Immediate Updates**: Registered and updated tools become callable in the active session; deleted tools are removed from active tools and fully disappear after reload.
 - **Bounded Output**: Tool stdout is returned to the agent with truncation safeguards; full oversized output is saved to a temp file.
+- **Template Jobs**: Starts detached template jobs from inline config, registered tools, or `~/.pi/agent/jobs/*.json`, with generic status, tail, list, and cancel actions backed by simple state files under `~/.pi/agent/tmp/pi-auto-tools`.
+- **Ambient Job Observability**: Shows one animated triangle per active sub-agent in the interactive status line, then injects a compact completion event when a job finishes.
 
 ## Install
 
@@ -33,9 +35,27 @@ From git:
 pi install git:github.com/llblab/pi-auto-tools
 ```
 
+## Mental Model
+
+`pi-auto-tools` has one execution idea that grows in place:
+
+```text
+command
+→ command template
+→ registered tool
+→ template job
+```
+
+- A **command** is one concrete local process.
+- A **command template** is the reusable shape of that process, with named placeholders.
+- A **registered tool** gives a command template a stable agent-facing name.
+- A **template job** runs a command template detached, writes state and logs, and lets the agent return later with `status`, `tail`, or `cancel`.
+
+The template remains the execution language. The job is only the async envelope.
+
 ## Register Tools
 
-`register_tool` registers, updates, or deletes one persistent tool.
+`register_tool` lists, registers, updates, or deletes persistent tools. Call it without arguments to list the current registry.
 
 ### Local command: transcription
 
@@ -71,7 +91,7 @@ register_tool name=call_subagent template=null
 
 ## Resulting Config
 
-The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; tool names come from the top-level keys:
+The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; tool names come from the top-level keys. Stored entries keep `template` last so flags and metadata are read before executable content:
 
 ```json
 {
@@ -88,6 +108,37 @@ The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; t
 
 This file is the durable registry. `register_tool` is the interactive API; `auto-tools.json` is the persisted state that is loaded on future sessions.
 
+## Run Template Jobs
+
+Use `template_job` when a command template may outlive the current turn. It starts the work now, returns immediately with state metadata, and keeps ordinary files under `~/.pi/agent/tmp/pi-auto-tools/jobs/<job>` for later inspection.
+
+Start from an inline template:
+
+```json
+{
+  "action": "start",
+  "job": "docs-review",
+  "template": "pi -p --model openai-codex/gpt-5.5 --no-tools {prompt}",
+  "values": {
+    "prompt": "Review docs/spec.md for contradictions."
+  }
+}
+```
+
+Check it later:
+
+```json
+{ "action": "status", "job": "docs-review" }
+```
+
+Read recent events or logs:
+
+```json
+{ "action": "tail", "job": "docs-review", "lines": "80" }
+```
+
+Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with `action=start` plus `file`. The package does not ship root-level job examples because model names, tool names, and review policy are local operator choices.
+
 ## Runtime Contract
 
 - Tool names are normalized to snake_case.
@@ -96,13 +147,21 @@ This file is the durable registry. `register_tool` is the interactive API; `auto
 - Tool args are derived from placeholders when `args` is omitted.
 - `{arg=default}` inline defaults resolve after runtime values and stored `defaults`.
 - `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
+- Object nodes may set `mode: "parallel"`; children receive the same stdin and joined stdout flows to the next sequence step.
+- Parallel nodes use soft-quorum semantics: non-critical branch failures are reported as degraded coverage, not treated as total failure.
+- Long-running agent branches should set explicit `timeout` values above the 30s default.
+- Nodes may set `delay` in milliseconds to wait before launch; delay is not inherited.
 - Non-critical composition step failures continue with empty stdin; `critical: true` aborts the sequence.
 - `retry` retries a step immediately on non-zero exit; default attempts is `1`.
 - Commands execute directly without shell evaluation.
+- `template_job` provides a minimal template job envelope around the same command-template contract.
+- `template_job` uses `action: start | status | tail | list | cancel`.
+- `template_job action=start` can run a template job JSON `file`, an inline `template`, or a registered auto-tool by `tool` name.
+- Interactive sessions show ambient sub-agent activity as `▷` triangles with one moving `▶` wave; terminal job events are delivered as compact follow-up context so the agent can inspect or react.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 
-See [`docs/command-templates.md`](./docs/command-templates.md) for the portable command-template contract and [`docs/tool-registry.md`](./docs/tool-registry.md) for the registry storage shape.
+See [`docs/command-templates.md`](./docs/command-templates.md) for the portable command template, template job, and temp-directory contract; [`docs/job-primitives.md`](./docs/job-primitives.md) for the pi-auto-tools job adapter; and [`docs/tool-registry.md`](./docs/tool-registry.md) for the registry storage shape.
 
 ## Notes
 

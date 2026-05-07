@@ -107,6 +107,97 @@ test("Registered tool execution runs template sequences with previous stdout as 
   assert.deepEqual(result.content, [{ type: "text", text: "\nsecond out" }]);
 });
 
+test("Registered tool execution runs nested parallel template nodes", async () => {
+  const calls: Array<{ command: string; stdin?: string }> = [];
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        "./prepare {file}",
+        {
+          mode: "parallel",
+          template: [
+            { label: "gpt", timeout: 120000, template: "./review-gpt {file}" },
+            { label: "kimi", timeout: 120000, template: "./review-kimi {file}" },
+          ],
+        },
+        "./merge {file}",
+      ],
+    },
+    { file: "/tmp/a.ogg" },
+    async (command, _args, options) => {
+      calls.push({ command, stdin: options?.stdin });
+      if (command.endsWith("prepare"))
+        return { stdout: "prepared", stderr: "", code: 0, killed: false };
+      if (command.endsWith("review-gpt"))
+        return { stdout: "gpt", stderr: "", code: 0, killed: false };
+      if (command.endsWith("review-kimi"))
+        return { stdout: "kimi", stderr: "", code: 0, killed: false };
+      return { stdout: `merged:\n${options?.stdin}`, stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, [
+    { command: "/work/prepare", stdin: undefined },
+    { command: "/work/review-gpt", stdin: "prepared" },
+    { command: "/work/review-kimi", stdin: "prepared" },
+    {
+      command: "/work/merge",
+      stdin: "--- branch: gpt status: done ---\ngpt\n--- branch: kimi status: done ---\nkimi",
+    },
+  ]);
+  assert.deepEqual(result.content, [
+    {
+      type: "text",
+      text: "\nmerged:\n--- branch: gpt status: done ---\ngpt\n--- branch: kimi status: done ---\nkimi",
+    },
+  ]);
+  assert.deepEqual(result.details.softQuorum, {
+    coverage: 1,
+    degraded: false,
+    done: 2,
+    expected: 2,
+    failed: 0,
+    usable: true,
+  });
+});
+
+test("Registered tool execution reports degraded soft quorum without aborting", async () => {
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        {
+          mode: "parallel",
+          template: [
+            { label: "ok", timeout: 120000, template: "./ok {file}" },
+            { label: "bad", timeout: 120000, template: "./bad {file}" },
+          ],
+        },
+        "./merge {file}",
+      ],
+    },
+    { file: "/tmp/a.ogg" },
+    async (command, _args, options) => {
+      if (command.endsWith("bad"))
+        return { stdout: "", stderr: "provider balance exhausted", code: 1, killed: false };
+      if (command.endsWith("merge"))
+        return { stdout: String(options?.stdin), stderr: "", code: 0, killed: false };
+      return { stdout: "ok output", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.match(result.content[0].text, /branch: bad status: failed/);
+  assert.deepEqual(result.details.softQuorum, {
+    coverage: 0.5,
+    degraded: true,
+    done: 1,
+    expected: 2,
+    failed: 1,
+    usable: true,
+  });
+});
+
 test("Registered tool execution throws formatted command failures", async () => {
   await assert.rejects(
     executeRegisteredTool(
@@ -139,6 +230,78 @@ test("Registered tool execution passes retry into template steps", async () => {
     "/work",
   );
   assert.deepEqual(calls, [{ command: "/work/flaky", retry: 3 }]);
+});
+
+test("Registered tool execution waits before delayed leaf steps", async () => {
+  const startedAt = Date.now();
+  const calls: Array<{ command: string; elapsed: number; timeout?: number }> = [];
+  await executeRegisteredTool(
+    {
+      ...tool,
+      template: [{ delay: 20, timeout: 123, template: "./slow-start {file}" }],
+    },
+    { file: "/tmp/a.ogg" },
+    async (command, _args, options) => {
+      calls.push({ command, elapsed: Date.now() - startedAt, timeout: options?.timeout });
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.equal(calls[0].command, "/work/slow-start");
+  assert.equal(calls[0].timeout, 123);
+  assert.ok(calls[0].elapsed >= 15, `elapsed ${calls[0].elapsed}`);
+});
+
+test("Registered tool execution waits before delayed sequence nodes", async () => {
+  const startedAt = Date.now();
+  const calls: Array<{ command: string; elapsed: number }> = [];
+  await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        {
+          delay: 20,
+          template: ["./first {file}", "./second {file}"],
+        },
+      ],
+    },
+    { file: "/tmp/a.ogg" },
+    async (command) => {
+      calls.push({ command, elapsed: Date.now() - startedAt });
+      return { stdout: command.endsWith("first") ? "one" : "two", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls.map((call) => call.command), ["/work/first", "/work/second"]);
+  assert.ok(calls[0].elapsed >= 15, `elapsed ${calls[0].elapsed}`);
+});
+
+test("Registered tool execution applies parallel branch delays independently", async () => {
+  const startedAt = Date.now();
+  const calls: Array<{ command: string; elapsed: number }> = [];
+  await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        {
+          mode: "parallel",
+          template: [
+            { label: "fast", template: "./fast {file}" },
+            { delay: 20, label: "slow", template: "./slow {file}" },
+          ],
+        },
+      ],
+    },
+    { file: "/tmp/a.ogg" },
+    async (command) => {
+      calls.push({ command, elapsed: Date.now() - startedAt });
+      return { stdout: command.endsWith("fast") ? "fast" : "slow", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  const fast = calls.find((call) => call.command === "/work/fast")!;
+  const slow = calls.find((call) => call.command === "/work/slow")!;
+  assert.ok(slow.elapsed - fast.elapsed >= 15, `${fast.elapsed} -> ${slow.elapsed}`);
 });
 
 test("Registered tool execution continues after non-critical composition failures", async () => {

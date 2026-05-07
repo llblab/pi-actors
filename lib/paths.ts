@@ -17,3 +17,18 @@ export function getAgentDir(
 export function getConfigPath(agentDir = getAgentDir()): string {
   return join(agentDir, "auto-tools.json");
 }
+
+export function getExtensionTmpDir(
+  agentDir = getAgentDir(),
+  extensionName = "pi-auto-tools",
+): string {
+  return join(agentDir, "tmp", extensionName);
+}
+
+export function getJobStateRoot(agentDir = getAgentDir()): string {
+  return join(getExtensionTmpDir(agentDir), "jobs");
+}
+
+export function getJobTemplateRoot(agentDir = getAgentDir()): string {
+  return join(agentDir, "jobs");
+}

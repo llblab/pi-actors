@@ -4,6 +4,11 @@
 
 No unreleased changes.
 
+## 0.5.1
+
+- `[Job Observability]` Made detached job status triangles use runner-reported active command counts across all running jobs instead of only process-tree probing. Impact: async parallel jobs keep stable per-sub-agent indicators while work is active, with the animation wave moving across the current aggregate set.
+- `[Docs]` Clarified that template jobs own async lifecycle and ambient sub-agent visibility, while command templates still own sequence and parallel execution shape. Impact: agentic fanout should use `job(template(mode: "parallel"))` instead of blocking foreground orchestration.
+
 ## 0.5.0
 
 - `[Command Templates]` Added `mode` for template object nodes, with `sequence` as the default and `parallel` for concurrent child execution. Object-form examples and persisted tool entries now keep `template` last, with regression coverage for serialization order. Parallel nodes now expose soft-quorum branch labels, statuses, and coverage details. Added compact per-node `delay` in milliseconds for launch pacing without scheduler semantics. Impact: one `template` property now describes sequential and parallel command trees with stable flag-first reading, graceful degradation, optional staged launch, and no separate workflow DSL.

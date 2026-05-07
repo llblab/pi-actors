@@ -123,6 +123,7 @@ Composition rules:
 - Execute leaves in order when `mode` is omitted or set to `"sequence"`
 - Execute child templates concurrently when `mode` is set to `"parallel"`
 - Parallel composition uses soft-quorum semantics by default: failed non-critical children are reported but do not abort siblings or the next sequence step
+- For long-running agentic fanout, wrap the parallel template in a template job so lifecycle, logs, cancellation, and ambient sub-agent status stay observable
 - Non-critical failures are recorded and execution continues, while `critical: true` failures abort the root composition
 - Treat the whole composition as one handler for selector matching and fallback
 - Top-level `args` and `defaults` apply to every leaf unless the leaf defines private values
@@ -260,6 +261,8 @@ string[]         → sequential composition
 ```
 
 Start with a string. Add composition when needed. Add `mode: "parallel"` when independent work can run concurrently. Add delay when launch pacing matters. Add retry when flaky. Add critical when safety matters. Same contract, growing capability, no dead weight.
+
+`mode: "parallel"` is the fanout shape; a template job is the async envelope. They are complementary: use foreground templates for short calls and pipelines, and use `job(template(mode: "parallel"))` for long-running agentic fanout.
 
 ## Template Job Envelope
 

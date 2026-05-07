@@ -19,7 +19,7 @@ Persistent template-backed tool registry extension for the pi coding agent.
 - **Immediate Updates**: Registered and updated tools become callable in the active session; deleted tools are removed from active tools and fully disappear after reload.
 - **Bounded Output**: Tool stdout is returned to the agent with truncation safeguards; full oversized output is saved to a temp file.
 - **Template Jobs**: Starts detached template jobs from inline config, registered tools, or `~/.pi/agent/jobs/*.json`, with generic status, tail, list, and cancel actions backed by simple state files under `~/.pi/agent/tmp/pi-auto-tools`.
-- **Ambient Job Observability**: Shows one animated triangle per active sub-agent in the interactive status line, then injects a compact completion event when a job finishes.
+- **Ambient Job Observability**: Shows one stable triangle per active job sub-agent across all running jobs in the interactive status line, then injects a compact completion event when a job finishes.
 
 ## Install
 
@@ -149,6 +149,7 @@ Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with
 - `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
 - Object nodes may set `mode: "parallel"`; children receive the same stdin and joined stdout flows to the next sequence step.
 - Parallel nodes use soft-quorum semantics: non-critical branch failures are reported as degraded coverage, not treated as total failure.
+- For long-running agentic fanout, prefer wrapping the parallel template in `template_job` so async lifecycle and ambient sub-agent status remain visible.
 - Long-running agent branches should set explicit `timeout` values above the 30s default.
 - Nodes may set `delay` in milliseconds to wait before launch; delay is not inherited.
 - Non-critical composition step failures continue with empty stdin; `critical: true` aborts the sequence.
@@ -157,7 +158,7 @@ Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with
 - `template_job` provides a minimal template job envelope around the same command-template contract.
 - `template_job` uses `action: start | status | tail | list | cancel`.
 - `template_job action=start` can run a template job JSON `file`, an inline `template`, or a registered auto-tool by `tool` name.
-- Interactive sessions show ambient sub-agent activity as `▷` triangles with one moving `▶` wave; terminal job events are delivered as compact follow-up context so the agent can inspect or react.
+- Interactive sessions show ambient job sub-agent activity as stable `▷` triangles aggregated across all running jobs, with one moving `▶` wave over the active set; terminal job events are delivered as compact follow-up context so the agent can inspect or react.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 

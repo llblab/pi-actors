@@ -1,5 +1,6 @@
 /**
  * Tool output formatting helpers
+ * Zones: tool execution, output formatting, temp artifacts
  * Owns stdout/stderr failure formatting, tail truncation, and full-output temp-file persistence
  */
 

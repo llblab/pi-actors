@@ -57,6 +57,29 @@ test("Stored tool normalization derives args from standard inline placeholders",
   assert.equal(result.cfg?.storedArgs, undefined);
 });
 
+test("Stored tool normalization accepts job-backed tools", () => {
+  const result = normalizeStoredTool(
+    "shader_launcher",
+    {
+      args: ["theme", "out_dir=latest"],
+      description: "Start shader job",
+      job: "shader-ring-8-parallel",
+    },
+    reserved,
+  );
+  assert.equal(result.warning, undefined);
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.cfg, {
+    name: "shader_launcher",
+    description: "Start shader job",
+    args: ["theme", "out_dir"],
+    defaults: { out_dir: "latest" },
+    job: "shader-ring-8-parallel",
+    storedArgs: ["theme", "out_dir"],
+    storedDefaults: { out_dir: "latest" },
+  });
+});
+
 test("Stored tool normalization accepts command-template sequences", () => {
   const result = normalizeStoredTool(
     "voice",
@@ -84,6 +107,16 @@ test("Stored tool normalization rejects legacy script entries", () => {
   assert.match(result.warning ?? "", /legacy script config/);
 });
 
+test("Stored tool normalization rejects template plus job", () => {
+  const result = normalizeStoredTool(
+    "mixed",
+    { template: "echo hi", job: "job", description: "Mixed" },
+    reserved,
+  );
+  assert.equal(result.cfg, undefined);
+  assert.match(result.warning ?? "", /cannot define both template and job/);
+});
+
 test("Serialized tool entries keep template last", () => {
   const tool: RegisteredTool = {
     name: "voice",
@@ -98,6 +131,20 @@ test("Serialized tool entries keep template last", () => {
     "args",
     "template",
   ]);
+});
+
+test("Serialized job-backed tool entries keep job without template", () => {
+  const tool: RegisteredTool = {
+    name: "launcher",
+    description: "Start job",
+    job: "shader-ring-8-parallel",
+    args: [],
+    defaults: {},
+  };
+  assert.deepEqual(serializeTools(new Map([[tool.name, tool]])).launcher, {
+    description: "Start job",
+    job: "shader-ring-8-parallel",
+  });
 });
 
 test("Config save and load round-trip template-backed tools", async () => {

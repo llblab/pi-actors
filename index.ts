@@ -1,8 +1,8 @@
 /**
  * pi-auto-tools — persistent self-registered agent tools.
+ * Zones: composition root, pi agent, automation runtime
  *
- * Wraps command templates as callable pi tools and stores their definitions in
- * auto-tools.json across reloads and sessions.
+ * Wraps command templates as callable pi tools and stores their definitions in auto-tools.json across reloads and sessions.
  */
 
 import type {
@@ -13,6 +13,7 @@ import type {
 import * as CommandTemplates from "./lib/command-templates.ts";
 import * as Observability from "./lib/observability.ts";
 import * as Paths from "./lib/paths.ts";
+import * as Prompts from "./lib/prompts.ts";
 import * as Runtime from "./lib/runtime.ts";
 import * as Temp from "./lib/temp.ts";
 import * as Tools from "./lib/tools.ts";
@@ -38,13 +39,27 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   const updateJobUi = (ctx: ExtensionContext, notify = false): void => {
     const summary = Observability.summarizeJobs();
     const status = Observability.renderJobStatus(summary, jobStatusFrame++);
-    ctx.ui.setStatus("zz-pi-auto-tools-jobs", status ? ctx.ui.theme.fg("dim", status) : undefined);
+    ctx.ui.setStatus(
+      "zz-pi-auto-tools-jobs",
+      status ? ctx.ui.theme.fg("dim", status) : undefined,
+    );
     ctx.ui.setWidget("zz-pi-auto-tools-jobs", undefined);
     if (!notify) return;
-    for (const transition of Observability.detectJobTransitions(observedJobs, summary)) {
+    for (const transition of Observability.detectJobTransitions(
+      observedJobs,
+      summary,
+    )) {
       const text = Observability.formatJobTransitionMessage(transition);
       ctx.ui.notify(text, transition.to === "done" ? "info" : "error");
-      pi.sendMessage({ customType: "pi-auto-tools-job", content: text, display: true, details: transition }, { deliverAs: "followUp", triggerTurn: true });
+      pi.sendMessage(
+        {
+          customType: "pi-auto-tools-job",
+          content: text,
+          display: true,
+          details: transition,
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
     }
   };
   const runtime = Runtime.createAutoToolsRuntime({
@@ -66,6 +81,9 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     if (jobsInterval) clearInterval(jobsInterval);
     jobsInterval = undefined;
   });
+  pi.on("before_agent_start", async (event) => ({
+    systemPrompt: `${event.systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,
+  }));
   pi.registerTool(
     Tools.createRegisterToolDefinition<ExtensionContext>({
       configPath: CONFIG_PATH,

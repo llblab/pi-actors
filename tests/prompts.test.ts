@@ -21,11 +21,20 @@ test("Register tool prompt copy names the register_tool tool explicitly", () => 
 
 test("Register tool parameter descriptions cover public input fields", () => {
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name, /snake_case/);
+  assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.job, /Template job/);
   assert.match(
     Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template,
     /Command template/,
   );
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.args, /file,lang/);
+});
+
+
+test("Onboarding system prompt explains template job model compactly", () => {
+  const lines = Prompts.ONBOARDING_SYSTEM_PROMPT.split("\n");
+  assert.equal(lines.length <= 22, true);
+  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /job\(template\(mode/);
+  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Tasks are user work units/);
 });
 
 test("Registered tool prompt snippet includes the command template", () => {

@@ -1,5 +1,6 @@
 /**
  * Registered tool execution runtime
+ * Zones: tool execution, command templates, output formatting
  * Owns command-template invocation execution and pi tool-result payload formatting
  */
 
@@ -78,6 +79,7 @@ function textContent(text: string) {
 }
 
 function createTemplateConfig(cfg: RegisteredTool): CommandTemplates.CommandTemplateObjectConfig {
+  if (!cfg.template) throw new Error(`Tool "${cfg.name}" has no command template.`);
   return { args: cfg.args, defaults: cfg.defaults, template: cfg.template };
 }
 
@@ -368,7 +370,7 @@ export async function executeRegisteredTool(
       ...(createSoftQuorum(executed.branches)
         ? { softQuorum: createSoftQuorum(executed.branches) }
         : {}),
-      template: cfg.template,
+      template: cfg.template!,
       tool: cfg.name,
       truncated: formatted.truncated,
     },

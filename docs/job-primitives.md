@@ -15,6 +15,24 @@ template job     = where it is running, what happened, how to inspect or stop it
 
 This is the core promise: keep execution declarative and small, but make long-running work observable after the initial tool call returns.
 
+## Jobs, Tasks, and Templates
+
+These words are intentionally separate:
+
+- `Task`: The user's unit of work or intent, such as review a spec or generate eight shader pages.
+- `Command template`: The execution graph that describes commands, sequences, and `mode: "parallel"` fanout.
+- `Template job`: One detached runtime execution of a command template, with id, pid, state files, logs, status, tail, cancel, and terminal result.
+
+A task may start zero, one, or many jobs. A job may run one command, a sequence, or a parallel fanout. A template can run in the foreground, but it has no durable lifecycle until it is wrapped in a job.
+
+Use this rule of thumb:
+
+```text
+short call or sequence pipeline → template/tool
+long-running, parallel, or agentic work → job(template)
+reusable async scenario → tool(job recipe)
+```
+
 ## Boundary
 
 The portable standard lives in [command-templates.md](./command-templates.md). This file is the pi-auto-tools adapter note: tool names, state-file paths, and Swarm mapping.
@@ -66,6 +84,20 @@ A job can also reference a registered auto-tool instead of repeating its templat
   }
 }
 ```
+
+A registered auto-tool can also point at a job recipe instead of a command template. This is the preferred shape for heavyweight agent fanout: keep the parallel template in the job file and expose only a small launch tool.
+
+```json
+{
+  "shader_ring_job": {
+    "description": "Start the shader ring job",
+    "args": ["theme", "out_dir"],
+    "job": "shader-ring-8-parallel"
+  }
+}
+```
+
+Calling this tool starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` asynchronously and returns job metadata. The tool is the button, the job file is the source of truth, and the job's `template` is the execution graph.
 
 ## Template Job Library
 
@@ -123,6 +155,7 @@ The extension prepares this directory on session start and removes stale entries
 The public adapter set is intentionally one tool. This mirrors `register_tool`: one management surface, explicit actions, small prompt footprint.
 
 - `template_job action=start` starts a detached template job from `file`, `template`, or `tool`.
+- A registered runtime tool may define `job` instead of `template`; calling it starts the named job file and returns job metadata.
 - `template_job action=status` reads structured state.
 - `template_job action=tail` reads events or logs.
 - `template_job action=list` lists known jobs.

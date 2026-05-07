@@ -1,5 +1,6 @@
 /**
  * Auto-tool runtime coordinator
+ * Zones: runtime coordination, registry loading, pi tools
  * Owns persisted tool loading, conflict detection, runtime registration, and warning notification
  */
 
@@ -60,7 +61,7 @@ export function createAutoToolsRuntime(
       : undefined;
   }
   function registerRuntimeTool(cfg: Config.RegisteredTool) {
-    deps.registerTool(Tools.createRuntimeToolDefinition(cfg, deps.exec));
+    deps.registerTool(Tools.createRuntimeToolDefinition(cfg, deps.exec, () => tools));
     runtimeTools.add(cfg.name);
   }
   function loadTools(ctx: RuntimeContext) {

@@ -1,5 +1,6 @@
 /**
  * Auto-tools schema helpers
+ * Zones: tool schema, registry args, command-template placeholders
  * Owns tool argument declarations, placeholder-derived tool schemas, and persisted registry normalization
  */
 
@@ -113,6 +114,10 @@ export function getTemplatePlaceholderNames(
     }
   }
   return mergeUnique(names);
+}
+
+export function getExplicitToolArgNames(args: string[] | undefined): string[] {
+  return mergeUnique((args ?? []).map((item) => parseToolArgToken(String(item)).arg));
 }
 
 export function getToolArgNames(

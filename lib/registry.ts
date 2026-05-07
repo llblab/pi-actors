@@ -1,5 +1,6 @@
 /**
  * Registry mutation use-cases
+ * Zones: registry mutations, persistence, runtime activation
  * Owns register/update/delete validation, persistence, runtime side effects, and result payloads
  */
 
@@ -13,6 +14,7 @@ export interface RegisterToolInput {
   name?: string;
   description?: string;
   template?: CommandTemplates.CommandTemplateValue | null;
+  job?: string;
   args?: string;
   update?: boolean;
 }
@@ -21,6 +23,7 @@ export interface RegisterToolResultDetails {
   args?: string[];
   config?: string;
   defaults?: Record<string, string>;
+  job?: string;
   template?: CommandTemplates.CommandTemplateValue;
   tool: string;
 }
@@ -141,8 +144,19 @@ function buildConfig(
   if (template === null) {
     throw new Error(Output.formatToolText("Tool template cannot be null here."));
   }
-  const finalTemplate =
-    template === undefined || template === "" ? existing!.template : template;
+  const inputJob = typeof input.job === "string" && input.job.trim()
+    ? input.job.trim()
+    : undefined;
+  if (inputJob && template !== undefined && template !== "") {
+    throw new Error(Output.formatToolText("Tool cannot define both job and template."));
+  }
+  const finalJob = inputJob ?? (template === undefined ? existing?.job : undefined);
+  const finalTemplate = finalJob
+    ? undefined
+    : template === undefined || template === "" ? existing?.template : template;
+  if (!finalJob && !finalTemplate) {
+    throw new Error(Output.formatToolText("Tool template or job is required."));
+  }
   const defaults = explicitArgs?.defaults ?? existing?.storedDefaults ?? {};
   const storedArgs = explicitArgs ? explicitArgs.args : existing?.storedArgs;
   const storedDefaults =
@@ -150,12 +164,15 @@ function buildConfig(
   return {
     name,
     description,
-    template: finalTemplate,
-    args: Schema.getToolArgNames({
-      args: storedArgs,
-      defaults,
-      template: finalTemplate,
-    }),
+    ...(finalJob ? { job: finalJob } : {}),
+    ...(finalTemplate ? { template: finalTemplate } : {}),
+    args: finalTemplate
+      ? Schema.getToolArgNames({
+        args: storedArgs,
+        defaults,
+        template: finalTemplate,
+      })
+      : Schema.getExplicitToolArgNames(storedArgs),
     defaults,
     ...(storedArgs !== undefined ? { storedArgs } : {}),
     ...(storedDefaults !== undefined ? { storedDefaults } : {}),
@@ -189,9 +206,9 @@ export async function executeRegisterTool<TContext>(
       ),
     );
   }
-  if (template === undefined && !existing) {
+  if (template === undefined && !input.job && !existing) {
     throw new Error(
-      Output.formatToolText("Tool template is required for new registrations."),
+      Output.formatToolText("Tool template or job is required for new registrations."),
     );
   }
   const cfg = buildConfig(name, input, existing);
@@ -220,7 +237,8 @@ export async function executeRegisterTool<TContext>(
       args: cfg.args,
       config: deps.configPath,
       defaults: cfg.defaults,
-      template: cfg.template,
+      ...(cfg.job ? { job: cfg.job } : {}),
+      ...(cfg.template ? { template: cfg.template } : {}),
       tool: name,
     },
   };

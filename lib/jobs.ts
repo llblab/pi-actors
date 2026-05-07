@@ -1,5 +1,6 @@
 /**
  * Command-template async job primitives
+ * Zones: job runtime, async lifecycle, state files
  * Owns detached job state, observation, log tailing, listing, and cancellation safety
  */
 
@@ -54,6 +55,7 @@ function resolveJobTemplate(
   if (!params.tool) throw new Error("template_job action=start requires file, template, or tool.");
   const cfg = tools?.get(params.tool);
   if (!cfg) throw new Error(`Registered tool not found: ${params.tool}`);
+  if (!cfg.template) throw new Error(`Registered tool has no command template: ${params.tool}`);
   return { template: cfg.template, tool: cfg.name };
 }
 

@@ -19,6 +19,8 @@ Persistent template-backed tool registry extension for the pi coding agent.
 - **Immediate Updates**: Registered and updated tools become callable in the active session; deleted tools are removed from active tools and fully disappear after reload.
 - **Bounded Output**: Tool stdout is returned to the agent with truncation safeguards; full oversized output is saved to a temp file.
 - **Template Jobs**: Starts detached template jobs from inline config, registered tools, or `~/.pi/agent/jobs/*.json`, with generic status, tail, list, and cancel actions backed by simple state files under `~/.pi/agent/tmp/pi-auto-tools`.
+- **Job Launch Tools**: Registers lightweight tools that start reusable job recipes directly, keeping large parallel agent templates in `~/.pi/agent/jobs/*.json` while exposing a compact callable button to the agent.
+- **Context Onboarding**: Injects a compact system-prompt note explaining templates, jobs, tasks, and agent fanout so installed sessions have the mental model available by default.
 - **Ambient Job Observability**: Shows one stable triangle per active job sub-agent across all running jobs in the interactive status line, then injects a compact completion event when a job finishes.
 
 ## Install
@@ -48,10 +50,32 @@ command
 
 - A **command** is one concrete local process.
 - A **command template** is the reusable shape of that process, with named placeholders.
-- A **registered tool** gives a command template a stable agent-facing name.
+- A **registered tool** gives a command template or job recipe a stable agent-facing name.
 - A **template job** runs a command template detached, writes state and logs, and lets the agent return later with `status`, `tail`, or `cancel`.
 
-The template remains the execution language. The job is only the async envelope.
+The template remains the execution language. The job is the async envelope. For large agent fanout, prefer `tool → job recipe → template(mode: "parallel")`: the tool is the button, the job is the lifecycle, and the template is the execution graph. The extension also injects this compact mental model into the system prompt on each agent turn so new operators do not need to read every doc before using jobs.
+
+## Operator Onboarding
+
+Start with foreground templates for short deterministic work:
+
+```text
+register_tool name=lint_docs description="Lint docs" template="npm run lint:docs"
+```
+
+Move to jobs when work is long-running, parallel, or agentic:
+
+```text
+template_job action=start file=shader-ring-8-parallel
+```
+
+Use a job-backed tool when the job recipe is reusable and should feel like a normal capability:
+
+```text
+register_tool name=shader_ring_job description="Start shader ring" job="shader-ring-8-parallel" args="theme,out_dir"
+```
+
+`Task` is the user's work item. `Template` is the execution graph. `Job` is one async runtime execution with status, logs, cancellation, and ambient triangles.
 
 ## Register Tools
 
@@ -66,6 +90,19 @@ register_tool name=transcribe \
   description="Transcribe a local audio file" \
   template="/path/to/stt --file {file} --lang {lang=ru}"
 ```
+
+### Job launcher
+
+For long-running agentic work, keep the large parallel template in a reusable job recipe and register a small launcher tool:
+
+```text
+register_tool name=shader_ring_job \
+  description="Start the shader ring job" \
+  job="shader-ring-8-parallel" \
+  args="theme,out_dir"
+```
+
+Calling `shader_ring_job` starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` as a detached template job. Job-backed tools return job metadata immediately and accept optional `job_id` to override the generated run id.
 
 ### Sub-agent
 
@@ -102,6 +139,11 @@ The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; t
   "call_subagent": {
     "description": "Run pi as a non-interactive sub-agent",
     "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
+  },
+  "shader_ring_job": {
+    "description": "Start the shader ring job",
+    "args": ["theme", "out_dir"],
+    "job": "shader-ring-8-parallel"
   }
 }
 ```
@@ -158,6 +200,7 @@ Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with
 - `template_job` provides a minimal template job envelope around the same command-template contract.
 - `template_job` uses `action: start | status | tail | list | cancel`.
 - `template_job action=start` can run a template job JSON `file`, an inline `template`, or a registered auto-tool by `tool` name.
+- Registered tools may use `job` instead of `template`; calling them starts the named job recipe asynchronously and returns job metadata.
 - Interactive sessions show ambient job sub-agent activity as stable `▷` triangles aggregated across all running jobs, with one moving `▶` wave over the active set; terminal job events are delivered as compact follow-up context so the agent can inspect or react.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.

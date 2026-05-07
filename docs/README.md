@@ -4,7 +4,8 @@ Living index of all documentation in the `/docs` directory.
 
 ## Documents
 
-- [command-templates.md](./command-templates.md) — Portable command-template standard core
+- [command-templates.md](./command-templates.md) — Portable execution standard: command template first, template job as the async envelope
+- [job-primitives.md](./job-primitives.md) — pi-auto-tools adapter for `template_job`, state files, observability, and the local template-job library
 - [tool-registry.md](./tool-registry.md) — Local `pi-auto-tools` registry storage and `register_tool` adaptation
 
 ## Root Context

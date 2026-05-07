@@ -8,6 +8,7 @@ import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
 import {
+  createJobToolDefinition,
   createRegisterToolDefinition,
   createRuntimeToolDefinition,
 } from "../lib/tools.ts";
@@ -25,16 +26,23 @@ function createRegistryDeps() {
   };
 }
 
-test("Register tool definition exposes a JSON schema with name as the only required field", () => {
+test("Register tool definition exposes a JSON schema with no required fields", () => {
   const definition = createRegisterToolDefinition(createRegistryDeps());
   assert.equal(definition.name, "register_tool");
-  assert.deepEqual(definition.parameters.required, ["name"]);
-  assert.equal(definition.parameters.properties.name.type, "string");
-  assert.equal(definition.parameters.properties.update.type, "boolean");
-  assert.equal(
-    Array.isArray(definition.parameters.properties.template.anyOf),
-    true,
-  );
+  assert.deepEqual(definition.parameters.required, []);
+  const properties = definition.parameters.properties as Record<string, any>;
+  assert.equal(properties.name.type, "string");
+  assert.equal(properties.update.type, "boolean");
+  assert.equal(Array.isArray(properties.template.anyOf), true);
+});
+
+test("Template job tool definition exposes action schema", () => {
+  const definition = createJobToolDefinition({ getTools: () => new Map() });
+  assert.equal(definition.name, "template_job");
+  assert.deepEqual(definition.parameters.required, ["action"]);
+  const properties = definition.parameters.properties as Record<string, any>;
+  assert.equal(properties.action.type, "string");
+  assert.equal(Array.isArray(properties.template.anyOf), true);
 });
 
 test("Runtime tool definition marks defaulted args optional", () => {
@@ -46,11 +54,12 @@ test("Runtime tool definition marks defaulted args optional", () => {
       name: "transcribe",
       template: "transcribe {file} {lang}",
     },
-    async () => ({ stdout: "ok" }),
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
   );
+  const properties = definition.parameters.properties as Record<string, any>;
   assert.deepEqual(definition.parameters.required, ["file"]);
-  assert.equal(definition.parameters.properties.file.type, "string");
-  assert.equal(definition.parameters.properties.lang.type, "string");
+  assert.equal(properties.file.type, "string");
+  assert.equal(properties.lang.type, "string");
 });
 
 test("Runtime tool definition treats inline-default args as optional", () => {
@@ -62,7 +71,7 @@ test("Runtime tool definition treats inline-default args as optional", () => {
       name: "speak",
       template: "speak --text {text} --lang {lang=ru}",
     },
-    async () => ({ stdout: "ok" }),
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
   );
   assert.deepEqual(definition.parameters.required, ["text"]);
 });

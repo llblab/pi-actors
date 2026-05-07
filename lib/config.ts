@@ -42,12 +42,12 @@ export function serializeTools(
   for (const [name, cfg] of entries) {
     const entry: Record<string, unknown> = {
       description: cfg.description,
-      template: cfg.template,
     };
     if (cfg.storedArgs && cfg.storedArgs.length > 0)
       entry.args = cfg.storedArgs;
     if (cfg.storedDefaults && Object.keys(cfg.storedDefaults).length > 0)
       entry.defaults = cfg.storedDefaults;
+    entry.template = cfg.template;
     result[name] = entry;
   }
   return result;

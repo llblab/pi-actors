@@ -107,6 +107,35 @@ test("Registered tool execution runs template sequences with previous stdout as 
   assert.deepEqual(result.content, [{ type: "text", text: "\nsecond out" }]);
 });
 
+test("Registered tool execution repeats template nodes", async () => {
+  const result = await executeRegisteredTool(
+    {
+      name: "repeat",
+      description: "repeat test",
+      args: [],
+      defaults: {},
+      template: {
+        mode: "parallel",
+        repeat: 3,
+        template: `${process.execPath} -e "console.log(process.argv[1])" page{_(index+1)}-of-{repeat}`,
+      },
+    },
+    {},
+    async (_command, args) => ({
+      stdout: `${args.at(-1)}\n`,
+      stderr: "",
+      code: 0,
+      killed: false,
+    }),
+    process.cwd(),
+  );
+  const text = result.content[0].text;
+  assert.match(text, /page01-of-3/);
+  assert.match(text, /page02-of-3/);
+  assert.match(text, /page03-of-3/);
+  assert.equal(result.details.branches?.length, 3);
+});
+
 test("Registered tool execution runs nested parallel template nodes", async () => {
   const calls: Array<{ command: string; stdin?: string }> = [];
   const result = await executeRegisteredTool(

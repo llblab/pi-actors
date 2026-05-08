@@ -23,9 +23,10 @@ export interface CommandTemplateObjectConfig {
   output?: string;
   retry?: number;
   critical?: boolean;
+  repeat?: number;
 }
 
-export type CommandTemplateValue = string | CommandTemplateConfig[];
+export type CommandTemplateValue = string | CommandTemplateConfig[] | CommandTemplateObjectConfig;
 
 export type CommandTemplateConfig = string | CommandTemplateObjectConfig;
 
@@ -83,6 +84,61 @@ function normalizeCommandTemplateDefaults(
   return normalized;
 }
 
+function normalizeRepeat(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 1)
+    throw new Error("Command template repeat must be a positive integer.");
+  return value;
+}
+
+function pad(value: number, width: number): string {
+  return String(value).padStart(width, "0");
+}
+
+export function isCommandTemplateRepeatPlaceholder(name: string): boolean {
+  return /^_{0,6}(?:index|prev|next|repeat)$/.test(name);
+}
+
+export function getCommandTemplateRepeatDefaults(
+  index: number,
+  repeat: number,
+): Record<string, string> {
+  const prev = (index - 1 + repeat) % repeat;
+  const next = (index + 1) % repeat;
+  const values: Record<string, string> = {
+    index: String(index),
+    next: String(next),
+    prev: String(prev),
+    repeat: String(repeat),
+  };
+  for (const name of ["index", "prev", "next", "repeat"]) {
+    const numeric = Number(values[name]);
+    for (let underscores = 1; underscores <= 6; underscores += 1) {
+      values[`${"_".repeat(underscores)}${name}`] = pad(numeric, underscores + 1);
+    }
+  }
+  return values;
+}
+
+function expandRepeatConfig(
+  config: CommandTemplateObjectConfig,
+  context: Pick<CommandTemplateObjectConfig, "args" | "defaults">,
+): CommandTemplateObjectConfig[] | undefined {
+  const repeat = normalizeRepeat(config.repeat);
+  if (repeat === undefined) return undefined;
+  return Array.from({ length: repeat }, (_unused, index0) => {
+    const { repeat: _repeat, ...rest } = config;
+    return {
+      ...rest,
+      defaults: {
+        ...(context.defaults ?? {}),
+        ...(rest.defaults ?? {}),
+        ...getCommandTemplateRepeatDefaults(index0, repeat),
+      },
+    };
+  });
+}
+
 export function expandCommandTemplateConfigs(
   config: CommandTemplateConfig,
   inherited: Pick<CommandTemplateObjectConfig, "args" | "defaults"> = {},
@@ -104,6 +160,10 @@ export function expandCommandTemplateConfigs(
       ? { defaults: { ...(inheritedDefaults ?? {}), ...ownDefaults } }
       : {}),
   };
+  const repeated = expandRepeatConfig(normalizedConfig, context);
+  if (repeated) {
+    return repeated.flatMap((step) => expandCommandTemplateConfigs(step, context));
+  }
   if (Array.isArray(normalizedConfig.template)) {
     return normalizedConfig.template.flatMap((step) =>
       expandCommandTemplateConfigs(step, context),
@@ -194,17 +254,92 @@ export function expandCommandTemplateExecutable(
   return command;
 }
 
+function evaluateCommandTemplateExpression(
+  expression: string,
+  values: Record<string, string>,
+): number {
+  let index = 0;
+  const source = expression.replace(/\s+/g, "");
+  function peek(): string | undefined {
+    return source[index];
+  }
+  function consume(char: string): boolean {
+    if (peek() !== char) return false;
+    index += 1;
+    return true;
+  }
+  function parsePrimary(): number {
+    if (consume("(")) {
+      const value = parseExpression();
+      if (!consume(")")) throw new Error(`Invalid command template expression: ${expression}`);
+      return value;
+    }
+    const numberMatch = source.slice(index).match(/^\d+/);
+    if (numberMatch) {
+      index += numberMatch[0].length;
+      return Number(numberMatch[0]);
+    }
+    const nameMatch = source.slice(index).match(/^[A-Za-z_][A-Za-z0-9_-]*/);
+    if (nameMatch) {
+      index += nameMatch[0].length;
+      const value = values[nameMatch[0]];
+      if (value === undefined || !/^-?\d+$/.test(value))
+        throw new Error(`Invalid command template expression variable: ${nameMatch[0]}`);
+      return Number(value);
+    }
+    throw new Error(`Invalid command template expression: ${expression}`);
+  }
+  function parseTerm(): number {
+    let value = parsePrimary();
+    while (true) {
+      if (consume("*")) value *= parsePrimary();
+      else if (consume("/")) value = Math.trunc(value / parsePrimary());
+      else if (consume("%")) value %= parsePrimary();
+      else return value;
+    }
+  }
+  function parseExpression(): number {
+    let value = parseTerm();
+    while (true) {
+      if (consume("+")) value += parseTerm();
+      else if (consume("-")) value -= parseTerm();
+      else return value;
+    }
+  }
+  const value = parseExpression();
+  if (index !== source.length) throw new Error(`Invalid command template expression: ${expression}`);
+  return value;
+}
+
+function substituteCommandTemplateExpression(
+  content: string,
+  values: Record<string, string>,
+): string | undefined {
+  const padded = content.match(/^(_{1,6})\((.+)\)$/);
+  if (padded) {
+    return pad(evaluateCommandTemplateExpression(padded[2], values), padded[1].length + 1);
+  }
+  if (!/[()+\-*\/%]/.test(content)) return undefined;
+  return String(evaluateCommandTemplateExpression(content, values));
+}
+
 export function substituteCommandTemplateToken(
   token: string,
   values: Record<string, string>,
   missingLabel = "command template",
 ): string {
   return token.replace(
-    /\{([A-Za-z_][A-Za-z0-9_-]*)(?:=([^}]*))?\}/g,
-    (_match, name, inlineDefault: string | undefined) => {
-      if (Object.hasOwn(values, name)) return values[name] ?? "";
-      if (inlineDefault !== undefined) return inlineDefault;
-      throw new Error(`Missing ${missingLabel} value: ${name}`);
+    /\{([^{}]+)\}/g,
+    (_match, content: string) => {
+      const simple = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?:=([^}]*))?$/);
+      if (simple) {
+        const [, name, inlineDefault] = simple;
+        if (Object.hasOwn(values, name)) return values[name] ?? "";
+        if (inlineDefault !== undefined) return inlineDefault;
+      }
+      const expression = substituteCommandTemplateExpression(content, values);
+      if (expression !== undefined) return expression;
+      throw new Error(`Missing ${missingLabel} value: ${content}`);
     },
   );
 }
@@ -305,6 +440,12 @@ export function buildCommandTemplateInvocation(
   }
   if (!normalizedConfig.template)
     throw new Error(options.emptyMessage ?? "Command template is required");
+  if (typeof normalizedConfig.template !== "string") {
+    throw new Error(
+      options.emptyMessage ??
+        "Command template object cannot be executed as one command",
+    );
+  }
   const parts = splitCommandTemplate(normalizedConfig.template);
   const commandPart = parts[0];
   if (!commandPart)

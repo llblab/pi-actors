@@ -150,6 +150,40 @@ Composition rules:
 
 `output` selects the primary result channel. Omitted `output` means `"stdout"`, and explicitly writing `"output": "stdout"` is valid standard syntax. Artifact-producing handlers may instead name a runtime value or placeholder path, e.g. `"ogg"` or `"{ogg}"`.
 
+### Repeat
+
+`repeat` expands one command-template node N times before execution. It works with both sequence and parallel nodes and is useful when many branches differ only by a number.
+
+```json
+{
+  "mode": "parallel",
+  "repeat": 8,
+  "template": "render page{_(index+1)}.html --prev page{_(prev+1)}.html --next page{_(next+1)}.html --zero page{_index}.html"
+}
+```
+
+Reserved repeat placeholders are injected into each repeated node:
+
+- `{index}`: current zero-based index, `0..repeat-1`
+- `{prev}` / `{next}`: wrapped zero-based neighbors
+- `{repeat}`: total repeat count
+
+Human 1-based numbering is intentionally expressed as limited arithmetic: `{index+1}`, `{prev+1}`, `{next+1}`.
+
+Leading underscores on repeat placeholders request zero padding. One underscore means width 2, two underscores mean width 3, and so on:
+
+```text
+{_index}      → 00, 01, ...
+{_(index+1)}  → 01, 02, ...
+{__(index+1)} → 001, 002, ...
+{_(prev+1)}   → wrapped previous page number, padded to width 2
+{_(next+1)}   → wrapped next page number, padded to width 2
+```
+
+Repeat expressions support only integers, `index`, `prev`, `next`, `repeat`, parentheses, and `+`, `-`, `*`, `/`, `%`. They are not JavaScript and cannot call functions or access properties.
+
+Repeat placeholders are local generated values. Call-time args should not use these reserved names to override the repeat index.
+
 Parallel nodes use the same object shape. Flags come first and `template` stays last:
 
 ```json

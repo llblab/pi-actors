@@ -5,6 +5,7 @@
  */
 
 import type { RegisteredTool } from "./config.ts";
+import * as CommandTemplates from "./command-templates.ts";
 import * as Execution from "./execution.ts";
 import * as JobReferences from "./job-references.ts";
 import * as Jobs from "./jobs.ts";
@@ -167,15 +168,23 @@ export function createRuntimeToolDefinition(
   const isJobRecipe = JobReferences.isJobRecipeTool(cfg.template, cfg.jobRecipe);
   const recipeTemplate = cfg.jobRecipe?.template ?? JobReferences.getJobRecipeTemplate(cfg.template);
   const requiredTemplate = recipeTemplate ?? cfg.template!;
+  const requiredTemplateConfig: CommandTemplates.CommandTemplateConfig =
+    typeof requiredTemplate === "object" && !Array.isArray(requiredTemplate)
+      ? {
+        ...requiredTemplate,
+        args: cfg.args,
+        defaults: { ...(requiredTemplate.defaults ?? {}), ...cfg.defaults },
+      }
+      : {
+        args: cfg.args,
+        defaults: cfg.defaults,
+        template: requiredTemplate,
+      };
   const requiredArgs = isJobRecipe && cfg.storedArgs !== undefined
     ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
     : JobReferences.isJobRecipeReference(cfg.template) && !recipeTemplate
       ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
-      : Schema.getRequiredToolArgNames({
-        args: cfg.args,
-        defaults: cfg.defaults,
-        template: requiredTemplate,
-      });
+      : Schema.getRequiredToolArgNames(requiredTemplateConfig);
   for (const arg of cfg.args) {
     paramSchema[arg] = stringSchema(`Argument: ${arg}`);
     if (requiredArgs.has(arg)) required.push(arg);

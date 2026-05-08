@@ -110,6 +110,39 @@ test("Template composition expansion preserves retry and critical on step object
   ]);
 });
 
+test("Command template repeat expands numbered defaults", () => {
+  const steps = expandCommandTemplateConfigs({
+    repeat: 3,
+    template: "render page{_(index+1)}.html prev=page{_(prev+1)}.html next=page{_(next+1)}.html raw={index}/{repeat}"
+  });
+  assert.equal(steps.length, 3);
+  assert.deepEqual(
+    {
+      index: steps[0].defaults?.index,
+      next: steps[0].defaults?.next,
+      prev: steps[0].defaults?.prev,
+      repeat: steps[0].defaults?.repeat,
+      _index: steps[0].defaults?._index,
+      __index: steps[0].defaults?.__index,
+      _prev: steps[0].defaults?._prev,
+      _next: steps[0].defaults?._next,
+    },
+    {
+      index: "0",
+      next: "1",
+      prev: "2",
+      repeat: "3",
+      _index: "00",
+      __index: "000",
+      _prev: "02",
+      _next: "01",
+    },
+  );
+  const invocation = buildCommandTemplateInvocation(steps[0], {}, "/work");
+  assert.deepEqual(invocation.args, ["page01.html", "prev=page03.html", "next=page02.html", "raw=0/3"]);
+  assert.deepEqual(buildCommandTemplateInvocation(steps[2], {}, "/work").args, ["page03.html", "prev=page02.html", "next=page01.html", "raw=2/3"]);
+});
+
 test("Command templates resolve defaults and inline placeholder defaults", () => {
   const invocation = buildCommandTemplateInvocation(
     {

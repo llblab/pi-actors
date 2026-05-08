@@ -32,7 +32,9 @@ test("Register tool definition exposes a JSON schema with no required fields", (
   assert.deepEqual(definition.parameters.required, []);
   const properties = definition.parameters.properties as Record<string, any>;
   assert.equal(properties.name.type, "string");
-  assert.equal(properties.job, undefined);
+  assert.equal(properties.job.type, "string");
+  assert.equal(properties.state_dir.type, "string");
+  assert.equal(properties.values.type, "object");
   assert.equal(properties.update.type, "boolean");
   assert.equal(Array.isArray(properties.template.anyOf), true);
 });
@@ -53,6 +55,7 @@ test("Runtime tool definition exposes job id override for job recipe template pa
       defaults: {},
       description: "Start shader job",
       name: "shader_job",
+      storedArgs: ["theme"],
       template: "shader-ring-8-parallel.json",
     },
     async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
@@ -62,6 +65,28 @@ test("Runtime tool definition exposes job id override for job recipe template pa
   assert.equal(properties.theme.type, "string");
   assert.equal(properties.job_id.type, "string");
   assert.match(definition.promptSnippet, /Start template job recipe/);
+});
+
+test("Runtime tool definition exposes job id override for co-located job recipes", () => {
+  const definition = createRuntimeToolDefinition(
+    {
+      args: ["scope"],
+      defaults: {},
+      description: "Start review job",
+      jobRecipe: {
+        job: "review",
+        template: "review {scope}",
+      },
+      name: "review_job",
+      template: "review {scope}",
+    },
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+  );
+  const properties = definition.parameters.properties as Record<string, any>;
+  assert.deepEqual(definition.parameters.required, ["scope"]);
+  assert.equal(properties.scope.type, "string");
+  assert.equal(properties.job_id.type, "string");
+  assert.match(definition.promptSnippet, /review/);
 });
 
 test("Runtime tool definition marks defaulted args optional", () => {

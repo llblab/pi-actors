@@ -5,7 +5,7 @@
  */
 
 export const REGISTER_TOOL_DESCRIPTION =
-  "Register a persistent custom tool from a command template or job recipe path. " +
+  "Register a persistent custom tool from a command template, job recipe path, or co-located job recipe. " +
   "Definitions are stored in auto-tools.json across reloads. " +
   "Use update=true to overwrite an existing auto-tool, template=null/empty to delete.";
 
@@ -25,13 +25,14 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - Array template = sync sequence pipeline.
 - Object node flags go before template.
 - mode: "parallel" = sync fanout shape.
+- Command templates stay sync and portable.
 - Parallel is not async lifecycle.
-- Template job = async envelope around a template.
+- Template job = async extension around a template.
 - Job state lives under ~/.pi/agent/tmp/pi-auto-tools/jobs.
 - Use template_job start/status/tail/list/cancel.
 - Put reusable job recipes in ~/.pi/agent/jobs/*.json.
-- Heavy agent fanout should be job(template(mode: "parallel")).
-- Job-backed tools store the job recipe path in template.
+- Long async fanout = template job wrapping template(mode: "parallel").
+- Tool template may point to or co-locate a job recipe.
 - Tool = compact callable button.
 - Job = lifecycle, logs, status, cancel.
 - Template = execution graph.
@@ -45,13 +46,16 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",
   description:
     "Describe what the tool does for the LLM. Required unless deleting; omitted updates keep the old description.",
+  job: "Optional job id for a co-located job recipe. Requires template and does not reference another tool.",
+  state_dir: "Optional job state directory for a co-located job recipe.",
   template:
-    "Command template with {arg} or {arg=default} placeholders, or a job recipe JSON path/name. Bare job names resolve under ~/.pi/agent/jobs. Omitted updates keep the old template. Empty string deletes the tool.",
+    "Command template with {arg} or {arg=default} placeholders, or a job recipe JSON path/name. With job, this is the co-located job recipe body. Bare job names resolve under ~/.pi/agent/jobs. Omitted updates keep the old template. Empty string deletes the tool.",
   templateArray:
     "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/critical.",
   templateNull: "Delete the tool when template is null.",
   args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,model=openai-codex/gpt-5.5",
   update: "Set to true to overwrite an existing auto-tool registration.",
+  values: "Optional default runtime placeholder values for a co-located job recipe.",
 } as const;
 
 export function formatRegisteredToolPromptSnippet(template: unknown): string {

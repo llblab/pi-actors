@@ -53,7 +53,7 @@ command
 - A **registered tool** gives a command template or job recipe a stable agent-facing name.
 - A **template job** runs a command template detached, writes state and logs, and lets the agent return later with `status`, `tail`, or `cancel`.
 
-The template remains the execution language. The job is the async envelope. For large agent fanout, the only valid chain is `tool → template → job → template`: the tool's `template` may point to a job recipe, and that job recipe must own its own `template(mode: "parallel")`. The tool is the button, the job is the lifecycle, and the template is the execution graph. The extension also injects this compact mental model into the system prompt on each agent turn so new operators do not need to read every doc before using jobs.
+The template remains the execution language. The job is the async envelope. For large agent fanout, the valid chain is `tool → template → job → template`: the tool's `template` may point to a job recipe file, or the tool entry may co-locate job envelope fields next to `description` and `args`. In both forms, the job owns its own `template(mode: "parallel")`. The tool is the button, the job is the lifecycle, and the template is the execution graph. The extension also injects this compact mental model into the system prompt on each agent turn so new operators do not need to read every doc before using jobs.
 
 ## Operator Onboarding
 
@@ -103,6 +103,21 @@ register_tool name=shader_ring_job \
 ```
 
 Calling `shader_ring_job` starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` as a detached template job. Job recipe tools return job metadata immediately and accept optional `job_id` to override the generated run id.
+
+A job recipe can also be co-located in `auto-tools.json` when keeping metadata and the async envelope together is clearer:
+
+```json
+{
+  "review_docs": {
+    "description": "Start an async docs review",
+    "job": "review-docs",
+    "state_dir": "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+    "template": "pi -p --model openai-codex/gpt-5.5 --tools read,bash \"Review {scope}\""
+  }
+}
+```
+
+A co-located job entry still cannot define `tool`; it must own `template` directly.
 
 ### Sub-agent
 
@@ -205,7 +220,7 @@ Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 
-See [`docs/command-templates.md`](./docs/command-templates.md) for the portable command template, template job, and temp-directory contract; [`docs/job-primitives.md`](./docs/job-primitives.md) for the pi-auto-tools job adapter; and [`docs/tool-registry.md`](./docs/tool-registry.md) for the registry storage shape.
+See [`docs/command-templates.md`](./docs/command-templates.md) for the portable synchronous command-template contract; [`docs/template-jobs.md`](./docs/template-jobs.md) for the async job extension; [`docs/job-primitives.md`](./docs/job-primitives.md) for the pi-auto-tools job adapter; and [`docs/tool-registry.md`](./docs/tool-registry.md) for the registry storage shape.
 
 ## Notes
 

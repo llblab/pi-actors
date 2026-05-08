@@ -4,7 +4,7 @@ Command templates are the portable integration format for deterministic local au
 
 **Meta-contract:** transportable (bit-for-bit identical across projects), high-density (zero fluff), constant (evolve by crystallizing, not speculating), optimal minimum (add only when it hurts).
 
-**Scope:** portable command execution format — shell-free exec, composition/pipes, timeout (30s default), delay-before-start, retry, critical-step branching, output artifact selection, handler-level fallback, template job envelope, and extension temp directory. Single JSON standard; no platform lock-in.
+**Scope:** portable synchronous command execution format — shell-free exec, composition/pipes, timeout (30s default), delay-before-start, retry, critical-step branching, output artifact selection, and handler-level fallback. Single JSON standard; no platform lock-in.
 
 ---
 
@@ -123,7 +123,6 @@ Composition rules:
 - Execute leaves in order when `mode` is omitted or set to `"sequence"`
 - Execute child templates concurrently when `mode` is set to `"parallel"`
 - Parallel composition uses soft-quorum semantics by default: failed non-critical children are reported but do not abort siblings or the next sequence step
-- For long-running agentic fanout, wrap the parallel template in a template job so lifecycle, logs, cancellation, and ambient sub-agent status stay observable
 - Non-critical failures are recorded and execution continues, while `critical: true` failures abort the root composition
 - Treat the whole composition as one handler for selector matching and fallback
 - Top-level `args` and `defaults` apply to every leaf unless the leaf defines private values
@@ -246,7 +245,7 @@ Set `delay` to wait before starting a node. The value is milliseconds. Delay is 
 
 On a sequence node, `delay` waits before the sequence begins. On a parallel node, `delay` waits before launching its children. On a branch, `delay` waits before that branch starts, without blocking sibling branches.
 
-Use `delay` only for explicit backoff, rate pacing, or staged launch. Do not use it as a scheduler; template jobs handle detached observation, not timed automation.
+Use `delay` only for explicit backoff, rate pacing, or staged launch. Do not use it as a scheduler.
 
 ## Progressive Disclosure
 
@@ -262,88 +261,7 @@ string[]         → sequential composition
 
 Start with a string. Add composition when needed. Add `mode: "parallel"` when independent work can run concurrently. Add delay when launch pacing matters. Add retry when flaky. Add critical when safety matters. Same contract, growing capability, no dead weight.
 
-`mode: "parallel"` is the fanout shape; a template job is the async envelope. They are complementary: use foreground templates for short calls and pipelines, and use `job(template(mode: "parallel"))` for long-running agentic fanout.
-
-## Template Job Envelope
-
-A template job is one command-template execution tree plus a tiny detached-process envelope.
-
-```text
-command template = what to run
-template job     = run it detached, remember it, inspect it later
-```
-
-The distinction is deliberately small:
-
-- The command template still owns execution: argv, placeholders, sequence, parallel mode, delay, retry, critical steps, and output selection.
-- The template job owns only lifecycle: start, state path, pid metadata, logs, status, tail, list, and cancel.
-
-A template job is not a scheduler, queue, daemon, workflow DSL, or distributed worker model. It keeps `template` plus `mode` as the only execution language.
-
-Minimal shape:
-
-```json
-{
-  "job": "review-docs",
-  "template": [
-    "prepare docs/spec.md",
-    {
-      "mode": "parallel",
-      "template": ["review-a docs/spec.md", "review-b docs/spec.md"]
-    },
-    "merge docs/spec.md"
-  ]
-}
-```
-
-A job recipe must define `template` directly. The valid chain is `tool → template → job → template`. A job must not reference a registered local tool: the job is the async container for the command-template tree, not a tool indirection layer.
-
-Reusable template job files may live under the agent directory:
-
-```text
-~/.pi/agent/jobs/*.json
-```
-
-A local `file` adapter can load one of these JSON objects and let call-time params override file params. `file` is an adapter convenience, not a replacement for the portable command-template contract.
-
-A minimal job adapter should expose start, status, tail, list, and cancel operations. Status and tail should read ordinary files so jobs stay inspectable without a daemon.
-
-Recommended state files:
-
-- `job.json` stores pid, command-template config, cwd, values, created time, and state dir.
-- `progress.json` stores phase, active node path, completed node count, failures, and updated time.
-- `events.jsonl` stores append-only lifecycle events.
-- `stdout.log` and `stderr.log` store detached process output.
-- `result.json` stores final code, killed flag, output selector, and optional full-output path.
-
-A job belongs to the current user and cwd at start time. Cancellation should only target the recorded pid when command line and cwd still match the recorded owner data. Stale pid reuse must fail closed.
-
-## Extension Temp Directory
-
-Extension-owned temporary runtime files live under the pi agent directory:
-
-```text
-~/.pi/agent/tmp/<extension-name>/
-```
-
-Rules:
-
-- Use the pi agent temp tree, not system temp, for extension-owned state.
-- Use system temp only for OS-level scratch files or explicit operator overrides.
-- Keep each extension in its own subdirectory named after the local extension name.
-- Prepare the extension temp directory on session start.
-- Prune stale entries on session start.
-- Default stale age is 24 hours unless the extension has a stronger reason.
-- Cleanup must be fail-open: cleanup races should not prevent extension startup.
-- State that must survive restarts belongs in the agent root, not in `tmp`.
-
-Generic shape:
-
-```text
-~/.pi/agent/tmp/<extension-name>/<runtime-domain>/<artifact>
-```
-
-Job-template state should live under this temp tree. Local adapters define their own subpaths.
+`mode: "parallel"` is the synchronous fanout shape. Detached lifecycle, logs, cancellation, and durable state belong to the separate [Template Job Standard](./template-jobs.md).
 
 ## Tool Boundary
 

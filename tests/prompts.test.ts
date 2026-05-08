@@ -32,7 +32,8 @@ test("Register tool parameter descriptions cover public input fields", () => {
 test("Onboarding system prompt explains template job model compactly", () => {
   const lines = Prompts.ONBOARDING_SYSTEM_PROMPT.split("\n");
   assert.equal(lines.length <= 22, true);
-  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /job\(template\(mode/);
+  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Command templates stay sync and portable/);
+  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /template job wrapping template\(mode/);
   assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Tasks are user work units/);
 });
 

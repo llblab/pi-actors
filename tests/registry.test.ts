@@ -83,6 +83,35 @@ test("Registry mutations register job recipe paths through template", async () =
   }
 });
 
+test("Registry mutations register co-located job recipes", async () => {
+  const harness = await createHarness();
+  try {
+    const result = await executeRegisterTool(
+      {
+        description: "Start review job",
+        job: "review-docs",
+        name: "review_job",
+        state_dir: "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+        template: "review {scope}",
+        values: { prompt: "Review risks." },
+      },
+      {},
+      harness.deps,
+    );
+    assert.deepEqual(harness.tools.get("review_job")?.jobRecipe, {
+      job: "review-docs",
+      state_dir: "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+      template: "review {scope}",
+      values: { prompt: "Review risks." },
+    });
+    assert.deepEqual(harness.tools.get("review_job")?.args, ["scope"]);
+    assert.equal(result.details.job, "review-docs");
+    assert.equal(result.details.state_dir, "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs");
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("Registry mutations register command-template sequences", async () => {
   const harness = await createHarness();
   try {

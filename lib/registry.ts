@@ -14,15 +14,21 @@ import * as Schema from "./schema.ts";
 export interface RegisterToolInput {
   name?: string;
   description?: string;
+  job?: string;
+  state_dir?: string;
+  stateDir?: string;
   template?: CommandTemplates.CommandTemplateValue | null;
   args?: string;
   update?: boolean;
+  values?: Record<string, unknown>;
 }
 
 export interface RegisterToolResultDetails {
   args?: string[];
   config?: string;
   defaults?: Record<string, string>;
+  job?: string;
+  state_dir?: string;
   template?: CommandTemplates.CommandTemplateValue;
   tool: string;
 }
@@ -147,20 +153,39 @@ function buildConfig(
   if (!finalTemplate) {
     throw new Error(Output.formatToolText("Tool template is required."));
   }
+  const inputJob = typeof input.job === "string" && input.job.trim()
+    ? input.job.trim()
+    : undefined;
+  const jobRecipe = inputJob
+    ? {
+      job: inputJob,
+      ...(typeof input.state_dir === "string" && input.state_dir.trim() ? { state_dir: input.state_dir.trim() } : {}),
+      ...(typeof input.stateDir === "string" && input.stateDir.trim() ? { stateDir: input.stateDir.trim() } : {}),
+      template: finalTemplate,
+      ...(input.values && typeof input.values === "object" ? { values: input.values } : {}),
+    }
+    : template === undefined
+      ? existing?.jobRecipe
+      : undefined;
   const defaults = explicitArgs?.defaults ?? existing?.storedDefaults ?? {};
   const storedArgs = explicitArgs ? explicitArgs.args : existing?.storedArgs;
   const storedDefaults =
     Object.keys(defaults).length > 0 ? defaults : undefined;
+  const recipeTemplate = JobReferences.getJobRecipeTemplate(finalTemplate);
+  const argTemplate = recipeTemplate ?? finalTemplate;
   return {
     name,
     description,
     template: finalTemplate,
-    args: JobReferences.isJobRecipeReference(finalTemplate)
+    ...(jobRecipe ? { jobRecipe } : {}),
+    args: JobReferences.isJobRecipeTool(finalTemplate, jobRecipe) && storedArgs !== undefined
       ? Schema.getExplicitToolArgNames(storedArgs)
-      : Schema.getToolArgNames({
+      : JobReferences.isJobRecipeReference(finalTemplate) && !recipeTemplate
+        ? Schema.getExplicitToolArgNames(storedArgs)
+        : Schema.getToolArgNames({
         args: storedArgs,
         defaults,
-        template: finalTemplate,
+        template: argTemplate,
       }),
     defaults,
     ...(storedArgs !== undefined ? { storedArgs } : {}),
@@ -226,6 +251,8 @@ export async function executeRegisterTool<TContext>(
       args: cfg.args,
       config: deps.configPath,
       defaults: cfg.defaults,
+      ...(cfg.jobRecipe?.job ? { job: cfg.jobRecipe.job } : {}),
+      ...(cfg.jobRecipe?.state_dir ? { state_dir: cfg.jobRecipe.state_dir } : {}),
       ...(cfg.template ? { template: cfg.template } : {}),
       tool: name,
     },

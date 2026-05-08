@@ -69,12 +69,15 @@ export function createRegisterToolDefinition<TContext>(
           Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.description,
         ),
         name: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name),
+        job: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.job),
+        state_dir: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.state_dir),
         template: unionSchema([
           stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template),
           arraySchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateArray),
           nullSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateNull),
         ]),
         update: booleanSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.update),
+        values: looseObjectSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.values),
       },
       [],
     ),
@@ -161,14 +164,18 @@ export function createRuntimeToolDefinition(
 ): any {
   const paramSchema: Record<string, JsonSchema> = {};
   const required: string[] = [];
-  const isJobRecipe = JobReferences.isJobRecipeReference(cfg.template);
-  const requiredArgs = isJobRecipe
+  const isJobRecipe = JobReferences.isJobRecipeTool(cfg.template, cfg.jobRecipe);
+  const recipeTemplate = cfg.jobRecipe?.template ?? JobReferences.getJobRecipeTemplate(cfg.template);
+  const requiredTemplate = recipeTemplate ?? cfg.template!;
+  const requiredArgs = isJobRecipe && cfg.storedArgs !== undefined
     ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
-    : Schema.getRequiredToolArgNames({
-      args: cfg.args,
-      defaults: cfg.defaults,
-      template: cfg.template!,
-    });
+    : JobReferences.isJobRecipeReference(cfg.template) && !recipeTemplate
+      ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
+      : Schema.getRequiredToolArgNames({
+        args: cfg.args,
+        defaults: cfg.defaults,
+        template: requiredTemplate,
+      });
   for (const arg of cfg.args) {
     paramSchema[arg] = stringSchema(`Argument: ${arg}`);
     if (requiredArgs.has(arg)) required.push(arg);
@@ -180,7 +187,7 @@ export function createRuntimeToolDefinition(
     description: cfg.description,
     parameters: objectSchema(paramSchema, required),
     promptSnippet: isJobRecipe
-      ? Prompts.formatJobRecipeToolPromptSnippet(String(cfg.template))
+      ? Prompts.formatJobRecipeToolPromptSnippet(cfg.jobRecipe?.job ?? String(cfg.template))
       : Prompts.formatRegisteredToolPromptSnippet(cfg.template),
     async execute(
       _toolCallId: string,
@@ -192,14 +199,16 @@ export function createRuntimeToolDefinition(
       if (isJobRecipe) {
         const input = params as Record<string, unknown>;
         const { job_id, ...values } = input;
+        const base = cfg.jobRecipe
+          ? cfg.jobRecipe
+          : { file: String(cfg.template) };
         const meta = Jobs.startJob(
           {
-            file: String(cfg.template),
+            ...base,
             job: typeof job_id === "string" && job_id.trim()
               ? job_id.trim()
               : `${cfg.name}-${Date.now()}`,
-            state_dir: "",
-            values: { ...cfg.defaults, ...values },
+            values: { ...(cfg.jobRecipe?.values ?? {}), ...cfg.defaults, ...values },
           },
           ctx.cwd,
         );

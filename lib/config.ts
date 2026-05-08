@@ -25,6 +25,7 @@ export interface RegisteredTool {
   description: string;
   args: string[];
   defaults: Record<string, string>;
+  jobRecipe?: JobReferences.JobRecipeConfig;
   template?: CommandTemplateValue;
   storedArgs?: string[];
   storedDefaults?: Record<string, string>;
@@ -49,6 +50,10 @@ export function serializeTools(
       entry.args = cfg.storedArgs;
     if (cfg.storedDefaults && Object.keys(cfg.storedDefaults).length > 0)
       entry.defaults = cfg.storedDefaults;
+    if (cfg.jobRecipe?.job) entry.job = cfg.jobRecipe.job;
+    if (cfg.jobRecipe?.state_dir) entry.state_dir = cfg.jobRecipe.state_dir;
+    if (cfg.jobRecipe?.stateDir) entry.stateDir = cfg.jobRecipe.stateDir;
+    if (cfg.jobRecipe?.values) entry.values = cfg.jobRecipe.values;
     if (cfg.template) entry.template = cfg.template;
     result[name] = entry;
   }
@@ -136,17 +141,32 @@ export function normalizeStoredTool(
       warning: `Tool "${name}" uses legacy script config. Migrate to template because pi-auto-tools v0.2.0 cannot load it.`,
     };
   }
-  if (typeof record.job === "string") {
-    return { changed: false, warning: `Tool "${name}" uses legacy job config. Migrate to template with a job recipe path.` };
+  if (Object.hasOwn(record, "tool")) {
+    return { changed: false, warning: `Tool "${name}" cannot define tool; use template directly.` };
+  }
+  if (typeof record.job === "string" && !template) {
+    return { changed: false, warning: `Tool "${name}" uses legacy job config. Add template to make it a co-located job recipe, or migrate to a template job recipe path.` };
   }
   if (!template) {
     return { changed: true, warning: `Tool "${name}" has no template` };
   }
+  const jobRecipe = typeof record.job === "string" && record.job.trim()
+    ? {
+      job: record.job.trim(),
+      ...(typeof record.state_dir === "string" && record.state_dir.trim() ? { state_dir: record.state_dir.trim() } : {}),
+      ...(typeof record.stateDir === "string" && record.stateDir.trim() ? { stateDir: record.stateDir.trim() } : {}),
+      template,
+      ...(record.values && typeof record.values === "object" && !Array.isArray(record.values) ? { values: record.values as Record<string, unknown> } : {}),
+    }
+    : undefined;
+  const isJobRecipe = JobReferences.isJobRecipeTool(template, jobRecipe);
+  const recipeTemplate = JobReferences.getJobRecipeTemplate(template);
+  const argTemplate = recipeTemplate ?? template;
   const description =
     typeof record.description === "string" && record.description.trim()
       ? record.description.trim()
-      : JobReferences.isJobRecipeReference(template)
-        ? `Start template job: ${formatTemplateForDescription(template)}`
+      : isJobRecipe
+        ? `Start template job: ${jobRecipe?.job ?? formatTemplateForDescription(template)}`
         : `Execute command template: ${formatTemplateForDescription(template)}`;
   const declarations = Schema.normalizeStoredToolArgDeclarations(
     record.args,
@@ -160,14 +180,17 @@ export function normalizeStoredTool(
   const cfg = {
     name,
     description,
-    args: JobReferences.isJobRecipeReference(template)
+    args: isJobRecipe && storedArgs !== undefined
       ? Schema.getExplicitToolArgNames(storedArgs)
-      : Schema.getToolArgNames({
+      : JobReferences.isJobRecipeReference(template) && !recipeTemplate
+        ? Schema.getExplicitToolArgNames(storedArgs)
+        : Schema.getToolArgNames({
         args: storedArgs,
         defaults: declarations.defaults,
-        template,
+        template: argTemplate,
       }),
     defaults: declarations.defaults,
+    ...(jobRecipe ? { jobRecipe } : {}),
     template,
     ...(storedArgs !== undefined ? { storedArgs } : {}),
     ...(storedDefaults !== undefined ? { storedDefaults } : {}),
@@ -176,7 +199,7 @@ export function normalizeStoredTool(
     record.name !== undefined ||
     record.label !== undefined ||
     JSON.stringify(record.template) !== JSON.stringify(template) ||
-    record.job !== undefined ||
+    (record.job !== undefined && !jobRecipe) ||
     description !== record.description ||
     declarations.changed;
   return { cfg, changed };

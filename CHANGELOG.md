@@ -4,6 +4,12 @@
 
 No unreleased changes.
 
+## 0.5.4
+
+- `[Co-located Job Recipes]` Allowed registered tool entries to include job envelope fields directly when they also define `template`. Impact: operators can keep small or local job recipes in `auto-tools.json` without introducing `job.tool` cycles or a separate recipe file.
+- `[Job Recipe Args]` Derived tool args from available file-backed and co-located job recipe templates when `args` is omitted. Impact: job recipes keep the same optional `args`/`defaults` behavior as command templates while explicit `args` remains an override.
+- `[Docs]` Split the synchronous Command Template Standard from the async Template Job Standard. Impact: command templates remain portable and backwards-compatible across extensions, while jobs are documented as an optional async extension.
+
 ## 0.5.3
 
 - `[Job Recipe References]` Replaced registered-tool `job` bindings with `template` job recipe references. Impact: the registry has one executable binding field, job files must own a `template`, and job recipes can no longer point back to tools.

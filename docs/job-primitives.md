@@ -2,7 +2,7 @@
 
 ## Goal
 
-Describe how pi-auto-tools implements the [template job envelope](./command-templates.md#template-job-envelope) without turning it into a workflow engine.
+Describe how pi-auto-tools implements the [Template Job Standard](./template-jobs.md) without turning it into a workflow engine.
 
 ## Reading model
 
@@ -35,7 +35,7 @@ reusable async scenario → tool → template → job → template
 
 ## Boundary
 
-The portable standard lives in [command-templates.md](./command-templates.md). This file is the pi-auto-tools adapter note: tool names, state-file paths, and Swarm mapping.
+The portable synchronous command-template standard lives in [command-templates.md](./command-templates.md). The async template-job extension lives in [template-jobs.md](./template-jobs.md). This file is the pi-auto-tools adapter note: tool names, state-file paths, and Swarm mapping.
 
 ## Non-goals
 
@@ -74,7 +74,7 @@ Read the shape as: start this command-template tree, give the run a stable id, a
 
 A job recipe must define `template` directly. It must not reference a registered auto-tool: a job is the async container for a template, not a tool-to-tool indirection layer.
 
-A registered auto-tool can point at a job recipe by storing the recipe path/name in `template`. This is the preferred shape for heavyweight agent fanout: keep the parallel template in the job file and expose only a small launch tool.
+A registered auto-tool can point at a job recipe by storing the recipe path/name in `template`. This is the preferred shape for heavyweight agent fanout when the recipe should live in the job library: keep the parallel template in the job file and expose only a small launch tool.
 
 ```json
 {
@@ -87,6 +87,21 @@ A registered auto-tool can point at a job recipe by storing the recipe path/name
 ```
 
 Calling this tool starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` asynchronously and returns job metadata. The tool is the button, the job file is the source of truth, and the job's `template` is the execution graph.
+
+A registered auto-tool may also co-locate the job envelope directly in `auto-tools.json`:
+
+```json
+{
+  "review_docs": {
+    "description": "Start an async docs review",
+    "job": "review-docs",
+    "state_dir": "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+    "template": "review {scope}"
+  }
+}
+```
+
+This is a storage variant of the same `tool → template → job → template` chain. The co-located entry must still own `template` directly and must not define `tool`.
 
 ## Template Job Library
 
@@ -118,7 +133,7 @@ Use ordinary files under the extension temp directory so status tools stay simpl
 
 ## Temporary directory
 
-Template job state follows the [extension temp directory](./command-templates.md#extension-temp-directory) rule from the command-template standard.
+Template job state follows the [extension temp directory](./template-jobs.md#extension-temp-directory) rule from the template-job standard.
 
 For pi-auto-tools, template job state defaults to:
 
@@ -145,6 +160,7 @@ The public adapter set is intentionally one tool. This mirrors `register_tool`: 
 
 - `template_job action=start` starts a detached template job from `file` or inline `template`.
 - A registered runtime tool may set `template` to a job recipe JSON path/name; calling it starts that job file and returns job metadata.
+- A registered runtime tool may co-locate job envelope fields (`job`, optional `state_dir`, optional `values`) beside metadata when it also defines `template`; `job.tool` and job-only bindings remain invalid.
 - `template_job action=status` reads structured state.
 - `template_job action=tail` reads events or logs.
 - `template_job action=list` lists known jobs.
@@ -217,4 +233,4 @@ Before adding a job feature, ask:
 
 ## Stop line
 
-If implementing job primitives requires a scheduler, queue daemon, or custom DAG syntax, stop. The standard should remain command-template execution with a small template job envelope.
+If implementing job primitives requires a scheduler, queue daemon, or custom DAG syntax, stop. The async extension should remain command-template execution with a small template job envelope.

@@ -30,7 +30,7 @@ Use this rule of thumb:
 ```text
 short call or sequence pipeline → template/tool
 long-running, parallel, or agentic work → job(template)
-reusable async scenario → tool(job recipe)
+reusable async scenario → tool → template → job → template
 ```
 
 ## Boundary
@@ -51,7 +51,7 @@ Async jobs need durable state because the first tool call returns before executi
 
 ## Minimal job shape
 
-A job primitive should be a thin execution envelope around an existing command-template tree or registered tool. The envelope fields name and locate the job; `template` remains the execution body:
+A job primitive should be a thin execution envelope around an existing command-template tree. The envelope fields name and locate the job; `template` remains the execution body:
 
 ```json
 {
@@ -72,27 +72,16 @@ A job primitive should be a thin execution envelope around an existing command-t
 
 Read the shape as: start this command-template tree, give the run a stable id, and write its state somewhere inspectable.
 
-A job can also reference a registered auto-tool instead of repeating its template:
+A job recipe must define `template` directly. It must not reference a registered auto-tool: a job is the async container for a template, not a tool-to-tool indirection layer.
 
-```json
-{
-  "job": "review-docs",
-  "tool": "swarm_compose_review",
-  "values": {
-    "prompt": "Review risks and contradictions.",
-    "scope": "docs/spec.md"
-  }
-}
-```
-
-A registered auto-tool can also point at a job recipe instead of a command template. This is the preferred shape for heavyweight agent fanout: keep the parallel template in the job file and expose only a small launch tool.
+A registered auto-tool can point at a job recipe by storing the recipe path/name in `template`. This is the preferred shape for heavyweight agent fanout: keep the parallel template in the job file and expose only a small launch tool.
 
 ```json
 {
   "shader_ring_job": {
     "description": "Start the shader ring job",
     "args": ["theme", "out_dir"],
-    "job": "shader-ring-8-parallel"
+    "template": "shader-ring-8-parallel.json"
   }
 }
 ```
@@ -154,8 +143,8 @@ The extension prepares this directory on session start and removes stale entries
 
 The public adapter set is intentionally one tool. This mirrors `register_tool`: one management surface, explicit actions, small prompt footprint.
 
-- `template_job action=start` starts a detached template job from `file`, `template`, or `tool`.
-- A registered runtime tool may define `job` instead of `template`; calling it starts the named job file and returns job metadata.
+- `template_job action=start` starts a detached template job from `file` or inline `template`.
+- A registered runtime tool may set `template` to a job recipe JSON path/name; calling it starts that job file and returns job metadata.
 - `template_job action=status` reads structured state.
 - `template_job action=tail` reads events or logs.
 - `template_job action=list` lists known jobs.

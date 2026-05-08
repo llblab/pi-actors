@@ -9,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { RegisteredTool } from "../lib/config.ts";
 import { cancelJob, getJobStatus, listJobs, startJob, tailJob } from "../lib/jobs.ts";
 
 async function waitForResult(stateDir: string): Promise<Record<string, unknown>> {
@@ -80,31 +79,18 @@ test("Template jobs can start from template job files with overrides", async () 
   }
 });
 
-test("Template jobs can start from registered tools", async () => {
+test("Template job files reject tool references", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-jobs-"));
-  const stateDir = join(root, "tool-job");
-  const tool: RegisteredTool = {
-    args: ["name"],
-    defaults: {},
-    description: "Say hello",
-    name: "hello_tool",
-    template: `${process.execPath} -e "console.log('hello ' + process.argv[1])" {name}`,
-  };
+  const file = join(root, "tool-job.json");
   try {
-    const meta = startJob(
-      {
-        job: "tool-job",
-        state_dir: stateDir,
-        tool: "hello_tool",
-        values: { name: "tool" },
-      },
-      process.cwd(),
-      new Map([[tool.name, tool]]),
+    await writeFile(
+      file,
+      JSON.stringify({ job: "tool-job", tool: "hello_tool" }, null, 2),
     );
-    assert.equal(meta.tool, "hello_tool");
-    const result = await waitForResult(stateDir);
-    assert.equal(result.code, 0);
-    assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /hello tool/);
+    assert.throws(
+      () => startJob({ file }, process.cwd()),
+      /Job recipe cannot define tool/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

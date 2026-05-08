@@ -9,8 +9,8 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { basename, extname, join, resolve } from "node:path";
 
 import type { CommandTemplateValue } from "./command-templates.ts";
-import type { RegisteredTool } from "./config.ts";
 import { writeJsonAtomic } from "./config.ts";
+import * as JobReferences from "./job-references.ts";
 import * as Paths from "./paths.ts";
 
 export interface JobStartParams {
@@ -19,7 +19,6 @@ export interface JobStartParams {
   state_dir?: string;
   stateDir?: string;
   template?: CommandTemplateValue;
-  tool?: string;
   values?: Record<string, unknown>;
   cwd?: string;
 }
@@ -33,7 +32,6 @@ export interface JobMeta {
   stateDir: string;
   status: "running" | "done" | "exited";
   template: CommandTemplateValue;
-  tool?: string;
   values: Record<string, unknown>;
 }
 
@@ -47,16 +45,9 @@ function safeJobId(value: string | undefined): string {
   return job;
 }
 
-function resolveJobTemplate(
-  params: JobStartParams,
-  tools?: Map<string, RegisteredTool>,
-): { template: CommandTemplateValue; tool?: string } {
+function resolveJobTemplate(params: JobStartParams): { template: CommandTemplateValue } {
   if (params.template) return { template: params.template };
-  if (!params.tool) throw new Error("template_job action=start requires file, template, or tool.");
-  const cfg = tools?.get(params.tool);
-  if (!cfg) throw new Error(`Registered tool not found: ${params.tool}`);
-  if (!cfg.template) throw new Error(`Registered tool has no command template: ${params.tool}`);
-  return { template: cfg.template, tool: cfg.name };
+  throw new Error("template_job action=start requires file or template.");
 }
 
 function resolveStateDir(params: JobStartParams, job: string): string {
@@ -65,13 +56,18 @@ function resolveStateDir(params: JobStartParams, job: string): string {
 }
 
 function resolveJobTemplateFile(file: string): string {
-  if (file.includes("/")) return resolve(file);
-  return resolve(join(DEFAULT_TEMPLATE_ROOT, file.endsWith(".json") ? file : `${file}.json`));
+  return JobReferences.resolveJobRecipePath(file, DEFAULT_TEMPLATE_ROOT);
 }
 
 function readJobTemplateFile(file: string): JobStartParams {
   const path = resolveJobTemplateFile(file);
   const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  if (Object.hasOwn(raw, "tool")) {
+    throw new Error(`Job recipe cannot define tool; use template in ${path}`);
+  }
+  if (!Object.hasOwn(raw, "template")) {
+    throw new Error(`Job recipe must define template: ${path}`);
+  }
   return { ...(raw as JobStartParams), file: path };
 }
 
@@ -129,10 +125,9 @@ function tailFile(path: string, lines: number): string {
 export function startJob(
   params: JobStartParams,
   cwd: string,
-  tools?: Map<string, RegisteredTool>,
 ): JobMeta {
   const startParams = resolveStartParams(params);
-  const resolved = resolveJobTemplate(startParams, tools);
+  const resolved = resolveJobTemplate(startParams);
   const job = safeJobId(startParams.job);
   const stateDir = resolveStateDir(startParams, job);
   mkdirSync(stateDir, { recursive: true });
@@ -150,7 +145,6 @@ export function startJob(
     stateDir,
     status: "running",
     template: resolved.template,
-    ...(resolved.tool ? { tool: resolved.tool } : {}),
     values: startParams.values || {},
   };
   writeJsonAtomic(join(stateDir, "job.json"), meta);

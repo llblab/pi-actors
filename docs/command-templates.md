@@ -296,18 +296,7 @@ Minimal shape:
 }
 ```
 
-A local implementation may also allow a job to reference a registered local tool instead of repeating the command-template tree:
-
-```json
-{
-  "job": "review-docs",
-  "tool": "swarm_compose_review",
-  "values": {
-    "prompt": "Review risks and contradictions.",
-    "scope": "docs/spec.md"
-  }
-}
-```
+A job recipe must define `template` directly. The valid chain is `tool → template → job → template`. A job must not reference a registered local tool: the job is the async container for the command-template tree, not a tool indirection layer.
 
 Reusable template job files may live under the agent directory:
 
@@ -315,7 +304,7 @@ Reusable template job files may live under the agent directory:
 ~/.pi/agent/jobs/*.json
 ```
 
-A local `file` adapter can load one of these JSON objects and let call-time params override file params. `tool` and `file` are adapter conveniences, not replacements for the portable command-template contract.
+A local `file` adapter can load one of these JSON objects and let call-time params override file params. `file` is an adapter convenience, not a replacement for the portable command-template contract.
 
 A minimal job adapter should expose start, status, tail, list, and cancel operations. Status and tail should read ordinary files so jobs stay inspectable without a daemon.
 

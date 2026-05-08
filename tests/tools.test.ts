@@ -32,7 +32,7 @@ test("Register tool definition exposes a JSON schema with no required fields", (
   assert.deepEqual(definition.parameters.required, []);
   const properties = definition.parameters.properties as Record<string, any>;
   assert.equal(properties.name.type, "string");
-  assert.equal(properties.job.type, "string");
+  assert.equal(properties.job, undefined);
   assert.equal(properties.update.type, "boolean");
   assert.equal(Array.isArray(properties.template.anyOf), true);
 });
@@ -46,14 +46,14 @@ test("Template job tool definition exposes action schema", () => {
   assert.equal(Array.isArray(properties.template.anyOf), true);
 });
 
-test("Runtime tool definition exposes job id override for job-backed tools", () => {
+test("Runtime tool definition exposes job id override for job recipe template paths", () => {
   const definition = createRuntimeToolDefinition(
     {
       args: ["theme"],
       defaults: {},
       description: "Start shader job",
-      job: "shader-ring-8-parallel",
       name: "shader_job",
+      template: "shader-ring-8-parallel.json",
     },
     async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
   );

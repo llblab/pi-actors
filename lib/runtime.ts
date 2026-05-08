@@ -61,7 +61,7 @@ export function createAutoToolsRuntime(
       : undefined;
   }
   function registerRuntimeTool(cfg: Config.RegisteredTool) {
-    deps.registerTool(Tools.createRuntimeToolDefinition(cfg, deps.exec, () => tools));
+    deps.registerTool(Tools.createRuntimeToolDefinition(cfg, deps.exec));
     runtimeTools.add(cfg.name);
   }
   function loadTools(ctx: RuntimeContext) {

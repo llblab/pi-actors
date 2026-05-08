@@ -31,16 +31,16 @@ Use `update=true` to overwrite an existing tool. Omit `template` or `job` during
 ]
 ```
 
-For long-running agentic work, register a small tool that starts a reusable job recipe instead of embedding a large parallel template in the tool itself:
+For long-running agentic work, register a small tool whose `template` points to a reusable job recipe instead of embedding a large parallel template in the tool itself:
 
 ```text
 register_tool name=shader_ring_job \
   description="Start the shader ring job" \
-  job="shader-ring-8-parallel" \
+  template="shader-ring-8-parallel.json" \
   args="theme,out_dir"
 ```
 
-This stores the job recipe name in the registry. Calling the tool starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` through the template-job runtime and returns job metadata immediately.
+This stores the job recipe path in the registry as `template`. Calling the tool follows `tool → template → job → template`: it starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` through the template-job runtime, and the job file supplies the executable template. The call returns job metadata immediately.
 
 Delete a tool with `template=null`:
 
@@ -50,7 +50,7 @@ register_tool name=call_subagent template=null
 
 ## Stored Shape
 
-Tool names come from the top-level registry keys. Tool entries either define `template` or `job`, never both. Template entries keep `template` last, matching the command-template readability rule. The commands above persist entries like this:
+Tool names come from the top-level registry keys. Tool entries define `template`; it may be an inline command template or a job recipe JSON path/name. Template entries keep `template` last, matching the command-template readability rule. The commands above persist entries like this:
 
 ```json
 {
@@ -65,7 +65,7 @@ Tool names come from the top-level registry keys. Tool entries either define `te
   "shader_ring_job": {
     "description": "Start the shader ring job",
     "args": ["theme", "out_dir"],
-    "job": "shader-ring-8-parallel"
+    "template": "shader-ring-8-parallel.json"
   }
 }
 ```
@@ -82,7 +82,7 @@ The optional `args` field is only an explicit placeholder declaration, matching 
 
 Defaults are applied before substitution, with resolution order runtime values → stored `defaults` → inline default → error. Missing required values are rejected before or during execution.
 
-Job-backed tools do not have a local command template to inspect, so their public arguments come from explicit `args` declarations. Runtime values are passed to the job as `values`. Every job-backed tool also accepts optional `job_id` to override the generated run id.
+Job recipe tools do not have inline placeholders to inspect, so their public arguments come from explicit `args` declarations. Runtime values are passed to the job as `values`. Every job recipe tool also accepts optional `job_id` to override the generated run id.
 
 ## File Argument Naming
 

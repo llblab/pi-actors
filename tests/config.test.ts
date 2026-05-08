@@ -57,13 +57,13 @@ test("Stored tool normalization derives args from standard inline placeholders",
   assert.equal(result.cfg?.storedArgs, undefined);
 });
 
-test("Stored tool normalization accepts job-backed tools", () => {
+test("Stored tool normalization accepts job recipe paths in template", () => {
   const result = normalizeStoredTool(
     "shader_launcher",
     {
       args: ["theme", "out_dir=latest"],
       description: "Start shader job",
-      job: "shader-ring-8-parallel",
+      template: "shader-ring-8-parallel.json",
     },
     reserved,
   );
@@ -74,7 +74,7 @@ test("Stored tool normalization accepts job-backed tools", () => {
     description: "Start shader job",
     args: ["theme", "out_dir"],
     defaults: { out_dir: "latest" },
-    job: "shader-ring-8-parallel",
+    template: "shader-ring-8-parallel.json",
     storedArgs: ["theme", "out_dir"],
     storedDefaults: { out_dir: "latest" },
   });
@@ -107,14 +107,14 @@ test("Stored tool normalization rejects legacy script entries", () => {
   assert.match(result.warning ?? "", /legacy script config/);
 });
 
-test("Stored tool normalization rejects template plus job", () => {
+test("Stored tool normalization rejects legacy job entries", () => {
   const result = normalizeStoredTool(
     "mixed",
-    { template: "echo hi", job: "job", description: "Mixed" },
+    { job: "job", description: "Mixed" },
     reserved,
   );
   assert.equal(result.cfg, undefined);
-  assert.match(result.warning ?? "", /cannot define both template and job/);
+  assert.match(result.warning ?? "", /legacy job config/);
 });
 
 test("Serialized tool entries keep template last", () => {
@@ -133,17 +133,17 @@ test("Serialized tool entries keep template last", () => {
   ]);
 });
 
-test("Serialized job-backed tool entries keep job without template", () => {
+test("Serialized job recipe launchers keep template path", () => {
   const tool: RegisteredTool = {
     name: "launcher",
     description: "Start job",
-    job: "shader-ring-8-parallel",
+    template: "shader-ring-8-parallel.json",
     args: [],
     defaults: {},
   };
   assert.deepEqual(serializeTools(new Map([[tool.name, tool]])).launcher, {
     description: "Start job",
-    job: "shader-ring-8-parallel",
+    template: "shader-ring-8-parallel.json",
   });
 });
 

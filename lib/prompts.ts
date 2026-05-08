@@ -5,7 +5,7 @@
  */
 
 export const REGISTER_TOOL_DESCRIPTION =
-  "Register a persistent custom tool from a command template or job recipe. " +
+  "Register a persistent custom tool from a command template or job recipe path. " +
   "Definitions are stored in auto-tools.json across reloads. " +
   "Use update=true to overwrite an existing auto-tool, template=null/empty to delete.";
 
@@ -31,7 +31,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - Use template_job start/status/tail/list/cancel.
 - Put reusable job recipes in ~/.pi/agent/jobs/*.json.
 - Heavy agent fanout should be job(template(mode: "parallel")).
-- Job-backed tools use job instead of template.
+- Job-backed tools store the job recipe path in template.
 - Tool = compact callable button.
 - Job = lifecycle, logs, status, cancel.
 - Template = execution graph.
@@ -45,9 +45,8 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",
   description:
     "Describe what the tool does for the LLM. Required unless deleting; omitted updates keep the old description.",
-  job: "Template job JSON file to start when the tool is called. Bare names resolve under ~/.pi/agent/jobs. Use this for async job-first launchers.",
   template:
-    "Command template with {arg} or {arg=default} placeholders. Omitted updates keep the old template/job. Empty string deletes the tool.",
+    "Command template with {arg} or {arg=default} placeholders, or a job recipe JSON path/name. Bare job names resolve under ~/.pi/agent/jobs. Omitted updates keep the old template. Empty string deletes the tool.",
   templateArray:
     "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/critical.",
   templateNull: "Delete the tool when template is null.",
@@ -60,6 +59,6 @@ export function formatRegisteredToolPromptSnippet(template: unknown): string {
   return `Execute command template: ${rendered}`;
 }
 
-export function formatJobBackedToolPromptSnippet(job: string): string {
+export function formatJobRecipeToolPromptSnippet(job: string): string {
   return `Start template job recipe: ${job}`;
 }

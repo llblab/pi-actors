@@ -6,6 +6,7 @@
 
 import type { RegisteredTool } from "./config.ts";
 import * as Execution from "./execution.ts";
+import * as JobReferences from "./job-references.ts";
 import * as Jobs from "./jobs.ts";
 import * as Prompts from "./prompts.ts";
 import * as Registry from "./registry.ts";
@@ -68,7 +69,6 @@ export function createRegisterToolDefinition<TContext>(
           Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.description,
         ),
         name: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name),
-        job: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.job),
         template: unionSchema([
           stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template),
           arraySchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateArray),
@@ -107,7 +107,6 @@ export function createJobToolDefinition<TContext extends { cwd: string }>(
           stringSchema("Command template string for start"),
           arraySchema("Command template sequence or mode tree for start"),
         ]),
-        tool: stringSchema("Optional registered auto-tool name to run as a detached job for start."),
         values: looseObjectSchema("Runtime placeholder values passed to the template for start"),
       },
       ["action"],
@@ -127,7 +126,7 @@ export function createJobToolDefinition<TContext extends { cwd: string }>(
       };
       switch (input.action) {
         case "start": {
-          const meta = Jobs.startJob(input, ctx.cwd, deps.getTools());
+          const meta = Jobs.startJob(input, ctx.cwd);
           return { content: [{ type: "text" as const, text: jsonText(meta) }], details: meta };
         }
         case "status": {
@@ -159,30 +158,30 @@ export function createJobToolDefinition<TContext extends { cwd: string }>(
 export function createRuntimeToolDefinition(
   cfg: RegisteredTool,
   exec: Execution.RegisteredToolExec,
-  getTools?: () => Map<string, RegisteredTool>,
 ): any {
   const paramSchema: Record<string, JsonSchema> = {};
   const required: string[] = [];
-  const requiredArgs = cfg.template
-    ? Schema.getRequiredToolArgNames({
+  const isJobRecipe = JobReferences.isJobRecipeReference(cfg.template);
+  const requiredArgs = isJobRecipe
+    ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
+    : Schema.getRequiredToolArgNames({
       args: cfg.args,
       defaults: cfg.defaults,
-      template: cfg.template,
-    })
-    : new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)));
+      template: cfg.template!,
+    });
   for (const arg of cfg.args) {
     paramSchema[arg] = stringSchema(`Argument: ${arg}`);
     if (requiredArgs.has(arg)) required.push(arg);
   }
-  if (cfg.job) paramSchema.job_id = stringSchema("Optional job id override for this job-backed tool invocation.");
+  if (isJobRecipe) paramSchema.job_id = stringSchema("Optional job id override for this template-job invocation.");
   return {
     name: cfg.name,
     label: cfg.name,
     description: cfg.description,
     parameters: objectSchema(paramSchema, required),
-    promptSnippet: cfg.template
-      ? Prompts.formatRegisteredToolPromptSnippet(cfg.template)
-      : Prompts.formatJobBackedToolPromptSnippet(cfg.job!),
+    promptSnippet: isJobRecipe
+      ? Prompts.formatJobRecipeToolPromptSnippet(String(cfg.template))
+      : Prompts.formatRegisteredToolPromptSnippet(cfg.template),
     async execute(
       _toolCallId: string,
       params: unknown,
@@ -190,12 +189,12 @@ export function createRuntimeToolDefinition(
       _onUpdate: unknown,
       ctx: { cwd: string },
     ) {
-      if (cfg.job) {
+      if (isJobRecipe) {
         const input = params as Record<string, unknown>;
         const { job_id, ...values } = input;
         const meta = Jobs.startJob(
           {
-            file: cfg.job,
+            file: String(cfg.template),
             job: typeof job_id === "string" && job_id.trim()
               ? job_id.trim()
               : `${cfg.name}-${Date.now()}`,
@@ -203,7 +202,6 @@ export function createRuntimeToolDefinition(
             values: { ...cfg.defaults, ...values },
           },
           ctx.cwd,
-          getTools?.(),
         );
         return { content: [{ type: "text" as const, text: jsonText(meta) }], details: meta };
       }

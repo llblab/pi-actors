@@ -4,6 +4,11 @@
 
 No unreleased changes.
 
+## 0.5.3
+
+- `[Job Recipe References]` Replaced registered-tool `job` bindings with `template` job recipe references. Impact: the registry has one executable binding field, job files must own a `template`, and job recipes can no longer point back to tools.
+- `[Runtime Boundary]` Enforced the `tool → template → job → template` graph across runtime, docs, and tests. Impact: jobs stay lightweight async envelopes, cyclic shortcuts such as `tool.job` and `job.tool` are rejected, and job recipe tools keep their public args explicit.
+
 ## 0.5.2
 
 - `[Job Launch Tools]` Added job-backed registered tools. A tool may now define `job` instead of `template`; calling it starts the named template-job recipe asynchronously and returns job metadata. Impact: heavyweight agent fanout can keep `template(mode: "parallel")` inside `~/.pi/agent/jobs/*.json` while exposing a compact callable tool.

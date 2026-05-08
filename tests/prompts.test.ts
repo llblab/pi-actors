@@ -21,10 +21,9 @@ test("Register tool prompt copy names the register_tool tool explicitly", () => 
 
 test("Register tool parameter descriptions cover public input fields", () => {
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name, /snake_case/);
-  assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.job, /Template job/);
   assert.match(
     Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template,
-    /Command template/,
+    /job recipe/,
   );
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.args, /file,lang/);
 });

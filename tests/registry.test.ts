@@ -61,45 +61,23 @@ test("Registry mutations register template-backed tools", async () => {
   }
 });
 
-test("Registry mutations register job-backed tools", async () => {
+test("Registry mutations register job recipe paths through template", async () => {
   const harness = await createHarness();
   try {
     const result = await executeRegisterTool(
       {
         args: "theme,out_dir=latest",
         description: "Start shader ring job",
-        job: "shader-ring-8-parallel",
         name: "shader_job",
+        template: "shader-ring-8-parallel.json",
       },
       {},
       harness.deps,
     );
-    assert.equal(harness.tools.get("shader_job")?.job, "shader-ring-8-parallel");
-    assert.equal(harness.tools.get("shader_job")?.template, undefined);
+    assert.equal(harness.tools.get("shader_job")?.template, "shader-ring-8-parallel.json");
     assert.deepEqual(harness.tools.get("shader_job")?.args, ["theme", "out_dir"]);
     assert.deepEqual(harness.runtimeRegistered, ["shader_job"]);
-    assert.equal(result.details.job, "shader-ring-8-parallel");
-  } finally {
-    await harness.cleanup();
-  }
-});
-
-test("Registry mutations reject tools with both template and job", async () => {
-  const harness = await createHarness();
-  try {
-    await assert.rejects(
-      executeRegisterTool(
-        {
-          description: "Mixed",
-          job: "job",
-          name: "mixed",
-          template: "echo hi",
-        },
-        {},
-        harness.deps,
-      ),
-      /both job and template/,
-    );
+    assert.equal(result.details.template, "shader-ring-8-parallel.json");
   } finally {
     await harness.cleanup();
   }

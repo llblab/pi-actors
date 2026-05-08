@@ -110,7 +110,8 @@ export function getTemplatePlaceholderNames(
     for (const match of step.template.matchAll(
       /\{([A-Za-z_][A-Za-z0-9_-]*)(?:=([^}]*))?\}/g,
     )) {
-      names.push(match[1]);
+      if (!CommandTemplates.isCommandTemplateRepeatPlaceholder(match[1]))
+        names.push(match[1]);
     }
   }
   return mergeUnique(names);

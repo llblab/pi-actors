@@ -111,7 +111,6 @@ A job recipe can also be co-located in `auto-tools.json` when keeping metadata a
   "review_docs": {
     "description": "Start an async docs review",
     "job": "review-docs",
-    "state_dir": "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
     "template": "pi -p --model openai-codex/gpt-5.5 --tools read,bash \"Review {scope}\""
   }
 }

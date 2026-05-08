@@ -49,7 +49,6 @@ When co-location is clearer than a separate file, the registry entry may include
   "review_docs": {
     "description": "Start an async docs review",
     "job": "review-docs",
-    "state_dir": "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
     "template": "pi -p --model openai-codex/gpt-5.5 --tools read,bash \"Review {scope}\""
   }
 }

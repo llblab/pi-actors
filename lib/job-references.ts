@@ -17,6 +17,16 @@ export interface JobRecipeConfig {
   state_dir?: string;
   stateDir?: string;
   template: CommandTemplateValue;
+  args?: string[];
+  defaults?: Record<string, unknown>;
+  mode?: CommandTemplates.CommandTemplateMode;
+  label?: string;
+  timeout?: number;
+  delay?: number;
+  output?: string;
+  retry?: number;
+  critical?: boolean;
+  repeat?: number;
   values?: Record<string, unknown>;
 }
 
@@ -54,11 +64,32 @@ export function getJobRecipePath(
 
 function normalizeRecipeTemplate(value: unknown): CommandTemplateValue | undefined {
   if (typeof value === "string") return value.trim() || undefined;
-  if (!Array.isArray(value)) return undefined;
-  const template = value as CommandTemplateConfig[];
-  return CommandTemplates.expandCommandTemplateConfigs({ template }).length > 0
-    ? template
-    : undefined;
+  if (Array.isArray(value)) {
+    const template = value as CommandTemplateConfig[];
+    return CommandTemplates.expandCommandTemplateConfigs({ template }).length > 0
+      ? template
+      : undefined;
+  }
+  if (value && typeof value === "object") {
+    const template = value as CommandTemplates.CommandTemplateObjectConfig;
+    return CommandTemplates.expandCommandTemplateConfigs(template).length > 0
+      ? template
+      : undefined;
+  }
+  return undefined;
+}
+
+function getRecipeCommandTemplate(raw: Record<string, unknown>): CommandTemplateValue | undefined {
+  const template = raw.template;
+  const envelope: Record<string, unknown> = {};
+  for (const key of ["args", "defaults", "mode", "label", "timeout", "delay", "output", "retry", "critical", "repeat"] as const) {
+    if (raw[key] !== undefined) envelope[key] = raw[key];
+  }
+  if (Object.keys(envelope).length === 0) return normalizeRecipeTemplate(template);
+  if (template && typeof template === "object" && !Array.isArray(template)) {
+    return normalizeRecipeTemplate({ ...envelope, ...(template as Record<string, unknown>) });
+  }
+  return normalizeRecipeTemplate({ ...envelope, template });
 }
 
 export function getJobRecipeTemplate(value: unknown): CommandTemplateValue | undefined {
@@ -67,7 +98,7 @@ export function getJobRecipeTemplate(value: unknown): CommandTemplateValue | und
   try {
     const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     if (Object.hasOwn(raw, "tool")) return undefined;
-    return normalizeRecipeTemplate(raw.template);
+    return getRecipeCommandTemplate(raw);
   } catch {
     return undefined;
   }

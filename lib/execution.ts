@@ -80,6 +80,13 @@ function textContent(text: string) {
 
 function createTemplateConfig(cfg: RegisteredTool): CommandTemplates.CommandTemplateObjectConfig {
   if (!cfg.template) throw new Error(`Tool "${cfg.name}" has no command template.`);
+  if (typeof cfg.template === "object" && !Array.isArray(cfg.template)) {
+    return {
+      ...cfg.template,
+      args: cfg.template.args ?? cfg.args,
+      defaults: mergeDefaults(cfg.defaults, cfg.template.defaults),
+    };
+  }
   return { args: cfg.args, defaults: cfg.defaults, template: cfg.template };
 }
 
@@ -193,6 +200,31 @@ async function executeTemplateConfig(
       ? { defaults: mergeDefaults(inherited.defaults, normalized.defaults) }
       : {}),
   };
+  if (normalized.repeat !== undefined) {
+    if (!Number.isInteger(normalized.repeat) || normalized.repeat < 1)
+      throw new Error("Command template repeat must be a positive integer.");
+    const repeatedSteps = Array.from({ length: normalized.repeat }, (_unused, index0) => {
+      const { repeat: _repeat, ...rest } = normalized;
+      return {
+        ...rest,
+        defaults: {
+          ...(context.defaults ?? {}),
+          ...(rest.defaults ?? {}),
+          ...CommandTemplates.getCommandTemplateRepeatDefaults(index0, normalized.repeat!),
+        },
+      };
+    });
+    return executeTemplateConfig(
+      { mode: normalized.mode ?? "sequence", template: repeatedSteps },
+      context,
+      params,
+      exec,
+      cwd,
+      signal,
+      stdin,
+      isRoot,
+    );
+  }
   if (!Array.isArray(normalized.template)) {
     const leaf = { ...normalized, ...context };
     const invocation = CommandTemplates.buildCommandTemplateInvocation(
@@ -210,11 +242,12 @@ async function executeTemplateConfig(
     });
     return { branches: [], commands: [invocation.command], failures: [], result };
   }
-  if (normalized.template.length === 0)
+  const steps = normalized.template;
+  if (steps.length === 0)
     throw new Error(formatToolText("Tool template produced no command steps."));
   if ((normalized.mode ?? "sequence") === "parallel") {
     const branchResults = await Promise.all(
-      normalized.template.map((step) =>
+      steps.map((step) =>
         executeTemplateConfig(step, context, params, exec, cwd, signal, stdin, false),
       ),
     );
@@ -222,7 +255,7 @@ async function executeTemplateConfig(
     const failures = branchResults.flatMap((item) => item.failures);
     const branches = branchResults.map((item, index) =>
       createBranchReport(
-        getNodeLabel(normalized.template![index], index),
+        getNodeLabel(steps[index], index),
         item.commands.at(-1) ?? "<template>",
         item.result,
       ),
@@ -232,7 +265,7 @@ async function executeTemplateConfig(
         item.result.code !== 0 &&
         (item.criticalFailure ||
           CommandTemplates.normalizeCommandTemplateConfig(
-            normalized.template![index],
+            steps[index],
           ).critical ||
           normalized.critical),
     );
@@ -271,7 +304,7 @@ async function executeTemplateConfig(
   const failures: Array<{ code: number; command: string; killed: boolean }> = [];
   let nextStdin = stdin;
   let result: ToolExecResult | undefined;
-  for (const step of normalized.template) {
+  for (const step of steps) {
     const executed = await executeTemplateConfig(
       step,
       context,
@@ -292,7 +325,7 @@ async function executeTemplateConfig(
         executed.criticalFailure ||
         stepConfig.critical ||
         normalized.critical ||
-        (isRoot && normalized.template.length === 1)
+        (isRoot && steps.length === 1)
       ) {
         return {
           branches,

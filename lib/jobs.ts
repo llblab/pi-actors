@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 
-import type { CommandTemplateValue } from "./command-templates.ts";
+import type { CommandTemplateMode, CommandTemplateValue } from "./command-templates.ts";
 import { writeJsonAtomic } from "./config.ts";
 import * as JobReferences from "./job-references.ts";
 import * as Paths from "./paths.ts";
@@ -19,6 +19,16 @@ export interface JobStartParams {
   state_dir?: string;
   stateDir?: string;
   template?: CommandTemplateValue;
+  args?: string[];
+  defaults?: Record<string, unknown>;
+  mode?: CommandTemplateMode;
+  label?: string;
+  timeout?: number;
+  delay?: number;
+  output?: string;
+  retry?: number;
+  critical?: boolean;
+  repeat?: number;
   values?: Record<string, unknown>;
   cwd?: string;
 }
@@ -46,8 +56,16 @@ function safeJobId(value: string | undefined): string {
 }
 
 function resolveJobTemplate(params: JobStartParams): { template: CommandTemplateValue } {
-  if (params.template) return { template: params.template };
-  throw new Error("template_job action=start requires file or template.");
+  if (!params.template) throw new Error("template_job action=start requires file or template.");
+  const envelope: Record<string, unknown> = {};
+  for (const key of ["args", "defaults", "mode", "label", "timeout", "delay", "output", "retry", "critical", "repeat"] as const) {
+    if (params[key] !== undefined) envelope[key] = params[key];
+  }
+  if (Object.keys(envelope).length === 0) return { template: params.template };
+  if (typeof params.template === "object" && !Array.isArray(params.template)) {
+    return { template: { ...envelope, ...params.template } };
+  }
+  return { template: { ...envelope, template: params.template } };
 }
 
 function resolveStateDir(params: JobStartParams, job: string): string {

@@ -4,6 +4,12 @@
 
 No unreleased changes.
 
+## 0.5.5
+
+- `[Template Job Shape]` Allowed job recipe files to place command-template node flags such as `mode`, `timeout`, `retry`, `critical`, `args`, and `defaults` at the job top level beside `job`. Impact: parallel jobs can use the compact shape `{ "job": "name", "mode": "parallel", "template": [...] }` without an unnecessary nested template wrapper.
+- `[Template Job Defaults]` Clarified that `state_dir` is optional and defaults to the extension job-state directory derived from the job id. Impact: recipe files only need `job` and `template` unless they intentionally override state placement.
+- `[Command Template Repeat]` Added `repeat` expansion with zero-based `{index}`, wrapped zero-based `{prev}`/`{next}`, `{repeat}`, underscore-padded forms such as `{_index}`, and limited arithmetic expressions such as `{_(index+1)}`. Impact: repeated parallel or sequence templates can be written once instead of copy-pasting near-identical branches while keeping human numbering explicit.
+
 ## 0.5.4
 
 - `[Co-located Job Recipes]` Allowed registered tool entries to include job envelope fields directly when they also define `template`. Impact: operators can keep small or local job recipes in `auto-tools.json` without introducing `job.tool` cycles or a separate recipe file.

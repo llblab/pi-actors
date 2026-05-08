@@ -147,6 +147,35 @@ test("Stored tool normalization derives args from existing job recipe files", as
   }
 });
 
+test("Stored tool normalization derives args from compact repeated job recipe files", async () => {
+  const path = join(homedir(), ".pi", "agent", "jobs", "derive-repeat-args-test.json");
+  try {
+    await mkdir(join(homedir(), ".pi", "agent", "jobs"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({
+        job: "derive-repeat-args-test",
+        mode: "parallel",
+        repeat: 3,
+        template: "render {scope} page{_(index+1)}.html prev=page{_(prev+1)}.html zero=page{_index}.html",
+      }),
+    );
+    const result = normalizeStoredTool(
+      "derive_repeat_job",
+      {
+        description: "Start derived repeated job",
+        template: "derive-repeat-args-test.json",
+      },
+      reserved,
+    );
+    assert.equal(result.warning, undefined);
+    assert.deepEqual(result.cfg?.args, ["scope"]);
+    assert.deepEqual(result.cfg?.defaults, {});
+  } finally {
+    await rm(path, { force: true });
+  }
+});
+
 test("Stored tool normalization accepts command-template sequences", () => {
   const result = normalizeStoredTool(
     "voice",

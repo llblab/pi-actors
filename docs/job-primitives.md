@@ -56,21 +56,25 @@ A job primitive should be a thin execution envelope around an existing command-t
 ```json
 {
   "job": "{job}",
-  "state_dir": "~/.pi/agent/tmp/pi-auto-tools/jobs/{job}",
-  "template": [
-    "prepare {scope}",
-    {
-      "mode": "parallel",
-      "template": ["review-a {scope}", "review-b {scope}"]
-    },
-    "merge {scope}"
-  ]
+  "template": "review {scope}"
 }
 ```
 
-`template` remains last. Job fields are envelope flags.
+State location is optional. By default, pi-auto-tools writes state under `~/.pi/agent/tmp/pi-auto-tools/jobs/{job}`. Use `state_dir` only when overriding that default.
 
-Read the shape as: start this command-template tree, give the run a stable id, and write its state somewhere inspectable.
+For parallel fanout, put command-template flags at the job top level instead of adding an unnecessary sequence wrapper:
+
+```json
+{
+  "job": "{job}",
+  "mode": "parallel",
+  "template": ["review-a {scope}", "review-b {scope}"]
+}
+```
+
+`template` remains last. Job fields are envelope flags; command-template flags keep their normal meaning.
+
+Read the shape as: start this command-template tree, give the run a stable id, and write its state to the default or overridden inspectable location.
 
 A job recipe must define `template` directly. It must not reference a registered auto-tool: a job is the async container for a template, not a tool-to-tool indirection layer.
 
@@ -95,7 +99,6 @@ A registered auto-tool may also co-locate the job envelope directly in `auto-too
   "review_docs": {
     "description": "Start an async docs review",
     "job": "review-docs",
-    "state_dir": "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
     "template": "review {scope}"
   }
 }

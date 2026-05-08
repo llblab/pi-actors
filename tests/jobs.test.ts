@@ -79,6 +79,41 @@ test("Template jobs can start from template job files with overrides", async () 
   }
 });
 
+test("Template job files can put command-template flags at the job top level", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-jobs-"));
+  const stateDir = join(root, "top-level-mode");
+  const file = join(root, "parallel.json");
+  try {
+    await writeFile(
+      file,
+      JSON.stringify(
+        {
+          job: "top-level-mode",
+          state_dir: stateDir,
+          mode: "parallel",
+          template: [
+            `${process.execPath} -e "console.log('left')"`,
+            `${process.execPath} -e "console.log('right')"`,
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    const meta = startJob({ file }, process.cwd());
+    assert.equal(meta.job, "top-level-mode");
+    assert.equal(typeof meta.template, "object");
+    assert.equal(Array.isArray(meta.template), false);
+    const result = await waitForResult(stateDir);
+    assert.equal(result.code, 0);
+    const stdout = await readFile(join(stateDir, "stdout.log"), "utf8");
+    assert.match(stdout, /left/);
+    assert.match(stdout, /right/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Template job files reject tool references", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-jobs-"));
   const file = join(root, "tool-job.json");

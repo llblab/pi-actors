@@ -30,21 +30,38 @@ The job owns only lifecycle:
 ```json
 {
   "job": "review-docs",
-  "state_dir": "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+  "template": "review docs/spec.md"
+}
+```
+
+`job` names the run. `template` is the command-template tree. State location is optional; adapters should default to their extension temp tree, for example `~/.pi/agent/tmp/pi-auto-tools/jobs/{job}`.
+
+Top-level command-template node flags may sit beside `job` so a job file can be a command-template object with an async envelope:
+
+```json
+{
+  "job": "review-docs",
+  "mode": "parallel",
   "template": [
-    "prepare docs/spec.md",
-    {
-      "mode": "parallel",
-      "template": ["review-a docs/spec.md", "review-b docs/spec.md"]
-    },
-    "merge docs/spec.md"
+    "review-a docs/spec.md",
+    "review-b docs/spec.md"
   ]
 }
 ```
 
-`template` remains last. Job fields are envelope flags.
+Use explicit `state_dir` only to override the default state location:
 
-Read the shape as: start this command-template tree, give the run a stable id, and write its state somewhere inspectable.
+```json
+{
+  "job": "review-docs",
+  "state_dir": "/custom/state/review-docs",
+  "template": "review docs/spec.md"
+}
+```
+
+`template` remains last. Job fields are envelope flags; command-template flags (`mode`, `timeout`, `retry`, `critical`, `delay`, `args`, `defaults`, etc.) keep their normal meaning.
+
+Read the shape as: start this command-template tree, give the run a stable id, and write its state to the default or overridden inspectable location.
 
 ## Valid Graph
 

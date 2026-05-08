@@ -177,6 +177,18 @@ export function normalizeStoredTool(
     declarations.provided && Object.keys(declarations.defaults).length > 0
       ? declarations.defaults
       : undefined;
+  const argTemplateConfig: CommandTemplates.CommandTemplateConfig =
+    typeof argTemplate === "object" && !Array.isArray(argTemplate)
+      ? {
+        ...argTemplate,
+        ...(storedArgs !== undefined ? { args: storedArgs } : {}),
+        defaults: { ...(argTemplate.defaults ?? {}), ...declarations.defaults },
+      }
+      : {
+        args: storedArgs,
+        defaults: declarations.defaults,
+        template: argTemplate,
+      };
   const cfg = {
     name,
     description,
@@ -184,11 +196,7 @@ export function normalizeStoredTool(
       ? Schema.getExplicitToolArgNames(storedArgs)
       : JobReferences.isJobRecipeReference(template) && !recipeTemplate
         ? Schema.getExplicitToolArgNames(storedArgs)
-        : Schema.getToolArgNames({
-        args: storedArgs,
-        defaults: declarations.defaults,
-        template: argTemplate,
-      }),
+        : Schema.getToolArgNames(argTemplateConfig),
     defaults: declarations.defaults,
     ...(jobRecipe ? { jobRecipe } : {}),
     template,

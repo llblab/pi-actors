@@ -143,6 +143,15 @@ test("Command template repeat expands numbered defaults", () => {
   assert.deepEqual(buildCommandTemplateInvocation(steps[2], {}, "/work").args, ["page03.html", "prev=page02.html", "next=page01.html", "raw=2/3"]);
 });
 
+test("Command templates resolve typed inline placeholders", () => {
+  const invocation = buildCommandTemplateInvocation(
+    "tool {file:path} {timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
+    { file: "/tmp/a.txt" },
+    "/work",
+  );
+  assert.deepEqual(invocation.args, ["/tmp/a.txt", "60000", "1.5", "check"]);
+});
+
 test("Command templates resolve defaults and inline placeholder defaults", () => {
   const invocation = buildCommandTemplateInvocation(
     {

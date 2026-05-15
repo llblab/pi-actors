@@ -7,6 +7,7 @@
 import type { RegisteredTool } from "./config.ts";
 import { formatFailureOutput, formatOutput, formatToolText } from "./output.ts";
 import * as CommandTemplates from "./command-templates.ts";
+import * as Schema from "./schema.ts";
 
 export interface ToolExecOptions {
   cwd?: string;
@@ -375,7 +376,13 @@ export async function executeRegisteredTool(
   cwd: string,
   signal?: AbortSignal,
 ): Promise<RegisteredToolExecutionResult> {
-  const executed = await executeTemplateSteps(cfg, params, exec, cwd, signal);
+  const executed = await executeTemplateSteps(
+    cfg,
+    Schema.normalizeRuntimeValues(params, cfg.argTypes),
+    exec,
+    cwd,
+    signal,
+  );
   const command = formatCommandDetail(executed.commands);
   const result = executed.result;
   if (result.code !== 0) {

@@ -54,6 +54,32 @@ test("Registered tool execution expands command and returns formatted payload", 
   assert.equal(result.details.truncated, false);
 });
 
+test("Registered tool execution normalizes typed runtime values", async () => {
+  const calls: string[][] = [];
+  await executeRegisteredTool(
+    {
+      name: "check_tool",
+      description: "Run checker",
+      template: "check {timeout} {speed} {dry_run} {mode}",
+      args: ["timeout", "speed", "dry_run", "mode"],
+      defaults: {},
+      argTypes: {
+        dry_run: { kind: "bool" },
+        speed: { kind: "number" },
+        mode: { kind: "enum", values: ["check", "fix"] },
+        timeout: { kind: "int" },
+      },
+    },
+    { timeout: 60, speed: 1.5, dry_run: false, mode: "fix" },
+    async (_command, args) => {
+      calls.push(args);
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, [["60", "1.5", "false", "fix"]]);
+});
+
 test("Registered tool execution runs template sequences with previous stdout as stdin", async () => {
   const calls: Array<{
     command: string;

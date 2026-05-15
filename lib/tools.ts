@@ -23,6 +23,15 @@ function stringSchema(description: string): JsonSchema {
   return { description, type: "string" };
 }
 
+function typedArgSchema(arg: string, type: Schema.ToolArgType | undefined): JsonSchema {
+  if (!type || type.kind === "string") return stringSchema(`Argument: ${arg}`);
+  if (type.kind === "path") return stringSchema(`Path argument: ${arg}`);
+  if (type.kind === "int") return { description: `Integer argument: ${arg}`, type: "integer" };
+  if (type.kind === "number") return { description: `Number argument: ${arg}`, type: "number" };
+  if (type.kind === "bool") return { description: `Boolean argument: ${arg}`, type: "boolean" };
+  return { description: `Enum argument: ${arg}`, enum: type.values, type: "string" };
+}
+
 function booleanSchema(description: string): JsonSchema {
   return { description, type: "boolean" };
 }
@@ -200,7 +209,7 @@ export function createRuntimeToolDefinition(
       ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
       : Schema.getRequiredToolArgNames(requiredTemplateConfig);
   for (const arg of cfg.args) {
-    paramSchema[arg] = stringSchema(`Argument: ${arg}`);
+    paramSchema[arg] = typedArgSchema(arg, cfg.argTypes?.[arg]);
     if (requiredArgs.has(arg)) required.push(arg);
   }
   if (isJobRecipe) paramSchema.job_id = stringSchema("Optional job id override for this template-job invocation.");
@@ -232,7 +241,10 @@ export function createRuntimeToolDefinition(
               ? job_id.trim()
               : `${cfg.name}-${Date.now()}`,
             ownerId: getJobOwnerId(ctx),
-            values: { ...(cfg.jobRecipe?.values ?? {}), ...cfg.defaults, ...values },
+            values: Schema.normalizeRuntimeValues(
+              { ...(cfg.jobRecipe?.values ?? {}), ...cfg.defaults, ...values },
+              cfg.argTypes,
+            ),
           },
           ctx.cwd,
         );
@@ -240,7 +252,7 @@ export function createRuntimeToolDefinition(
       }
       return Execution.executeRegisteredTool(
         cfg,
-        params as Record<string, unknown>,
+        Schema.normalizeRuntimeValues(params as Record<string, unknown>, cfg.argTypes),
         exec,
         ctx.cwd,
         signal,

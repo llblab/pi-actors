@@ -43,6 +43,44 @@ test("Stored tool normalization accepts template-backed tools", () => {
   });
 });
 
+test("Stored tool normalization accepts typed arg declarations", () => {
+  const result = normalizeStoredTool(
+    "check_tool",
+    {
+      template: "check {file} {timeout} {speed} {dry_run} {mode}",
+      args: ["file:path", "timeout:int=60000", "speed:number=1.5", "dry_run:bool=true", "mode:enum(check,fix)=check"],
+      description: "Run checker",
+    },
+    reserved,
+  );
+  assert.equal(result.warning, undefined);
+  assert.deepEqual(result.cfg?.args, ["file", "timeout", "speed", "dry_run", "mode"]);
+  assert.deepEqual(result.cfg?.storedArgs, ["file:path", "timeout:int", "speed:number", "dry_run:bool", "mode:enum(check,fix)"]);
+  assert.deepEqual(result.cfg?.storedDefaults, {
+    dry_run: "true",
+    mode: "check",
+    speed: "1.5",
+    timeout: "60000",
+  });
+  assert.deepEqual(result.cfg?.argTypes?.speed, { kind: "number" });
+  assert.deepEqual(result.cfg?.argTypes?.mode, { kind: "enum", values: ["check", "fix"] });
+});
+
+test("Stored tool normalization derives typed args from inline template placeholders", () => {
+  const result = normalizeStoredTool(
+    "inline_typed",
+    {
+      description: "Run inline typed checker",
+      template: "check {file:path} {timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
+    },
+    reserved,
+  );
+  assert.deepEqual(result.cfg?.args, ["file", "timeout", "speed", "mode"]);
+  assert.deepEqual(result.cfg?.argTypes?.timeout, { kind: "int" });
+  assert.deepEqual(result.cfg?.argTypes?.speed, { kind: "number" });
+  assert.deepEqual(result.cfg?.argTypes?.mode, { kind: "enum", values: ["check", "fix"] });
+});
+
 test("Stored tool normalization derives args from standard inline placeholders", () => {
   const result = normalizeStoredTool(
     "transcribe_groq",

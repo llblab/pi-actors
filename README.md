@@ -201,6 +201,7 @@ Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with
 - Reserved built-in names are blocked.
 - Templates are split into shell-like words first, then placeholders are substituted per command arg.
 - Tool args are derived from placeholders when `args` is omitted.
+- Typed arg declarations are progressive: `file:path`, `timeout:int=60000`, `speed:number=1.5`, `dry_run:bool=true`, and `mode:enum(check,fix)=check` can live in `args` or inline placeholders such as `{timeout:int=60000}`. They generate narrower tool schemas and runtime validation while existing untyped `args` and placeholders keep working.
 - `{arg=default}` inline defaults resolve after runtime values and stored `defaults`.
 - `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
 - Object nodes may set `mode: "parallel"`; children receive the same stdin and joined stdout flows to the next sequence step.

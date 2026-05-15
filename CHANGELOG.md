@@ -4,6 +4,12 @@
 
 No unreleased changes.
 
+## 0.6.0
+
+- `[Typed Args]` Added progressive typed command-template argument declarations for `string`, `path`, `int`, `number`, `bool`, and `enum(...)` compact forms in both `args` and inline template placeholders. Impact: registered tools can expose narrower generated schemas and validate/normalize runtime values without requiring JSON Schema authoring or separate `args` metadata for simple templates.
+- `[Compatibility]` Kept existing untyped `args` and shorthand defaults fully compatible while normalizing typed shorthand such as `timeout:int=60000` into canonical stored declarations plus `defaults`. Impact: existing `auto-tools.json` entries continue to load unchanged.
+- `[Docs]` Documented typed args in the command-template standard, tool registry guide, README, and backlog state, including metadata-first and inline-first authoring styles. Impact: operators can adopt typed declarations incrementally while choosing the most readable shape for each tool.
+
 ## 0.5.6: Coordinator-Scoped Job Notifications Hotfix
 
 - `[Job Observability]` Scoped async job ambient status and terminal follow-up context to the agent session that started the job. Impact: multiple pi agents sharing the same job state root can run independent async jobs without receiving each other's completion messages or sub-agent indicators, while explicit `status`/`tail` inspection by job id remains available.

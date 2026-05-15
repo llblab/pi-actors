@@ -181,6 +181,22 @@ export function expandCommandTemplateConfigs(
   ];
 }
 
+function parseCommandTemplateArgToken(value: string): { name: string; defaultValue?: string } {
+  const separatorIndex = value.indexOf("=");
+  const rawName = separatorIndex === -1 ? value : value.slice(0, separatorIndex);
+  const colonIndex = rawName.indexOf(":");
+  return {
+    name: (colonIndex === -1 ? rawName : rawName.slice(0, colonIndex)).trim(),
+    ...(separatorIndex === -1 ? {} : { defaultValue: value.slice(separatorIndex + 1).trim() }),
+  };
+}
+
+function parseCommandTemplatePlaceholderContent(content: string): { name: string; inlineDefault?: string } | undefined {
+  const match = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?::(?:string|path|int|number|bool|enum\([^)]*\)))?(?:=([^}]*))?$/);
+  if (!match) return undefined;
+  return { name: match[1], ...(match[2] !== undefined ? { inlineDefault: match[2] } : {}) };
+}
+
 export function getCommandTemplateDefaults(
   config: CommandTemplateConfig | undefined,
 ): Record<string, string> {
@@ -190,9 +206,9 @@ export function getCommandTemplateDefaults(
   const defaults: Record<string, string> = {};
   for (const item of normalizeCommandTemplateArgs(normalizedConfig?.args)) {
     if (!item) continue;
-    const [name, ...defaultParts] = item.split("=");
-    if (!name || defaultParts.length === 0) continue;
-    defaults[name.trim()] = defaultParts.join("=").trim();
+    const parsed = parseCommandTemplateArgToken(item);
+    if (!parsed.name || parsed.defaultValue === undefined) continue;
+    defaults[parsed.name] = parsed.defaultValue;
   }
   for (const [key, value] of Object.entries(normalizedConfig?.defaults ?? {})) {
     defaults[key] = value === undefined || value === null ? "" : String(value);
@@ -331,11 +347,10 @@ export function substituteCommandTemplateToken(
   return token.replace(
     /\{([^{}]+)\}/g,
     (_match, content: string) => {
-      const simple = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?:=([^}]*))?$/);
+      const simple = parseCommandTemplatePlaceholderContent(content);
       if (simple) {
-        const [, name, inlineDefault] = simple;
-        if (Object.hasOwn(values, name)) return values[name] ?? "";
-        if (inlineDefault !== undefined) return inlineDefault;
+        if (Object.hasOwn(values, simple.name)) return values[simple.name] ?? "";
+        if (simple.inlineDefault !== undefined) return simple.inlineDefault;
       }
       const expression = substituteCommandTemplateExpression(content, values);
       if (expression !== undefined) return expression;

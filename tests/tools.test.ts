@@ -90,6 +90,34 @@ test("Runtime tool definition exposes job id override for co-located job recipes
   assert.match(definition.promptSnippet, /review/);
 });
 
+test("Runtime tool definition exposes typed arg schemas", () => {
+  const definition = createRuntimeToolDefinition(
+    {
+      argTypes: {
+        dry_run: { kind: "bool" },
+        mode: { kind: "enum", values: ["check", "fix"] },
+        speed: { kind: "number" },
+        timeout: { kind: "int" },
+      },
+      args: ["file", "timeout", "speed", "dry_run", "mode"],
+      defaults: { dry_run: "true", mode: "check" },
+      description: "Run checker",
+      name: "check_tool",
+      storedArgs: ["file:path", "timeout:int", "speed:number", "dry_run:bool", "mode:enum(check,fix)"],
+      storedDefaults: { dry_run: "true", mode: "check" },
+      template: "check {file} {timeout} {speed} {dry_run} {mode}",
+    },
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+  );
+  const properties = definition.parameters.properties as Record<string, any>;
+  assert.equal(properties.file.type, "string");
+  assert.equal(properties.timeout.type, "integer");
+  assert.equal(properties.speed.type, "number");
+  assert.equal(properties.dry_run.type, "boolean");
+  assert.deepEqual(properties.mode.enum, ["check", "fix"]);
+  assert.deepEqual(definition.parameters.required, ["file", "timeout", "speed"]);
+});
+
 test("Runtime tool definition marks defaulted args optional", () => {
   const definition = createRuntimeToolDefinition(
     {

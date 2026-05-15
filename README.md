@@ -21,7 +21,7 @@ Persistent template-backed tool registry extension for the pi coding agent.
 - **Template Jobs**: Starts detached template jobs from inline config or `~/.pi/agent/jobs/*.json`, with generic status, tail, list, and cancel actions backed by simple state files under `~/.pi/agent/tmp/pi-auto-tools`.
 - **Job Launch Tools**: Registers lightweight tools whose `template` points to reusable job recipes, keeping large parallel agent templates in `~/.pi/agent/jobs/*.json` while exposing a compact callable button to the agent.
 - **Context Onboarding**: Injects a compact system-prompt note explaining templates, jobs, tasks, and agent fanout so installed sessions have the mental model available by default.
-- **Ambient Job Observability**: Shows one stable triangle per active job sub-agent across all running jobs in the interactive status line, then injects a compact completion event when a job finishes.
+- **Coordinator-Scoped Job Observability**: Shows one stable triangle per active job sub-agent started by the current agent session, then injects a compact completion event only back to that launching coordinator when its job finishes.
 
 ## Install
 
@@ -212,10 +212,10 @@ Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with
 - `retry` retries a step immediately on non-zero exit; default attempts is `1`.
 - Commands execute directly without shell evaluation.
 - `template_job` provides a minimal template job envelope around the same command-template contract.
-- `template_job` uses `action: start | status | tail | list | cancel`.
+- `template_job` uses `action: start | status | tail | list | cancel | kill`.
 - `template_job action=start` can run a template job JSON `file` or an inline `template`.
 - Registered tools may set `template` to a job recipe JSON path/name; calling them starts that recipe asynchronously and returns job metadata.
-- Interactive sessions show ambient job sub-agent activity as stable `▷` triangles aggregated across all running jobs, with one moving `▶` wave over the active set; terminal job events are delivered as compact follow-up context so the agent can inspect or react.
+- Interactive sessions show ambient job sub-agent activity as stable `▷` triangles aggregated across jobs started by the current agent session, with one moving `▶` wave over the active set; terminal job events are delivered as compact follow-up context only to the launching coordinator agent so unrelated sessions do not receive cross-job noise.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 

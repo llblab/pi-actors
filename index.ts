@@ -36,8 +36,11 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   let jobsInterval: NodeJS.Timeout | undefined;
   const observedJobs = new Map<string, Observability.JobObservedStatus>();
   let jobStatusFrame = 0;
+  const getJobOwnerId = (ctx: ExtensionContext): string =>
+    ctx.sessionManager.getSessionId();
   const updateJobUi = (ctx: ExtensionContext, notify = false): void => {
-    const summary = Observability.summarizeJobs();
+    const ownerId = getJobOwnerId(ctx);
+    const summary = Observability.summarizeJobs(undefined, ownerId);
     const status = Observability.renderJobStatus(summary, jobStatusFrame++);
     ctx.ui.setStatus(
       "zz-pi-auto-tools-jobs",

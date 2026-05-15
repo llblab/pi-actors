@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { cancelJob, getJobStatus, listJobs, startJob, tailJob } from "../lib/jobs.ts";
+import { cancelJob, getJobStatus, killJob, listJobs, startJob, tailJob } from "../lib/jobs.ts";
 
 async function waitForResult(stateDir: string): Promise<Record<string, unknown>> {
   for (let i = 0; i < 40; i++) {
@@ -34,6 +34,7 @@ test("Template jobs write state files and finish", async () => {
       process.cwd(),
     );
     assert.equal(meta.job, "hello");
+    assert.equal(meta.ownerId, undefined);
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
     const status = getJobStatus(stateDir);
@@ -41,6 +42,27 @@ test("Template jobs write state files and finish", async () => {
     assert.equal((listJobs(root)[0] || {}).job, "hello");
     assert.match(tailJob(stateDir), /job\.(start|runner\.start|done)/);
     assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /hello world/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template jobs persist coordinator owner ids", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-jobs-"));
+  const stateDir = join(root, "owned");
+  try {
+    const meta = startJob(
+      {
+        job: "owned",
+        ownerId: "session-a",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "console.log('owned')"`,
+      },
+      process.cwd(),
+    );
+    assert.equal(meta.ownerId, "session-a");
+    await waitForResult(stateDir);
+    assert.equal(getJobStatus(stateDir).ownerId, "session-a");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -149,6 +171,31 @@ test("Template job cancel terminates matching running jobs", async () => {
     }
     const result = cancelJob(stateDir);
     assert.equal(result.cancelled, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template job kill terminates matching stuck jobs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-jobs-"));
+  const stateDir = join(root, "stuck");
+  try {
+    startJob(
+      {
+        job: "stuck",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    for (let i = 0; i < 20; i++) {
+      if (getJobStatus(stateDir).status === "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const result = killJob(stateDir);
+    assert.equal(result.killed, true);
+    assert.equal(result.signal, "SIGKILL");
+    assert.match(tailJob(stateDir), /job\.kill/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

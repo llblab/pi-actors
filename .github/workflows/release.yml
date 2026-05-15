@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build release notes from changelog
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+          const tagName = process.env.TAG_NAME;
+          const version = tagName?.replace(/^v/, "");
+          if (!version) throw new Error("Missing release tag name.");
+          const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+          if (packageJson.version !== version) {
+            throw new Error(`Tag ${tagName} does not match package.json version ${packageJson.version}.`);
+          }
+          const changelog = readFileSync("CHANGELOG.md", "utf8");
+          const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const pattern = new RegExp(`^##\\s+(${escapedVersion}(?:[^\\n]*)?)\\n([\\s\\S]*?)(?=^##\\s+|(?![\\s\\S]))`, "m");
+          const match = changelog.match(pattern);
+          if (!match) throw new Error(`CHANGELOG.md has no section for ${version}.`);
+          const title = match[1].trim();
+          const notes = match[2].trim();
+          if (!notes) throw new Error(`CHANGELOG.md section for ${version} is empty.`);
+          writeFileSync("release-title.txt", `${title}\n`);
+          writeFileSync("release-notes.md", `${notes}\n`);
+          NODE
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" \
+            --title "$(cat release-title.txt)" \
+            --notes-file release-notes.md \
+            --verify-tag

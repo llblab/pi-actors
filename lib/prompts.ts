@@ -29,12 +29,12 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - Parallel is not async lifecycle.
 - Template job = async extension around a template.
 - Job state lives under ~/.pi/agent/tmp/pi-auto-tools/jobs.
-- Use template_job start/status/tail/list/cancel.
+- Use template_job start/status/tail/list/cancel/kill.
 - Put reusable job recipes in ~/.pi/agent/jobs/*.json.
 - Long async fanout = template job wrapping template(mode: "parallel").
 - Tool template may point to or co-locate a job recipe.
 - Tool = compact callable button.
-- Job = lifecycle, logs, status, cancel.
+- Job = lifecycle, logs, status, cancel, kill.
 - Template = execution graph.
 - Tasks are user work units; jobs are runtime executions.
 - For single calls or short pipelines, use templates/tools.

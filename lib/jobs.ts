@@ -16,6 +16,7 @@ import * as Paths from "./paths.ts";
 export interface JobStartParams {
   file?: string;
   job?: string;
+  ownerId?: string;
   state_dir?: string;
   stateDir?: string;
   template?: CommandTemplateValue;
@@ -38,6 +39,7 @@ export interface JobMeta {
   createdAt: string;
   cwd: string;
   job: string;
+  ownerId?: string;
   pid: number;
   stateDir: string;
   status: "running" | "done" | "exited";
@@ -159,6 +161,7 @@ export function startJob(
     createdAt: new Date().toISOString(),
     cwd,
     job,
+    ...(startParams.ownerId ? { ownerId: startParams.ownerId } : {}),
     pid: 0,
     stateDir,
     status: "running",
@@ -228,16 +231,34 @@ export function tailJob(jobOrDir: string, lines = 40): string {
   return tailFile(join(stateDir, "stdout.log"), lines) || tailFile(join(stateDir, "stderr.log"), lines);
 }
 
-export function cancelJob(jobOrDir: string): Record<string, unknown> {
+function stopJob(
+  jobOrDir: string,
+  signal: NodeJS.Signals,
+  event: string,
+): Record<string, unknown> {
   const status = getJobStatus(jobOrDir);
   const pid = Number(status.pid || 0);
   const stateDir = String(status.stateDir);
-  if (status.status !== "running") return { cancelled: false, reason: "not running", status };
-  if (!pid || !isAlive(pid)) return { cancelled: false, reason: "pid not alive", status };
+  if (status.status !== "running") return { stopped: false, reason: "not running", status };
+  if (!pid || !isAlive(pid)) return { stopped: false, reason: "pid not alive", status };
   if (!pidMatchesJob(pid, String(status.cwd), stateDir)) {
-    return { cancelled: false, reason: "pid owner mismatch", status };
+    return { stopped: false, reason: "pid owner mismatch", status };
   }
-  process.kill(pid, "SIGTERM");
-  writeFileSync(join(stateDir, "events.jsonl"), `${JSON.stringify({ event: "job.cancel", pid, ts: new Date().toISOString() })}\n`, { flag: "a" });
-  return { cancelled: true, pid, stateDir };
+  process.kill(pid, signal);
+  writeFileSync(join(stateDir, "events.jsonl"), `${JSON.stringify({ event, pid, signal, ts: new Date().toISOString() })}\n`, { flag: "a" });
+  return { stopped: true, pid, signal, stateDir };
+}
+
+export function cancelJob(jobOrDir: string): Record<string, unknown> {
+  const result = stopJob(jobOrDir, "SIGTERM", "job.cancel");
+  return Object.hasOwn(result, "stopped")
+    ? { cancelled: result.stopped, ...result }
+    : result;
+}
+
+export function killJob(jobOrDir: string): Record<string, unknown> {
+  const result = stopJob(jobOrDir, "SIGKILL", "job.kill");
+  return Object.hasOwn(result, "stopped")
+    ? { killed: result.stopped, ...result }
+    : result;
 }

@@ -4,6 +4,13 @@
 
 No unreleased changes.
 
+## 0.5.6: Coordinator-Scoped Job Notifications Hotfix
+
+- `[Job Observability]` Scoped async job ambient status and terminal follow-up context to the agent session that started the job. Impact: multiple pi agents sharing the same job state root can run independent async jobs without receiving each other's completion messages or sub-agent indicators, while explicit `status`/`tail` inspection by job id remains available.
+- `[Template Jobs]` Added `template_job action=kill` as a forceful `SIGKILL` escape hatch for stuck owned job runners, with the same cwd/runner ownership checks as graceful `cancel`. Impact: operators can recover from unresponsive detached jobs without unsafe broad process killing.
+- `[Release]` Added a tag-triggered GitHub Actions release workflow that verifies the `vX.Y.Z` tag matches `package.json`, extracts the matching `CHANGELOG.md` section, and publishes a GitHub Release automatically.
+- `[Backlog]` Clarified that typed command-template argument declarations must be progressive: current untyped `args` declarations continue to work unchanged while typed forms are added.
+
 ## 0.5.5
 
 - `[Template Job Shape]` Allowed job recipe files to place command-template node flags such as `mode`, `timeout`, `retry`, `critical`, `args`, and `defaults` at the job top level beside `job`. Impact: parallel jobs can use the compact shape `{ "job": "name", "mode": "parallel", "template": [...] }` without an unnecessary nested template wrapper.

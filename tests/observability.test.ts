@@ -19,12 +19,13 @@ async function writeJob(
   status: "running" | "done" | "exited",
   failures: unknown[] = [],
   activeSubagents = 0,
+  ownerId?: string,
 ): Promise<void> {
   const dir = join(root, job);
   await mkdir(dir, { recursive: true });
   await writeFile(
     join(dir, "job.json"),
-    JSON.stringify({ createdAt: "2026-01-01T00:00:00.000Z", cwd: process.cwd(), job, pid: status === "running" ? process.pid : 0, stateDir: dir }),
+    JSON.stringify({ createdAt: "2026-01-01T00:00:00.000Z", cwd: process.cwd(), job, ...(ownerId ? { ownerId } : {}), pid: status === "running" ? process.pid : 0, stateDir: dir }),
   );
   await writeFile(
     join(dir, "progress.json"),
@@ -44,6 +45,24 @@ test("Job observability summarizes state root", async () => {
     assert.equal(summary.done, 1);
     assert.equal(summary.runningSubagents, 0);
     assert.equal(renderJobStatus(summary), undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Job observability filters summaries by coordinator owner", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  try {
+    await writeJob(root, "alpha", "running", [], 3, "session-a");
+    await writeJob(root, "beta", "running", [], 2, "session-b");
+    await writeJob(root, "global", "running", [], 4);
+    const summaryA = summarizeJobs(root, "session-a");
+    const summaryB = summarizeJobs(root, "session-b");
+    assert.deepEqual(summaryA.jobs.map((job) => job.job), ["alpha"]);
+    assert.equal(summaryA.runningSubagents, 3);
+    assert.deepEqual(summaryB.jobs.map((job) => job.job), ["beta"]);
+    assert.equal(summaryB.runningSubagents, 2);
+    assert.equal(summarizeJobs(root).total, 3);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

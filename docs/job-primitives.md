@@ -128,7 +128,7 @@ Keep reusable examples in docs or copy local recipes directly into `~/.pi/agent/
 
 Use ordinary files under the extension temp directory so status tools stay simple and inspectable:
 
-- `job.json` stores pid, command-template config, cwd, args, created time, and state dir.
+- `job.json` stores pid, command-template config, cwd, coordinator owner id, args, created time, and state dir.
 - `progress.json` stores phase, active node path, completed node count, failures, and updated time.
 - `events.jsonl` stores append-only lifecycle events.
 - `stdout.log` and `stderr.log` store detached process output.
@@ -167,13 +167,16 @@ The public adapter set is intentionally one tool. This mirrors `register_tool`: 
 - `template_job action=status` reads structured state.
 - `template_job action=tail` reads events or logs.
 - `template_job action=list` lists known jobs.
-- `template_job action=cancel` sends termination to the owned pid.
+- `template_job action=cancel` sends graceful termination (`SIGTERM`) to the owned pid.
+- `template_job action=kill` force-kills (`SIGKILL`) a stuck owned pid after the same cwd/runner ownership checks.
 
 These are generic pi-auto-tools capabilities. Swarm can register local adapters that call them. The public surface stays small: one management tool with five actions.
 
 ## Ownership and safety
 
-A job belongs to the current user and cwd at start time. Cancellation should only target the recorded pid when the command line and cwd still match the recorded owner data. Stale pid reuse must fail closed.
+A job belongs to the current user, cwd, and launching agent session at start time. Cancellation and force-kill should only target the recorded pid when the command line and cwd still match the recorded owner data. Stale pid reuse must fail closed.
+
+Jobs started through `template_job` or job-launch tools persist the launching session id as the coordinator owner. Ambient status and terminal follow-up context are filtered by this owner so parallel pi agents sharing the same state root do not receive each other's job completion messages. Explicit inspection remains global by job id or state directory: `template_job action=status`, `tail`, `list`, and `cancel` can still target known jobs directly.
 
 Job state is append-only where practical. Final result writes should be atomic.
 
@@ -199,7 +202,7 @@ Job state is append-only where practical. Final result writes should be atomic.
 
 Interactive sessions expose compact sub-agent activity with minimal screen cost:
 
-- Footer status is shown only while sub-agents are running.
+- Footer status is shown only while sub-agents launched by the current coordinator session are running.
 - One `▷` is shown per active sub-agent.
 - Triangles are separated by a single compact space for legibility.
 - One `▶` moves across the triangles as a small wave.
@@ -209,10 +212,10 @@ Interactive sessions expose compact sub-agent activity with minimal screen cost:
 - The status uses dim footer coloring, matching the quieter model/status tone.
 - The status key sorts late among extension statuses; exact right alignment is controlled by pi core footer rendering.
 - No prompt-area widget is shown by default.
-- Terminal job transitions trigger a compact follow-up context event.
+- Terminal job transitions trigger a compact follow-up context event only in the launching coordinator session.
 - Full logs remain in job state files and are still accessed through `template_job action=tail`.
 
-This keeps long-running swarms visible without occupying the prompt area. Only terminal job events enter context, so the agent can inspect or react after completion without being flooded by routine progress updates.
+This keeps long-running swarms visible without occupying the prompt area or leaking async-job context into unrelated agents. Only terminal job events for the current coordinator enter context, so the launching agent can inspect or react after completion without being flooded by routine progress updates.
 
 ## Swarm mapping
 

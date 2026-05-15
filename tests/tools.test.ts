@@ -45,6 +45,7 @@ test("Template job tool definition exposes action schema", () => {
   assert.deepEqual(definition.parameters.required, ["action"]);
   const properties = definition.parameters.properties as Record<string, any>;
   assert.equal(properties.action.type, "string");
+  assert.match(properties.action.description, /kill/);
   assert.equal(Array.isArray(properties.template.anyOf), true);
 });
 

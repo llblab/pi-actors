@@ -92,16 +92,25 @@ export function createRegisterToolDefinition<TContext>(
   };
 }
 
-export function createJobToolDefinition<TContext extends { cwd: string }>(
+export interface JobToolContext {
+  cwd: string;
+  sessionManager?: { getSessionId?: () => string };
+}
+
+function getJobOwnerId(ctx: JobToolContext): string | undefined {
+  return ctx.sessionManager?.getSessionId?.();
+}
+
+export function createJobToolDefinition<TContext extends JobToolContext>(
   deps: { getTools: () => Map<string, RegisteredTool> },
 ): any {
   return {
     name: "template_job",
     label: "Template Job",
-    description: "Manage detached template jobs. Actions: start, status, tail, list, cancel.",
+    description: "Manage detached template jobs. Actions: start, status, tail, list, cancel, kill.",
     parameters: objectSchema(
       {
-        action: stringSchema("Action: start, status, tail, list, or cancel."),
+        action: stringSchema("Action: start, status, tail, list, cancel, or kill."),
         file: stringSchema("Optional template job JSON file for start. Bare names resolve under ~/.pi/agent/jobs."),
         job: stringSchema("Job id or state directory. Required for status, tail, and cancel. Optional for start."),
         lines: stringSchema("Tail line count for tail. Default 40."),
@@ -130,7 +139,7 @@ export function createJobToolDefinition<TContext extends { cwd: string }>(
       };
       switch (input.action) {
         case "start": {
-          const meta = Jobs.startJob(input, ctx.cwd);
+          const meta = Jobs.startJob({ ...input, ownerId: getJobOwnerId(ctx) }, ctx.cwd);
           return { content: [{ type: "text" as const, text: jsonText(meta) }], details: meta };
         }
         case "status": {
@@ -152,8 +161,13 @@ export function createJobToolDefinition<TContext extends { cwd: string }>(
           const result = Jobs.cancelJob(String(input.job));
           return { content: [{ type: "text" as const, text: jsonText(result) }], details: result };
         }
+        case "kill": {
+          if (!input.job) throw new Error("template_job action=kill requires job.");
+          const result = Jobs.killJob(String(input.job));
+          return { content: [{ type: "text" as const, text: jsonText(result) }], details: result };
+        }
         default:
-          throw new Error("template_job action must be one of: start, status, tail, list, cancel.");
+          throw new Error("template_job action must be one of: start, status, tail, list, cancel, kill.");
       }
     },
   };
@@ -203,7 +217,7 @@ export function createRuntimeToolDefinition(
       params: unknown,
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
-      ctx: { cwd: string },
+      ctx: JobToolContext,
     ) {
       if (isJobRecipe) {
         const input = params as Record<string, unknown>;
@@ -217,6 +231,7 @@ export function createRuntimeToolDefinition(
             job: typeof job_id === "string" && job_id.trim()
               ? job_id.trim()
               : `${cfg.name}-${Date.now()}`,
+            ownerId: getJobOwnerId(ctx),
             values: { ...(cfg.jobRecipe?.values ?? {}), ...cfg.defaults, ...values },
           },
           ctx.cwd,

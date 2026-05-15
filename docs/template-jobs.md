@@ -4,7 +4,7 @@ Template jobs are the portable async extension around the synchronous [Command T
 
 **Meta-contract:** command templates remain the execution language; template jobs add only lifecycle, state, and inspection.
 
-**Scope:** detached command-template execution envelope — job id, state path, pid metadata, logs, status, tail, list, cancel, result state, and extension-owned temp storage. No scheduler, queue, daemon, workflow DSL, distributed worker, or second execution language.
+**Scope:** detached command-template execution envelope — job id, state path, pid metadata, logs, status, tail, list, cancel, force-kill, result state, and extension-owned temp storage. No scheduler, queue, daemon, workflow DSL, distributed worker, or second execution language.
 
 ---
 
@@ -23,7 +23,7 @@ The job owns only lifecycle:
 - Name and locate the run
 - Record pid and owner metadata
 - Store progress, events, stdout, stderr, and final result
-- Report status, tail logs, list jobs, and cancel safely
+- Report status, tail logs, list jobs, cancel safely, and force-kill stuck owned jobs
 
 ## Minimal Shape
 
@@ -124,7 +124,7 @@ Template-job state should live under this temp tree. Local adapters define their
 
 ## Ownership and Safety
 
-A job belongs to the current user and cwd at start time. Cancellation should only target the recorded pid when command line and cwd still match the recorded owner data. Stale pid reuse must fail closed.
+A job belongs to the current user and cwd at start time. Cancellation or force-kill should only target the recorded pid when command line and cwd still match the recorded owner data. Stale pid reuse must fail closed.
 
 Job state is append-only where practical. Final result writes should be atomic.
 

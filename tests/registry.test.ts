@@ -61,6 +61,34 @@ test("Registry mutations register template-backed tools", async () => {
   }
 });
 
+test("Registry mutations register typed command-template args progressively", async () => {
+  const harness = await createHarness();
+  try {
+    await executeRegisterTool(
+      {
+        args: "file:path,timeout:int=60000,speed:number=1.5,dry_run:bool=true,mode:enum(check,fix)=check",
+        description: "Run checker",
+        name: "check_tool",
+        template: "check {file} {timeout} {speed} {dry_run} {mode}",
+      },
+      {},
+      harness.deps,
+    );
+    assert.deepEqual(harness.tools.get("check_tool")?.args, ["file", "timeout", "speed", "dry_run", "mode"]);
+    assert.deepEqual(harness.tools.get("check_tool")?.storedArgs, [
+      "file:path",
+      "timeout:int",
+      "speed:number",
+      "dry_run:bool",
+      "mode:enum(check,fix)",
+    ]);
+    assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.timeout, { kind: "int" });
+    assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.speed, { kind: "number" });
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("Registry mutations register job recipe paths through template", async () => {
   const harness = await createHarness();
   try {

@@ -32,7 +32,7 @@ Common object fields:
 
 - `label`: Optional human label for diagnostics and parallel branch reports.
 - `mode`: Optional execution mode for array templates. Default is `"sequence"`; `"parallel"` runs children concurrently.
-- `args`: Optional placeholder-name declarations only. Never stores defaults.
+- `args`: Optional placeholder declarations. Untyped names remain valid; compact typed forms such as `file:path`, `timeout:int`, `speed:number`, `dry_run:bool`, and `mode:enum(check,fix)` are valid when the host supports typed tool schemas. Defaults belong in `defaults` or inline placeholder defaults; hosts may normalize interactive shorthand such as `timeout:int=60000` before persistence.
 - `defaults`: Placeholder default values by name.
 - `timeout`: Optional execution timeout in milliseconds. Default is `30000`. Long-running agent calls should set this explicitly.
 - `delay`: Optional wait in milliseconds before starting this node. Default is no delay.
@@ -79,6 +79,8 @@ With runtime values `{ "text": "hello" }`, argv is:
 ```
 
 Use `defaults` for visible configuration data; use inline defaults for compact local literals. Prefer flag-style examples such as `/path/to/tool --file {file} --lang {lang=ru}` for readability, but positional forms such as `/path/to/tool {file} {lang=ru}` are valid when the invoked script defines that CLI contract.
+
+Typed declarations annotate the public tool interface, not the shell command. They may live in `args` or inline placeholders such as `{timeout:int=60000}` and `{mode:enum(check,fix)=check}`. Use metadata-first authoring (`args` plus `defaults`) when long templates should stay visually short; use inline-first authoring when one self-contained `template` property is clearer. They do not sandbox or reinterpret the executable; they only let the host generate narrower input schemas and normalize runtime values before placeholder substitution. Untyped `args` and untyped placeholders continue to work unchanged.
 
 ## Quoting
 

@@ -168,7 +168,7 @@ function buildConfig(
       ? existing?.jobRecipe
       : undefined;
   const defaults = explicitArgs?.defaults ?? existing?.storedDefaults ?? {};
-  const storedArgs = explicitArgs ? explicitArgs.args : existing?.storedArgs;
+  const storedArgs = explicitArgs ? explicitArgs.declarations : existing?.storedArgs;
   const storedDefaults =
     Object.keys(defaults).length > 0 ? defaults : undefined;
   const recipeTemplate = JobReferences.getJobRecipeTemplate(finalTemplate);
@@ -185,6 +185,8 @@ function buildConfig(
         defaults,
         template: argTemplate,
       };
+  const inferredArgTypes = Schema.getTemplateArgTypes(argTemplateConfig);
+  const argTypes = { ...inferredArgTypes, ...(existing?.argTypes ?? {}), ...(explicitArgs?.argTypes ?? {}) };
   return {
     name,
     description,
@@ -196,6 +198,7 @@ function buildConfig(
         ? Schema.getExplicitToolArgNames(storedArgs)
         : Schema.getToolArgNames(argTemplateConfig),
     defaults,
+    ...(Object.keys(argTypes).length > 0 ? { argTypes } : {}),
     ...(storedArgs !== undefined ? { storedArgs } : {}),
     ...(storedDefaults !== undefined ? { storedDefaults } : {}),
   };

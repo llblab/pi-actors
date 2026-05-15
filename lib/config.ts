@@ -25,6 +25,7 @@ export interface RegisteredTool {
   description: string;
   args: string[];
   defaults: Record<string, string>;
+  argTypes?: Record<string, Schema.ToolArgType>;
   jobRecipe?: JobReferences.JobRecipeConfig;
   template?: CommandTemplateValue;
   storedArgs?: string[];
@@ -172,7 +173,7 @@ export function normalizeStoredTool(
     record.args,
     record.defaults,
   );
-  const storedArgs = declarations.provided ? declarations.args : undefined;
+  const storedArgs = declarations.provided ? declarations.declarations : undefined;
   const storedDefaults =
     declarations.provided && Object.keys(declarations.defaults).length > 0
       ? declarations.defaults
@@ -189,6 +190,8 @@ export function normalizeStoredTool(
         defaults: declarations.defaults,
         template: argTemplate,
       };
+  const inferredArgTypes = Schema.getTemplateArgTypes(argTemplateConfig);
+  const argTypes = { ...inferredArgTypes, ...declarations.argTypes };
   const cfg = {
     name,
     description,
@@ -198,6 +201,7 @@ export function normalizeStoredTool(
         ? Schema.getExplicitToolArgNames(storedArgs)
         : Schema.getToolArgNames(argTemplateConfig),
     defaults: declarations.defaults,
+    ...(Object.keys(argTypes).length > 0 ? { argTypes } : {}),
     ...(jobRecipe ? { jobRecipe } : {}),
     template,
     ...(storedArgs !== undefined ? { storedArgs } : {}),

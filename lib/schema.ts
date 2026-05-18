@@ -12,6 +12,7 @@ export type ToolArgType =
   | { kind: "int" }
   | { kind: "number" }
   | { kind: "bool" }
+  | { kind: "array" }
   | { kind: "enum"; values: string[] };
 
 export interface ParsedToolArgToken {
@@ -41,6 +42,7 @@ function parseArgType(value: string | undefined): ToolArgType | undefined {
   if (source === "int") return { kind: "int" };
   if (source === "number") return { kind: "number" };
   if (source === "bool") return { kind: "bool" };
+  if (source === "array") return { kind: "array" };
   const enumMatch = source.match(/^enum\(([^)]*)\)$/);
   if (enumMatch) {
     const values = enumMatch[1]
@@ -78,6 +80,7 @@ function canonicalArgDeclaration(arg: string, type: ToolArgType): string {
     case "int":
     case "number":
     case "bool":
+    case "array":
       return `${arg}:${type.kind}`;
     case "enum":
       return `${arg}:enum(${type.values.join(",")})`;
@@ -115,6 +118,7 @@ function isValidDefault(type: ToolArgType, value: string): boolean {
     case "enum":
       return type.values.includes(value);
     case "path":
+    case "array":
     case "string":
       return true;
   }
@@ -212,8 +216,7 @@ export function formatToolArgs(args: string[]): string {
 
 function parseTemplatePlaceholderDeclaration(content: string): ParsedToolArgToken | undefined {
   if (content.startsWith("_(")) return undefined;
-  const typedMatch = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?::(?:string|path|int|number|bool|enum\([^)]*\)))?(?:=([^}]*))?$/);
-  if (!typedMatch) return undefined;
+  const typedMatch = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?::(?:string|path|int|number|bool|array|enum\([^)]*\)))?(?:=([^}]*))?$/);  if (!typedMatch) return undefined;
   const parsed = parseToolArgToken(content);
   if (!parsed.arg || CommandTemplates.isCommandTemplateRepeatPlaceholder(parsed.arg)) return undefined;
   return parsed;
@@ -279,7 +282,7 @@ export function getRequiredToolArgNames(
   return required;
 }
 
-function normalizeTypedArgValue(name: string, type: ToolArgType, value: unknown): string {
+function normalizeTypedArgValue(name: string, type: ToolArgType, value: unknown): unknown {
   if (value === undefined || value === null) return "";
   switch (type.kind) {
     case "int": {
@@ -305,6 +308,18 @@ function normalizeTypedArgValue(name: string, type: ToolArgType, value: unknown)
       const normalized = String(value);
       if (type.values.includes(normalized)) return normalized;
       throw new Error(`Argument ${name} must be one of: ${type.values.join(", ")}.`);
+    }
+    case "array": {
+      if (Array.isArray(value)) return value;
+      if (typeof value === "string") {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) return parsed;
+        } catch {
+          // Fall through to error.
+        }
+      }
+      throw new Error(`Argument ${name} must be an array.`);
     }
     case "path":
     case "string":

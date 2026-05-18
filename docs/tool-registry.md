@@ -1,6 +1,6 @@
 # Tool Registry
 
-`pi-auto-tools` stores registered command-template and job-launch tools in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
+`pi-auto-tools` stores registered command-template tools and template-recipe launchers in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
 
 This document is the local adaptation of the portable [Command Template Standard](./command-templates.md).
 
@@ -20,41 +20,42 @@ register_tool name=call_subagent \
   template="pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
 ```
 
-Use `update=true` to overwrite an existing tool. Omit `template` and co-located job fields during update to keep the previous execution binding.
+Use `update=true` to overwrite an existing tool. Omit `template` and co-located recipe fields during update to keep the previous execution binding.
 
-`template` may also be a standard command-template sequence for multi-step tools. Long-running agent calls should set explicit `timeout` values because the command-template default is 30 seconds:
+`template` may also be a standard command-template sequence for multi-step tools. Timeout is disabled by default; add explicit positive `timeout` values when individual steps should fail closed:
 
 ```json
 [
   "~/bin/tts --text {text} --out {mp3}",
-  { "timeout": 30000, "template": "ffmpeg -y -i {mp3} -c:a libopus {ogg}" }
+  { "timeout": 300000, "template": "ffmpeg -y -i {mp3} -c:a libopus {ogg}" }
 ]
 ```
 
-For long-running agentic work, register a small tool whose `template` points to a reusable job recipe instead of embedding a large parallel template in the tool itself:
+For reusable workflows, register a small tool whose `template` points to a template recipe instead of embedding a large parallel template in the tool itself:
 
 ```text
-register_tool name=shader_ring_job \
-  description="Start the shader ring job" \
+register_tool name=shader_ring \
+  description="Start the shader ring recipe" \
   template="shader-ring-8-parallel.json" \
   args="theme,out_dir"
 ```
 
-This stores the job recipe path in the registry as `template`. Calling the tool follows `tool → template → job → template`: it starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` through the template-job runtime, and the job file supplies the executable template. The call returns job metadata immediately.
+This stores the recipe path in the registry as `template`. If `~/.pi/agent/recipes/shader-ring-8-parallel.json` contains `async: true`, calling the tool starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
-When co-location is clearer than a separate file, the registry entry may include job envelope fields directly beside tool metadata:
+When co-location is clearer than a separate file, the registry entry may include recipe fields directly beside tool metadata:
 
 ```json
 {
   "review_docs": {
     "description": "Start an async docs review",
-    "job": "review-docs",
+    "name": "review-docs",
+    "async": true,
     "template": "pi -p --model openai-codex/gpt-5.5 --tools read,bash \"Review {scope}\""
   }
 }
 ```
 
-This is still not a cycle: `job` names the async run envelope, and `template` remains the executable body. Co-located job entries must not define `tool`.
+This is still not a cycle: `name` names the saved definition when it differs from the tool key, `async: true` selects detached run mode, and `template` remains the executable body. Co-located recipe entries must not define `tool`.
 
 Delete a tool with `template=null`:
 
@@ -64,7 +65,7 @@ register_tool name=call_subagent template=null
 
 ## Stored Shape
 
-Tool names come from the top-level registry keys. Tool entries define `template`; it may be an inline command template, a job recipe JSON path/name, or the body of a co-located job recipe when `job` is also present. Template entries keep `template` last, matching the command-template readability rule. The commands above persist entries like this:
+Tool names come from the top-level registry keys. Tool entries define `template`; it may be an inline command template, a template recipe JSON path/name, or the body of a co-located template recipe when `async` or entry-local `name` is present. Template entries keep `template` last, matching the command-template readability rule. The commands above persist entries like this:
 
 ```json
 {
@@ -76,8 +77,8 @@ Tool names come from the top-level registry keys. Tool entries define `template`
     "description": "Run pi as a non-interactive sub-agent",
     "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
   },
-  "shader_ring_job": {
-    "description": "Start the shader ring job",
+  "shader_ring": {
+    "description": "Start the shader ring recipe",
     "args": ["theme", "out_dir"],
     "template": "shader-ring-8-parallel.json"
   }
@@ -104,8 +105,20 @@ Use the metadata-first style when the command line is long and readability benef
 
 ```json
 {
-  "args": ["file:path", "out_dir:path", "timeout:int", "speed:number", "dry_run:bool", "mode:enum(check,fix)"],
-  "defaults": { "timeout": "60000", "speed": "1.5", "dry_run": "true", "mode": "check" },
+  "args": [
+    "file:path",
+    "out_dir:path",
+    "timeout:int",
+    "speed:number",
+    "dry_run:bool",
+    "mode:enum(check,fix)"
+  ],
+  "defaults": {
+    "timeout": "60000",
+    "speed": "1.5",
+    "dry_run": "true",
+    "mode": "check"
+  },
   "template": "tool --file {file} --out {out_dir} --timeout {timeout} --speed {speed} --dry-run {dry_run} --mode {mode}"
 }
 ```
@@ -120,7 +133,7 @@ Supported compact types are `string` (implicit), `path`, `int`, `number`, `bool`
 
 Defaults are applied before substitution, with resolution order runtime values → stored `defaults` → inline default → error. Missing required values are rejected before or during execution. Typed runtime values are normalized before substitution: `int` and `number` values become numeric strings, booleans become `true`/`false`, and enums must match one of the declared values.
 
-Job recipe tools derive public arguments from the referenced or co-located command template when the job recipe is available locally. Explicit `args` is still available when the public tool surface should be narrower or defaulted differently, or when a file-backed recipe is not available during registration. Runtime values are passed to the job as `values`. Every job recipe tool also accepts optional `job_id` to override the generated run id.
+Template recipe tools derive public arguments from the referenced or co-located command template when the recipe is available locally. Explicit `args` is still available when the public tool surface should be narrower or defaulted differently, or when a file-backed recipe is not available during registration. Runtime values are passed as `values`; async recipe tools also accept optional `run_id` to override the generated run id.
 
 ## File Argument Naming
 

@@ -54,6 +54,7 @@ export interface RegisteredToolExecutionResult {
     nonCriticalFailures?: Array<{ code: number; command: string; killed: boolean }>;
     softQuorum?: SoftQuorumReport;
     template: CommandTemplates.CommandTemplateValue;
+    templateWarnings?: string[];
     tool: string;
     truncated: boolean;
   };
@@ -69,11 +70,10 @@ type TemplateExecution = {
   branches: BranchReport[];
   commands: string[];
   criticalFailure?: boolean;
+  failureScope?: CommandTemplates.CommandTemplateFailureScope;
   failures: Array<{ code: number; command: string; killed: boolean }>;
   result: ToolExecResult;
 };
-
-const TOOL_TIMEOUT_MS = CommandTemplates.DEFAULT_COMMAND_TIMEOUT_MS;
 
 function textContent(text: string) {
   return { type: "text" as const, text };
@@ -147,6 +147,77 @@ function createSoftQuorum(branches: BranchReport[]): SoftQuorumReport | undefine
   };
 }
 
+function normalizeFailureScope(
+  value: CommandTemplates.CommandTemplateFailureScope | undefined,
+): CommandTemplates.CommandTemplateFailureScope {
+  if (value === undefined) return "continue";
+  if (value === "continue" || value === "branch" || value === "root") return value;
+  throw new Error("Command template failure must be one of: continue, branch, root.");
+}
+
+function getFailureScope(
+  config: CommandTemplates.CommandTemplateConfig,
+): CommandTemplates.CommandTemplateFailureScope {
+  const normalized = CommandTemplates.normalizeCommandTemplateConfig(config);
+  if (normalized.critical) return "root";
+  return normalizeFailureScope(normalized.failure);
+}
+
+function maxFailureScope(
+  ...scopes: Array<CommandTemplates.CommandTemplateFailureScope | undefined>
+): CommandTemplates.CommandTemplateFailureScope {
+  const rank = { branch: 1, continue: 0, root: 2 } as const;
+  return scopes.reduce<CommandTemplates.CommandTemplateFailureScope>(
+    (current, scope) => rank[scope ?? "continue"] > rank[current] ? scope! : current,
+    "continue",
+  );
+}
+
+function normalizeRetry(value: number | undefined): number {
+  if (value === undefined) return 1;
+  if (!Number.isInteger(value) || value < 1)
+    throw new Error("Command template retry must be a positive integer.");
+  return value;
+}
+
+function getRecoverConfig(
+  config: CommandTemplates.CommandTemplateValue,
+): CommandTemplates.CommandTemplateConfig {
+  const recovered = Array.isArray(config) ? { template: config } : config;
+  const normalized = CommandTemplates.normalizeCommandTemplateConfig(recovered);
+  if (normalized.failure !== undefined || normalized.critical !== undefined)
+    return recovered;
+  return { ...normalized, failure: "root" };
+}
+
+function addResultFailure(
+  failures: Array<{ code: number; command: string; killed: boolean }>,
+  execution: TemplateExecution,
+): void {
+  if (execution.result.code === 0) return;
+  const failure = {
+    code: execution.result.code,
+    command: execution.commands.at(-1) ?? "<template>",
+    killed: execution.result.killed,
+  };
+  const last = failures.at(-1);
+  if (
+    last?.code === failure.code &&
+    last.command === failure.command &&
+    last.killed === failure.killed
+  ) return;
+  failures.push(failure);
+}
+
+function mergeExecution(
+  target: TemplateExecution,
+  source: TemplateExecution,
+): void {
+  target.branches.push(...source.branches);
+  target.commands.push(...source.commands);
+  target.failures.push(...source.failures);
+}
+
 function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve) => {
     let timeoutId: NodeJS.Timeout | undefined;
@@ -181,6 +252,72 @@ function joinParallelStdout(branches: BranchReport[], results: ToolExecResult[])
     .join("\n");
 }
 
+async function executeRetriableTemplateConfig(
+  normalized: CommandTemplates.CommandTemplateObjectConfig,
+  inherited: Pick<CommandTemplates.CommandTemplateObjectConfig, "args" | "defaults">,
+  params: Record<string, unknown>,
+  exec: RegisteredToolExec,
+  cwd: string,
+  signal: AbortSignal | undefined,
+  stdin: string | undefined,
+  isRoot: boolean,
+): Promise<TemplateExecution> {
+  const maxAttempts = normalizeRetry(normalized.retry);
+  const attemptConfig = {
+    ...normalized,
+    delay: undefined,
+    recover: undefined,
+    retry: undefined,
+  };
+  const aggregate: TemplateExecution = {
+    branches: [],
+    commands: [],
+    failures: [],
+    result: { code: 1, killed: false, stderr: "", stdout: "" },
+  };
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const executed = await executeTemplateConfig(
+      attemptConfig,
+      inherited,
+      params,
+      exec,
+      cwd,
+      signal,
+      stdin,
+      isRoot,
+    );
+    mergeExecution(aggregate, executed);
+    aggregate.result = executed.result;
+    aggregate.criticalFailure = executed.criticalFailure;
+    aggregate.failureScope = executed.failureScope;
+    if (executed.result.code === 0) return aggregate;
+    addResultFailure(aggregate.failures, executed);
+    if (attempt === maxAttempts) return aggregate;
+    if (normalized.recover === undefined) continue;
+    const recovered = await executeTemplateConfig(
+      getRecoverConfig(normalized.recover),
+      inherited,
+      params,
+      exec,
+      cwd,
+      signal,
+      executed.result.stdout,
+      false,
+    );
+    mergeExecution(aggregate, recovered);
+    if (recovered.result.code === 0) continue;
+    addResultFailure(aggregate.failures, recovered);
+    aggregate.result = recovered.result;
+    aggregate.criticalFailure = recovered.criticalFailure;
+    aggregate.failureScope = maxFailureScope(
+      recovered.failureScope,
+      getFailureScope(normalized),
+    );
+    return aggregate;
+  }
+  return aggregate;
+}
+
 async function executeTemplateConfig(
   config: CommandTemplates.CommandTemplateConfig,
   inherited: Pick<CommandTemplates.CommandTemplateObjectConfig, "args" | "defaults">,
@@ -201,22 +338,41 @@ async function executeTemplateConfig(
       ? { defaults: mergeDefaults(inherited.defaults, normalized.defaults) }
       : {}),
   };
+  getFailureScope(normalized);
   if (normalized.repeat !== undefined) {
-    if (!Number.isInteger(normalized.repeat) || normalized.repeat < 1)
-      throw new Error("Command template repeat must be a positive integer.");
-    const repeatedSteps = Array.from({ length: normalized.repeat }, (_unused, index0) => {
+    const repeat = CommandTemplates.resolveCommandTemplateRepeat(
+      normalized.repeat,
+      { ...(context.defaults ?? {}), ...params },
+    );
+    if (repeat === undefined) throw new Error("Command template repeat could not be resolved.");
+    const repeatedSteps = Array.from({ length: repeat }, (_unused, index0) => {
       const { repeat: _repeat, ...rest } = normalized;
       return {
         ...rest,
         defaults: {
           ...(context.defaults ?? {}),
           ...(rest.defaults ?? {}),
-          ...CommandTemplates.getCommandTemplateRepeatDefaults(index0, normalized.repeat!),
+          ...CommandTemplates.getCommandTemplateRepeatDefaults(index0, repeat),
         },
       };
     });
     return executeTemplateConfig(
       { mode: normalized.mode ?? "sequence", template: repeatedSteps },
+      context,
+      params,
+      exec,
+      cwd,
+      signal,
+      stdin,
+      isRoot,
+    );
+  }
+  if (
+    normalized.retry !== undefined &&
+    (Array.isArray(normalized.template) || normalized.recover !== undefined)
+  ) {
+    return executeRetriableTemplateConfig(
+      normalized,
       context,
       params,
       exec,
@@ -238,7 +394,7 @@ async function executeTemplateConfig(
       cwd,
       signal,
       stdin,
-      timeout: normalized.timeout ?? TOOL_TIMEOUT_MS,
+      ...(normalized.timeout !== undefined ? { timeout: normalized.timeout } : {}),
       ...(normalized.retry !== undefined ? { retry: normalized.retry } : {}),
     });
     return { branches: [], commands: [invocation.command], failures: [], result };
@@ -261,43 +417,53 @@ async function executeTemplateConfig(
         item.result,
       ),
     );
-    const criticalFailure = branchResults.find(
-      (item, index) =>
-        item.result.code !== 0 &&
-        (item.criticalFailure ||
-          CommandTemplates.normalizeCommandTemplateConfig(
-            steps[index],
-          ).critical ||
-          normalized.critical),
-    );
-    if (criticalFailure) {
+    const nodeFailure = getFailureScope(normalized);
+    const rootFailure = branchResults.find((item, index) => {
+      if (item.result.code === 0) return false;
+      const branchFailure = maxFailureScope(
+        item.failureScope,
+        item.criticalFailure ? "root" : undefined,
+        getFailureScope(steps[index]),
+        nodeFailure,
+      );
+      return branchFailure === "root";
+    });
+    if (rootFailure) {
       return {
         branches: [...branchResults.flatMap((item) => item.branches), ...branches],
         commands,
         criticalFailure: true,
+        failureScope: "root",
         failures,
-        result: criticalFailure.result,
+        result: rootFailure.result,
       };
     }
+    const firstFailedBranch = branchResults.find((item) => item.result.code !== 0);
     const successful = branchResults.map((item) => {
       if (item.result.code === 0) return item.result;
-      failures.push({
-        code: item.result.code,
-        command: item.commands.at(-1) ?? "<template>",
-        killed: item.result.killed,
-      });
+      addResultFailure(failures, item);
       return { ...item.result, code: 0, stdout: "" };
     });
+    const result = {
+      code: 0,
+      killed: successful.some((item) => item.killed),
+      stderr: successful.map((item) => item.stderr).filter(Boolean).join("\n"),
+      stdout: joinParallelStdout(branches, successful),
+    };
+    if (firstFailedBranch && nodeFailure === "branch") {
+      return {
+        commands,
+        branches: [...branchResults.flatMap((item) => item.branches), ...branches],
+        failureScope: "branch",
+        failures,
+        result: { ...result, code: firstFailedBranch.result.code || 1 },
+      };
+    }
     return {
       commands,
       branches: [...branchResults.flatMap((item) => item.branches), ...branches],
       failures,
-      result: {
-        code: 0,
-        killed: successful.some((item) => item.killed),
-        stderr: successful.map((item) => item.stderr).filter(Boolean).join("\n"),
-        stdout: joinParallelStdout(branches, successful),
-      },
+      result,
     };
   }
   const branches: BranchReport[] = [];
@@ -320,27 +486,35 @@ async function executeTemplateConfig(
     commands.push(...executed.commands);
     failures.push(...executed.failures);
     result = executed.result;
-    const stepConfig = CommandTemplates.normalizeCommandTemplateConfig(step);
     if (result.code !== 0) {
-      if (
-        executed.criticalFailure ||
-        stepConfig.critical ||
-        normalized.critical ||
-        (isRoot && steps.length === 1)
-      ) {
+      const failureScope = maxFailureScope(
+        executed.failureScope,
+        executed.criticalFailure ? "root" : undefined,
+        getFailureScope(step),
+        getFailureScope(normalized),
+        isRoot && steps.length === 1 ? "root" : undefined,
+      );
+      if (failureScope === "root") {
         return {
           branches,
           commands,
-          criticalFailure: executed.criticalFailure || stepConfig.critical || normalized.critical,
+          criticalFailure: true,
+          failureScope: "root",
           failures,
           result,
         };
       }
-      failures.push({
-        code: result.code,
-        command: executed.commands.at(-1) ?? "<template>",
-        killed: result.killed,
-      });
+      if (failureScope === "branch") {
+        addResultFailure(failures, executed);
+        return {
+          branches,
+          commands,
+          failureScope: "branch",
+          failures,
+          result,
+        };
+      }
+      addResultFailure(failures, executed);
       result = { ...result, code: 0, stdout: "" };
       nextStdin = "";
       continue;
@@ -396,6 +570,7 @@ export async function executeRegisteredTool(
     throw new Error(formatted.text);
   }
   const formatted = formatOutput(cfg.name, "stdout", result.stdout);
+  const templateWarnings = CommandTemplates.getCommandTemplateWarnings(createTemplateConfig(cfg));
   return {
     content: [textContent(formatted.text)],
     details: {
@@ -411,6 +586,7 @@ export async function executeRegisteredTool(
         ? { softQuorum: createSoftQuorum(executed.branches) }
         : {}),
       template: cfg.template!,
+      ...(templateWarnings.length > 0 ? { templateWarnings } : {}),
       tool: cfg.name,
       truncated: formatted.truncated,
     },

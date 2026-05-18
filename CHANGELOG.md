@@ -4,6 +4,10 @@
 
 No unreleased changes.
 
+## 0.6.1: Pi SDK Scope Hotfix
+
+- `[Packaging]` Migrated the pi SDK peer dependency and extension type imports from the legacy `@mariozechner/pi-coding-agent` scope to `@earendil-works/pi-coding-agent`. Impact: package metadata matches the current Endrilla/Earendil pi package namespace.
+
 ## 0.6.0
 
 - `[Typed Args]` Added progressive typed command-template argument declarations for `string`, `path`, `int`, `number`, `bool`, and `enum(...)` compact forms in both `args` and inline template placeholders. Impact: registered tools can expose narrower generated schemas and validate/normalize runtime values without requiring JSON Schema authoring or separate `args` metadata for simple templates.
@@ -58,15 +62,15 @@ No unreleased changes.
 
 ## 0.4.0
 
-- `[Command Templates]` Prepared the 0.4.0 runtime profile for the current portable command-template contract: default 30s command timeout, per-step retry propagation, fail-open composition for non-critical failures, and `critical: true` abort semantics. Impact: registered auto-tools now behave like the reference command-template handler profile used by `pi-telegram`.
+- `[Command Templates]` Prepared the 0.4.0 runtime profile for the current portable command-template contract: default 30s command timeout, per-step retry propagation, fail-open composition for non-critical failures, and `critical: true` abort semantics. Impact: registered auto-tools now follow the portable command-template runtime profile.
 - `[Docs]` Cleaned the backlog and synchronized README plus command-template docs with the strengthened 0.4.0 contract. Impact: release notes, open work, and user-facing runtime semantics now describe the same behavior.
 
 ## 0.3.0
 
-- `[Architecture]` Renamed the command-template domain from `lib/templates.ts` to `lib/command-templates.ts`, made it byte-identical to the shared `pi-telegram` implementation, and moved auto-tools-specific arg/schema helpers into `lib/schema.ts`. Impact: the portable standard stays copyable while registry-specific schema derivation remains local.
-- `[Command Templates]` Migrated runtime helpers to the current shared command-template standard: string shorthand configs, inline `{arg=default}` defaults, derived tool args, missing-value errors, relative executable expansion, sequence expansion, direct execution with stdin, and timeout escalation. Impact: `pi-auto-tools` now matches the `pi-telegram` command-template regression surface, loads current inline-default `auto-tools.json` entries without `name`/`label`/`args`/`defaults`, and can run multi-step template-backed tools.
+- `[Architecture]` Renamed the command-template domain from `lib/templates.ts` to `lib/command-templates.ts` and moved auto-tools-specific arg/schema helpers into `lib/schema.ts`. Impact: the portable standard stays copyable while registry-specific schema derivation remains local.
+- `[Command Templates]` Migrated runtime helpers to the current shared command-template standard: string shorthand configs, inline `{arg=default}` defaults, derived tool args, missing-value errors, relative executable expansion, sequence expansion, direct execution with stdin, and timeout escalation. Impact: `pi-auto-tools` now follows the portable command-template regression surface, loads current inline-default `auto-tools.json` entries without `name`/`label`/`args`/`defaults`, and can run multi-step template-backed tools.
 - `[Registry]` Canonical persisted object entries now omit redundant `name` and `label`; object keys supply tool names, and runtime labels derive from tool names. Impact: `auto-tools.json` follows the command-template standard more closely while legacy `name`/`label` fields are accepted and normalized away.
-- `[Docs]` Harmonized the portable command-template standard wording with `pi-telegram`, using `template`/`args`/`defaults`, command-arg terminology, and `{file}` as the canonical local file path arg. Impact: both extensions now describe the same integration contract without `argv`, `command`, or `{filename}` ambiguity.
+- `[Docs]` Harmonized the portable command-template standard wording, using `template`/`args`/`defaults`, command-arg terminology, and `{file}` as the canonical local file path arg. Impact: the docs describe the integration contract without `argv`, `command`, or `{filename}` ambiguity.
 
 ## 0.2.1
 

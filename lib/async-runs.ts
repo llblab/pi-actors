@@ -26,7 +26,7 @@ import type {
   CommandTemplateValue,
 } from "./command-templates.ts";
 import { substituteCommandTemplateToken } from "./command-templates.ts";
-import { writeJsonAtomic } from "./config.ts";
+import { writeJsonAtomic } from "./file-state.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as Paths from "./paths.ts";
 

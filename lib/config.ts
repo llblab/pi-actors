@@ -1,19 +1,12 @@
 /**
  * Persistent tool registry config helpers
  * Zones: registry config, persistence, migration boundary
- * Owns auto-tools.json loading, normalization, legacy rejection, serialization, and atomic writes
+ * Owns auto-tools.json loading, normalization, legacy rejection, and serialization
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 
+import { writeJsonAtomic } from "./file-state.ts";
 import { normalizeToolName } from "./identity.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import * as RecipeReferences from "./recipe-references.ts";
@@ -59,22 +52,6 @@ export function serializeTools(
     result[name] = entry;
   }
   return result;
-}
-
-export function writeJsonAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-    renameSync(tempPath, path);
-  } catch (error) {
-    try {
-      unlinkSync(tempPath);
-    } catch {
-      /* best effort */
-    }
-    throw error;
-  }
 }
 
 export function saveTools(

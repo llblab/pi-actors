@@ -21,7 +21,7 @@ if (!stateDir) {
 }
 const { executeRegisteredTool } = await import("../lib/execution.ts");
 const { execCommandTemplate } = await import("../lib/command-templates.ts");
-const { writeJsonAtomic } = await import("../lib/config.ts");
+const { writeJsonAtomic } = await import("../lib/file-state.ts");
 const runPath = join(stateDir, "run.json");
 const progressPath = join(stateDir, "progress.json");
 const resultPath = join(stateDir, "result.json");

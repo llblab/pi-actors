@@ -1,0 +1,15 @@
+{
+  "name": "subagent-followup",
+  "async": true,
+  "args": [
+    "checkpoint:string",
+    "reply:string",
+    "mode:enum(same-context,degraded-new-branch)",
+    "model:string"
+  ],
+  "defaults": {
+    "mode": "degraded-new-branch",
+    "model": "openai-codex/gpt-5.5"
+  },
+  "template": "pi -p --model {model} --no-tools Continue from checkpoint using mode {mode}. Checkpoint: {checkpoint}. Coordinator reply: {reply}. If mode is degraded-new-branch, state what continuity was lost."
+}

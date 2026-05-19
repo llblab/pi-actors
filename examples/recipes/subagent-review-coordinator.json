@@ -1,0 +1,64 @@
+{
+  "name": "subagent-review-coordinator",
+  "async": true,
+  "imports": {
+    "reviewer": "subagent-review.json",
+    "verifier": "subagent-verify.json",
+    "merger": "subagent-merge.json",
+    "normalizer": "subagent-normalize.json"
+  },
+  "args": [
+    "scope:string",
+    "lenses:array",
+    "claim:string",
+    "model:string"
+  ],
+  "defaults": {
+    "lenses": [
+      "correctness",
+      "architecture",
+      "operator UX"
+    ],
+    "claim": "The reviewed scope is ready for the next implementation or release step.",
+    "model": "openai-codex/gpt-5.5"
+  },
+  "template": [
+    {
+      "mode": "parallel",
+      "repeat": "{lenses.length}",
+      "failure": "branch",
+      "template": {
+        "name": "reviewer",
+        "values": {
+          "scope": "{scope}",
+          "lens": "{lenses[index]}",
+          "model": "{model}"
+        }
+      }
+    },
+    {
+      "name": "verifier",
+      "values": {
+        "claim": "{claim}",
+        "evidence": "Use the previous reviewer outputs from stdin and the named scope: {scope}.",
+        "model": "{model}"
+      }
+    },
+    {
+      "name": "merger",
+      "values": {
+        "inputs": "Use the previous reviewer and verifier outputs from stdin.",
+        "mode": "consensus-first",
+        "model": "{model}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use the merged output from stdin.",
+        "format": "Markdown sections: Summary, Consensus Findings, Minority Findings, Verification, Risks, Next Actions.",
+        "model": "{model}"
+      }
+    }
+  ]
+}

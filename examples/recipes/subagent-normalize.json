@@ -1,0 +1,14 @@
+{
+  "name": "subagent-normalize",
+  "async": true,
+  "args": [
+    "input:string",
+    "format:string",
+    "model:string"
+  ],
+  "defaults": {
+    "format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
+    "model": "openai-codex/gpt-5.5"
+  },
+  "template": "pi -p --model {model} --no-tools Normalize this subagent output without changing its meaning. Target format: {format}. Input: {input}"
+}

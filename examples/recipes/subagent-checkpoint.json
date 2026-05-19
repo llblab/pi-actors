@@ -1,0 +1,15 @@
+{
+  "name": "subagent-checkpoint",
+  "async": true,
+  "args": [
+    "state:string",
+    "question:string",
+    "options:string",
+    "model:string"
+  ],
+  "defaults": {
+    "options": "List options considered, recommendation, and risk if the coordinator does not answer.",
+    "model": "openai-codex/gpt-5.5"
+  },
+  "template": "pi -p --model {model} --no-tools Create a bounded coordinator checkpoint. State to preserve: {state}. Question: {question}. Options/risk format: {options}"
+}

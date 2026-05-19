@@ -1,0 +1,14 @@
+{
+  "name": "subagent-merge",
+  "async": true,
+  "args": [
+    "inputs:string",
+    "mode:enum(consensus-first,risk-first)",
+    "model:string"
+  ],
+  "defaults": {
+    "mode": "consensus-first",
+    "model": "openai-codex/gpt-5.5"
+  },
+  "template": "pi -p --model {model} --no-tools Merge these subagent outputs using mode {mode}: {inputs}. Preserve evidence, vote shape, minority findings, and mark merger-added claims explicitly."
+}

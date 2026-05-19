@@ -1,0 +1,28 @@
+{
+  "name": "subagent-quorum",
+  "async": true,
+  "imports": {
+    "subagent": "subagent-prompt.json"
+  },
+  "args": [
+    "prompt:string",
+    "models:array"
+  ],
+  "defaults": {
+    "models": [
+      "openai-codex/gpt-5.5",
+      "openai-codex/gpt-5.4",
+      "deepseek/deepseek-v4-flash"
+    ]
+  },
+  "repeat": "{models.length}",
+  "mode": "parallel",
+  "failure": "branch",
+  "template": {
+    "name": "subagent",
+    "values": {
+      "prompt": "{prompt}",
+      "model": "{models[index]}"
+    }
+  }
+}

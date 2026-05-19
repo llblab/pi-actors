@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-No unreleased changes.
+- `[Component Recipes]` Added `docs/component-recipes.md`, seed subagent component examples for review, verification, merge, quorum, checkpoint, follow-up, normalization, and one composed review coordinator. Impact: pi-auto-tools now has an explicit weak component-recipe contract for composing higher-level subagent coordinators without introducing a monolithic swarm DSL.
+- `[Template Recipes]` Allowed recipe-envelope sequence templates to contain recipe import nodes and added packaged-example import resolution coverage. Impact: composed recipes can keep public args/defaults at the recipe envelope while sequencing imported component recipes.
 
 ## 0.7.0: Command Template Checkpoints
 

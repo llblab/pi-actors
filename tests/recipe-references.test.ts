@@ -4,12 +4,15 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { readResolvedRecipeConfig } from "../lib/recipe-references.ts";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 test("Template recipes embed imported recipes as pipeline nodes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
@@ -118,6 +121,18 @@ test("Template recipes reference imported defaults and explicit values", async (
     });
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Packaged example recipes parse and resolve imports", async () => {
+  const recipeDir = join(__dirname, "..", "examples", "recipes");
+  const files = (await readdir(recipeDir)).filter((file) => file.endsWith(".json"));
+
+  assert.ok(files.length > 0);
+  for (const file of files) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    assert.ok(config, `${file} should resolve`);
+    assert.ok(config.template, `${file} should define a template`);
   }
 });
 

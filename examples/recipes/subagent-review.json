@@ -1,0 +1,16 @@
+{
+  "name": "subagent-review",
+  "async": true,
+  "args": [
+    "scope:string",
+    "lens:string",
+    "instructions:string",
+    "model:string"
+  ],
+  "defaults": {
+    "lens": "evidence-grounded review",
+    "instructions": "Return findings with evidence, risk, and recommended next action.",
+    "model": "openai-codex/gpt-5.5"
+  },
+  "template": "pi -p --model {model} --no-tools Review {scope} through this lens: {lens}. Instructions: {instructions}"
+}

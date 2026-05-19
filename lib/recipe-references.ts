@@ -90,17 +90,30 @@ function isImportNode(value: unknown): boolean {
   return typeof value.name === "string";
 }
 
+function isValidRecipeTemplateNode(value: unknown): boolean {
+  if (isImportNode(value)) return true;
+  if (isRecord(value)) {
+    if (isImportNode(value.template)) return true;
+    if (Array.isArray(value.template)) return isValidRecipeTemplateArray(value.template);
+  }
+  return CommandTemplates.expandCommandTemplateConfigs(value as CommandTemplateConfig).length > 0;
+}
+
+function isValidRecipeTemplateArray(value: unknown[]): boolean {
+  return value.length > 0 && value.every((item) => isValidRecipeTemplateNode(item));
+}
+
 function normalizeRecipeTemplate(value: unknown): CommandTemplateValue | undefined {
   if (typeof value === "string") return value.trim() || undefined;
   if (Array.isArray(value)) {
     const template = value as CommandTemplateConfig[];
-    return template.length > 0 && template.every((item) => isImportNode(item) || CommandTemplates.expandCommandTemplateConfigs(item).length > 0)
-      ? template
-      : undefined;
+    return isValidRecipeTemplateArray(template) ? template : undefined;
   }
   if (isImportNode(value)) return value as CommandTemplates.CommandTemplateObjectConfig;
   if (value && typeof value === "object") {
     const template = value as CommandTemplates.CommandTemplateObjectConfig;
+    if (Array.isArray(template.template) && isValidRecipeTemplateArray(template.template)) return template;
+    if (isImportNode(template.template)) return template;
     return CommandTemplates.expandCommandTemplateConfigs(template).length > 0
       ? template
       : undefined;

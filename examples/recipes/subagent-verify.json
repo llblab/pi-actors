@@ -1,0 +1,13 @@
+{
+  "name": "subagent-verify",
+  "async": true,
+  "args": [
+    "claim:string",
+    "evidence:string",
+    "model:string"
+  ],
+  "defaults": {
+    "model": "openai-codex/gpt-5.5"
+  },
+  "template": "pi -p --model {model} --no-tools Verify this claim against the provided evidence. Claim: {claim}. Evidence or artifact paths: {evidence}. Return proven, disproven, unknown, and missing evidence."
+}

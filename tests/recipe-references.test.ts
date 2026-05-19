@@ -185,6 +185,15 @@ test("Packaged library recipes parse and resolve imports", async () => {
   }
 });
 
+test("Packaged actor event recipes expose envelope-aligned type args", () => {
+  const recipeDir = join(__dirname, "..", "recipes");
+  for (const file of ["subagent-event.json", "utility-actor-message.json"]) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    assert.ok(config?.args?.includes("type:string"), `${file} should expose type:string`);
+    assert.ok(!config?.args?.some((arg) => arg.startsWith("event_type")), `${file} should not expose event_type`);
+  }
+});
+
 test("Packaged async recipes declare mailbox metadata", async () => {
   const recipeDir = join(__dirname, "..", "recipes");
   const files = (await readdir(recipeDir)).filter((file) =>

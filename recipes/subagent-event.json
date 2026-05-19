@@ -2,7 +2,7 @@
   "name": "subagent-event",
   "async": true,
   "args": [
-    "event_type:string",
+    "type:string",
     "payload:string",
     "delivery:enum(log,notify,followup)",
     "to:string",
@@ -14,7 +14,7 @@
     "tools:string"
   ],
   "defaults": {
-    "event_type": "component.update",
+    "type": "component.update",
     "delivery": "log",
     "to": "coordinator",
     "from": "run:{run_id}",
@@ -27,5 +27,5 @@
   "mailbox": {
     "emits": ["event.*"]
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create an actor-message envelope-shaped event record. To: {to}. From: {from}. Event/type: {event_type}. Delivery: {delivery}. Event policy: {event_policy}. Payload/body: {payload}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create an actor-message envelope-shaped event record. To: {to}. From: {from}. Type/event: {type}. Delivery: {delivery}. Event policy: {event_policy}. Payload/body: {payload}. Output format: {output_format}"
 }

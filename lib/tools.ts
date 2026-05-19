@@ -190,6 +190,8 @@ function compactActorMessageResult(
   if (result.bytes !== undefined) tokens.push(`bytes=${String(result.bytes)}`);
   if (result.control) tokens.push(`control=${String(result.control)}`);
   if (result.outbox) tokens.push(`outbox=${String(result.outbox)}`);
+  if (result.tool) tokens.push(`tool=${String(result.tool)}`);
+  if (result.invoked === true) tokens.push("invoked=true");
   return `\n${tokens.join(" ")}`;
 }
 
@@ -272,6 +274,14 @@ function messageBodyToRunLine(message: ActorMessages.ActorMessage): string {
   if (typeof message.body === "string") return message.body;
   if (message.body === undefined) return message.type;
   return JSON.stringify(message.body);
+}
+
+function messageBodyToToolParams(message: ActorMessages.ActorMessage): Record<string, unknown> {
+  if (message.body && typeof message.body === "object" && !Array.isArray(message.body)) {
+    return message.body as Record<string, unknown>;
+  }
+  if (message.body === undefined) return {};
+  return { input: message.body };
 }
 
 function runIdFromActorAddress(address: string | undefined): string | undefined {
@@ -456,12 +466,18 @@ export function createInspectToolDefinition(): any {
   };
 }
 
-export function createActorMessageToolDefinition(): any {
+export interface ActorMessageToolDeps<TContext = unknown> {
+  getTool?: (name: string) => any | undefined;
+}
+
+export function createActorMessageToolDefinition<TContext = unknown>(
+  deps: ActorMessageToolDeps<TContext> = {},
+): any {
   return {
     name: "message",
     label: "Message",
     description:
-      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, and coordinator outbox events.",
+      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator outbox events.",
     parameters: objectSchema(
       {
         body: unionSchema([
@@ -486,7 +502,7 @@ export function createActorMessageToolDefinition(): any {
       params: unknown,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
-      _ctx: unknown,
+      ctx: TContext,
     ) {
       const input = asRecord(params);
       const message = ActorMessages.normalizeActorMessage(input);
@@ -502,6 +518,24 @@ export function createActorMessageToolDefinition(): any {
           address.value,
           JSON.stringify(message),
         );
+      } else if (address.kind === "tool" && address.value) {
+        const tool = deps.getTool?.(address.value);
+        if (!tool || typeof tool.execute !== "function") {
+          throw new Error(`tool actor not found or not executable: ${address.value}`);
+        }
+        const toolResult = await tool.execute(
+          `message:${message.type}`,
+          messageBodyToToolParams(message),
+          _signal,
+          _onUpdate,
+          ctx,
+        );
+        result = {
+          invoked: true,
+          sent: true,
+          tool: address.value,
+          tool_result: toolResult,
+        };
       } else if (address.kind === "coordinator") {
         if (!message.from) {
           throw new Error("message to coordinator requires from=run:<id>.");
@@ -523,7 +557,7 @@ export function createActorMessageToolDefinition(): any {
         });
       } else {
         throw new Error(
-          `message currently supports run:<id>, branch:<run>/<branch>, and coordinator destinations; unsupported destination: ${message.to}`,
+          `message currently supports run:<id>, branch:<run>/<branch>, tool:<name>, and coordinator destinations; unsupported destination: ${message.to}`,
         );
       }
       return {

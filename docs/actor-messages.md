@@ -74,6 +74,7 @@ run -> coordinator
 run -> run
 parent -> branch
 branch -> parent
+coordinator -> tool
 ```
 
 Transports differ, but the public contract does not:
@@ -81,6 +82,7 @@ Transports differ, but the public contract does not:
 - `to: run:<id>` may route to FIFO, mailbox file, socket, or process stdin.
 - `to: coordinator` routes to outbox/watch/follow-up delivery when `from` names a run actor. Generic async-runner `command.done` events and explicit coordinator-bound messages include the actor envelope fields alongside the runtime event fields.
 - `to: branch:<run>/<branch>` routes through the parent run mailbox with the full envelope preserved so the run can dispatch branch-local control.
+- `to: tool:<name>` invokes an executable pi tool by name. Object bodies become tool parameters; primitive bodies are passed as `{ "input": body }`.
 
 Transport is not public API unless a recipe explicitly documents a custom endpoint.
 
@@ -140,6 +142,7 @@ Low-level runtime operations map onto the actor/message vocabulary:
 async_run action=start  -> spawn
 async_run action=send   -> message to run:<id>
 outbox append           -> message to coordinator
+tool execution          -> message to tool:<name>
 async_run action=status -> inspect view=status
 async_run action=tail   -> inspect view=tail
 async_run action=events -> inspect view=events

@@ -142,6 +142,47 @@ test(
   },
 );
 
+test("Actor message tool routes tool actors to executable tools", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const definition = createActorMessageToolDefinition({
+    getTool: (name) =>
+      name === "echo"
+        ? {
+            execute: async (
+              toolCallId: string,
+              params: unknown,
+              _signal: AbortSignal | undefined,
+              _onUpdate: unknown,
+              ctx: unknown,
+            ) => {
+              calls.push({ ctx, params, toolCallId });
+              return { content: [{ type: "text" as const, text: "\nok" }], details: params };
+            },
+          }
+        : undefined,
+  });
+  const ctx = { cwd: process.cwd() };
+  const result = await definition.execute(
+    "call-tool-message",
+    {
+      body: { text: "hello" },
+      to: "tool:echo",
+      type: "tool.call",
+    },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.match(result.content[0].text, /to=tool:echo/);
+  assert.match(result.content[0].text, /tool=echo/);
+  assert.match(result.content[0].text, /invoked=true/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].toolCallId, "message:tool.call");
+  assert.deepEqual(calls[0].params, { text: "hello" });
+  assert.equal(calls[0].ctx, ctx);
+  assert.equal(result.details.result.tool, "echo");
+});
+
 test("Actor message tool routes coordinator messages through run outboxes", async () => {
   const definition = createActorMessageToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-message-"));

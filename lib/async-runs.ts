@@ -540,17 +540,18 @@ export function appendRunOutboxEvent(
   const stateDir = String(status.state_dir);
   const run = String(status.run ?? runOrDir);
   const type = event.type || event.event || "run.message";
+  const to = event.to || "coordinator";
   const payload = {
     ...(event.body !== undefined ? { body: event.body } : {}),
     ...(event.correlation_id ? { correlation_id: event.correlation_id } : {}),
     ...(event.data !== undefined ? { data: event.data } : {}),
-    delivery: normalizeRunOutboxDelivery(event.delivery),
+    delivery: normalizeRunOutboxDelivery(event.delivery ?? (to === "coordinator" ? "followup" : "log")),
     event: type,
     from: event.from || `run:${run}`,
     level: normalizeRunOutboxLevel(event.level),
     ...(event.reply_to ? { reply_to: event.reply_to } : {}),
     summary: event.summary || type,
-    to: event.to || "coordinator",
+    to,
     ts: new Date().toISOString(),
     type,
   };

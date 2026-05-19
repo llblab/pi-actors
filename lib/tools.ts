@@ -482,7 +482,6 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           arraySchema("Structured JSON message body array."),
         ]),
         correlation_id: stringSchema("Optional correlation id for workflow/task linkage."),
-        delivery: stringSchema("Optional delivery hint: direct, log, notify, or followup."),
         from: stringSchema("Optional sender address, such as coordinator or run:<id>."),
         metadata: looseObjectSchema("Optional structured metadata for routing or domain hints."),
         reply_to: stringSchema("Optional message id this message replies to."),
@@ -543,7 +542,6 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         result = AsyncRuns.appendRunOutboxEvent(sender.value, {
           body: message.body,
           correlation_id: message.correlation_id,
-          delivery: message.delivery,
           event: message.type,
           from: message.from,
           reply_to: message.reply_to,

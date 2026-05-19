@@ -512,14 +512,14 @@ export function formatRunTransitionMessage(transition: RunTransition): string {
   const artifacts = formatNamedArtifacts(transition.artifacts);
   const runFiles = formatRunFileList(getRunArtifacts(transition));
   if (transition.to === "done")
-    return `Run ${transition.run} completed successfully.${artifacts}${runFiles}\nUse async_run action=status or action=tail if the result needs inspection.`;
+    return `Run ${transition.run} completed successfully.${artifacts}${runFiles}\nUse inspect target=run:${transition.run} view=status or view=tail if the result needs inspection.`;
   if (transition.to === "failed")
-    return `Run ${transition.run} failed.${artifacts}${runFiles}\nUse async_run action=status or action=tail for details.`;
+    return `Run ${transition.run} failed.${artifacts}${runFiles}\nUse inspect target=run:${transition.run} view=status or view=tail for details.`;
   if (transition.to === "cancelled")
-    return `Run ${transition.run} was cancelled. Use async_run action=status or action=tail if analysis is needed.`;
+    return `Run ${transition.run} was cancelled. Use inspect target=run:${transition.run} view=status or view=tail if analysis is needed.`;
   if (transition.to === "killed")
-    return `Run ${transition.run} was force-killed. Use async_run action=status or action=tail if analysis is needed.`;
+    return `Run ${transition.run} was force-killed. Use inspect target=run:${transition.run} view=status or view=tail if analysis is needed.`;
   if (transition.to === "exited")
-    return `Run ${transition.run} exited before writing a result. Use async_run action=status or action=tail if analysis is needed.`;
-  return `Run ${transition.run} finished with status ${transition.to}. Use async_run action=status or action=tail if analysis is needed.`;
+    return `Run ${transition.run} exited before writing a result. Use inspect target=run:${transition.run} view=status or view=tail if analysis is needed.`;
+  return `Run ${transition.run} finished with status ${transition.to}. Use inspect target=run:${transition.run} view=status or view=tail if analysis is needed.`;
 }

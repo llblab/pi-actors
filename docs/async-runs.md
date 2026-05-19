@@ -321,7 +321,7 @@ Coordinator responsibilities stay outside the async runtime:
 - Partition backlog tasks by stable task IDs and non-overlapping mutation zones.
 - Write scope files before starting the run.
 - Pass scope paths and branch names as values.
-- Inspect `async_run action=status` and `async_run action=tail` after terminal events.
+- Use `inspect target=run:<id> view=status` or `view=tail` after terminal events.
 - Treat pushed branches as artifacts for review, not as automatic merges.
 - Record failed scopes back into the backlog.
 

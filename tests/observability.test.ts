@@ -123,7 +123,7 @@ test("Run observability detects script-authored outbox events", async () => {
     await writeRun(root, "music", "running", [], 0, "session-a");
     await writeFile(
       join(root, "music", "outbox.jsonl"),
-      `${JSON.stringify({ event: "player.track", summary: "Now playing: track.flac", delivery: "followup", level: "info", data: { index: 3, artifacts: { report: join(root, "music", "report.md") }, run_files: [join(root, "music", "stdout.log")] } })}\n`,
+      `${JSON.stringify({ event: "player.track", summary: "Now playing: track.flac", delivery: "followup", level: "info", body: { question: "Continue playback?" }, metadata: { source: "player" }, data: { index: 3, artifacts: { report: join(root, "music", "report.md") }, run_files: [join(root, "music", "stdout.log")] } })}\n`,
     );
     const summary = summarizeRuns(root, "session-a");
     const previous = new Map<string, number>();
@@ -131,9 +131,11 @@ test("Run observability detects script-authored outbox events", async () => {
     assert.equal(events.length, 1);
     assert.equal(events[0].event, "player.track");
     assert.equal(events[0].summary, "Now playing: track.flac");
+    assert.deepEqual(events[0].body, { question: "Continue playback?" });
+    assert.deepEqual(events[0].metadata, { source: "player" });
     assert.equal(
       formatRunOutboxMessage(events[0]),
-      `Run music: Now playing: track.flac\nArtifacts:\n- Base: \`${join(root, "music")}\`\n- Files: \`report.md\`\nRun files:\n- Base: \`${join(root, "music")}\`\n- Files: \`stdout.log\``,
+      `Run music: Now playing: track.flac\nBody: {"question":"Continue playback?"}\nArtifacts:\n- Base: \`${join(root, "music")}\`\n- Files: \`report.md\`\nRun files:\n- Base: \`${join(root, "music")}\`\n- Files: \`stdout.log\``,
     );
     assert.equal(getRunOutboxNotificationType(events[0]), "info");
     assert.equal(shouldNotifyRunOutboxEvent(events[0]), true);

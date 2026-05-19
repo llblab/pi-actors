@@ -4,11 +4,11 @@
  * Owns stdout/stderr failure formatting, tail truncation, and full-output temp-file persistence
  */
 
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { sanitizeFilePart } from "./identity.ts";
+import * as Paths from "./paths.ts";
 
 export interface FormattedOutput {
   text: string;
@@ -25,7 +25,9 @@ export function writeFullOutput(
   content: string,
 ): string | undefined {
   try {
-    const dir = mkdtempSync(join(tmpdir(), "pi-actors-"));
+    const outputRoot = join(Paths.getExtensionTmpDir(), "outputs");
+    mkdirSync(outputRoot, { recursive: true });
+    const dir = mkdtempSync(join(outputRoot, "tool-output-"));
     const filePath = join(
       dir,
       `${sanitizeFilePart(toolName)}-${sanitizeFilePart(stream)}.txt`,

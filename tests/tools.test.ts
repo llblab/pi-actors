@@ -201,6 +201,7 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
       {
         body: { ready: true },
         from: "run:sender",
+        metadata: { checkpoint: "ready" },
         summary: "Ready",
         to: "coordinator",
         type: "checkpoint.ready",
@@ -217,6 +218,7 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
     assert.equal(event.type, "checkpoint.ready");
     assert.equal(event.delivery, "followup");
     assert.deepEqual(event.body, { ready: true });
+    assert.deepEqual(event.metadata, { checkpoint: "ready" });
     await waitForFile(join(stateDir, "result.json"));
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });

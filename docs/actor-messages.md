@@ -98,7 +98,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. Packaged interactive and message-producing recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Message-producing recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so message shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
+`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. Packaged interactive and message-producing recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Message-producing recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Coordinator follow-ups preserve bounded body previews and metadata so checkpoints do not lose their actionable payload. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so message shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
 
 ## Spawn
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.12.9: Actor Runtime Hotfix
+
+- `[Async Runs]` Protected the `runs` state root from session-start temp pruning, tightened live-run status around owned runner processes, and kept non-Linux FIFO control usable without `/proc`-only checks. Impact: long-lived actors are less likely to disappear or be misclassified during startup and stale PID reuse is reduced on Linux.
+- `[Actor Messages]` Preserved coordinator-bound actor message `body` and `metadata` through outbox parsing and follow-up formatting, with bounded body previews. Impact: checkpoint and decision messages reach the coordinator with the useful payload instead of only the summary line.
+- `[Observability]` Reduced generic `command.done` follow-up noise by keeping successful final leaf completions diagnostic while still bubbling failures and in-flight parallel branch completions. Impact: long sequential pipelines no longer flood the launching coordinator with low-value leaf-completion messages.
+- `[Output]` Moved truncated full-output files under `~/.pi/agent/tmp/pi-actors/outputs`. Impact: oversized tool output now follows the extension temp-directory contract instead of using system temp.
+
 ## 0.12.8: Usage Hint Documentation
 
 - `[Docs]` Documented runtime actor-tool argument usage hints in README and tool-registry docs, and covered missing template-value hints separately from typed value errors. Impact: users and agents can discover the self-correction behavior without reading tests.

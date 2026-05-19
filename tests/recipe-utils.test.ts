@@ -124,7 +124,7 @@ test("recipe-utils actor-message rejects invalid envelopes", () => {
   assert.match(result.stderr, /Invalid actor message type/);
 });
 
-test("recipe-utils run-ops-snapshot combines runs, events, and recommendations", async () => {
+test("recipe-utils run-ops-snapshot combines runs, messages, and recommendations", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     await writeRun(root, "active", "running");
@@ -134,7 +134,7 @@ test("recipe-utils run-ops-snapshot combines runs, events, and recommendations",
     const { stdout } = await execFileAsync(script, ["run-ops-snapshot", root, eventFile, "5", "1"]);
     const snapshot = JSON.parse(stdout);
     assert.equal(snapshot.runs.length, 2);
-    assert.equal(snapshot.events[0].event, "demo");
+    assert.equal(snapshot.messages[0].event, "demo");
     assert.equal(
       snapshot.recommendations.some(
         (item: { suggested_message?: Record<string, unknown> }) =>

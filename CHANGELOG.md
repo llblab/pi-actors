@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.13.3: Actor Vocabulary Cleanup
+
+- `[Docs]` Removed remaining public FIFO/outbox phrasing from actor-message/template-recipe docs and runtime prompt guidance. Impact: agent and operator guidance now consistently describes `spawn`, `message`, and `inspect` without transport-specific vocabulary.
+- `[Recipe Library]` Removed the legacy `event_file` default from async-run operations recipes. Impact: the recipe surface now uses only `message_file` for run actor-message inputs.
+
+## 0.13.2: Async Run Actor Vocabulary Docs
+
+- `[Docs]` Reframed `docs/async-runs.md` around actor messages and run-local control channels, keeping file names and transport details in implementation sections. Impact: the async-run standard now separates public `spawn`/`message`/`inspect` behavior from storage/transport mechanics more clearly.
+
+## 0.13.1: Public Actor Vocabulary Docs
+
+- `[Docs]` Replaced remaining public README and recipe-library wording that described run coordination as events, FIFO, or outbox paths with actor-message and run-local control-channel terminology. Impact: operator-facing docs now teach the actor vocabulary first while keeping transport details in the async-run implementation reference.
+
+## 0.13.0: Actor-Native Control Surface
+
+- `[Actor Messages]` Removed `runtime.cancel` and `runtime.kill` termination aliases from `message to=run:<id>`. Impact: run termination now uses only actor-native `control.stop`, `control.cancel`, and `control.kill`; runtime-prefixed control names are no longer treated as public API.
+
+## 0.12.15: Run Operations Message File Vocabulary
+
+- `[Recipe Library]` Renamed async-run operations recipe inputs from `event_file` to `message_file`, with legacy `event_file` retained only as an internal default fallback. Impact: public recipe args align with the actor-message vocabulary while existing value-based launches can still supply the old key.
+- `[Recipe Utilities]` Renamed `run-ops-snapshot` output from `events` to `messages`. Impact: operations reports now describe run outbox records as actor messages instead of runtime events.
+
+## 0.12.14: Actor Message Inspection Alias
+
+- `[Actor Messages]` Added `inspect view=messages` for run actors, with `events` retained as a compatibility alias for the same outbox-backed actor messages. Impact: the public inspection vocabulary now matches the actor/message model while preserving existing event-oriented diagnostics.
+
 ## 0.12.13: Structured Run Operations Recommendations
 
 - `[Recipe Utilities]` Changed `utility-run-ops-snapshot` recommendations from shell-like suggestion strings to structured `message` and `inspect` call objects. Impact: async-run operations reports now preserve the actor API shape directly and avoid reintroducing command-string parsing into coordinator handoffs.

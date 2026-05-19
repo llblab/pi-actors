@@ -35,7 +35,7 @@ Template-recipe standard owns:
 Template-recipe standard does not own:
 
 - How command-template nodes execute internally.
-- Async state files, logs, FIFO, status, cancellation, or observability.
+- Async state files, logs, run-local transports, status, cancellation, or observability.
 - Tool registry naming, button UX, package installation, or operator-specific policy.
 - Domain workflows such as swarm quorum, release policy, backlog parsing, or merge policy.
 
@@ -86,7 +86,7 @@ Use recipe-level `artifacts` to declare stable artifact names and paths for the 
 }
 ```
 
-`output` and `artifacts` are intentionally different. `output` is the command-template primary result selector and defaults to stdout; it participates in sequence/stdin flow. `artifacts` is recipe metadata: an ordered named artifact manifest for humans, async completion events, and downstream tooling. `stdout` remains the default command result channel and is not renamed by `artifacts`.
+`output` and `artifacts` are intentionally different. `output` is the command-template primary result selector and defaults to stdout; it participates in sequence/stdin flow. `artifacts` is recipe metadata: an ordered named artifact manifest for humans, async completion messages, and downstream tooling. `stdout` remains the default command result channel and is not renamed by `artifacts`.
 
 ## Mailbox
 
@@ -101,7 +101,7 @@ Use recipe-level `mailbox` to document the semantic messages a recipe actor acce
 }
 ```
 
-`mailbox` is contract metadata, not transport configuration. It should name semantic message types, not FIFO commands, file paths, or CLI fragments.
+`mailbox` is contract metadata, not transport configuration. It should name semantic message types, not transport commands, file paths, or CLI fragments.
 
 ## Actor Message Delivery
 

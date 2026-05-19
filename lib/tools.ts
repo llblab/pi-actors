@@ -430,7 +430,7 @@ export function createInspectToolDefinition<TContext = unknown>(
         status: stringSchema("Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited."),
         target: stringSchema("Actor address to inspect, e.g. run:<id>, coordinator, session:<id>, session:all, or tool:<name>."),
         verbose: booleanSchema("Return full JSON instead of compact text where available."),
-        view: stringSchema("Inspection view: status, tail, events, artifacts, files, or mailbox."),
+        view: stringSchema("Inspection view: status, tail, messages, events, artifacts, files, or mailbox."),
       },
       ["target", "view"],
     ),
@@ -522,17 +522,18 @@ export function createInspectToolDefinition<TContext = unknown>(
           const text = AsyncRuns.tailRun(runId, Number(input.lines || 40));
           return { content: [{ type: "text" as const, text: `\n${text}` }], details: {} };
         }
+        case "messages":
         case "events": {
           assertRunAccessibleToContext(runId, ctx);
-          const events = AsyncRuns.readRunEvents(runId, Number(input.lines || 40));
+          const messages = AsyncRuns.readRunEvents(runId, Number(input.lines || 40));
           return {
             content: [
               {
                 type: "text" as const,
-                text: maybeJsonText(events, input.verbose === true, compactRunEvents(events)),
+                text: maybeJsonText(messages, input.verbose === true, compactRunEvents(messages)),
               },
             ],
-            details: { events },
+            details: { messages, events: messages },
           };
         }
         case "artifacts":
@@ -562,7 +563,7 @@ export function createInspectToolDefinition<TContext = unknown>(
           };
         }
         default:
-          throw new Error("inspect view must be one of: status, tail, events, artifacts, files, mailbox.");
+          throw new Error("inspect view must be one of: status, tail, messages, events, artifacts, files, mailbox.");
       }
     },
   };
@@ -611,9 +612,9 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       let result: Record<string, unknown>;
       if (address.kind === "run" && address.value) {
         assertRunAccessibleToContext(address.value, ctx);
-        if (message.type === "control.stop" || message.type === "control.cancel" || message.type === "runtime.cancel") {
+        if (message.type === "control.stop" || message.type === "control.cancel") {
           result = AsyncRuns.cancelRun(address.value);
-        } else if (message.type === "control.kill" || message.type === "runtime.kill") {
+        } else if (message.type === "control.kill") {
           result = AsyncRuns.killRun(address.value);
         } else {
           result = AsyncRuns.sendRunMessage(

@@ -84,6 +84,7 @@ test("Inspect tool definition exposes intentional observation schema", () => {
   assert.equal(properties.view.type, "string");
   assert.equal(properties.lines.type, "string");
   assert.equal(properties.status.type, "string");
+  assert.match(properties.view.description, /messages/);
 });
 
 test("Actor message tool definition exposes concentrated message schema", () => {
@@ -570,6 +571,34 @@ test("Inspect tool rejects run views across session ownership", async () => {
   }
 });
 
+test("Inspect tool reads run actor messages", async () => {
+  const definition = createInspectToolDefinition();
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: `messages-${Date.now()}`,
+        template: `${process.execPath} -e "console.log('done')"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await waitForFile(join(stateDir, "result.json"));
+    const result = await definition.execute(
+      "call-inspect-messages",
+      { target: `run:${meta.run}`, view: "messages", verbose: true },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /command\.done/);
+    assert.equal(result.details.messages[0].type, "command.done");
+    assert.equal(result.details.events[0].type, "command.done");
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Inspect tool reads run mailbox metadata", async () => {
   const definition = createInspectToolDefinition();
   let stateDir = "";
@@ -644,6 +673,43 @@ test("Actor tools start, inspect, and stop run actors", async () => {
     assert.match(cancelled.content[0].text, /type=control\.stop/);
     assert.match(cancelled.content[0].text, /stopped=true/);
     assert.doesNotMatch(cancelled.content[0].text, /state_dir|argv/);
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool does not treat legacy runtime control types as termination aliases", async () => {
+  const message = createActorMessageToolDefinition();
+  const runId = `legacy-control-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        template: `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      () => message.execute(
+        "call-legacy-runtime-cancel",
+        { to: `run:${runId}`, type: "runtime.cancel" },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /Run control FIFO not found/,
+    );
+    const cancelled = await message.execute(
+      "call-actor-cancel",
+      { to: `run:${runId}`, type: "control.cancel" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(cancelled.content[0].text, /type=control\.cancel/);
+    assert.match(cancelled.content[0].text, /stopped=true/);
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }

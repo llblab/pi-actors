@@ -8,7 +8,7 @@
   },
   "args": [
     "state_root:path",
-    "event_file:path",
+    "message_file:path",
     "lines:int",
     "stale_minutes:int",
     "artifact_path:path",
@@ -17,7 +17,7 @@
   ],
   "defaults": {
     "state_root": "~/.pi/agent/tmp/pi-actors/runs",
-    "event_file": "~/.pi/agent/tmp/pi-actors/runs/music/outbox.jsonl",
+    "message_file": "~/.pi/agent/tmp/pi-actors/runs/music/outbox.jsonl",
     "lines": "80",
     "stale_minutes": "60",
     "artifact_path": "./async-run-ops.md",
@@ -33,7 +33,7 @@
       "name": "snapshot",
       "values": {
         "state_root": "{state_root}",
-        "event_file": "{event_file}",
+        "message_file": "{message_file}",
         "lines": "{lines}",
         "stale_minutes": "{stale_minutes}"
       }
@@ -41,7 +41,7 @@
     {
       "name": "normalizer",
       "values": {
-        "input": "Use async run operations snapshot JSON from stdin. State root: {state_root}. Event file: {event_file}.",
+        "input": "Use async run operations snapshot JSON from stdin. State root: {state_root}. Message file: {message_file}.",
         "format": "Markdown sections: Active Runs, Terminal Runs, Recent Events, Stale/Risky Runs, Recommended Controls, Follow-up Needed.",
         "model": "{model}",
         "thinking": "off",

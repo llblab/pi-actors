@@ -2,11 +2,11 @@
 
 Async runs are detached executions of a template recipe or inline command template.
 
-**Meta-contract:** the command template is still the execution graph; the async run is only a lifecycle envelope with state, logs, script-authored events, status, cancellation, and coordinator-scoped observability.
+**Meta-contract:** the command template is still the execution graph; the async run is only a lifecycle envelope with state, logs, actor messages, status, cancellation, and coordinator-scoped observability.
 
-**Scope:** run id, state path, runner pid, process-group cancellation, logs, status, tail, list, script-authored event outbox, line-message send to a run-local Unix FIFO, cancel, force-kill, terminal result state, ambient activity indicators, and extension-owned temp storage. No scheduler, queue daemon, workflow DSL, distributed worker, or second execution language.
+**Scope:** run id, state path, runner pid, process-group cancellation, logs, status, tail, list, script-authored actor messages, run-local control messages, cancel, force-kill, terminal result state, ambient activity indicators, and extension-owned temp storage. No scheduler, queue daemon, workflow DSL, distributed worker, or second execution language.
 
-Layer boundary: async-run configuration may inject lifecycle values such as `{run_id}` and `{state_dir}` and may choose detached execution through `async: true`, but it does not add command-template graph syntax. Recipe imports and recipe-local references belong to the template-recipe layer; status, send, events, cancel, and kill belong to the async-run layer.
+Layer boundary: async-run configuration may inject lifecycle values such as `{run_id}` and `{state_dir}` and may choose detached execution through `async: true`, but it does not add command-template graph syntax. Recipe imports and recipe-local references belong to the template-recipe layer; status, control messages, actor messages, cancel, and kill belong to the async-run layer.
 
 ---
 
@@ -15,7 +15,7 @@ Layer boundary: async-run configuration may inject lifecycle values such as `{ru
 Async-run standard owns:
 
 - Detached process lifecycle for one execution instance.
-- Run identity, state directory, pid/process-group tracking, logs, status, list, tail, events, send, cancel, and kill.
+- Run identity, state directory, pid/process-group tracking, logs, status, list, tail, actor-message inspection, run-local control, cancel, and kill.
 - Injected lifecycle values such as `{run_id}` and `{state_dir}`.
 - Coordinator-scoped observability and script-authored actor messages.
 
@@ -31,8 +31,8 @@ Async-run standard does not own:
 ```text
 recipe       = saved JSON definition
 run          = one execution instance
-lifecycle    = state/logs/events/status/send/cancel/kill envelope
-state dir    = ordinary files for status/logs/events/result
+lifecycle    = state/logs/messages/status/control/cancel/kill envelope
+state dir    = ordinary files for status/logs/messages/result
 coordinator  = agent session that started the run
 ```
 
@@ -80,8 +80,8 @@ Use ordinary files under the extension temp directory so status tools stay simpl
 
 - `run.json`: pid, optional source metadata (`tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, mailbox metadata, created time, and state dir.
 - `progress.json`: phase, active command count, completed count, failures, and updated time.
-- `events.jsonl`: append-only lifecycle events.
-- `outbox.jsonl`: optional script-authored JSONL actor-message events for coordinator inspection, notifications, or follow-up context. Coordinator follow-ups preserve bounded `body` previews plus message metadata for decision points.
+- `events.jsonl`: append-only implementation lifecycle log.
+- `outbox.jsonl`: implementation storage for actor-message envelopes used by `inspect view=messages`, coordinator notifications, or follow-up context. Coordinator follow-ups preserve bounded `body` previews plus message metadata for decision points.
 - `stdout.log` and `stderr.log`: detached process output.
 - `result.json`: final code, killed flag, output selector, and optional full-output path.
 
@@ -107,7 +107,7 @@ Terminal status is `done` for result code 0 and `failed` for non-zero result cod
 
 ## Reactive Coordinator Loop
 
-Async runs are designed for event-driven coordination, not polling loops. A good coordinator starts long-lived or multi-agent work, lets completion and decision-point events bubble through `outbox.jsonl`, and sends corrective commands only when the run asks for input or the operator changes direction.
+Async runs are designed for message-driven coordination, not polling loops. A good coordinator starts long-lived or multi-agent work, lets completion and decision-point actor messages bubble upward, and sends corrective commands only when the run asks for input or the operator changes direction.
 
 The core loop is:
 
@@ -117,7 +117,7 @@ The core loop is:
    { "recipe": "music-player.json", "as": "run:music" }
    ```
 
-2. Let terminal events, `command.done`, and script-authored `followup` messages reach the launching coordinator automatically.
+2. Let terminal completion, `command.done`, and script-authored follow-up messages reach the launching coordinator automatically.
 
 3. Respond with explicit run-local messages when needed:
 
@@ -125,7 +125,7 @@ The core loop is:
    { "to": "run:music", "type": "player.next", "body": "next" }
    ```
 
-4. Do not inspect just because time passed. Inspect `status`, `tail`, or `events` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
+4. Do not inspect just because time passed. Inspect `status`, `tail`, or `messages` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
 
 Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-actors owns the safe run-local transport, coordinator-session ownership checks, and coordinator attention policy.
 
@@ -135,13 +135,13 @@ The actor-level surface is:
 
 - `spawn`: start a detached `run:<id>` actor from `file`, `recipe`, or inline `template`.
 - `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, `coordinator`, or `session:<id>`.
-- `inspect`: intentionally read owned `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
+- `inspect`: intentionally read owned `run:<id>` status, tail, messages, events, artifacts, files, or mailbox metadata; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
 
 Low-level async actions map into the actor surface instead of forming a second public model:
 
 - start → `spawn`
 - send/control → `message`
-- status/tail/events/list → `inspect`
+- status/tail/messages/events/list → `inspect`
 - stop/kill → `message` with `control.stop` or `control.kill`, with synchronous results
 
 Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
@@ -150,13 +150,7 @@ Compact text is returned by default so async management does not flood agent con
 
 `message` is the explicit coordinator-to-actor command channel. Use it when a running recipe exposes a control vocabulary, a branch needs parent-mediated control, a registered tool should be invoked as `tool:<name>`, or the coordinator needs to redirect work without killing or restarting it.
 
-On Unix-like hosts, async runs may expose a control FIFO at:
-
-```text
-<state_dir>/control.fifo
-```
-
-When present, a caller can send a typed actor message:
+Some recipes expose a run-local control channel. When present, a caller can send a typed actor message:
 
 ```json
 {
@@ -166,23 +160,19 @@ When present, a caller can send a typed actor message:
 }
 ```
 
-For `run:<id>`, `message` adapts the body to the FIFO command line. For `branch:<run>/<branch>`, it sends the full envelope through the parent run mailbox so the run can dispatch branch-local control. For `tool:<name>`, object bodies become the target tool parameters and primitive bodies are passed as `{ "input": body }`. The generic runtime records send events but does not interpret arbitrary run mailbox content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
+For `run:<id>`, `message` adapts the body to the recipe's run-local control channel. For `branch:<run>/<branch>`, it sends the full envelope through the parent run mailbox so the run can dispatch branch-local control. For `tool:<name>`, object bodies become the target tool parameters and primitive bodies are passed as `{ "input": body }`. The generic runtime records control messages but does not interpret arbitrary run mailbox content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
 
-Native Windows does not support this Unix FIFO contract. Use WSL/Linux/macOS for FIFO-controlled recipes, or let a Windows-specific recipe expose its own transport such as a Windows named pipe or localhost socket.
+The standard run-local transport is Unix-oriented. Use WSL/Linux/macOS for packaged message-controlled recipes, or let a Windows-specific recipe expose its own transport such as a Windows named pipe or localhost socket.
 
 ## Coordinator Notifications
 
 The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` actor messages back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local messages bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Failures and in-flight parallel branch completions can bubble as follow-ups, while successful final leaf completions stay diagnostic to avoid flooding long sequential pipelines. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `control.stop`, `control.kill`, and recipe-local stop commands stay out of follow-up context because the initiating message already returns synchronously. If a follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
 
-Ambient status indicators may refresh while work is active, but coordinator attention is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
+Ambient status indicators may refresh while work is active, but coordinator attention is driven from run-state changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn`; the run signals back through lifecycle state, results, and actor messages. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
 
 ## Run Actor Messages
 
-A recipe or script may append coordinator-bound or session-bound actor message records to:
-
-```text
-<state_dir>/outbox.jsonl
-```
+A recipe or script may emit coordinator-bound or session-bound actor message records. The runtime persists those records in the run state dir and exposes them through `inspect target=run:<id> view=messages`.
 
 Shape:
 
@@ -208,7 +198,7 @@ An async run belongs to the current user, cwd, and launching agent session at st
 
 On Unix-like systems, cancel and kill signal the runner process group when available, then fall back to the runner pid. The runner starts command-template children in that process group, so long-running descendants such as audio players stop with the run instead of becoming orphaned background processes. After the process exits, status reflects the operator action as `cancelled` or `killed` instead of a generic `exited`.
 
-State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and actor-message logs may live in the state dir. pi-actors core owns only the generic Unix FIFO write action and runtime attention policy; command and message vocabularies belong to the recipe/script.
+State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and actor-message logs may live in the state dir. pi-actors core owns the generic run-local message adapter and runtime attention policy; command and message vocabularies belong to the recipe/script.
 
 ## Extension Temp Directory
 

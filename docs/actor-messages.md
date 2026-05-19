@@ -8,7 +8,7 @@ Compress communication to three durable verbs:
 
 - `spawn`: create an addressable actor from a recipe, template, or tool.
 - `message`: send one typed message to one address.
-- `inspect`: intentionally observe state, logs, events, or artifacts.
+- `inspect`: intentionally observe state, logs, actor messages, or artifacts.
 
 Everything else is an adapter until proven otherwise.
 
@@ -78,8 +78,8 @@ coordinator -> tool
 
 Transports differ, but the public contract does not:
 
-- `to: run:<id>` may route to FIFO, mailbox file, socket, or process stdin.
-- `to: coordinator` routes to outbox/watch/follow-up delivery when `from` names a run actor. `to: session:<id>` uses the same actor-message path only when the sender run is owned by that session, making explicit session-directed checkpoints possible without exposing runtime delivery knobs. Generic async-runner `command.done` events and explicit coordinator/session-bound messages include the actor envelope fields alongside the runtime event fields.
+- `to: run:<id>` routes through the run-local control channel selected by that recipe or runtime adapter.
+- `to: coordinator` routes to the runtime attention path when `from` names a run actor. `to: session:<id>` uses the same actor-message path only when the sender run is owned by that session, making explicit session-directed checkpoints possible without exposing runtime delivery knobs. Generic async-runner `command.done` messages and explicit coordinator/session-bound messages include the actor envelope fields alongside runtime metadata.
 - `to: branch:<run>/<branch>` routes through the parent run mailbox with the full envelope preserved so the run can dispatch branch-local control.
 - `to: tool:<name>` invokes an executable pi tool by name. Object bodies become tool parameters; primitive bodies are passed as `{ "input": body }`.
 
@@ -92,13 +92,18 @@ Recipes can declare their conversational surface:
 ```json
 {
   "mailbox": {
-    "accepts": ["control.continue", "control.revise", "control.approve", "control.stop"],
+    "accepts": [
+      "control.continue",
+      "control.revise",
+      "control.approve",
+      "control.stop"
+    ],
     "emits": ["checkpoint.needs_scope", "branch.done", "run.done"]
   }
 }
 ```
 
-`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. Packaged interactive and message-producing recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Message-producing recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Coordinator follow-ups preserve bounded body previews and metadata so checkpoints do not lose their actionable payload. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so message shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
+`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. Packaged interactive and message-producing recipes declare mailbox metadata so coordinators can discover semantic message types without reading transport details. Message-producing recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Coordinator follow-ups preserve bounded body previews and metadata so checkpoints do not lose their actionable payload. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so message shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
 
 ## Spawn
 
@@ -126,7 +131,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
+The implementation supports `status`, `tail`, `messages`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. Prefer `messages` for actor-envelope inspection; `events` remains a compatibility alias for the same run message stream. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
 
 ## Runtime Direction
 
@@ -144,7 +149,7 @@ intentional observe  -> inspect
 ## Non-goals
 
 - No generic expression language in templates.
-- No public FIFO/outbox vocabulary in recipe args.
+- No public transport-path vocabulary in recipe args.
 - No polling-first examples.
 - No separate upward and downward message schemas.
 - No broad facade that hides artifacts, logs, or ownership checks.

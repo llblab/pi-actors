@@ -1,0 +1,103 @@
+{
+  "name": "subagent-review-coordinator",
+  "async": true,
+  "imports": {
+    "reviewer": "subagent-review.json",
+    "verifier": "subagent-verify.json",
+    "merger": "subagent-merge.json",
+    "judge": "subagent-judge.json",
+    "normalizer": "subagent-normalize.json"
+  },
+  "args": [
+    "scope:string",
+    "lenses:array",
+    "claim:string",
+    "reviewer_model:string",
+    "verifier_model:string",
+    "merger_model:string",
+    "judge_model:string",
+    "thinking:string",
+    "tool_args:string",
+    "evidence_policy:string",
+    "risk_policy:string",
+    "output_format:string"
+  ],
+  "defaults": {
+    "lenses": [
+      "correctness",
+      "architecture",
+      "operator UX"
+    ],
+    "claim": "The reviewed scope is ready for the next implementation or release step.",
+    "reviewer_model": "openai-codex/gpt-5.5",
+    "verifier_model": "openai-codex/gpt-5.5",
+    "merger_model": "openai-codex/gpt-5.5",
+    "judge_model": "openai-codex/gpt-5.5",
+    "thinking": "off",
+    "tool_args": "--no-tools",
+    "evidence_policy": "Cite inspected files, command output, or explicit uncertainty for every material claim.",
+    "risk_policy": "Preserve minority high-impact risks and separate confirmed issues from hypotheses.",
+    "output_format": "Markdown sections: Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
+  },
+  "template": [
+    {
+      "mode": "parallel",
+      "repeat": "{lenses.length}",
+      "failure": "branch",
+      "template": {
+        "name": "reviewer",
+        "values": {
+          "scope": "{scope}",
+          "lens": "{lenses[index]}",
+          "model": "{reviewer_model}",
+          "thinking": "{thinking}",
+          "tool_args": "{tool_args}",
+          "evidence_policy": "{evidence_policy}",
+          "risk_policy": "{risk_policy}"
+        }
+      }
+    },
+    {
+      "name": "verifier",
+      "values": {
+        "claim": "{claim}",
+        "evidence": "Use previous reviewer outputs from stdin and named scope: {scope}.",
+        "model": "{verifier_model}",
+        "thinking": "{thinking}",
+        "tool_args": "{tool_args}",
+        "evidence_policy": "{evidence_policy}"
+      }
+    },
+    {
+      "name": "merger",
+      "values": {
+        "inputs": "Use previous reviewer and verifier outputs from stdin.",
+        "mode": "consensus-first",
+        "model": "{merger_model}",
+        "thinking": "medium",
+        "tool_args": "{tool_args}",
+        "risk_policy": "{risk_policy}"
+      }
+    },
+    {
+      "name": "judge",
+      "values": {
+        "report": "Use merged output from stdin.",
+        "evidence": "Use previous reviewer, verifier, and merger outputs from stdin.",
+        "model": "{judge_model}",
+        "thinking": "medium",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use merged and judged output from stdin.",
+        "format": "{output_format}",
+        "model": "{merger_model}",
+        "thinking": "off",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

@@ -5,10 +5,27 @@
  */
 
 import { spawn } from "node:child_process";
-import { closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 
-import type { CommandTemplateFailureScope, CommandTemplateMode, CommandTemplateValue } from "./command-templates.ts";
+import type {
+  CommandTemplateFailureScope,
+  CommandTemplateMode,
+  CommandTemplateValue,
+} from "./command-templates.ts";
 import { writeJsonAtomic } from "./config.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as Paths from "./paths.ts";
@@ -38,7 +55,13 @@ export interface AsyncRunStartParams {
   cwd?: string;
 }
 
-export type AsyncRunStatus = "running" | "done" | "failed" | "exited" | "cancelled" | "killed";
+export type AsyncRunStatus =
+  | "running"
+  | "done"
+  | "failed"
+  | "exited"
+  | "cancelled"
+  | "killed";
 export type RunOutboxDelivery = "log" | "notify" | "followup";
 export type RunOutboxLevel = "info" | "warning" | "error";
 
@@ -72,18 +95,38 @@ export interface AsyncRunMeta {
 
 const DEFAULT_STATE_ROOT = Paths.getRunStateRoot();
 const DEFAULT_RECIPE_ROOT = Paths.getRecipeRoot();
-const RUNNER_PATH = new URL("../scripts/async-runner.mjs", import.meta.url).pathname;
+const RUNNER_PATH = new URL("../scripts/async-runner.mjs", import.meta.url)
+  .pathname;
 
 function safeRunId(value: string | undefined): string {
   const run = (value || `run-${Date.now()}`).trim();
-  if (!/^[A-Za-z0-9_.-]+$/.test(run)) throw new Error("Run id may contain only letters, numbers, dot, underscore, and dash.");
+  if (!/^[A-Za-z0-9_.-]+$/.test(run))
+    throw new Error(
+      "Run id may contain only letters, numbers, dot, underscore, and dash.",
+    );
   return run;
 }
 
-function resolveRunTemplate(params: AsyncRunStartParams): { template: CommandTemplateValue } {
-  if (!params.template) throw new Error("async_run action=start requires file or template.");
+function resolveRunTemplate(params: AsyncRunStartParams): {
+  template: CommandTemplateValue;
+} {
+  if (!params.template)
+    throw new Error("async_run action=start requires file or template.");
   const envelope: Record<string, unknown> = {};
-  for (const key of ["args", "defaults", "mode", "label", "timeout", "delay", "output", "retry", "critical", "failure", "recover", "repeat"] as const) {
+  for (const key of [
+    "args",
+    "defaults",
+    "mode",
+    "label",
+    "timeout",
+    "delay",
+    "output",
+    "retry",
+    "critical",
+    "failure",
+    "recover",
+    "repeat",
+  ] as const) {
     if (params[key] !== undefined) envelope[key] = params[key];
   }
   if (Object.keys(envelope).length === 0) return { template: params.template };
@@ -105,7 +148,9 @@ function readRecipeFile(file: string): AsyncRunStartParams {
   const path = resolveRecipeFile(file);
   const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
   if (Object.hasOwn(raw, "tool")) {
-    throw new Error(`Template recipe cannot define tool; use template in ${path}`);
+    throw new Error(
+      `Template recipe cannot define tool; use template in ${path}`,
+    );
   }
   const config = RecipeReferences.readResolvedRecipeConfig(path);
   if (!config) {
@@ -126,7 +171,11 @@ function resolveStartParams(params: AsyncRunStartParams): AsyncRunStartParams {
   return {
     ...fileParams,
     ...params,
-    run_id: params.run_id || fileParams.run_id || fileParams.name || getRunIdFromFile(fileParams.file),
+    run_id:
+      params.run_id ||
+      fileParams.run_id ||
+      fileParams.name ||
+      getRunIdFromFile(fileParams.file),
     values: { ...(fileParams.values ?? {}), ...(params.values ?? {}) },
   };
 }
@@ -152,7 +201,11 @@ function pidMatchesRun(pid: number, cwd: string, stateDir: string): boolean {
   try {
     const procCwd = readlinkSync(`/proc/${pid}/cwd`);
     const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
-    return procCwd === resolve(cwd) && cmdline.includes(RUNNER_PATH) && cmdline.includes(stateDir);
+    return (
+      procCwd === resolve(cwd) &&
+      cmdline.includes(RUNNER_PATH) &&
+      cmdline.includes(stateDir)
+    );
   } catch {
     return false;
   }
@@ -170,7 +223,9 @@ function tailLines(path: string, lines: number): string[] {
   return content ? content.split("\n") : [];
 }
 
-function getInterruptedRunStatus(stateDir: string): "cancelled" | "killed" | undefined {
+function getInterruptedRunStatus(
+  stateDir: string,
+): "cancelled" | "killed" | undefined {
   const events = tailFile(join(stateDir, "events.jsonl"), 200);
   if (!events) return undefined;
   for (const line of events.split("\n").reverse()) {
@@ -188,12 +243,28 @@ function getInterruptedRunStatus(stateDir: string): "cancelled" | "killed" | und
 function prepareStateDirForStart(stateDir: string): void {
   const existing = readJson(join(stateDir, "run.json"));
   const existingPid = Number(existing?.pid || 0);
-  const existingCwd = typeof existing?.cwd === "string" ? existing.cwd : undefined;
+  const existingCwd =
+    typeof existing?.cwd === "string" ? existing.cwd : undefined;
   const existingResult = readJson(join(stateDir, "result.json"));
-  if (!existingResult && existingPid && existingCwd && isAlive(existingPid) && pidMatchesRun(existingPid, existingCwd, stateDir)) {
-    throw new Error(`Run is already running: ${String(existing?.run ?? stateDir)}`);
+  if (
+    !existingResult &&
+    existingPid &&
+    existingCwd &&
+    isAlive(existingPid) &&
+    pidMatchesRun(existingPid, existingCwd, stateDir)
+  ) {
+    throw new Error(
+      `Run is already running: ${String(existing?.run ?? stateDir)}`,
+    );
   }
-  for (const file of ["events.jsonl", "outbox.jsonl", "progress.json", "result.json", "stderr.log", "stdout.log"]) {
+  for (const file of [
+    "events.jsonl",
+    "outbox.jsonl",
+    "progress.json",
+    "result.json",
+    "stderr.log",
+    "stdout.log",
+  ]) {
     rmSync(join(stateDir, file), { force: true });
   }
 }
@@ -210,7 +281,9 @@ export function startRun(
   prepareStateDirForStart(stateDir);
   const stdout = join(stateDir, "stdout.log");
   const stderr = join(stateDir, "stderr.log");
-  const recipeFile = startParams.file ? resolveRecipeFile(startParams.file) : undefined;
+  const recipeFile = startParams.file
+    ? resolveRecipeFile(startParams.file)
+    : undefined;
   const recipe = startParams.name || getRunIdFromFile(recipeFile);
   const outFd = openSync(stdout, "a");
   const errFd = openSync(stderr, "a");
@@ -251,7 +324,11 @@ export function startRun(
     phase: "starting",
     updatedAt: new Date().toISOString(),
   });
-  writeFileSync(join(stateDir, "events.jsonl"), `${JSON.stringify({ event: "run.start", run, pid: meta.pid, ts: new Date().toISOString() })}\n`, { flag: "a" });
+  writeFileSync(
+    join(stateDir, "events.jsonl"),
+    `${JSON.stringify({ event: "run.start", run, pid: meta.pid, ts: new Date().toISOString() })}\n`,
+    { flag: "a" },
+  );
   child.unref();
   return meta;
 }
@@ -272,18 +349,22 @@ function normalizeRunOutboxEvent(
 ): RunOutboxEvent | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const record = raw as Record<string, unknown>;
-  const event = typeof record.event === "string" && record.event.trim()
-    ? record.event.trim()
-    : "run.event";
-  const summary = typeof record.summary === "string" && record.summary.trim()
-    ? record.summary.trim()
-    : event;
-  const ts = typeof record.ts === "string" && record.ts.trim()
-    ? record.ts.trim()
-    : new Date(0).toISOString();
-  const id = typeof record.id === "string" && record.id.trim()
-    ? record.id.trim()
-    : `${run}:${index}`;
+  const event =
+    typeof record.event === "string" && record.event.trim()
+      ? record.event.trim()
+      : "run.event";
+  const summary =
+    typeof record.summary === "string" && record.summary.trim()
+      ? record.summary.trim()
+      : event;
+  const ts =
+    typeof record.ts === "string" && record.ts.trim()
+      ? record.ts.trim()
+      : new Date(0).toISOString();
+  const id =
+    typeof record.id === "string" && record.id.trim()
+      ? record.id.trim()
+      : `${run}:${index}`;
   return {
     ...(record.data !== undefined ? { data: record.data } : {}),
     delivery: normalizeRunOutboxDelivery(record.delivery),
@@ -311,14 +392,22 @@ export function parseRunOutboxEventLine(
 }
 
 export function getRunStatus(runOrDir: string): Record<string, unknown> {
-  const stateDir = resolve(runOrDir.includes("/") ? runOrDir : join(DEFAULT_STATE_ROOT, safeRunId(runOrDir)));
+  const stateDir = resolve(
+    runOrDir.includes("/")
+      ? runOrDir
+      : join(DEFAULT_STATE_ROOT, safeRunId(runOrDir)),
+  );
   const meta = readJson(join(stateDir, "run.json"));
   if (!meta) throw new Error(`Run not found: ${runOrDir}`);
   const result = readJson(join(stateDir, "result.json"));
   const pid = Number(meta.pid || 0);
   const status: AsyncRunStatus = result
-    ? Number(result.code ?? 0) === 0 ? "done" : "failed"
-    : isAlive(pid) ? "running" : getInterruptedRunStatus(stateDir) ?? "exited";
+    ? Number(result.code ?? 0) === 0
+      ? "done"
+      : "failed"
+    : isAlive(pid)
+      ? "running"
+      : (getInterruptedRunStatus(stateDir) ?? "exited");
   return {
     ...meta,
     eventsFile: join(stateDir, "events.jsonl"),
@@ -332,7 +421,10 @@ export function getRunStatus(runOrDir: string): Record<string, unknown> {
   };
 }
 
-function matchesStatusFilter(status: unknown, filter: string | undefined): boolean {
+function matchesStatusFilter(
+  status: unknown,
+  filter: string | undefined,
+): boolean {
   if (!filter || filter === "all") return true;
   if (filter === "active") return status === "running";
   if (filter === "terminal") return status !== "running";
@@ -370,7 +462,10 @@ export function tailRun(runOrDir: string, lines = 40): string {
   const stateDir = String(status.state_dir);
   const events = tailFile(join(stateDir, "events.jsonl"), lines);
   if (events) return events;
-  return tailFile(join(stateDir, "stdout.log"), lines) || tailFile(join(stateDir, "stderr.log"), lines);
+  return (
+    tailFile(join(stateDir, "stdout.log"), lines) ||
+    tailFile(join(stateDir, "stderr.log"), lines)
+  );
 }
 
 export function readRunEvents(runOrDir: string, lines = 40): RunOutboxEvent[] {
@@ -382,19 +477,27 @@ export function readRunEvents(runOrDir: string, lines = 40): RunOutboxEvent[] {
     .filter((event): event is RunOutboxEvent => Boolean(event));
 }
 
-export function sendRunMessage(runOrDir: string, message: string): Record<string, unknown> {
+export function sendRunMessage(
+  runOrDir: string,
+  message: string,
+): Record<string, unknown> {
   if (process.platform === "win32") {
-    throw new Error("async_run action=send requires Unix FIFO support; use WSL/Linux/macOS or a recipe-specific Windows transport.");
+    throw new Error(
+      "async_run action=send requires Unix FIFO support; use WSL/Linux/macOS or a recipe-specific Windows transport.",
+    );
   }
   const status = getRunStatus(runOrDir);
   const stateDir = String(status.state_dir);
   const run = String(status.run ?? runOrDir);
-  if (status.status !== "running") throw new Error(`Run is not running: ${run}`);
+  if (status.status !== "running")
+    throw new Error(`Run is not running: ${run}`);
   const pid = Number(status.pid || 0);
   if (!pid || !isAlive(pid)) throw new Error(`Run pid is not alive: ${run}`);
-  if (!pidMatchesRun(pid, String(status.cwd), stateDir)) throw new Error(`Run pid owner mismatch: ${run}`);
+  if (!pidMatchesRun(pid, String(status.cwd), stateDir))
+    throw new Error(`Run pid owner mismatch: ${run}`);
   const controlPath = join(stateDir, "control.fifo");
-  if (!existsSync(controlPath)) throw new Error(`Run control FIFO not found: ${controlPath}`);
+  if (!existsSync(controlPath))
+    throw new Error(`Run control FIFO not found: ${controlPath}`);
   const stat = statSync(controlPath);
   if ((stat.mode & constants.S_IFMT) !== constants.S_IFIFO) {
     throw new Error(`Run control endpoint is not a FIFO: ${controlPath}`);
@@ -404,10 +507,22 @@ export function sendRunMessage(runOrDir: string, message: string): Record<string
   try {
     fd = openSync(controlPath, constants.O_WRONLY | constants.O_NONBLOCK);
     const bytes = writeSync(fd, payload);
-    writeFileSync(join(stateDir, "events.jsonl"), `${JSON.stringify({ bytes, event: "run.message", ts: new Date().toISOString() })}\n`, { flag: "a" });
-    return { bytes, control: "control.fifo", run, sent: true, state_dir: stateDir };
+    writeFileSync(
+      join(stateDir, "events.jsonl"),
+      `${JSON.stringify({ bytes, event: "run.message", ts: new Date().toISOString() })}\n`,
+      { flag: "a" },
+    );
+    return {
+      bytes,
+      control: "control.fifo",
+      run,
+      sent: true,
+      state_dir: stateDir,
+    };
   } catch (error) {
-    throw new Error(`Run control FIFO is not ready: ${controlPath}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Run control FIFO is not ready: ${controlPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
@@ -434,13 +549,19 @@ function stopRun(
   const status = getRunStatus(runOrDir);
   const pid = Number(status.pid || 0);
   const stateDir = String(status.state_dir);
-  if (status.status !== "running") return { stopped: false, reason: "not running", status };
-  if (!pid || !isAlive(pid)) return { stopped: false, reason: "pid not alive", status };
+  if (status.status !== "running")
+    return { stopped: false, reason: "not running", status };
+  if (!pid || !isAlive(pid))
+    return { stopped: false, reason: "pid not alive", status };
   if (!pidMatchesRun(pid, String(status.cwd), stateDir)) {
     return { stopped: false, reason: "pid owner mismatch", status };
   }
   const signalResult = signalOwnedRunProcess(pid, signal);
-  writeFileSync(join(stateDir, "events.jsonl"), `${JSON.stringify({ event, pid, signal, ...signalResult, ts: new Date().toISOString() })}\n`, { flag: "a" });
+  writeFileSync(
+    join(stateDir, "events.jsonl"),
+    `${JSON.stringify({ event, pid, signal, ...signalResult, ts: new Date().toISOString() })}\n`,
+    { flag: "a" },
+  );
   return { stopped: true, pid, signal, ...signalResult, state_dir: stateDir };
 }
 

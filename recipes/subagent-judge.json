@@ -1,0 +1,22 @@
+{
+  "name": "subagent-judge",
+  "async": true,
+  "args": [
+    "report:string",
+    "rubric:string",
+    "evidence:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "rubric": "Judge evidence preservation, severity calibration, consensus purity, internal consistency, and merge bias.",
+    "evidence": "Use the provided raw outputs or artifact paths; mark any missing evidence.",
+    "output_format": "Markdown sections: Verdict, Issues, Evidence Preservation, Bias Risks, Required Fixes.",
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "medium",
+    "tool_args": "--no-tools"
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Judge this report: {report}. Rubric: {rubric}. Evidence: {evidence}. Output format: {output_format}"
+}

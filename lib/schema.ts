@@ -59,7 +59,7 @@ function splitArgDeclarations(value: string): string[] {
   let depth = 0;
   let current = "";
   for (const char of value) {
-    if (char === "(" ) depth += 1;
+    if (char === "(") depth += 1;
     if (char === ")" && depth > 0) depth -= 1;
     if (char === "," && depth === 0) {
       if (current.trim()) items.push(current.trim());
@@ -104,7 +104,12 @@ export function parseToolArgToken(value: string): ParsedToolArgToken {
   }
   const arg = typedMatch[1].trim();
   const type = parseArgType(typedMatch[2]) ?? { kind: "string" };
-  return { arg, defaultValue, declaration: canonicalArgDeclaration(arg, type), type };
+  return {
+    arg,
+    defaultValue,
+    declaration: canonicalArgDeclaration(arg, type),
+    type,
+  };
 }
 
 function isValidDefault(type: ToolArgType, value: string): boolean {
@@ -206,7 +211,8 @@ export function normalizeStoredToolArgDeclarations(
   const changed =
     provided &&
     (JSON.stringify(canonicalArgs ?? []) !== JSON.stringify(argsValue ?? []) ||
-      JSON.stringify(canonicalDefaults) !== JSON.stringify(defaultsValue ?? {}));
+      JSON.stringify(canonicalDefaults) !==
+        JSON.stringify(defaultsValue ?? {}));
   return { args, argTypes, changed, declarations, defaults, provided };
 }
 
@@ -214,11 +220,20 @@ export function formatToolArgs(args: string[]): string {
   return args.length > 0 ? args.join(", ") : "none";
 }
 
-function parseTemplatePlaceholderDeclaration(content: string): ParsedToolArgToken | undefined {
+function parseTemplatePlaceholderDeclaration(
+  content: string,
+): ParsedToolArgToken | undefined {
   if (content.startsWith("_(")) return undefined;
-  const typedMatch = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?::(?:string|path|int|number|bool|array|enum\([^)]*\)))?(?:=([^}]*))?$/);  if (!typedMatch) return undefined;
+  const typedMatch = content.match(
+    /^([A-Za-z_][A-Za-z0-9_-]*)(?::(?:string|path|int|number|bool|array|enum\([^)]*\)))?(?:=([^}]*))?$/,
+  );
+  if (!typedMatch) return undefined;
   const parsed = parseToolArgToken(content);
-  if (!parsed.arg || CommandTemplates.isCommandTemplateRepeatPlaceholder(parsed.arg)) return undefined;
+  if (
+    !parsed.arg ||
+    CommandTemplates.isCommandTemplateRepeatPlaceholder(parsed.arg)
+  )
+    return undefined;
   return parsed;
 }
 
@@ -238,7 +253,9 @@ function getTemplatePlaceholderDeclarations(
 export function getTemplatePlaceholderNames(
   config: CommandTemplates.CommandTemplateConfig,
 ): string[] {
-  return mergeUnique(getTemplatePlaceholderDeclarations(config).map((item) => item.arg));
+  return mergeUnique(
+    getTemplatePlaceholderDeclarations(config).map((item) => item.arg),
+  );
 }
 
 export function getTemplateArgTypes(
@@ -246,26 +263,27 @@ export function getTemplateArgTypes(
 ): Record<string, ToolArgType> {
   const argTypes: Record<string, ToolArgType> = {};
   for (const declaration of getTemplatePlaceholderDeclarations(config)) {
-    if (declaration.type.kind !== "string") argTypes[declaration.arg] = declaration.type;
+    if (declaration.type.kind !== "string")
+      argTypes[declaration.arg] = declaration.type;
   }
   return argTypes;
 }
 
 export function getExplicitToolArgNames(args: string[] | undefined): string[] {
-  return mergeUnique((args ?? []).map((item) => parseToolArgToken(String(item)).arg));
+  return mergeUnique(
+    (args ?? []).map((item) => parseToolArgToken(String(item)).arg),
+  );
 }
 
 export function getToolArgNames(
   config: CommandTemplates.CommandTemplateConfig,
 ): string[] {
-  const normalizedConfig = CommandTemplates.normalizeCommandTemplateConfig(config);
+  const normalizedConfig =
+    CommandTemplates.normalizeCommandTemplateConfig(config);
   const declaredArgs = Array.isArray(normalizedConfig.args)
     ? normalizedConfig.args.map((item) => parseToolArgToken(String(item)).arg)
     : [];
-  return mergeUnique([
-    ...declaredArgs,
-    ...getTemplatePlaceholderNames(config),
-  ]);
+  return mergeUnique([...declaredArgs, ...getTemplatePlaceholderNames(config)]);
 }
 
 export function getRequiredToolArgNames(
@@ -275,24 +293,38 @@ export function getRequiredToolArgNames(
   for (const step of CommandTemplates.expandCommandTemplateConfigs(config)) {
     const defaults = CommandTemplates.getCommandTemplateDefaults(step);
     for (const declaration of getTemplatePlaceholderDeclarations(step)) {
-      if (declaration.defaultValue === undefined && !Object.hasOwn(defaults, declaration.arg))
+      if (
+        declaration.defaultValue === undefined &&
+        !Object.hasOwn(defaults, declaration.arg)
+      )
         required.add(declaration.arg);
     }
   }
   return required;
 }
 
-function normalizeTypedArgValue(name: string, type: ToolArgType, value: unknown): unknown {
+function normalizeTypedArgValue(
+  name: string,
+  type: ToolArgType,
+  value: unknown,
+): unknown {
   if (value === undefined || value === null) return "";
   switch (type.kind) {
     case "int": {
-      if (typeof value === "number" && Number.isInteger(value)) return String(value);
-      if (typeof value === "string" && /^-?\d+$/.test(value.trim())) return value.trim();
+      if (typeof value === "number" && Number.isInteger(value))
+        return String(value);
+      if (typeof value === "string" && /^-?\d+$/.test(value.trim()))
+        return value.trim();
       throw new Error(`Argument ${name} must be an integer.`);
     }
     case "number": {
-      if (typeof value === "number" && Number.isFinite(value)) return String(value);
-      if (typeof value === "string" && /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim())) return value.trim();
+      if (typeof value === "number" && Number.isFinite(value))
+        return String(value);
+      if (
+        typeof value === "string" &&
+        /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim())
+      )
+        return value.trim();
       throw new Error(`Argument ${name} must be a number.`);
     }
     case "bool": {
@@ -307,7 +339,9 @@ function normalizeTypedArgValue(name: string, type: ToolArgType, value: unknown)
     case "enum": {
       const normalized = String(value);
       if (type.values.includes(normalized)) return normalized;
-      throw new Error(`Argument ${name} must be one of: ${type.values.join(", ")}.`);
+      throw new Error(
+        `Argument ${name} must be one of: ${type.values.join(", ")}.`,
+      );
     }
     case "array": {
       if (Array.isArray(value)) return value;

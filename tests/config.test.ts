@@ -48,14 +48,32 @@ test("Stored tool normalization accepts typed arg declarations", () => {
     "check_tool",
     {
       template: "check {file} {timeout} {speed} {dry_run} {mode}",
-      args: ["file:path", "timeout:int=60000", "speed:number=1.5", "dry_run:bool=true", "mode:enum(check,fix)=check"],
+      args: [
+        "file:path",
+        "timeout:int=60000",
+        "speed:number=1.5",
+        "dry_run:bool=true",
+        "mode:enum(check,fix)=check",
+      ],
       description: "Run checker",
     },
     reserved,
   );
   assert.equal(result.warning, undefined);
-  assert.deepEqual(result.cfg?.args, ["file", "timeout", "speed", "dry_run", "mode"]);
-  assert.deepEqual(result.cfg?.storedArgs, ["file:path", "timeout:int", "speed:number", "dry_run:bool", "mode:enum(check,fix)"]);
+  assert.deepEqual(result.cfg?.args, [
+    "file",
+    "timeout",
+    "speed",
+    "dry_run",
+    "mode",
+  ]);
+  assert.deepEqual(result.cfg?.storedArgs, [
+    "file:path",
+    "timeout:int",
+    "speed:number",
+    "dry_run:bool",
+    "mode:enum(check,fix)",
+  ]);
   assert.deepEqual(result.cfg?.storedDefaults, {
     dry_run: "true",
     mode: "check",
@@ -63,7 +81,10 @@ test("Stored tool normalization accepts typed arg declarations", () => {
     timeout: "60000",
   });
   assert.deepEqual(result.cfg?.argTypes?.speed, { kind: "number" });
-  assert.deepEqual(result.cfg?.argTypes?.mode, { kind: "enum", values: ["check", "fix"] });
+  assert.deepEqual(result.cfg?.argTypes?.mode, {
+    kind: "enum",
+    values: ["check", "fix"],
+  });
 });
 
 test("Stored tool normalization derives typed args from inline template placeholders", () => {
@@ -71,14 +92,18 @@ test("Stored tool normalization derives typed args from inline template placehol
     "inline_typed",
     {
       description: "Run inline typed checker",
-      template: "check {file:path} {timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
+      template:
+        "check {file:path} {timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
     },
     reserved,
   );
   assert.deepEqual(result.cfg?.args, ["file", "timeout", "speed", "mode"]);
   assert.deepEqual(result.cfg?.argTypes?.timeout, { kind: "int" });
   assert.deepEqual(result.cfg?.argTypes?.speed, { kind: "number" });
-  assert.deepEqual(result.cfg?.argTypes?.mode, { kind: "enum", values: ["check", "fix"] });
+  assert.deepEqual(result.cfg?.argTypes?.mode, {
+    kind: "enum",
+    values: ["check", "fix"],
+  });
 });
 
 test("Stored tool normalization derives args from standard inline placeholders", () => {
@@ -165,12 +190,23 @@ test("Stored tool normalization rejects co-located template recipes with tool", 
 });
 
 test("Stored tool normalization derives args from existing template recipe files", async () => {
-  const path = join(homedir(), ".pi", "agent", "recipes", "derive-args-test.json");
+  const path = join(
+    homedir(),
+    ".pi",
+    "agent",
+    "recipes",
+    "derive-args-test.json",
+  );
   try {
-    await mkdir(join(homedir(), ".pi", "agent", "recipes"), { recursive: true });
+    await mkdir(join(homedir(), ".pi", "agent", "recipes"), {
+      recursive: true,
+    });
     await writeFile(
       path,
-      JSON.stringify({ name: "derive-args-test", template: "review {scope} {mode=fast}" }),
+      JSON.stringify({
+        name: "derive-args-test",
+        template: "review {scope} {mode=fast}",
+      }),
     );
     const result = normalizeStoredTool(
       "derive_job",
@@ -188,16 +224,25 @@ test("Stored tool normalization derives args from existing template recipe files
 });
 
 test("Stored tool normalization derives args from compact repeated template recipe files", async () => {
-  const path = join(homedir(), ".pi", "agent", "recipes", "derive-repeat-args-test.json");
+  const path = join(
+    homedir(),
+    ".pi",
+    "agent",
+    "recipes",
+    "derive-repeat-args-test.json",
+  );
   try {
-    await mkdir(join(homedir(), ".pi", "agent", "recipes"), { recursive: true });
+    await mkdir(join(homedir(), ".pi", "agent", "recipes"), {
+      recursive: true,
+    });
     await writeFile(
       path,
       JSON.stringify({
         name: "derive-repeat-args-test",
         mode: "parallel",
         repeat: 3,
-        template: "render {scope} page{_(index+1)}.html prev=page{_(prev+1)}.html zero=page{_index}.html",
+        template:
+          "render {scope} page{_(index+1)}.html prev=page{_(prev+1)}.html zero=page{_index}.html",
       }),
     );
     const result = normalizeStoredTool(
@@ -217,9 +262,17 @@ test("Stored tool normalization derives args from compact repeated template reci
 });
 
 test("Stored tool normalization derives args from template recipe recover fields", async () => {
-  const path = join(homedir(), ".pi", "agent", "recipes", "derive-recover-args-test.json");
+  const path = join(
+    homedir(),
+    ".pi",
+    "agent",
+    "recipes",
+    "derive-recover-args-test.json",
+  );
   try {
-    await mkdir(join(homedir(), ".pi", "agent", "recipes"), { recursive: true });
+    await mkdir(join(homedir(), ".pi", "agent", "recipes"), {
+      recursive: true,
+    });
     await writeFile(
       path,
       JSON.stringify({
@@ -291,8 +344,16 @@ test("Stored tool normalization rejects legacy script entries", () => {
 });
 
 test("Stored tool normalization rejects legacy job or recipe fields", () => {
-  const jobResult = normalizeStoredTool("old_job", { job: "review", template: "review {scope}" }, reserved);
-  const recipeResult = normalizeStoredTool("old_recipe", { recipe: "review", template: "review {scope}" }, reserved);
+  const jobResult = normalizeStoredTool(
+    "old_job",
+    { job: "review", template: "review {scope}" },
+    reserved,
+  );
+  const recipeResult = normalizeStoredTool(
+    "old_recipe",
+    { recipe: "review", template: "review {scope}" },
+    reserved,
+  );
   assert.equal(jobResult.cfg, undefined);
   assert.equal(recipeResult.cfg, undefined);
   assert.match(jobResult.warning ?? "", /legacy job\/recipe config/);
@@ -318,11 +379,15 @@ test("Serialized tool entries keep template last", () => {
     defaults: {},
     storedArgs: ["text"],
   };
-  assert.deepEqual(Object.keys(serializeTools(new Map([[tool.name, tool]])).voice as Record<string, unknown>), [
-    "description",
-    "args",
-    "template",
-  ]);
+  assert.deepEqual(
+    Object.keys(
+      serializeTools(new Map([[tool.name, tool]])).voice as Record<
+        string,
+        unknown
+      >,
+    ),
+    ["description", "args", "template"],
+  );
 });
 
 test("Serialized co-located template recipe launchers keep recipe metadata before template", () => {
@@ -340,14 +405,15 @@ test("Serialized co-located template recipe launchers keep recipe metadata befor
     args: ["scope"],
     defaults: {},
   };
-  assert.deepEqual(Object.keys(serializeTools(new Map([[tool.name, tool]])).review as Record<string, unknown>), [
-    "description",
-    "name",
-    "async",
-    "state_dir",
-    "values",
-    "template",
-  ]);
+  assert.deepEqual(
+    Object.keys(
+      serializeTools(new Map([[tool.name, tool]])).review as Record<
+        string,
+        unknown
+      >,
+    ),
+    ["description", "name", "async", "state_dir", "values", "template"],
+  );
 });
 
 test("Serialized template recipe launchers keep template path", () => {

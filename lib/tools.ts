@@ -23,14 +23,25 @@ function stringSchema(description: string): JsonSchema {
   return { description, type: "string" };
 }
 
-function typedArgSchema(arg: string, type: Schema.ToolArgType | undefined): JsonSchema {
+function typedArgSchema(
+  arg: string,
+  type: Schema.ToolArgType | undefined,
+): JsonSchema {
   if (!type || type.kind === "string") return stringSchema(`Argument: ${arg}`);
   if (type.kind === "path") return stringSchema(`Path argument: ${arg}`);
-  if (type.kind === "int") return { description: `Integer argument: ${arg}`, type: "integer" };
-  if (type.kind === "number") return { description: `Number argument: ${arg}`, type: "number" };
-  if (type.kind === "bool") return { description: `Boolean argument: ${arg}`, type: "boolean" };
-  if (type.kind === "array") return { description: `Array argument: ${arg}`, items: {}, type: "array" };
-  return { description: `Enum argument: ${arg}`, enum: type.values, type: "string" };
+  if (type.kind === "int")
+    return { description: `Integer argument: ${arg}`, type: "integer" };
+  if (type.kind === "number")
+    return { description: `Number argument: ${arg}`, type: "number" };
+  if (type.kind === "bool")
+    return { description: `Boolean argument: ${arg}`, type: "boolean" };
+  if (type.kind === "array")
+    return { description: `Array argument: ${arg}`, items: {}, type: "array" };
+  return {
+    description: `Enum argument: ${arg}`,
+    enum: type.values,
+    type: "string",
+  };
 }
 
 function booleanSchema(description: string): JsonSchema {
@@ -66,7 +77,7 @@ function jsonText(value: unknown): string {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : {};
 }
 
@@ -85,11 +96,15 @@ function compactAsyncRunStatus(value: unknown): string {
   if (status.tool) tokens.push(`tool=${String(status.tool)}`);
   if (status.recipe) tokens.push(`recipe=${String(status.recipe)}`);
   if (Number(status.pid) > 0) tokens.push(`pid=${Number(status.pid)}`);
-  if (progress.phase && progress.phase !== status.status) tokens.push(`phase=${String(progress.phase)}`);
-  if (Number(progress.activeSubagents) > 0) tokens.push(`active=${Number(progress.activeSubagents)}`);
-  if (Number(progress.completed) > 0) tokens.push(`completed=${Number(progress.completed)}`);
+  if (progress.phase && progress.phase !== status.status)
+    tokens.push(`phase=${String(progress.phase)}`);
+  if (Number(progress.activeSubagents) > 0)
+    tokens.push(`active=${Number(progress.activeSubagents)}`);
+  if (Number(progress.completed) > 0)
+    tokens.push(`completed=${Number(progress.completed)}`);
   const failures = formatFailureCount(progress.failures);
-  if (failures !== undefined && failures > 0) tokens.push(`failures=${failures}`);
+  if (failures !== undefined && failures > 0)
+    tokens.push(`failures=${failures}`);
   if (result.code !== undefined) tokens.push(`code=${String(result.code)}`);
   if (result.killed === true) tokens.push("killed=true");
   return `\n${tokens.join(" ")}`;
@@ -97,23 +112,31 @@ function compactAsyncRunStatus(value: unknown): string {
 
 function compactAsyncRunList(runs: Array<Record<string, unknown>>): string {
   if (runs.length === 0) return "\n(no async runs)";
-  return `\n${runs.map((run) => [
-    `run=${String(run.run ?? "<unknown>")}`,
-    `status=${String(run.status ?? "unknown")}`,
-    ...(run.tool ? [`tool=${String(run.tool)}`] : []),
-    ...(run.recipe ? [`recipe=${String(run.recipe)}`] : []),
-  ].join(" ")).join("\n")}`;
+  return `\n${runs
+    .map((run) =>
+      [
+        `run=${String(run.run ?? "<unknown>")}`,
+        `status=${String(run.status ?? "unknown")}`,
+        ...(run.tool ? [`tool=${String(run.tool)}`] : []),
+        ...(run.recipe ? [`recipe=${String(run.recipe)}`] : []),
+      ].join(" "),
+    )
+    .join("\n")}`;
 }
 
 function compactRunEvents(events: AsyncRuns.RunOutboxEvent[]): string {
   if (events.length === 0) return "\n(no run events)";
-  return `\n${events.map((event) => [
-    `run=${event.run}`,
-    `event=${event.event}`,
-    `level=${event.level}`,
-    `delivery=${event.delivery}`,
-    `summary=${event.summary.replaceAll(/\s+/g, "_")}`,
-  ].join(" ")).join("\n")}`;
+  return `\n${events
+    .map((event) =>
+      [
+        `run=${event.run}`,
+        `event=${event.event}`,
+        `level=${event.level}`,
+        `delivery=${event.delivery}`,
+        `summary=${event.summary.replaceAll(/\s+/g, "_")}`,
+      ].join(" "),
+    )
+    .join("\n")}`;
 }
 
 function compactSendResult(
@@ -136,18 +159,20 @@ function compactStopResult(
 ): string {
   const status = asRecord(result.status);
   const stopped = result.stopped === true;
-  const tokens = [
-    `run=${runId}`,
-    `${action}=${stopped ? "sent" : "not_sent"}`,
-  ];
-  if (result.reason) tokens.push(`reason=${String(result.reason).replaceAll(" ", "_")}`);
+  const tokens = [`run=${runId}`, `${action}=${stopped ? "sent" : "not_sent"}`];
+  if (result.reason)
+    tokens.push(`reason=${String(result.reason).replaceAll(" ", "_")}`);
   if (status.status) tokens.push(`status=${String(status.status)}`);
   if (result.signal) tokens.push(`signal=${String(result.signal)}`);
   if (result.signalTarget) tokens.push(`target=${String(result.signalTarget)}`);
   return `\n${tokens.join(" ")}`;
 }
 
-function maybeJsonText(value: unknown, verbose: boolean | undefined, compact: string): string {
+function maybeJsonText(
+  value: unknown,
+  verbose: boolean | undefined,
+  compact: string,
+): string {
   return verbose ? jsonText(value) : compact;
 }
 
@@ -168,14 +193,18 @@ export function createRegisterToolDefinition<TContext>(
           Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.description,
         ),
         name: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name),
-        state_dir: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.state_dir),
+        state_dir: stringSchema(
+          Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.state_dir,
+        ),
         template: unionSchema([
           stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template),
           arraySchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateArray),
           nullSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateNull),
         ]),
         update: booleanSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.update),
-        values: looseObjectSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.values),
+        values: looseObjectSchema(
+          Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.values,
+        ),
       },
       [],
     ),
@@ -198,32 +227,59 @@ function getRunOwnerId(ctx: AsyncRunToolContext): string | undefined {
   return ctx.sessionManager?.getSessionId?.();
 }
 
-export function createAsyncRunToolDefinition<TContext extends AsyncRunToolContext>(): any {
+export function createAsyncRunToolDefinition<
+  TContext extends AsyncRunToolContext,
+>(): any {
   return {
     name: "async_run",
     label: "Async Run",
-    description: "Manage detached async runs. Actions: start, status, tail, list, events, send, cancel, kill.",
+    description:
+      "Manage detached async runs. Actions: start, status, tail, list, events, send, cancel, kill.",
     parameters: objectSchema(
       {
-        action: stringSchema("Action: start, status, tail, list, events, send, cancel, or kill."),
-        failure: stringSchema("Failure propagation for start: continue, branch, or root."),
-        file: stringSchema("Optional template recipe JSON file for start. Bare names resolve under ~/.pi/agent/recipes."),
-        lines: stringSchema("Tail/event line count for tail or events. Default 40."),
-        message: stringSchema("Line-delimited message for send to a run control FIFO. A trailing newline is added when omitted."),
+        action: stringSchema(
+          "Action: start, status, tail, list, events, send, cancel, or kill.",
+        ),
+        failure: stringSchema(
+          "Failure propagation for start: continue, branch, or root.",
+        ),
+        file: stringSchema(
+          "Optional template recipe JSON file for start. Bare names resolve under ~/.pi/agent/recipes.",
+        ),
+        lines: stringSchema(
+          "Tail/event line count for tail or events. Default 40.",
+        ),
+        message: stringSchema(
+          "Line-delimited message for send to a run control FIFO. A trailing newline is added when omitted.",
+        ),
         recover: unionSchema([
-          stringSchema("Recovery command template run between failed retry attempts for start"),
+          stringSchema(
+            "Recovery command template run between failed retry attempts for start",
+          ),
           arraySchema("Recovery command-template sequence for start"),
         ]),
-        run_id: stringSchema("Run id or state directory. Required for status, tail, cancel, and kill. Optional for start."),
-        state_dir: stringSchema("Optional run state directory for start. Defaults to ~/.pi/agent/tmp/pi-auto-tools/runs/{run_id}."),
-        state_root: stringSchema("Optional state root for list. Defaults to ~/.pi/agent/tmp/pi-auto-tools/runs."),
-        status: stringSchema("Optional list filter: all, running, active, terminal, done, failed, cancelled, killed, or exited."),
+        run_id: stringSchema(
+          "Run id or state directory. Required for status, tail, cancel, and kill. Optional for start.",
+        ),
+        state_dir: stringSchema(
+          "Optional run state directory for start. Defaults to ~/.pi/agent/tmp/pi-auto-tools/runs/{run_id}.",
+        ),
+        state_root: stringSchema(
+          "Optional state root for list. Defaults to ~/.pi/agent/tmp/pi-auto-tools/runs.",
+        ),
+        status: stringSchema(
+          "Optional list filter: all, running, active, terminal, done, failed, cancelled, killed, or exited.",
+        ),
         template: unionSchema([
           stringSchema("Command template string for start"),
           arraySchema("Command template sequence or mode tree for start"),
         ]),
-        values: looseObjectSchema("Runtime placeholder values passed to the template for start"),
-        verbose: booleanSchema("Return full JSON instead of compact text for start, status, list, events, send, cancel, and kill."),
+        values: looseObjectSchema(
+          "Runtime placeholder values passed to the template for start",
+        ),
+        verbose: booleanSchema(
+          "Return full JSON instead of compact text for start, status, list, events, send, cancel, and kill.",
+        ),
       },
       ["action"],
     ),
@@ -244,49 +300,154 @@ export function createAsyncRunToolDefinition<TContext extends AsyncRunToolContex
       };
       switch (input.action) {
         case "start": {
-          const meta = AsyncRuns.startRun({ ...input, ownerId: getRunOwnerId(ctx) }, ctx.cwd);
-          return { content: [{ type: "text" as const, text: maybeJsonText(meta, input.verbose, compactAsyncRunStatus(meta)) }], details: meta };
+          const meta = AsyncRuns.startRun(
+            { ...input, ownerId: getRunOwnerId(ctx) },
+            ctx.cwd,
+          );
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  meta,
+                  input.verbose,
+                  compactAsyncRunStatus(meta),
+                ),
+              },
+            ],
+            details: meta,
+          };
         }
         case "status": {
-          if (!input.run_id) throw new Error("async_run action=status requires run_id.");
+          if (!input.run_id)
+            throw new Error("async_run action=status requires run_id.");
           const status = AsyncRuns.getRunStatus(String(input.run_id));
-          return { content: [{ type: "text" as const, text: maybeJsonText(status, input.verbose, compactAsyncRunStatus(status)) }], details: status };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  status,
+                  input.verbose,
+                  compactAsyncRunStatus(status),
+                ),
+              },
+            ],
+            details: status,
+          };
         }
         case "tail": {
-          if (!input.run_id) throw new Error("async_run action=tail requires run_id.");
-          const text = AsyncRuns.tailRun(String(input.run_id), Number(input.lines || 40));
-          return { content: [{ type: "text" as const, text: `\n${text}` }], details: {} };
+          if (!input.run_id)
+            throw new Error("async_run action=tail requires run_id.");
+          const text = AsyncRuns.tailRun(
+            String(input.run_id),
+            Number(input.lines || 40),
+          );
+          return {
+            content: [{ type: "text" as const, text: `\n${text}` }],
+            details: {},
+          };
         }
         case "list": {
           const runs = AsyncRuns.listRuns(input.state_root, input.status);
-          return { content: [{ type: "text" as const, text: maybeJsonText(runs, input.verbose, compactAsyncRunList(runs)) }], details: { runs } };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  runs,
+                  input.verbose,
+                  compactAsyncRunList(runs),
+                ),
+              },
+            ],
+            details: { runs },
+          };
         }
         case "events": {
-          if (!input.run_id) throw new Error("async_run action=events requires run_id.");
-          const events = AsyncRuns.readRunEvents(String(input.run_id), Number(input.lines || 40));
-          return { content: [{ type: "text" as const, text: maybeJsonText(events, input.verbose, compactRunEvents(events)) }], details: { events } };
+          if (!input.run_id)
+            throw new Error("async_run action=events requires run_id.");
+          const events = AsyncRuns.readRunEvents(
+            String(input.run_id),
+            Number(input.lines || 40),
+          );
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  events,
+                  input.verbose,
+                  compactRunEvents(events),
+                ),
+              },
+            ],
+            details: { events },
+          };
         }
         case "send": {
-          if (!input.run_id) throw new Error("async_run action=send requires run_id.");
-          if (typeof input.message !== "string") throw new Error("async_run action=send requires message.");
+          if (!input.run_id)
+            throw new Error("async_run action=send requires run_id.");
+          if (typeof input.message !== "string")
+            throw new Error("async_run action=send requires message.");
           const runId = String(input.run_id);
           const result = AsyncRuns.sendRunMessage(runId, input.message);
-          return { content: [{ type: "text" as const, text: maybeJsonText(result, input.verbose, compactSendResult(runId, result)) }], details: result };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  result,
+                  input.verbose,
+                  compactSendResult(runId, result),
+                ),
+              },
+            ],
+            details: result,
+          };
         }
         case "cancel": {
-          if (!input.run_id) throw new Error("async_run action=cancel requires run_id.");
+          if (!input.run_id)
+            throw new Error("async_run action=cancel requires run_id.");
           const runId = String(input.run_id);
           const result = AsyncRuns.cancelRun(runId);
-          return { content: [{ type: "text" as const, text: maybeJsonText(result, input.verbose, compactStopResult("cancel", runId, result)) }], details: result };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  result,
+                  input.verbose,
+                  compactStopResult("cancel", runId, result),
+                ),
+              },
+            ],
+            details: result,
+          };
         }
         case "kill": {
-          if (!input.run_id) throw new Error("async_run action=kill requires run_id.");
+          if (!input.run_id)
+            throw new Error("async_run action=kill requires run_id.");
           const runId = String(input.run_id);
           const result = AsyncRuns.killRun(runId);
-          return { content: [{ type: "text" as const, text: maybeJsonText(result, input.verbose, compactStopResult("kill", runId, result)) }], details: result };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  result,
+                  input.verbose,
+                  compactStopResult("kill", runId, result),
+                ),
+              },
+            ],
+            details: result,
+          };
         }
         default:
-          throw new Error("async_run action must be one of: start, status, tail, list, events, send, cancel, kill.");
+          throw new Error(
+            "async_run action must be one of: start, status, tail, list, events, send, cancel, kill.",
+          );
       }
     },
   };
@@ -299,38 +460,48 @@ export function createRuntimeToolDefinition(
   const paramSchema: Record<string, JsonSchema> = {};
   const required: string[] = [];
   const isRecipe = RecipeReferences.isRecipeTool(cfg.template, cfg.recipe);
-  const isAsyncRecipe = cfg.recipe?.async === true || RecipeReferences.isAsyncRecipeReference(cfg.template);
-  const recipeTemplate = cfg.recipe?.template ?? RecipeReferences.getRecipeTemplate(cfg.template);
+  const isAsyncRecipe =
+    cfg.recipe?.async === true ||
+    RecipeReferences.isAsyncRecipeReference(cfg.template);
+  const recipeTemplate =
+    cfg.recipe?.template ?? RecipeReferences.getRecipeTemplate(cfg.template);
   const requiredTemplate = recipeTemplate ?? cfg.template!;
   const requiredTemplateConfig: CommandTemplates.CommandTemplateConfig =
     typeof requiredTemplate === "object" && !Array.isArray(requiredTemplate)
       ? {
-        ...requiredTemplate,
-        args: cfg.args,
-        defaults: { ...(requiredTemplate.defaults ?? {}), ...cfg.defaults },
-      }
+          ...requiredTemplate,
+          args: cfg.args,
+          defaults: { ...(requiredTemplate.defaults ?? {}), ...cfg.defaults },
+        }
       : {
-        args: cfg.args,
-        defaults: cfg.defaults,
-        template: requiredTemplate,
-      };
-  const requiredArgs = isRecipe && cfg.storedArgs !== undefined
-    ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
-    : RecipeReferences.isRecipeReference(cfg.template) && !recipeTemplate
+          args: cfg.args,
+          defaults: cfg.defaults,
+          template: requiredTemplate,
+        };
+  const requiredArgs =
+    isRecipe && cfg.storedArgs !== undefined
       ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
-      : Schema.getRequiredToolArgNames(requiredTemplateConfig);
+      : RecipeReferences.isRecipeReference(cfg.template) && !recipeTemplate
+        ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
+        : Schema.getRequiredToolArgNames(requiredTemplateConfig);
   for (const arg of cfg.args) {
     paramSchema[arg] = typedArgSchema(arg, cfg.argTypes?.[arg]);
     if (requiredArgs.has(arg)) required.push(arg);
   }
-  if (isAsyncRecipe) paramSchema.run_id = stringSchema("Optional run id override for this async template recipe invocation.");
+  if (isAsyncRecipe)
+    paramSchema.run_id = stringSchema(
+      "Optional run id override for this async template recipe invocation.",
+    );
   return {
     name: cfg.name,
     label: cfg.name,
     description: cfg.description,
     parameters: objectSchema(paramSchema, required),
     promptSnippet: isRecipe
-      ? Prompts.formatRecipeToolPromptSnippet(cfg.recipe?.name ?? String(cfg.template), isAsyncRecipe)
+      ? Prompts.formatRecipeToolPromptSnippet(
+          cfg.recipe?.name ?? String(cfg.template),
+          isAsyncRecipe,
+        )
       : Prompts.formatRegisteredToolPromptSnippet(cfg.template),
     async execute(
       _toolCallId: string,
@@ -342,12 +513,11 @@ export function createRuntimeToolDefinition(
       if (isAsyncRecipe) {
         const input = params as Record<string, unknown>;
         const { run_id, ...values } = input;
-        const base = cfg.recipe
-          ? cfg.recipe
-          : { file: String(cfg.template) };
-        const runId = typeof run_id === "string" && run_id.trim()
-          ? run_id.trim()
-          : `${cfg.name}-${Date.now()}`;
+        const base = cfg.recipe ? cfg.recipe : { file: String(cfg.template) };
+        const runId =
+          typeof run_id === "string" && run_id.trim()
+            ? run_id.trim()
+            : `${cfg.name}-${Date.now()}`;
         const meta = AsyncRuns.startRun(
           {
             ...base,
@@ -361,7 +531,12 @@ export function createRuntimeToolDefinition(
           },
           ctx.cwd,
         );
-        return { content: [{ type: "text" as const, text: compactAsyncRunStatus(meta) }], details: meta };
+        return {
+          content: [
+            { type: "text" as const, text: compactAsyncRunStatus(meta) },
+          ],
+          details: meta,
+        };
       }
       if (isRecipe && recipeTemplate) {
         const paramsWithDefaults = {
@@ -379,7 +554,10 @@ export function createRuntimeToolDefinition(
       }
       return Execution.executeRegisteredTool(
         cfg,
-        Schema.normalizeRuntimeValues(params as Record<string, unknown>, cfg.argTypes),
+        Schema.normalizeRuntimeValues(
+          params as Record<string, unknown>,
+          cfg.argTypes,
+        ),
         exec,
         ctx.cwd,
         signal,

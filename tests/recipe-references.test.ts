@@ -4,37 +4,43 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { readResolvedRecipeConfig } from "../lib/recipe-references.ts";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 test("Template recipes embed imported recipes as pipeline nodes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
   try {
     const child = join(root, "child.json");
     const parent = join(root, "parent.json");
-    await writeFile(child, JSON.stringify({
-      name: "child",
-      args: ["word:string", "suffix:string"],
-      defaults: { suffix: "!" },
-      template: "printf {word}{suffix}",
-    }));
-    await writeFile(parent, JSON.stringify({
-      name: "parent",
-      imports: {
-        child: {
-          from: "child.json",
-          values: { word: "hello" },
+    await writeFile(
+      child,
+      JSON.stringify({
+        name: "child",
+        args: ["word:string", "suffix:string"],
+        defaults: { suffix: "!" },
+        template: "printf {word}{suffix}",
+      }),
+    );
+    await writeFile(
+      parent,
+      JSON.stringify({
+        name: "parent",
+        imports: {
+          child: {
+            from: "child.json",
+            values: { word: "hello" },
+          },
         },
-      },
-      template: [
-        { name: "child" },
-        "wc -c",
-      ],
-    }));
+        template: [{ name: "child" }, "wc -c"],
+      }),
+    );
 
     const config = readResolvedRecipeConfig(parent)!;
     assert.deepEqual(config.template, [
@@ -54,12 +60,18 @@ test("Template recipes reject unknown named import nodes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
   try {
     const parent = join(root, "parent.json");
-    await writeFile(parent, JSON.stringify({
-      imports: {},
-      template: [{ name: "missing" }],
-    }));
+    await writeFile(
+      parent,
+      JSON.stringify({
+        imports: {},
+        template: [{ name: "missing" }],
+      }),
+    );
 
-    assert.throws(() => readResolvedRecipeConfig(parent), /Unknown recipe import: missing/);
+    assert.throws(
+      () => readResolvedRecipeConfig(parent),
+      /Unknown recipe import: missing/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -70,29 +82,36 @@ test("Template recipes reference imported defaults and explicit values", async (
   try {
     const base = join(root, "base.json");
     const parent = join(root, "parent.json");
-    await writeFile(base, JSON.stringify({
-      name: "base-recipe",
-      defaults: { mode: "safe", nested: { level: 3 }, enabled: true },
-      template: "echo base",
-    }));
-    await writeFile(parent, JSON.stringify({
-      imports: {
-        base: {
-          from: "base.json",
-          values: { target: "docs", empty: "" },
+    await writeFile(
+      base,
+      JSON.stringify({
+        name: "base-recipe",
+        defaults: { mode: "safe", nested: { level: 3 }, enabled: true },
+        template: "echo base",
+      }),
+    );
+    await writeFile(
+      parent,
+      JSON.stringify({
+        imports: {
+          base: {
+            from: "base.json",
+            values: { target: "docs", empty: "" },
+          },
         },
-      },
-      defaults: {
-        inherited_mode: "{base.defaults.mode}",
-        inherited_level: "{base.defaults.nested.level}",
-        target: "{base.values.target}",
-        label: "{base.name}:{base.values.target}",
-        fallback: "{base.defaults.missing=default-mode}",
-        enabled_label: "{base.defaults.enabled?enabled:disabled}",
-        empty_label: "{base.values.empty?present:empty}",
-      },
-      template: "run {base.defaults.mode} {base.values.target} {base.defaults.missing=fallback} {base.values.empty?yes:no} {label}",
-    }));
+        defaults: {
+          inherited_mode: "{base.defaults.mode}",
+          inherited_level: "{base.defaults.nested.level}",
+          target: "{base.values.target}",
+          label: "{base.name}:{base.values.target}",
+          fallback: "{base.defaults.missing=default-mode}",
+          enabled_label: "{base.defaults.enabled?enabled:disabled}",
+          empty_label: "{base.values.empty?present:empty}",
+        },
+        template:
+          "run {base.defaults.mode} {base.values.target} {base.defaults.missing=fallback} {base.values.empty?yes:no} {label}",
+      }),
+    );
 
     const config = readResolvedRecipeConfig(parent)!;
     assert.deepEqual(config.defaults, {
@@ -121,13 +140,33 @@ test("Template recipes reference imported defaults and explicit values", async (
   }
 });
 
+test("Packaged library recipes parse and resolve imports", async () => {
+  const recipeDir = join(__dirname, "..", "recipes");
+  const files = (await readdir(recipeDir)).filter((file) =>
+    file.endsWith(".json"),
+  );
+
+  assert.ok(files.length > 0);
+  for (const file of files) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    assert.ok(config, `${file} should resolve`);
+    assert.ok(config.template, `${file} should define a template`);
+  }
+});
+
 test("Template recipe imports reject cycles", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
   try {
     const a = join(root, "a.json");
     const b = join(root, "b.json");
-    await writeFile(a, JSON.stringify({ imports: { b: "b.json" }, template: "echo a" }));
-    await writeFile(b, JSON.stringify({ imports: { a: "a.json" }, template: "echo b" }));
+    await writeFile(
+      a,
+      JSON.stringify({ imports: { b: "b.json" }, template: "echo a" }),
+    );
+    await writeFile(
+      b,
+      JSON.stringify({ imports: { a: "a.json" }, template: "echo b" }),
+    );
     assert.throws(() => readResolvedRecipeConfig(a), /Cyclic recipe import/);
   } finally {
     await rm(root, { recursive: true, force: true });

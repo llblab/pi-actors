@@ -1,5 +1,5 @@
 {
-  "name": "music-player-mjs",
+  "name": "music-player",
   "async": true,
   "args": [
     "repo:path",
@@ -19,5 +19,5 @@
     "player": "auto",
     "event_delivery": "log"
   },
-  "template": "{repo}/examples/scripts/music-player.mjs {command} {source} {loop} {volume} {player} {state_dir} {event_delivery}"
+  "template": "{repo}/scripts/music-player.mjs {command} {source} {loop} {volume} {player} {state_dir} {event_delivery}"
 }

@@ -1,0 +1,69 @@
+{
+  "name": "pipeline-docs-maintenance",
+  "async": true,
+  "imports": {
+    "docs_index": "utility-markdown-index.json",
+    "reviewer": "subagent-review.json",
+    "planner": "subagent-plan.json",
+    "artifact": "pipeline-artifact-report.json"
+  },
+  "args": [
+    "docs_dir:path",
+    "readme:path",
+    "change_summary:string",
+    "artifact_path:path",
+    "model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "docs_dir": "docs",
+    "readme": "README.md",
+    "change_summary": "Recent project changes require documentation/index consistency review.",
+    "artifact_path": "./docs-maintenance.md",
+    "model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "name": "docs_index",
+      "values": {
+        "directory": "{docs_dir}",
+        "title": "Documentation Index",
+        "include_pattern": "*.md"
+      }
+    },
+    {
+      "name": "reviewer",
+      "values": {
+        "scope": "README {readme}, docs directory {docs_dir}, and docs index output from stdin.",
+        "lens": "documentation maintenance and navigation consistency",
+        "instructions": "Review whether docs navigation, README entrypoints, and changed behavior are coherent. Change summary: {change_summary}",
+        "output_format": "Markdown sections: Missing Links, Stale Docs, Needed Updates, Safe No-op Areas.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "planner",
+      "values": {
+        "goal": "Prepare a bounded docs maintenance plan for: {change_summary}",
+        "scope": "Use docs index and documentation review from stdin. README: {readme}. Docs dir: {docs_dir}.",
+        "constraints": "Prefer smallest documentation changes; do not rewrite stable docs cosmetically.",
+        "output_format": "Markdown sections: Required Edits, Optional Edits, Validation, Stop Conditions.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "artifact",
+      "values": {
+        "input": "Use docs review and maintenance plan from stdin.",
+        "artifact_path": "{artifact_path}",
+        "artifact_format": "Markdown sections: Docs State, Required Updates, Optional Follow-up, Validation.",
+        "delivery": "log",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

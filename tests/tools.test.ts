@@ -148,7 +148,14 @@ test("Runtime tool definition exposes typed arg schemas", () => {
       defaults: { dry_run: "true", mode: "check" },
       description: "Run checker",
       name: "check_tool",
-      storedArgs: ["file:path", "timeout:int", "speed:number", "dry_run:bool", "mode:enum(check,fix)", "prompts:array"],
+      storedArgs: [
+        "file:path",
+        "timeout:int",
+        "speed:number",
+        "dry_run:bool",
+        "mode:enum(check,fix)",
+        "prompts:array",
+      ],
       storedDefaults: { dry_run: "true", mode: "check" },
       template: "check {file} {timeout} {speed} {dry_run} {mode} {prompts}",
     },
@@ -161,7 +168,12 @@ test("Runtime tool definition exposes typed arg schemas", () => {
   assert.equal(properties.dry_run.type, "boolean");
   assert.deepEqual(properties.mode.enum, ["check", "fix"]);
   assert.equal(properties.prompts.type, "array");
-  assert.deepEqual(definition.parameters.required, ["file", "timeout", "speed", "prompts"]);
+  assert.deepEqual(definition.parameters.required, [
+    "file",
+    "timeout",
+    "speed",
+    "prompts",
+  ]);
 });
 
 test("Runtime tool definition marks defaulted args optional", () => {

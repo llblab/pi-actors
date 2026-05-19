@@ -1,0 +1,83 @@
+{
+  "name": "pipeline-research-synthesis",
+  "async": true,
+  "imports": {
+    "planner": "subagent-plan.json",
+    "evidence": "subagent-evidence-map.json",
+    "contradictions": "subagent-contradiction-map.json",
+    "verifier": "subagent-verify.json",
+    "merger": "subagent-merge.json",
+    "normalizer": "subagent-normalize.json"
+  },
+  "args": [
+    "question:string",
+    "sources:string",
+    "constraints:string",
+    "model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "sources": "Use provided source notes or artifact paths only; mark missing evidence.",
+    "constraints": "Bound the question, preserve contradictions, and avoid publication-style certainty when evidence is weak.",
+    "model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "name": "planner",
+      "values": {
+        "goal": "Answer research question: {question}",
+        "scope": "Sources: {sources}",
+        "constraints": "{constraints}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "evidence",
+      "values": {
+        "question": "{question}",
+        "sources": "{sources}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "contradictions",
+      "values": {
+        "inputs": "Use plan and evidence map from stdin.",
+        "focus": "Contradictions, weak evidence, and missing source classes for question: {question}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "verifier",
+      "values": {
+        "claim": "The synthesis can answer the research question within the stated constraints.",
+        "evidence": "Use plan, evidence map, and contradiction map from stdin.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "merger",
+      "values": {
+        "inputs": "Use all previous research outputs from stdin.",
+        "mode": "risk-first",
+        "risk_policy": "Preserve uncertainty and contradictions over forced consensus.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use merged research synthesis from stdin.",
+        "format": "Markdown sections: Question, Evidence Map, Synthesis, Contradictions, Confidence, Missing Evidence, Next Evidence Slice.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

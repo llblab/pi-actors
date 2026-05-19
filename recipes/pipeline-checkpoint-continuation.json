@@ -1,0 +1,53 @@
+{
+  "name": "pipeline-checkpoint-continuation",
+  "async": true,
+  "imports": {
+    "checkpoint": "subagent-checkpoint.json",
+    "followup": "subagent-followup.json",
+    "normalizer": "subagent-normalize.json"
+  },
+  "args": [
+    "state:string",
+    "question:string",
+    "reply:string",
+    "mode:enum(same-context,degraded-new-branch)",
+    "model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "reply": "No coordinator reply provided yet; produce a checkpoint artifact only.",
+    "mode": "degraded-new-branch",
+    "model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "name": "checkpoint",
+      "values": {
+        "state": "{state}",
+        "question": "{question}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "followup",
+      "values": {
+        "checkpoint": "Use checkpoint output from stdin.",
+        "reply": "{reply}",
+        "mode": "{mode}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use checkpoint and follow-up outputs from stdin.",
+        "format": "Markdown sections: Checkpoint, Coordinator Reply, Continuation Mode, Lost Context, Next Actions.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

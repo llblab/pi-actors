@@ -127,6 +127,12 @@ When present, a caller can send a script-owned command line:
 
 Native Windows does not support this Unix FIFO contract. Use WSL/Linux/macOS for FIFO-controlled recipes, or let a Windows-specific recipe expose its own transport such as a Windows named pipe or localhost socket.
 
+## Coordinator Notifications
+
+The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers exceptional terminal transitions plus script-authored `notify`/`followup` outbox events back to the owning session. Expected `done`, `failed`, and `cancelled` terminal states do not enqueue duplicate async follow-ups: start/cancel calls already return optimistic synchronous results, and failed run details should be inspected only when the operator or coordinator needs analysis. Use explicit `async_run action=status`, `tail`, or `events` only at decision points, after a delivered follow-up, or when diagnosing a suspected stuck run.
+
+Ambient status indicators may refresh while work is active, but notification delivery is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `async_run action=start`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents unfinished async run instances, not internal command-template branches: one triangle per started run that has not reached a terminal state. If a coordinator starts one parent run and four separate child async runs, five triangles are shown; if one run executes a parallel command-template stage internally, it still contributes one triangle.
+
 ## Run Outbox Events
 
 A recipe or script may append JSONL events to:

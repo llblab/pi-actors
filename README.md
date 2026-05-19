@@ -58,7 +58,7 @@ command
 - A **registered tool** gives a command template or recipe a stable agent-facing name.
 - An **async run** is one execution instance with state, logs, script-authored events, status, tail, message send, cancel, and kill.
 
-The template remains the execution language. The recipe is saved configuration. `async: true` is the detached lifecycle switch. The extension injects this compact mental model into the system prompt on each agent turn, including where to look first (`README.md`, `docs/README.md`, recipe/async docs, and `examples/recipes`) so an agent asked to inspect pi-auto-tools can quickly understand the model and start composing async subagents or other long-running recipes.
+The template remains the execution language. The recipe is saved configuration. `async: true` is the detached lifecycle switch. The extension injects this compact mental model into the system prompt on each agent turn, including where to look first (`README.md`, `docs/README.md`, recipe/async docs, and `recipes/`) so an agent asked to inspect pi-auto-tools can quickly understand the model and start composing async subagents or other long-running recipes.
 
 ## Operator Onboarding
 
@@ -249,11 +249,11 @@ Read recent events or logs:
 
 Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. `async_run action=start` always starts a detached run from a file or inline template. Use `async_run action=list status=running` for active runs; list output includes `tool` and `recipe` when the launcher recorded that source context.
 
-## Experimental Recipes
+## Recipe Library
 
-Packaged experimental recipes live under `examples/recipes/` with helper scripts under `examples/scripts/`. They are examples, not automatically installed policy.
+Packaged standard recipes live under root `recipes/` with helper scripts under root `scripts/`. They are reusable library definitions, not automatically installed operator policy.
 
-The subagent recipes start non-interactive pi subagents as async runs. Use the no-tools recipe for the safest default, the explicit-tool variant when a bounded tool allowlist is needed, or the prompts fanout parent recipe to see imported subagent recipe nodes composed into one async run:
+The subagent component recipes start non-interactive pi subagents as async runs or compose component recipes into higher-level coordinator pipelines. Use the no-tools recipe for the safest default, the explicit-tool variant when a bounded tool allowlist is needed, or the prompts fanout parent recipe to see imported subagent recipe nodes composed into one async run:
 
 ```text
 register_tool name=subagent_prompt \
@@ -276,27 +276,22 @@ subagents_prompts \
 async_run action=tail run_id=review-prompts
 ```
 
-The music player recipes start a local file, URL, directory, or playlist as an async run, keep the agent unblocked, show the ambient triangle indicator in the launching coordinator, and can be controlled on Unix-like hosts by `async_run action=send` messages to the run's control FIFO. The paired recipes differ only by executable wrapper, demonstrating direct shell-script and Node.js-script recipes:
+The music player recipe starts a local file, URL, directory, or playlist as an async run, keeps the agent unblocked, shows the ambient triangle indicator in the launching coordinator, and can be controlled on Unix-like hosts by `async_run action=send` messages to the run's control FIFO. The standard library ships one Node.js wrapper recipe:
 
 ```text
-register_tool name=music_player_sh \
-  description="Start async music player playback through the shell wrapper" \
-  template="music-player-sh.json" \
-  args="source:string,loop:bool=true,volume:int=70,player:enum(auto,mpv,ffplay,cvlc,play)=auto"
-
-register_tool name=music_player_mjs \
+register_tool name=music_player \
   description="Start async music player playback through the Node.js wrapper" \
-  template="music-player-mjs.json" \
+  template="music-player.json" \
   args="source:string,loop:bool=true,volume:int=70,player:enum(auto,mpv,ffplay,cvlc,play)=auto"
 
-music_player_sh source="~/Music" volume=55 run_id=music
+music_player source="~/Music" volume=55 run_id=music
 async_run action=send run_id=music message=next
 async_run action=send run_id=music message=pause
 async_run action=send run_id=music message=play
 async_run action=send run_id=music message=stop
 ```
 
-See [`docs/experimental-recipes.md`](./docs/experimental-recipes.md) for install notes and recipe requirements.
+See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and recipe requirements.
 
 ## Runtime Contract
 
@@ -332,7 +327,7 @@ See [`docs/experimental-recipes.md`](./docs/experimental-recipes.md) for install
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 
-See [`docs/command-templates.md`](./docs/command-templates.md) for the portable synchronous command-template contract; [`docs/template-recipes.md`](./docs/template-recipes.md) for saved recipe JSON; [`docs/async-runs.md`](./docs/async-runs.md) for detached lifecycle, state files, cancellation, and observability; [`docs/tool-registry.md`](./docs/tool-registry.md) for registry storage; and [`docs/experimental-recipes.md`](./docs/experimental-recipes.md) for packaged experiments.
+See [`docs/command-templates.md`](./docs/command-templates.md) for the portable synchronous command-template contract; [`docs/template-recipes.md`](./docs/template-recipes.md) for saved recipe JSON; [`docs/async-runs.md`](./docs/async-runs.md) for detached lifecycle, state files, cancellation, and observability; [`docs/tool-registry.md`](./docs/tool-registry.md) for registry storage; and [`docs/recipe-library.md`](./docs/recipe-library.md) for the packaged standard recipe library.
 
 ## Notes
 

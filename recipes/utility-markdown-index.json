@@ -1,0 +1,15 @@
+{
+  "name": "utility-markdown-index",
+  "args": [
+    "directory:path",
+    "title:string",
+    "include_pattern:string",
+    "output_format:string"
+  ],
+  "defaults": {
+    "title": "Documentation Index",
+    "include_pattern": "*.md",
+    "output_format": "Markdown bullet list with relative links and one-line descriptions when headings are available."
+  },
+  "template": "find {directory} -maxdepth 1 -name {include_pattern} -type f -printf '%f\\n'"
+}

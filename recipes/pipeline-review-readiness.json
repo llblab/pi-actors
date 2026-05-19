@@ -1,0 +1,45 @@
+{
+  "name": "pipeline-review-readiness",
+  "async": true,
+  "imports": {
+    "coordinator": "subagent-review-coordinator.json"
+  },
+  "args": [
+    "scope:string",
+    "lenses:array",
+    "release_gate:string",
+    "reviewer_model:string",
+    "verifier_model:string",
+    "merger_model:string",
+    "judge_model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "lenses": [
+      "correctness",
+      "tests",
+      "release",
+      "operator UX"
+    ],
+    "release_gate": "The scope is safe to ship or hand to the next release step.",
+    "reviewer_model": "openai-codex/gpt-5.5",
+    "verifier_model": "openai-codex/gpt-5.5",
+    "merger_model": "openai-codex/gpt-5.5",
+    "judge_model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": {
+    "name": "coordinator",
+    "values": {
+      "scope": "{scope}",
+      "lenses": "{lenses}",
+      "claim": "{release_gate}",
+      "reviewer_model": "{reviewer_model}",
+      "verifier_model": "{verifier_model}",
+      "merger_model": "{merger_model}",
+      "judge_model": "{judge_model}",
+      "tool_args": "{tool_args}",
+      "output_format": "Markdown sections: Ship Verdict, Blocking Findings, Nonblocking Risks, Evidence, Required Follow-up."
+    }
+  }
+}

@@ -30,13 +30,13 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - async:true = detached lifecycle; async_run can also start file/template directly.
 - Async run state lives under ~/.pi/agent/tmp/pi-auto-tools/runs.
 - Use async_run action=start/status/tail/list/events/send/cancel/kill.
-- Run lifecycle = state files, logs, outbox events, FIFO send, cancel/kill, compact status.
+- Run lifecycle = state files, logs, outbox events, FIFO send, cancel/kill, compact status; do not busy-poll runs, rely on event/follow-up notifications and inspect only at decision points.
 - Tool template may be a command template, recipe path/name, or co-located recipe.
 - register_tool makes compact persistent buttons; args may be typed or derived from placeholders.
 - For single calls or short pipelines, use foreground templates/tools.
 - For subagents, swarms, background music, or long fanout, prefer async recipes/runs.
 - Long async fanout = parent async recipe wrapping template(mode:"parallel") and imports.
-- If asked to explore pi-auto-tools, read README.md, docs/README.md, docs/template-recipes.md, docs/async-runs.md, and examples/recipes.
+- If asked to explore pi-auto-tools, read README.md, docs/README.md, docs/template-recipes.md, docs/async-runs.md, and recipes/.
 - Ambient triangles show active async commands/subagents for the launching coordinator.
 - After async run finish, inspect status/tail/events before final artifacts.`;
 
@@ -44,8 +44,10 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",
   description:
     "Describe what the tool does for the LLM. Required unless deleting; omitted updates keep the old description.",
-  async: "Set true for a co-located async template recipe. Omit for ordinary command templates or file-backed recipe references.",
-  state_dir: "Optional async run state directory for a co-located template recipe.",
+  async:
+    "Set true for a co-located async template recipe. Omit for ordinary command templates or file-backed recipe references.",
+  state_dir:
+    "Optional async run state directory for a co-located template recipe.",
   template:
     "Command template with {arg} or {arg=default} placeholders, or a template recipe JSON path/name. With async, this is the co-located recipe body. Bare recipe names resolve under ~/.pi/agent/recipes. Omitted updates keep the old template. Empty string deletes the tool.",
   templateArray:
@@ -53,15 +55,20 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   templateNull: "Delete the tool when template is null.",
   args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,model=openai-codex/gpt-5.5",
   update: "Set to true to overwrite an existing auto-tool registration.",
-  values: "Optional default runtime placeholder values for a co-located template recipe.",
+  values:
+    "Optional default runtime placeholder values for a co-located template recipe.",
 } as const;
 
 export function formatRegisteredToolPromptSnippet(template: unknown): string {
-  const rendered = typeof template === "string" ? template : JSON.stringify(template);
+  const rendered =
+    typeof template === "string" ? template : JSON.stringify(template);
   return `Execute command template: ${rendered}`;
 }
 
-export function formatRecipeToolPromptSnippet(recipe: string, asyncRecipe: boolean): string {
+export function formatRecipeToolPromptSnippet(
+  recipe: string,
+  asyncRecipe: boolean,
+): string {
   return asyncRecipe
     ? `Start async template recipe: ${recipe}`
     : `Execute template recipe: ${recipe}`;

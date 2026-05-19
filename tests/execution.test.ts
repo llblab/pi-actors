@@ -80,6 +80,31 @@ test("Registered tool execution normalizes typed runtime values", async () => {
   assert.deepEqual(calls, [["60", "1.5", "false", "fix"]]);
 });
 
+test("Registered tool execution lets runtime values override inherited default references", async () => {
+  const calls: string[][] = [];
+  await executeRegisteredTool(
+    {
+      ...tool,
+      template: {
+        defaults: { file: "default.txt" },
+        template: [
+          {
+            defaults: { target: "{file}" },
+            template: "tail {target}",
+          },
+        ],
+      },
+    },
+    { file: "/tmp/events.jsonl" },
+    async (_command, args) => {
+      calls.push(args);
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, [["/tmp/events.jsonl"]]);
+});
+
 test("Registered tool execution runs template sequences with previous stdout as stdin", async () => {
   const calls: Array<{
     command: string;
@@ -133,6 +158,52 @@ test("Registered tool execution runs template sequences with previous stdout as 
   assert.deepEqual(result.content, [{ type: "text", text: "\nsecond out" }]);
 });
 
+test("Registered tool execution runs nested object template values", async () => {
+  const calls: string[][] = [];
+  await executeRegisteredTool(
+    {
+      ...tool,
+      template: {
+        defaults: { message: "hello" },
+        template: {
+          defaults: { text: "{message}" },
+          template: "echo {text}",
+        },
+      },
+    },
+    {},
+    async (_command, args) => {
+      calls.push(args);
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, [["hello"]]);
+});
+
+test("Registered tool execution repeats nested object template nodes", async () => {
+  const calls: string[][] = [];
+  await executeRegisteredTool(
+    {
+      ...tool,
+      template: {
+        repeat: "{items.length}",
+        template: {
+          defaults: { item: "{items[index]}" },
+          template: "echo {item}",
+        },
+      },
+    },
+    { items: ["left", "right"] },
+    async (_command, args) => {
+      calls.push(args);
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, [["left"], ["right"]]);
+});
+
 test("Registered tool execution repeats template nodes", async () => {
   const result = await executeRegisteredTool(
     {
@@ -177,7 +248,12 @@ test("Registered tool execution repeats template nodes from array length", async
       },
     },
     { prompts: ["left", "right", "third"] },
-    async (_command, args) => ({ stdout: `${args[0]}\n`, stderr: "", code: 0, killed: false }),
+    async (_command, args) => ({
+      stdout: `${args[0]}\n`,
+      stderr: "",
+      code: 0,
+      killed: false,
+    }),
     process.cwd(),
   );
   const text = result.content[0].text;
@@ -198,7 +274,11 @@ test("Registered tool execution runs nested parallel template nodes", async () =
           mode: "parallel",
           template: [
             { label: "gpt", timeout: 120000, template: "./review-gpt {file}" },
-            { label: "kimi", timeout: 120000, template: "./review-kimi {file}" },
+            {
+              label: "kimi",
+              timeout: 120000,
+              template: "./review-kimi {file}",
+            },
           ],
         },
         "./merge {file}",
@@ -213,7 +293,12 @@ test("Registered tool execution runs nested parallel template nodes", async () =
         return { stdout: "gpt", stderr: "", code: 0, killed: false };
       if (command.endsWith("review-kimi"))
         return { stdout: "kimi", stderr: "", code: 0, killed: false };
-      return { stdout: `merged:\n${options?.stdin}`, stderr: "", code: 0, killed: false };
+      return {
+        stdout: `merged:\n${options?.stdin}`,
+        stderr: "",
+        code: 0,
+        killed: false,
+      };
     },
     "/work",
   );
@@ -223,7 +308,8 @@ test("Registered tool execution runs nested parallel template nodes", async () =
     { command: "/work/review-kimi", stdin: "prepared" },
     {
       command: "/work/merge",
-      stdin: "--- branch: gpt status: done ---\ngpt\n--- branch: kimi status: done ---\nkimi",
+      stdin:
+        "--- branch: gpt status: done ---\ngpt\n--- branch: kimi status: done ---\nkimi",
     },
   ]);
   assert.deepEqual(result.content, [
@@ -260,9 +346,19 @@ test("Registered tool execution reports degraded soft quorum without aborting", 
     { file: "/tmp/a.ogg" },
     async (command, _args, options) => {
       if (command.endsWith("bad"))
-        return { stdout: "", stderr: "provider balance exhausted", code: 1, killed: false };
+        return {
+          stdout: "",
+          stderr: "provider balance exhausted",
+          code: 1,
+          killed: false,
+        };
       if (command.endsWith("merge"))
-        return { stdout: String(options?.stdin), stderr: "", code: 0, killed: false };
+        return {
+          stdout: String(options?.stdin),
+          stderr: "",
+          code: 0,
+          killed: false,
+        };
       return { stdout: "ok output", stderr: "", code: 0, killed: false };
     },
     "/work",
@@ -328,7 +424,8 @@ test("Registered tool execution passes retry into template steps", async () => {
 
 test("Registered tool execution waits before delayed leaf steps", async () => {
   const startedAt = Date.now();
-  const calls: Array<{ command: string; elapsed: number; timeout?: number }> = [];
+  const calls: Array<{ command: string; elapsed: number; timeout?: number }> =
+    [];
   await executeRegisteredTool(
     {
       ...tool,
@@ -336,7 +433,11 @@ test("Registered tool execution waits before delayed leaf steps", async () => {
     },
     { file: "/tmp/a.ogg" },
     async (command, _args, options) => {
-      calls.push({ command, elapsed: Date.now() - startedAt, timeout: options?.timeout });
+      calls.push({
+        command,
+        elapsed: Date.now() - startedAt,
+        timeout: options?.timeout,
+      });
       return { stdout: "ok", stderr: "", code: 0, killed: false };
     },
     "/work",
@@ -362,11 +463,19 @@ test("Registered tool execution waits before delayed sequence nodes", async () =
     { file: "/tmp/a.ogg" },
     async (command) => {
       calls.push({ command, elapsed: Date.now() - startedAt });
-      return { stdout: command.endsWith("first") ? "one" : "two", stderr: "", code: 0, killed: false };
+      return {
+        stdout: command.endsWith("first") ? "one" : "two",
+        stderr: "",
+        code: 0,
+        killed: false,
+      };
     },
     "/work",
   );
-  assert.deepEqual(calls.map((call) => call.command), ["/work/first", "/work/second"]);
+  assert.deepEqual(
+    calls.map((call) => call.command),
+    ["/work/first", "/work/second"],
+  );
   assert.ok(calls[0].elapsed >= 15, `elapsed ${calls[0].elapsed}`);
 });
 
@@ -389,13 +498,21 @@ test("Registered tool execution applies parallel branch delays independently", a
     { file: "/tmp/a.ogg" },
     async (command) => {
       calls.push({ command, elapsed: Date.now() - startedAt });
-      return { stdout: command.endsWith("fast") ? "fast" : "slow", stderr: "", code: 0, killed: false };
+      return {
+        stdout: command.endsWith("fast") ? "fast" : "slow",
+        stderr: "",
+        code: 0,
+        killed: false,
+      };
     },
     "/work",
   );
   const fast = calls.find((call) => call.command === "/work/fast")!;
   const slow = calls.find((call) => call.command === "/work/slow")!;
-  assert.ok(slow.elapsed - fast.elapsed >= 15, `${fast.elapsed} -> ${slow.elapsed}`);
+  assert.ok(
+    slow.elapsed - fast.elapsed >= 15,
+    `${fast.elapsed} -> ${slow.elapsed}`,
+  );
 });
 
 test("Registered tool execution continues after non-critical composition failures", async () => {
@@ -456,7 +573,11 @@ test("Registered tool execution stops a failed branch without cancelling sibling
             {
               failure: "branch",
               label: "agent-a",
-              template: ["./work-a {file}", "./validate-a {file}", "./commit-a {file}"],
+              template: [
+                "./work-a {file}",
+                "./validate-a {file}",
+                "./commit-a {file}",
+              ],
             },
             { label: "agent-b", template: "./work-b {file}" },
           ],
@@ -470,17 +591,39 @@ test("Registered tool execution stops a failed branch without cancelling sibling
       if (command === "/work/validate-a")
         return { stdout: "", stderr: "invalid", code: 2, killed: false };
       if (command === "/work/merge")
-        return { stdout: String(options?.stdin), stderr: "", code: 0, killed: false };
-      return { stdout: command.endsWith("work-b") ? "b" : "a", stderr: "", code: 0, killed: false };
+        return {
+          stdout: String(options?.stdin),
+          stderr: "",
+          code: 0,
+          killed: false,
+        };
+      return {
+        stdout: command.endsWith("work-b") ? "b" : "a",
+        stderr: "",
+        code: 0,
+        killed: false,
+      };
     },
     "/work",
   );
   assert.equal(calls.includes("/work/commit-a"), false);
   assert.equal(calls.at(-1), "/work/merge");
-  assert.deepEqual(new Set(calls), new Set(["/work/work-a", "/work/work-b", "/work/validate-a", "/work/merge"]));
+  assert.deepEqual(
+    new Set(calls),
+    new Set([
+      "/work/work-a",
+      "/work/work-b",
+      "/work/validate-a",
+      "/work/merge",
+    ]),
+  );
   assert.match(result.content[0].text, /branch: agent-a status: failed/);
   assert.match(result.content[0].text, /branch: agent-b status: done/);
-  assert.equal(result.details.branches?.find((branch) => branch.label === "agent-a")?.status, "failed");
+  assert.equal(
+    result.details.branches?.find((branch) => branch.label === "agent-a")
+      ?.status,
+    "failed",
+  );
   assert.deepEqual(result.details.softQuorum, {
     coverage: 0.5,
     degraded: true,
@@ -515,7 +658,12 @@ test("Registered tool execution retries a sequence with recover between attempts
         if (validationAttempts === 1)
           return { stdout: "", stderr: "bad", code: 1, killed: false };
       }
-      return { stdout: command.endsWith("publish") ? "published" : "ok", stderr: "", code: 0, killed: false };
+      return {
+        stdout: command.endsWith("publish") ? "published" : "ok",
+        stderr: "",
+        code: 0,
+        killed: false,
+      };
     },
     "/work",
   );

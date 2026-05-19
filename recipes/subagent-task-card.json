@@ -1,0 +1,24 @@
+{
+  "name": "subagent-task-card",
+  "async": true,
+  "args": [
+    "goal:string",
+    "allowed:string",
+    "avoided:string",
+    "checks:string",
+    "handoff_format:string",
+    "model:string",
+    "thinking:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "allowed": "Caller must name allowed files, directories, or logical scope.",
+    "avoided": "Avoid unrelated files, public contracts, generated artifacts, and broad refactors unless explicitly allowed.",
+    "checks": "Name the smallest validation commands or review gates that prove completion.",
+    "handoff_format": "Markdown sections: Task, Allowed Files, Avoid Files, Expected Output, Checks, Handoff Notes.",
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "off",
+    "tool_args": "--no-tools"
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Create a bounded implementation task card. Goal: {goal}. Allowed: {allowed}. Avoided: {avoided}. Checks: {checks}. Handoff format: {handoff_format}"
+}

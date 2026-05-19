@@ -1,0 +1,84 @@
+{
+  "name": "pipeline-architect-coordinator",
+  "async": true,
+  "imports": {
+    "reviewer": "subagent-review.json",
+    "critic": "subagent-critic.json",
+    "verifier": "subagent-verify.json",
+    "merger": "subagent-merge.json",
+    "normalizer": "subagent-normalize.json"
+  },
+  "args": [
+    "problem:string",
+    "lenses:array",
+    "constraints:string",
+    "model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "lenses": [
+      "architecture",
+      "implementation pragmatism",
+      "operator UX",
+      "failure modes"
+    ],
+    "constraints": "Prefer small composable pieces, explicit contracts, and no broad workflow DSL.",
+    "model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "mode": "parallel",
+      "repeat": "{lenses.length}",
+      "failure": "branch",
+      "template": {
+        "name": "reviewer",
+        "values": {
+          "scope": "{problem}",
+          "lens": "{lenses[index]}",
+          "instructions": "Propose one architecture direction and one smallest next slice within constraints: {constraints}",
+          "model": "{model}",
+          "thinking": "medium",
+          "tool_args": "{tool_args}"
+        }
+      }
+    },
+    {
+      "name": "critic",
+      "values": {
+        "target": "Use proposed directions from stdin for problem: {problem}",
+        "constraints": "{constraints}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "verifier",
+      "values": {
+        "claim": "The proposed architecture can be advanced by a small validated next slice.",
+        "evidence": "Use proposed directions and critique from stdin.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "merger",
+      "values": {
+        "inputs": "Use brainstorm, critique, and verification outputs from stdin.",
+        "mode": "risk-first",
+        "risk_policy": "Prefer a feasible smallest next slice over ambitious completeness.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use architecture synthesis from stdin.",
+        "format": "Markdown sections: Direction, Rejected Alternatives, Risks, Component Contracts, Next Slice, Validation Gates.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

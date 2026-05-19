@@ -1,0 +1,54 @@
+{
+  "name": "pipeline-artifact-report",
+  "async": true,
+  "imports": {
+    "normalizer": "subagent-normalize.json",
+    "artifact": "subagent-artifact.json",
+    "event": "subagent-event.json"
+  },
+  "args": [
+    "input:string",
+    "artifact_path:path",
+    "artifact_format:string",
+    "delivery:enum(log,notify,followup)",
+    "model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
+    "delivery": "log",
+    "model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "{input}",
+        "format": "{artifact_format}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "artifact",
+      "values": {
+        "input": "Use normalized report from stdin.",
+        "artifact_path": "{artifact_path}",
+        "artifact_format": "{artifact_format}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "event",
+      "values": {
+        "event_type": "artifact.prepared",
+        "payload": "Artifact prepared for path {artifact_path}. Use previous artifact content from stdin.",
+        "delivery": "{delivery}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "utility-playlist-build",
+  "args": [
+    "repo:path",
+    "source_dir:path",
+    "extensions:string",
+    "max_depth:int",
+    "output_mode:enum(paths,m3u,inline)"
+  ],
+  "defaults": {
+    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "source_dir": "~/Music",
+    "extensions": ".mp3,.ogg,.wav,.flac,.m4a",
+    "max_depth": "2",
+    "output_mode": "paths"
+  },
+  "template": "{repo}/scripts/recipe-utils.mjs playlist {source_dir} {extensions} {max_depth} {output_mode}"
+}

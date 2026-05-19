@@ -1,0 +1,12 @@
+{
+  "name": "utility-playlist-scan",
+  "args": [
+    "source_dir:path",
+    "max_depth:int"
+  ],
+  "defaults": {
+    "source_dir": "~/Music",
+    "max_depth": "2"
+  },
+  "template": "find {source_dir} -maxdepth {max_depth} -type f -print"
+}

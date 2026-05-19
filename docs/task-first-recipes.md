@@ -49,7 +49,7 @@ Existing seeds:
 
 Implemented seed:
 
-- `pipeline-release-readiness`: changelog section → validation wrapper → release review coordinator → artifact report.
+- `pipeline-release-readiness`: changelog section → package summary → validation wrapper → release review coordinator → artifact report.
 
 ### Repository Health Cell
 
@@ -226,7 +226,7 @@ Prefer adding a high-level recipe when at least three cells already exist and th
 
 Good next candidates for the standard library after the first task-first wave:
 
-1. Package/release metadata enrichment: use `utility-package-summary` with changelog and validation cells to make release-readiness reports more evidence-rich without adding publish automation.
+1. Package/release metadata enrichment: implemented in `pipeline-release-readiness` by adding `utility-package-summary` between changelog extraction and validation, making release-readiness reports more evidence-rich without adding publish automation.
 2. Artifact packaging and manifesting: implemented as `pipeline-artifact-bundle`, which composes optional validation, `pipeline-artifact-write`, `utility-artifact-manifest`, deterministic manifest writing, and an actor-message handoff when the caller explicitly requests filesystem writes.
 3. Async run cleanup planning: extend async-run operations with stale-run classification and recommended `message`, `cancel`, or `kill` controls, keeping actual control execution operator-gated.
 

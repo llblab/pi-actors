@@ -3,6 +3,7 @@
   "async": true,
   "imports": {
     "changelog": "utility-changelog-section.json",
+    "package": "utility-package-summary.json",
     "validation": "utility-validation-wrapper.json",
     "review": "subagent-review-coordinator.json",
     "artifact": "pipeline-artifact-report.json"
@@ -10,6 +11,7 @@
   "args": [
     "scope:path",
     "version:string",
+    "package_json:path",
     "validation_command:string",
     "artifact_path:path",
     "lenses:array",
@@ -22,6 +24,7 @@
   "defaults": {
     "scope": ".",
     "version": "0.7.1",
+    "package_json": "{scope}/package.json",
     "validation_command": "npm run validate",
     "artifact_path": "./release-readiness.md",
     "lenses": [
@@ -49,6 +52,13 @@
       }
     },
     {
+      "name": "package",
+      "values": {
+        "package_json": "{package_json}",
+        "repo": "{scope}"
+      }
+    },
+    {
       "name": "validation",
       "values": {
         "scope": "{scope}",
@@ -58,7 +68,7 @@
     {
       "name": "review",
       "values": {
-        "scope": "Release scope {scope} for version {version}. Use changelog and validation output from stdin.",
+        "scope": "Release scope {scope} for version {version}. Use changelog, package summary, and validation output from stdin.",
         "lenses": "{lenses}",
         "claim": "Version {version} is ready for release or the remaining blockers are explicitly identified.",
         "reviewer_model": "{reviewer_model}",

@@ -69,7 +69,7 @@ inspect target=run:docs-review view=tail
 Pipeline recipes demonstrate second-order composition:
 
 - `recipes/subagent-review-coordinator.json`: Lens reviewers → verifier → merger → judge → normalizer.
-- `recipes/pipeline-release-readiness.json`: Task-first release cell: changelog section → validation → release review → artifact report.
+- `recipes/pipeline-release-readiness.json`: Task-first release cell: changelog section → package summary → validation → release review → artifact report.
 - `recipes/pipeline-repo-health.json`: Task-first repository-health cell: git status/log → docs index → validation → normalized artifact report.
 - `recipes/pipeline-async-run-ops.json`: Task-first async-run operations cell: run summary → actor-message tail → normalized operations report → artifact report.
 - `recipes/pipeline-review-readiness.json`: Release/readiness gate over selected lenses.

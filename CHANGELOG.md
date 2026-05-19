@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.2: Release Readiness Package Evidence
+
+- `[Recipe Library]` Added `utility-package-summary` evidence to `pipeline-release-readiness` between changelog extraction and validation. Impact: release readiness reports can consider package metadata and package contents summary without adding publish automation.
+- `[Docs]` Updated task-first and recipe-library docs to describe the enriched release-readiness pipeline. Impact: the documented task-first candidate map now matches the implemented recipe composition.
+
 ## 0.14.1: Backlog Vocabulary Reconciliation
 
 - `[Docs]` Reconciled backlog status text after the message-only inspection release. Impact: project context no longer claims `inspect view=events` is retained and describes operations snapshots as actor-message tails instead of event tails.

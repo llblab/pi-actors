@@ -23,7 +23,6 @@ import { basename, extname, join, resolve } from "node:path";
 
 import type {
   CommandTemplateFailureScope,
-  CommandTemplateMode,
   CommandTemplateValue,
 } from "./command-templates.ts";
 import { writeJsonAtomic } from "./config.ts";
@@ -41,13 +40,13 @@ export interface AsyncRunStartParams {
   template?: CommandTemplateValue;
   args?: string[];
   defaults?: Record<string, unknown>;
-  mode?: CommandTemplateMode;
+  parallel?: boolean;
   label?: string;
-  timeout?: number;
-  delay?: number;
+  when?: boolean | string;
+  timeout?: number | string;
+  delay?: number | string;
   output?: string;
-  retry?: number;
-  critical?: boolean;
+  retry?: number | string;
   failure?: CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
   repeat?: number;
@@ -116,13 +115,13 @@ function resolveRunTemplate(params: AsyncRunStartParams): {
   for (const key of [
     "args",
     "defaults",
-    "mode",
+    "parallel",
     "label",
+    "when",
     "timeout",
     "delay",
     "output",
     "retry",
-    "critical",
     "failure",
     "recover",
     "repeat",

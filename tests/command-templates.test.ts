@@ -54,7 +54,6 @@ test("Command template arrays inherit only top-level args and defaults", () => {
       args: ["text", "lang", "mp3", "ogg"],
       defaults: { lang: "en" },
       retry: undefined,
-      critical: undefined,
     },
     {
       template: "ffmpeg -i {mp3} {ogg} {codec}",
@@ -62,7 +61,6 @@ test("Command template arrays inherit only top-level args and defaults", () => {
       defaults: { lang: "en", codec: "opus" },
       timeout: 123,
       retry: undefined,
-      critical: undefined,
     },
   ]);
 });
@@ -79,18 +77,18 @@ test("Command template child defaults can reference inherited defaults", () => {
   assert.equal(steps[1].defaults?.model, "reviewer-model");
 });
 
-test("Template composition expansion preserves retry and critical on step objects", () => {
+test("Template composition expansion preserves retry and failure on step objects", () => {
   const steps = expandCommandTemplateConfigs({
     template: [
       "scan --path {dir}",
       {
         template: "lint --strict {dir}",
         retry: 3,
-        critical: true,
+        failure: "root",
       },
       {
         template: "deploy {dir}",
-        critical: true,
+        failure: "root",
         timeout: 60000,
       },
     ],
@@ -103,20 +101,19 @@ test("Template composition expansion preserves retry and critical on step object
       args: ["dir"],
       defaults: { dir: "./src" },
       retry: undefined,
-      critical: undefined,
     },
     {
       template: "lint --strict {dir}",
       args: ["dir"],
       defaults: { dir: "./src" },
       retry: 3,
-      critical: true,
+      failure: "root",
     },
     {
       template: "deploy {dir}",
       args: ["dir"],
       defaults: { dir: "./src" },
-      critical: true,
+      failure: "root",
       timeout: 60000,
       retry: undefined,
     },
@@ -179,11 +176,41 @@ test("Command templates detect high-risk trusted executable shapes", () => {
 
 test("Command templates resolve typed inline placeholders", () => {
   const invocation = buildCommandTemplateInvocation(
-    "tool {file:path} {timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
+    "tool {file:path} {request_timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
     { file: "/tmp/a.txt" },
     "/work",
   );
   assert.deepEqual(invocation.args, ["/tmp/a.txt", "60000", "1.5", "check"]);
+});
+
+test("Command templates resolve ternary placeholders", () => {
+  const enabled = buildCommandTemplateInvocation(
+    "validate recipes {all?--all:}",
+    { all: true },
+    "/work",
+  );
+  const disabled = buildCommandTemplateInvocation(
+    "validate recipes {all?--all:}",
+    { all: false },
+    "/work",
+  );
+  assert.deepEqual(enabled.args, ["recipes", "--all"]);
+  assert.deepEqual(disabled.args, ["recipes"]);
+});
+
+test("Command templates resolve nullish coalescing placeholders", () => {
+  const missing = buildCommandTemplateInvocation(
+    "deploy {env??dev} {region??local}",
+    { region: "" },
+    "/work",
+  );
+  const provided = buildCommandTemplateInvocation(
+    "deploy {env??dev} {region??local}",
+    { env: "prod", region: "eu" },
+    "/work",
+  );
+  assert.deepEqual(missing.args, ["dev", "local"]);
+  assert.deepEqual(provided.args, ["prod", "eu"]);
 });
 
 test("Command templates resolve defaults and inline placeholder defaults", () => {

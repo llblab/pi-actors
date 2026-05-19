@@ -13,7 +13,7 @@
     "change_summary:string",
     "artifact_path:path",
     "model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "docs_dir": "docs",
@@ -21,7 +21,7 @@
     "change_summary": "Recent project changes require documentation/index consistency review.",
     "artifact_path": "./docs-maintenance.md",
     "model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -40,7 +40,7 @@
         "instructions": "Review whether docs navigation, README entrypoints, and changed behavior are coherent. Change summary: {change_summary}",
         "output_format": "Markdown sections: Missing Links, Stale Docs, Needed Updates, Safe No-op Areas.",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -51,7 +51,7 @@
         "constraints": "Prefer smallest documentation changes; do not rewrite stable docs cosmetically.",
         "output_format": "Markdown sections: Required Edits, Optional Edits, Validation, Stop Conditions.",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -62,7 +62,7 @@
         "artifact_format": "Markdown sections: Docs State, Required Updates, Optional Follow-up, Validation.",
         "delivery": "log",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

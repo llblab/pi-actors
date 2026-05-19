@@ -47,10 +47,10 @@ test("Stored tool normalization accepts typed arg declarations", () => {
   const result = normalizeStoredTool(
     "check_tool",
     {
-      template: "check {file} {timeout} {speed} {dry_run} {mode}",
+      template: "check {file} {request_timeout} {speed} {dry_run} {mode}",
       args: [
         "file:path",
-        "timeout:int=60000",
+        "request_timeout:int=60000",
         "speed:number=1.5",
         "dry_run:bool=true",
         "mode:enum(check,fix)=check",
@@ -62,14 +62,14 @@ test("Stored tool normalization accepts typed arg declarations", () => {
   assert.equal(result.warning, undefined);
   assert.deepEqual(result.cfg?.args, [
     "file",
-    "timeout",
+    "request_timeout",
     "speed",
     "dry_run",
     "mode",
   ]);
   assert.deepEqual(result.cfg?.storedArgs, [
     "file:path",
-    "timeout:int",
+    "request_timeout:int",
     "speed:number",
     "dry_run:bool",
     "mode:enum(check,fix)",
@@ -78,7 +78,7 @@ test("Stored tool normalization accepts typed arg declarations", () => {
     dry_run: "true",
     mode: "check",
     speed: "1.5",
-    timeout: "60000",
+    request_timeout: "60000",
   });
   assert.deepEqual(result.cfg?.argTypes?.speed, { kind: "number" });
   assert.deepEqual(result.cfg?.argTypes?.mode, {
@@ -93,12 +93,12 @@ test("Stored tool normalization derives typed args from inline template placehol
     {
       description: "Run inline typed checker",
       template:
-        "check {file:path} {timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
+        "check {file:path} {request_timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
     },
     reserved,
   );
-  assert.deepEqual(result.cfg?.args, ["file", "timeout", "speed", "mode"]);
-  assert.deepEqual(result.cfg?.argTypes?.timeout, { kind: "int" });
+  assert.deepEqual(result.cfg?.args, ["file", "request_timeout", "speed", "mode"]);
+  assert.deepEqual(result.cfg?.argTypes?.request_timeout, { kind: "int" });
   assert.deepEqual(result.cfg?.argTypes?.speed, { kind: "number" });
   assert.deepEqual(result.cfg?.argTypes?.mode, {
     kind: "enum",
@@ -239,7 +239,7 @@ test("Stored tool normalization derives args from compact repeated template reci
       path,
       JSON.stringify({
         name: "derive-repeat-args-test",
-        mode: "parallel",
+        parallel: true,
         repeat: 3,
         template:
           "render {scope} page{_(index+1)}.html prev=page{_(prev+1)}.html zero=page{_index}.html",

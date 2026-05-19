@@ -9,7 +9,7 @@
     "handoff_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "allowed": "Caller must name allowed files, directories, or logical scope.",
@@ -18,7 +18,7 @@
     "handoff_format": "Markdown sections: Task, Allowed Files, Avoid Files, Expected Output, Checks, Handoff Notes.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "off",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Create a bounded implementation task card. Goal: {goal}. Allowed: {allowed}. Avoided: {avoided}. Checks: {checks}. Handoff format: {handoff_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create a bounded implementation task card. Goal: {goal}. Allowed: {allowed}. Avoided: {avoided}. Checks: {checks}. Handoff format: {handoff_format}"
 }

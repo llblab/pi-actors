@@ -9,7 +9,7 @@
     "output_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "mode": "degraded-new-branch",
@@ -17,7 +17,7 @@
     "output_format": "Markdown sections: Continuation Mode, Applied Reply, Lost Context, Continued Work, Next Actions.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "off",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Continue from checkpoint using mode {mode}. Checkpoint: {checkpoint}. Coordinator reply: {reply}. Continuity policy: {continuity_policy}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Continue from checkpoint using mode {mode}. Checkpoint: {checkpoint}. Coordinator reply: {reply}. Continuity policy: {continuity_policy}. Output format: {output_format}"
 }

@@ -74,7 +74,7 @@ Move to async recipes when work is long-running, parallel, or agentic:
 {
   "name": "shader-ring-8-parallel",
   "async": true,
-  "mode": "parallel",
+  "parallel": true,
   "template": ["..."]
 }
 ```
@@ -111,7 +111,7 @@ Recipes can import other recipe files and reuse them as named nodes. This keeps 
   "imports": {
     "review": "review-one.json"
   },
-  "mode": "parallel",
+  "parallel": true,
   "failure": "branch",
   "template": [
     { "name": "review", "values": { "scope": "README.md" } },
@@ -299,16 +299,16 @@ See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and r
 - Reserved built-in names are blocked.
 - Templates are split into shell-like words first, then placeholders are substituted per command arg.
 - Tool args are derived from placeholders when `args` is omitted.
-- Typed arg declarations are progressive: `file:path`, `timeout:int=60000`, `speed:number=1.5`, `dry_run:bool=true`, `prompts:array`, and `mode:enum(check,fix)=check` can live in `args` or inline placeholders such as `{timeout:int=60000}`. They generate narrower tool schemas and runtime validation while existing untyped `args` and placeholders keep working.
-- `{arg=default}` inline defaults resolve after runtime values and stored `defaults`.
+- Typed arg declarations are progressive: `file:path`, `request_timeout:int=60000`, `speed:number=1.5`, `dry_run:bool=true`, `prompts:array`, and `mode:enum(check,fix)=check` can live in `args` or inline placeholders such as `{request_timeout:int=60000}`. They generate narrower tool schemas and runtime validation while existing untyped `args` and placeholders keep working.
+- `{arg=default}` inline defaults resolve after runtime values and stored `defaults`; `{arg??fallback}` handles empty/null fallback values; `{flag?--flag:}` ternaries map small truthy/falsy values to strings such as optional CLI flags.
 - `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
-- Object nodes may set `mode: "parallel"`; children receive the same stdin and joined stdout flows to the next sequence step.
+- Object nodes may set `parallel: true`; children receive the same stdin and joined stdout flows to the next sequence step.
 - Parallel nodes use soft-quorum semantics: failed branches are reported as degraded coverage unless failure propagation escalates to the root.
 - For long-running work or agentic fanout, prefer `async: true` recipes or `async_run action=start` so lifecycle and ambient activity status remain visible.
-- Timeout is disabled by default; set a positive `timeout` on bounded commands that should fail closed.
-- Nodes may set `delay` in milliseconds to wait before launch; delay is not inherited.
+- Timeout is disabled by default; set a positive `timeout` on bounded commands that should fail closed. Numeric node fields may read placeholders such as `timeout: "{timeout_ms}"`.
+- Nodes may set `when` to skip conditional work and `delay` in milliseconds to wait before launch; delay is not inherited.
 - Failed steps default to `failure: "continue"`, which records the failure and continues with empty stdin.
-- `failure: "branch"` stops the current sequence/subtree without cancelling sibling parallel branches; `failure: "root"` aborts the composition. `critical: true` remains an alias for root failure.
+- `failure: "branch"` stops the current sequence/subtree without cancelling sibling parallel branches; `failure: "root"` aborts the composition.
 - `retry` retries a leaf or whole node on non-zero exit; default attempts is `1`.
 - `recover` runs a cleanup command template between failed retry attempts and stops retries if cleanup fails.
 - Commands execute directly without shell evaluation, but trusted executables still run with the same permissions as pi.

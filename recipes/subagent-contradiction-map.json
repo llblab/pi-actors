@@ -8,7 +8,7 @@
     "output_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "focus": "Find contradictions, unresolved assumptions, incompatible recommendations, and evidence gaps.",
@@ -16,7 +16,7 @@
     "output_format": "Markdown sections: Contradictions, Affected Claims, Resolution Evidence, Unresolved Risks.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Map contradictions in these inputs: {inputs}. Focus: {focus}. Resolution policy: {resolution_policy}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Map contradictions in these inputs: {inputs}. Focus: {focus}. Resolution policy: {resolution_policy}. Output format: {output_format}"
 }

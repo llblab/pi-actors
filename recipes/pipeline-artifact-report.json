@@ -12,13 +12,13 @@
     "artifact_format:string",
     "delivery:enum(log,notify,followup)",
     "model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
     "delivery": "log",
     "model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -27,7 +27,7 @@
         "input": "{input}",
         "format": "{artifact_format}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -37,7 +37,7 @@
         "artifact_path": "{artifact_path}",
         "artifact_format": "{artifact_format}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -47,7 +47,7 @@
         "payload": "Artifact prepared for path {artifact_path}. Use previous artifact content from stdin.",
         "delivery": "{delivery}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

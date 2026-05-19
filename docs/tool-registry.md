@@ -108,7 +108,7 @@ Use the metadata-first style when the command line is long and readability benef
   "args": [
     "file:path",
     "out_dir:path",
-    "timeout:int",
+    "request_timeout:int",
     "speed:number",
     "dry_run:bool",
     "mode:enum(check,fix)"
@@ -119,17 +119,17 @@ Use the metadata-first style when the command line is long and readability benef
     "dry_run": "true",
     "mode": "check"
   },
-  "template": "tool --file {file} --out {out_dir} --timeout {timeout} --speed {speed} --dry-run {dry_run} --mode {mode}"
+  "template": "tool --file {file} --out {out_dir} --timeout {request_timeout} --speed {speed} --dry-run {dry_run} --mode {mode}"
 }
 ```
 
 Use the inline-first style when a compact tool is clearer as one self-contained template:
 
 ```text
-template="tool --file {file:path} --out {out_dir:path} --timeout {timeout:int=60000} --speed {speed:number=1.5} --dry-run {dry_run:bool=true} --mode {mode:enum(check,fix)=check}"
+template="tool --file {file:path} --out {out_dir:path} --timeout {request_timeout:int=60000} --speed {speed:number=1.5} --dry-run {dry_run:bool=true} --mode {mode:enum(check,fix)=check}"
 ```
 
-Supported compact types are `string` (implicit), `path`, `int`, `number`, `bool`, and `enum(a,b)`. Defaults should be stored in `defaults`, written inline as `{name=default}`, or supplied through interactive shorthand. Shorthand such as `args="file,lang=ru"` and typed shorthand such as `timeout:int=60000` are normalized before persistence. When both `args` and template placeholders provide a type for the same name, explicit `args` wins.
+Supported compact types are `string` (implicit), `path`, `int`, `number`, `bool`, and `enum(a,b)`. Defaults should be stored in `defaults`, written inline as `{name=default}`, or supplied through interactive shorthand. Shorthand such as `args="file,lang=ru"` and typed shorthand such as `request_timeout:int=60000` are normalized before persistence. When both `args` and template placeholders provide a type for the same name, explicit `args` wins.
 
 Defaults are applied before substitution, with resolution order runtime values → stored `defaults` → inline default → error. Missing required values are rejected before or during execution. Typed runtime values are normalized before substitution: `int` and `number` values become numeric strings, booleans become `true`/`false`, and enums must match one of the declared values.
 

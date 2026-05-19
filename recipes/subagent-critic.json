@@ -9,7 +9,7 @@
     "output_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "lens": "assumption and failure-mode critic",
@@ -18,7 +18,7 @@
     "output_format": "Markdown sections: Assumptions, Failure Modes, Counterarguments, Tests, Recommendation.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Critique this target through lens {lens}: {target}. Constraints: {constraints}. Risk policy: {risk_policy}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Critique this target through lens {lens}: {target}. Constraints: {constraints}. Risk policy: {risk_policy}. Output format: {output_format}"
 }

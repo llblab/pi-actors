@@ -8,20 +8,19 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
-export type CommandTemplateMode = "sequence" | "parallel";
 export type CommandTemplateFailureScope = "continue" | "branch" | "root";
 
 export interface CommandTemplateObjectConfig {
   label?: string;
-  mode?: CommandTemplateMode;
+  parallel?: boolean;
+  when?: boolean | string;
   template?: CommandTemplateValue;
   args?: string[];
   defaults?: Record<string, unknown>;
-  timeout?: number;
-  delay?: number;
+  timeout?: number | string;
+  delay?: number | string;
   output?: string;
-  retry?: number;
-  critical?: boolean;
+  retry?: number | string;
   failure?: CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
   repeat?: number | string;
@@ -174,11 +173,11 @@ function getLeafCommandTemplateWarnings(
   const args = parts.slice(1);
   const warnings: string[] = [];
   if (["bash", "sh", "zsh", "fish"].includes(command)) {
-    const mode = hasAnyFlag(args, ["-c"])
+    const shellContent = hasAnyFlag(args, ["-c"])
       ? "shell command strings"
       : "shell scripts";
     warnings.push(
-      `${config.label ?? command}: invokes ${command}; ${mode} are trusted executable content and are not sandboxed by command-template argv splitting.`,
+      `${config.label ?? command}: invokes ${command}; ${shellContent} are trusted executable content and are not sandboxed by command-template argv splitting.`,
     );
   }
   if (
@@ -315,7 +314,6 @@ export function expandCommandTemplateConfigs(
       ...context,
       template: normalizedConfig.template,
       retry: normalizedConfig.retry,
-      critical: normalizedConfig.critical,
     },
     ...recoverSteps,
   ];
@@ -519,6 +517,10 @@ function shouldResolveEmbeddedCommandTemplateToken(
   if (matches.length === 0) return false;
   return matches.every((match) => {
     const content = match[1];
+    if (resolveCommandTemplateNullish(content, values) !== undefined)
+      return true;
+    if (resolveCommandTemplateTernary(content, values) !== undefined)
+      return true;
     const indexed = content.match(
       /^([A-Za-z_][A-Za-z0-9_-]*)\[([A-Za-z_][A-Za-z0-9_-]*|\d+)\]$/,
     );
@@ -536,6 +538,60 @@ function shouldResolveEmbeddedCommandTemplateToken(
   });
 }
 
+function isFalsyCommandTemplateValue(value: unknown): boolean {
+  if (value === undefined || value === null || value === false) return true;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === "" || normalized === "0" || normalized === "false" || normalized === "no";
+}
+
+function resolveCommandTemplateCondition(
+  condition: string,
+  values: Record<string, unknown>,
+): unknown {
+  const trimmed = condition.trim();
+  const negated = trimmed.startsWith("!");
+  const name = negated ? trimmed.slice(1).trim() : trimmed;
+  const value = /^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)
+    ? values[name]
+    : undefined;
+  return negated ? isFalsyCommandTemplateValue(value) : value;
+}
+
+export function shouldRunCommandTemplateNode(
+  value: boolean | string | undefined,
+  values: Record<string, unknown>,
+): boolean {
+  if (value === undefined) return true;
+  if (typeof value === "boolean") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const exact = /^\{([^{}]+)\}$/.exec(trimmed);
+  const resolved = exact
+    ? resolveCommandTemplateValue(exact[1], values, "command template when")
+    : resolveCommandTemplateCondition(trimmed, values);
+  return !isFalsyCommandTemplateValue(resolved);
+}
+
+function resolveCommandTemplateNullish(
+  content: string,
+  values: Record<string, unknown>,
+): string | undefined {
+  const coalescing = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)\?\?(.*)$/);
+  if (!coalescing) return undefined;
+  const value = values[coalescing[1]];
+  return isFalsyCommandTemplateValue(value) ? coalescing[2] : String(value);
+}
+
+function resolveCommandTemplateTernary(
+  content: string,
+  values: Record<string, unknown>,
+): string | undefined {
+  const ternary = content.match(/^([^?:]+)\?([^:]*):(.*)$/);
+  if (!ternary) return undefined;
+  const condition = resolveCommandTemplateCondition(ternary[1], values);
+  return isFalsyCommandTemplateValue(condition) ? ternary[3] : ternary[2];
+}
+
 function resolveCommandTemplateValue(
   content: string,
   values: Record<string, unknown>,
@@ -544,6 +600,10 @@ function resolveCommandTemplateValue(
 ): string | undefined {
   if (depth > 5)
     throw new Error(`Command template value recursion exceeded: ${content}`);
+  const nullish = resolveCommandTemplateNullish(content, values);
+  if (nullish !== undefined) return nullish;
+  const ternary = resolveCommandTemplateTernary(content, values);
+  if (ternary !== undefined) return ternary;
   const indexed = content.match(
     /^([A-Za-z_][A-Za-z0-9_-]*)\[([A-Za-z_][A-Za-z0-9_-]*|\d+)\]$/,
   );
@@ -729,6 +789,7 @@ export function buildCommandTemplateInvocation(
         resolvedValues,
         options.missingLabel,
       ),
-    );
+    )
+    .filter((part) => part !== "");
   return { command, args };
 }

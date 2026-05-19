@@ -17,9 +17,26 @@ run             = one execution instance
 async: true     = run through detached lifecycle
 ```
 
-A recipe wraps one command-template tree. The wrapped `template` keeps the normal command-template semantics: argv splitting, placeholders, defaults, typed args, sequence, `mode: "parallel"`, delay, retry, failure propagation, recover cleanup, critical compatibility, and output selection.
+A recipe wraps one command-template tree. The wrapped `template` keeps the normal command-template semantics: argv splitting, placeholders, defaults, typed args, sequence, `parallel: true`, `when`, delay, retry, failure propagation, recover cleanup, and output selection.
 
 Layer boundary: `imports`, `{ "name": "alias" }` imported-recipe nodes, `{alias.defaults.key}` references, fallback expressions, and recipe-local ternaries are recipe-loading features. They resolve before the command-template graph runs and do not extend the portable Command Template Standard. Typed imports are recipe definitions: they expose the imported recipe's command-template-shaped metadata (`template`, `args`, `defaults`, flags, and `values`), while async-run launch fields such as `async` and `state_dir` remain lifecycle configuration for starting a run, not part of the imported execution graph.
+
+## Layer Ownership
+
+Template-recipe standard owns:
+
+- Saved JSON definitions around one command-template graph.
+- File-backed and co-located recipe shapes.
+- Recipe identity through `name` or filename.
+- Recipe defaults, values, imports, import references, and import-node expansion.
+- Foreground-vs-detached selection through `async: true` when invoked by a recipe-aware host.
+
+Template-recipe standard does not own:
+
+- How command-template nodes execute internally.
+- Async state files, logs, FIFO, status, cancellation, or observability.
+- Tool registry naming, button UX, package installation, or operator-specific policy.
+- Domain workflows such as swarm quorum, release policy, backlog parsing, or merge policy.
 
 A recipe can be synchronous or asynchronous:
 
@@ -59,14 +76,14 @@ Top-level command-template flags may sit beside `name` and `async`:
 {
   "name": "review-docs",
   "async": true,
-  "mode": "parallel",
+  "parallel": true,
   "timeout": 300000,
   "failure": "branch",
   "template": ["review-a docs/spec.md", "review-b docs/spec.md"]
 }
 ```
 
-Valid command-template flags include `args`, `defaults`, `mode`, `label`, `timeout`, `delay`, `output`, `retry`, `critical`, `failure`, `recover`, and `repeat`.
+Valid command-template flags include `args`, `defaults`, `parallel`, `when`, `label`, `timeout`, `delay`, `output`, `retry`, `failure`, `recover`, and `repeat`.
 
 Timeout is disabled by default. Set a positive `timeout` when a recipe should fail closed after a bounded runtime; omit it, or set `0`, for intentionally open-ended runs that will be stopped by async cancellation, such as background audio playback.
 
@@ -161,7 +178,7 @@ An import binding may be either a string recipe path/name or an object with:
 - `defaults`: extra default values exposed through the import.
 - `values`: explicit values for embedding that imported recipe.
 
-A template node of `{ "name": "alias" }` is replaced with the imported recipe's command-template graph. Imported recipe defaults are merged with import `defaults`, import `values`, node `defaults`, and node `values`; later layers win. This lets a parent recipe embed a reusable recipe in a sequence or `mode: "parallel"` branch without inventing a workflow language.
+A template node of `{ "name": "alias" }` is replaced with the imported recipe's command-template graph. Imported recipe defaults are merged with import `defaults`, import `values`, node `defaults`, and node `values`; later layers win. This lets a parent recipe embed a reusable recipe in a sequence or `parallel: true` branch without inventing a workflow language.
 
 Async composition stays explicit: importing a recipe reuses its command-template-shaped definition. It does not start a nested async run. Put `async: true` on the parent recipe when the combined imported graph should run detached as one run with one state dir. For agent-callable fanout, prefer public inputs such as `prompts:array` plus `repeat: "{prompts.length}"`, then select each branch value with `{prompts[index]}` instead of baking concrete prompts or file names into the reusable recipe.
 
@@ -172,7 +189,7 @@ Async composition stays explicit: importing a recipe reuses its command-template
   "imports": {
     "review": "review-one.json"
   },
-  "mode": "parallel",
+  "parallel": true,
   "failure": "branch",
   "template": [
     { "name": "review", "values": { "scope": "README.md" } },
@@ -192,12 +209,12 @@ Recipes can also read imported metadata and value containers before command-temp
     }
   },
   "defaults": {
-    "mode": "{base.defaults.mode=safe}",
+    "profile": "{base.defaults.profile=safe}",
     "target": "{base.values.target}",
     "label": "{base.name}:{base.values.target}",
     "enabled_label": "{base.defaults.enabled?enabled:disabled}"
   },
-  "template": "run {base.defaults.mode=safe} {base.values.target} {label}"
+  "template": "run {base.defaults.profile=safe} {base.values.target} {label}"
 }
 ```
 
@@ -214,6 +231,6 @@ Nested object keys are dot-separated. Import references are resolved before norm
 
 ## Compatibility
 
-The 0.7.0 line intentionally tightens terminology before release. Use `name` for an explicit recipe id, rely on the filename for file-backed recipe ids, and use `async: true` for detached runs. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
+The 0.8.0 line intentionally tightens terminology before release. Use `name` for an explicit recipe id, rely on the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
 
 If a proposed recipe needs a scheduler, queue daemon, `goto`, or custom workflow syntax, stop. Keep the recipe as saved command-template JSON and put policy in the registered tool, script, or caller.

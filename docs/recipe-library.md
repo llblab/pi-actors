@@ -46,7 +46,7 @@ Core subagent recipes:
 - `recipes/subagent-followup.json`: Same-context or degraded continuation.
 - `recipes/subagent-judge.json`: Post-merge/report quality judge.
 
-Most atoms expose policy knobs such as `model`, `thinking`, `tool_args`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Higher-level recipes pass these knobs through instead of hard-coding local policy.
+Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Higher-level recipes pass these knobs through instead of hard-coding local policy.
 
 Register one atom:
 
@@ -101,7 +101,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.
 - `recipes/utility-package-summary.json`: Use `scripts/recipe-utils.mjs` to emit bounded package metadata such as name, version, files, scripts, and dependency counts.
-- `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all_flag: "--all"`.
+- `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 
 These recipes are intentionally small. Register them only for trusted local commands and prefer narrow scopes. The helper-backed utilities share `scripts/recipe-utils.mjs` so repeated parsing/listing logic stays out of recipe strings.
 

@@ -201,7 +201,7 @@ test("Async runs can start from recipe files with overrides", async () => {
 
 test("Recipe files can put command-template flags at the recipe top level", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
-  const stateDir = join(root, "top-level-mode");
+  const stateDir = join(root, "top-level-parallel");
   const file = join(root, "parallel.json");
   try {
     await writeFile(
@@ -209,7 +209,7 @@ test("Recipe files can put command-template flags at the recipe top level", asyn
       JSON.stringify(
         {
           state_dir: stateDir,
-          mode: "parallel",
+          parallel: true,
           template: [
             `${process.execPath} -e "console.log('left')"`,
             `${process.execPath} -e "console.log('right')"`,

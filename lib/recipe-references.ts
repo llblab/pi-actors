@@ -29,13 +29,13 @@ export interface TemplateRecipeDefinition {
   template: CommandTemplateValue;
   args?: string[];
   defaults?: Record<string, unknown>;
-  mode?: CommandTemplates.CommandTemplateMode;
+  parallel?: boolean;
   label?: string;
-  timeout?: number;
-  delay?: number;
+  when?: boolean | string;
+  timeout?: number | string;
+  delay?: number | string;
   output?: string;
-  retry?: number;
-  critical?: boolean;
+  retry?: number | string;
   failure?: CommandTemplates.CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
   repeat?: number;
@@ -154,13 +154,13 @@ function getRecipeCommandTemplate(
   for (const key of [
     "args",
     "defaults",
-    "mode",
+    "parallel",
     "label",
+    "when",
     "timeout",
     "delay",
     "output",
     "retry",
-    "critical",
     "failure",
     "recover",
     "repeat",
@@ -501,26 +501,26 @@ export function readResolvedRecipeConfig(
     ...(isRecord(substituted.defaults)
       ? { defaults: substituted.defaults }
       : {}),
-    ...(substituted.mode === "parallel" || substituted.mode === "sequence"
-      ? { mode: substituted.mode }
+    ...(typeof substituted.parallel === "boolean"
+      ? { parallel: substituted.parallel }
       : {}),
     ...(typeof substituted.label === "string"
       ? { label: substituted.label }
       : {}),
-    ...(typeof substituted.timeout === "number"
+    ...(typeof substituted.when === "string" || typeof substituted.when === "boolean"
+      ? { when: substituted.when }
+      : {}),
+    ...(typeof substituted.timeout === "number" || typeof substituted.timeout === "string"
       ? { timeout: substituted.timeout }
       : {}),
-    ...(typeof substituted.delay === "number"
+    ...(typeof substituted.delay === "number" || typeof substituted.delay === "string"
       ? { delay: substituted.delay }
       : {}),
     ...(typeof substituted.output === "string"
       ? { output: substituted.output }
       : {}),
-    ...(typeof substituted.retry === "number"
+    ...(typeof substituted.retry === "number" || typeof substituted.retry === "string"
       ? { retry: substituted.retry }
-      : {}),
-    ...(typeof substituted.critical === "boolean"
-      ? { critical: substituted.critical }
       : {}),
     ...(substituted.failure === "continue" ||
     substituted.failure === "branch" ||

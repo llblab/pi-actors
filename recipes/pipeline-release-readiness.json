@@ -17,7 +17,7 @@
     "verifier_model:string",
     "merger_model:string",
     "judge_model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "scope": ".",
@@ -34,7 +34,7 @@
     "verifier_model": "openai-codex/gpt-5.5",
     "merger_model": "openai-codex/gpt-5.5",
     "judge_model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -61,7 +61,7 @@
         "verifier_model": "{verifier_model}",
         "merger_model": "{merger_model}",
         "judge_model": "{judge_model}",
-        "tool_args": "{tool_args}",
+        "tools": "{tools}",
         "output_format": "Markdown sections: Release Verdict, Blocking Issues, Package/Docs Risks, Validation Evidence, Publish Notes, Required Follow-up."
       }
     },
@@ -73,7 +73,7 @@
         "artifact_format": "Markdown sections: Release Verdict, Evidence, Risks, Checklist, Next Actions.",
         "delivery": "log",
         "model": "{merger_model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

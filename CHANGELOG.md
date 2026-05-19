@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0: Semantic Recipe API
+
+- `[Release]` Reframed the 0.8 line around semantic recipe inputs instead of leaking CLI fragments or historical node shapes. Impact: current docs focus on `async`, `parallel`, `when`, typed args, and recipe imports as the active API.
+- `[Command Templates]` Replaced public execution `mode: "parallel"` with boolean `parallel: true` for command-template and recipe fanout. Impact: the execution API now matches `async: true` style boolean modifiers, and packaged recipes/docs/tests no longer use enum-like execution mode for a two-state choice.
+- `[Recipe Design]` Reviewed remaining `mode`-named surfaces after the migration and removed the unused `utility-jsonl-tail` mode arg. Impact: execution mode became boolean, while multi-value user policy knobs such as merge mode, continuation mode, playlist output mode, and CLI `mode:enum(...)` examples remain enums because they are not reducible to true/false without losing names.
+- `[Command Templates]` Added `{name??fallback}` nullish coalescing and `{name?truthy:falsy}` ternary placeholder selection, then migrated `utility-validate-recipe` from `all_flag:string` to `all:bool`. Impact: recipes can expose semantic values while mapping empty fallbacks or optional CLI strings without leaking raw flag fragments into public args.
+- `[Command Templates]` Allowed numeric node control fields such as `timeout`, `delay`, and `retry` to read placeholder values, for example `timeout: "{timeout_ms}"`. Impact: recipes can expose configurable execution policy while keeping public arg names distinct from node field names.
+- `[Docs]` Added explicit layer-ownership sections to command-template, template-recipe, and async-run standards. Impact: portable execution syntax, saved recipe configuration, and detached lifecycle primitives are now documented as separate layers with clear non-goals.
+- `[Command Templates]` Added node-level `when` guards for conditional template execution. Impact: recipes can branch optional steps with semantic boolean inputs while skipped sequence nodes preserve stdin flow.
+- `[Component Recipes]` Replaced raw `tool_args` CLI fragments with semantic `tools` inputs mapped through ternary placeholders. Impact: subagent component recipes expose tool access policy without making callers assemble `pi` CLI flag strings.
+- `[Command Templates]` Removed the public `critical` alias in favor of `failure: "root"`. Impact: failure handling now has one explicit strategy surface instead of a boolean alias plus enum.
+- `[Recipe Library]` Replaced the public `timeout` arg in `utility-validation-wrapper` with `timeout_ms:int`, then feeds it into node-level `timeout`. Impact: callers can configure execution bounds without reusing command-template control-field names as public args.
+
 ## 0.7.1: Recipe Library Hotfix
 
 - `[Component Recipes]` Added `docs/component-recipes.md`, seed subagent component examples for review, verification, merge, quorum, checkpoint, follow-up, normalization, and one composed review coordinator. Impact: pi-auto-tools now has an explicit weak component-recipe contract for composing higher-level subagent coordinators without introducing a monolithic swarm DSL.

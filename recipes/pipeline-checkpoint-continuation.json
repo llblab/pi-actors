@@ -12,13 +12,13 @@
     "reply:string",
     "mode:enum(same-context,degraded-new-branch)",
     "model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "reply": "No coordinator reply provided yet; produce a checkpoint artifact only.",
     "mode": "degraded-new-branch",
     "model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -27,7 +27,7 @@
         "state": "{state}",
         "question": "{question}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -37,7 +37,7 @@
         "reply": "{reply}",
         "mode": "{mode}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -46,7 +46,7 @@
         "input": "Use checkpoint and follow-up outputs from stdin.",
         "format": "Markdown sections: Checkpoint, Coordinator Reply, Continuation Mode, Lost Context, Next Actions.",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

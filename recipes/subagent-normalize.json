@@ -7,14 +7,14 @@
     "preservation_policy:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
     "preservation_policy": "Do not change meaning, severity, evidence, or uncertainty while normalizing.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "off",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Normalize this subagent output. Target format: {format}. Preservation policy: {preservation_policy}. Input: {input}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Normalize this subagent output. Target format: {format}. Preservation policy: {preservation_policy}. Input: {input}"
 }

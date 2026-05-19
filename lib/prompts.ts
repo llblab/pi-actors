@@ -22,8 +22,8 @@ export const REGISTER_TOOL_GUIDELINES = [
 export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - Local-first cybernetic tool memory: agents persist trusted local capabilities instead of repeating shell recipes.
 - Task = user work; template = execution graph; recipe = saved JSON; run = execution instance.
-- Command templates stay sync: string leaf, array sequence, object flags, mode:"parallel" fanout.
-- Template flags: args/defaults, timeout, delay, retry, failure, recover, repeat, output.
+- Command templates stay sync: string leaf, array sequence, object flags, parallel: true fanout.
+- Template flags: args/defaults, parallel, when, timeout, delay, retry, failure, recover, repeat, output; placeholders support {value??fallback} and {flag?yes:no}.
 - Recipes live in ~/.pi/agent/recipes/*.json and wrap templates with metadata/defaults/imports.
 - Recipe imports are local variables: imports.alias -> {"name":"alias"} nodes and {alias.defaults.key} refs.
 - Imported recipes are definitions, not nested async runs; parent async:true creates one run.
@@ -35,7 +35,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - register_tool makes compact persistent buttons; args may be typed or derived from placeholders.
 - For single calls or short pipelines, use foreground templates/tools.
 - For subagents, swarms, background music, or long fanout, prefer async recipes/runs.
-- Long async fanout = parent async recipe wrapping template(mode:"parallel") and imports.
+- Long async fanout = parent async recipe wrapping template(parallel: true) and imports.
 - If asked to explore pi-auto-tools, read README.md, docs/README.md, docs/template-recipes.md, docs/async-runs.md, and recipes/.
 - Ambient triangles show active async commands/subagents for the launching coordinator.
 - After async run finish, inspect status/tail/events before final artifacts.`;
@@ -51,7 +51,7 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   template:
     "Command template with {arg} or {arg=default} placeholders, or a template recipe JSON path/name. With async, this is the co-located recipe body. Bare recipe names resolve under ~/.pi/agent/recipes. Omitted updates keep the old template. Empty string deletes the tool.",
   templateArray:
-    "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/failure/recover/critical.",
+    "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/failure/recover.",
   templateNull: "Delete the tool when template is null.",
   args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,model=openai-codex/gpt-5.5",
   update: "Set to true to overwrite an existing auto-tool registration.",

@@ -86,7 +86,7 @@ test("Template recipes reference imported defaults and explicit values", async (
       base,
       JSON.stringify({
         name: "base-recipe",
-        defaults: { mode: "safe", nested: { level: 3 }, enabled: true },
+        defaults: { profile: "safe", nested: { level: 3 }, enabled: true },
         template: "echo base",
       }),
     );
@@ -100,36 +100,36 @@ test("Template recipes reference imported defaults and explicit values", async (
           },
         },
         defaults: {
-          inherited_mode: "{base.defaults.mode}",
+          inherited_profile: "{base.defaults.profile}",
           inherited_level: "{base.defaults.nested.level}",
           target: "{base.values.target}",
           label: "{base.name}:{base.values.target}",
-          fallback: "{base.defaults.missing=default-mode}",
+          fallback: "{base.defaults.missing=default-profile}",
           enabled_label: "{base.defaults.enabled?enabled:disabled}",
           empty_label: "{base.values.empty?present:empty}",
         },
         template:
-          "run {base.defaults.mode} {base.values.target} {base.defaults.missing=fallback} {base.values.empty?yes:no} {label}",
+          "run {base.defaults.profile} {base.values.target} {base.defaults.missing=fallback} {base.values.empty?yes:no} {label}",
       }),
     );
 
     const config = readResolvedRecipeConfig(parent)!;
     assert.deepEqual(config.defaults, {
-      inherited_mode: "safe",
+      inherited_profile: "safe",
       inherited_level: 3,
       target: "docs",
       label: "base-recipe:docs",
-      fallback: "default-mode",
+      fallback: "default-profile",
       enabled_label: "enabled",
       empty_label: "empty",
     });
     assert.deepEqual(config.template, {
       defaults: {
-        inherited_mode: "safe",
+        inherited_profile: "safe",
         inherited_level: 3,
         target: "docs",
         label: "base-recipe:docs",
-        fallback: "default-mode",
+        fallback: "default-profile",
         enabled_label: "enabled",
         empty_label: "empty",
       },

@@ -142,35 +142,35 @@ test("Runtime tool definition exposes typed arg schemas", () => {
         mode: { kind: "enum", values: ["check", "fix"] },
         prompts: { kind: "array" },
         speed: { kind: "number" },
-        timeout: { kind: "int" },
+        request_timeout: { kind: "int" },
       },
-      args: ["file", "timeout", "speed", "dry_run", "mode", "prompts"],
+      args: ["file", "request_timeout", "speed", "dry_run", "mode", "prompts"],
       defaults: { dry_run: "true", mode: "check" },
       description: "Run checker",
       name: "check_tool",
       storedArgs: [
         "file:path",
-        "timeout:int",
+        "request_timeout:int",
         "speed:number",
         "dry_run:bool",
         "mode:enum(check,fix)",
         "prompts:array",
       ],
       storedDefaults: { dry_run: "true", mode: "check" },
-      template: "check {file} {timeout} {speed} {dry_run} {mode} {prompts}",
+      template: "check {file} {request_timeout} {speed} {dry_run} {mode} {prompts}",
     },
     async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
   );
   const properties = definition.parameters.properties as Record<string, any>;
   assert.equal(properties.file.type, "string");
-  assert.equal(properties.timeout.type, "integer");
+  assert.equal(properties.request_timeout.type, "integer");
   assert.equal(properties.speed.type, "number");
   assert.equal(properties.dry_run.type, "boolean");
   assert.deepEqual(properties.mode.enum, ["check", "fix"]);
   assert.equal(properties.prompts.type, "array");
   assert.deepEqual(definition.parameters.required, [
     "file",
-    "timeout",
+    "request_timeout",
     "speed",
     "prompts",
   ]);

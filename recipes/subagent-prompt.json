@@ -5,14 +5,14 @@
     "prompt:string",
     "model:string",
     "thinking:string",
-    "tool_args:string",
+    "tools:string",
     "output_format:string"
   ],
   "defaults": {
     "model": "openai-codex/gpt-5.5",
     "thinking": "off",
-    "tool_args": "--no-tools",
+    "tools": "",
     "output_format": "Concise Markdown with assumptions and next actions."
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} {prompt}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} {prompt}. Output format: {output_format}"
 }

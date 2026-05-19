@@ -3,12 +3,12 @@
   "args": [
     "command:string",
     "scope:string",
-    "timeout:int"
+    "timeout_ms:int"
   ],
   "defaults": {
     "scope": ".",
-    "timeout": "300000"
+    "timeout_ms": "300000"
   },
-  "timeout": 300000,
+  "timeout": "{timeout_ms}",
   "template": "bash -lc 'cd {scope} && {command}'"
 }

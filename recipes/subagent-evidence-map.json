@@ -8,7 +8,7 @@
     "output_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "sources": "Use only provided source notes, inspected artifacts, or explicit uncertainty.",
@@ -16,7 +16,7 @@
     "output_format": "Markdown sections: Question, Evidence Map, Contradictions, Missing Evidence, Confidence.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Build an evidence map for question: {question}. Sources: {sources}. Source policy: {source_policy}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Build an evidence map for question: {question}. Sources: {sources}. Source policy: {source_policy}. Output format: {output_format}"
 }

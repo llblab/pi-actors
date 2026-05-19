@@ -21,8 +21,8 @@ function templateKind(template) {
   if (Array.isArray(template)) return "sequence";
   if (template && typeof template === "object") {
     if (typeof template.template === "string") return "leaf";
-    if (Array.isArray(template.template)) return template.mode === "parallel" ? "parallel" : "sequence";
-    if (template.mode === "parallel") return "parallel";
+    if (Array.isArray(template.template)) return template.parallel === true ? "parallel" : "sequence";
+    if (template.parallel === true) return "parallel";
     return "object";
   }
   return "unknown";

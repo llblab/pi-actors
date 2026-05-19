@@ -14,13 +14,13 @@
     "sources:string",
     "constraints:string",
     "model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "sources": "Use provided source notes or artifact paths only; mark missing evidence.",
     "constraints": "Bound the question, preserve contradictions, and avoid publication-style certainty when evidence is weak.",
     "model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -30,7 +30,7 @@
         "scope": "Sources: {sources}",
         "constraints": "{constraints}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -39,7 +39,7 @@
         "question": "{question}",
         "sources": "{sources}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -48,7 +48,7 @@
         "inputs": "Use plan and evidence map from stdin.",
         "focus": "Contradictions, weak evidence, and missing source classes for question: {question}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -57,7 +57,7 @@
         "claim": "The synthesis can answer the research question within the stated constraints.",
         "evidence": "Use plan, evidence map, and contradiction map from stdin.",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -67,7 +67,7 @@
         "mode": "risk-first",
         "risk_policy": "Preserve uncertainty and contradictions over forced consensus.",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -76,7 +76,7 @@
         "input": "Use merged research synthesis from stdin.",
         "format": "Markdown sections: Question, Evidence Map, Synthesis, Contradictions, Confidence, Missing Evidence, Next Evidence Slice.",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

@@ -12,7 +12,7 @@
     "output_mode:enum(paths,m3u,inline)",
     "artifact_path:path",
     "model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "source_dir": "~/Music",
@@ -21,7 +21,7 @@
     "output_mode": "m3u",
     "artifact_path": "./media-library.md",
     "model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -41,7 +41,7 @@
         "artifact_format": "Markdown sections: Source, Playlist Output, Playback Notes, Next Actions.",
         "delivery": "log",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

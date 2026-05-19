@@ -88,13 +88,13 @@ Purpose: inspect, summarize, and decide actions for local async runs.
 Pipeline:
 
 ```text
-run-state summary → event tail → stale/active classification → recommended action → optional stop/control message
+run-state summary → actor-message tail → stale/active classification → recommended action → optional stop/control message
 ```
 
 Likely needed cells:
 
 - run summary helper
-- JSONL event tailer
+- JSONL actor-message tailer
 - stale-run classifier
 - control-message recommender
 - run report artifact
@@ -108,7 +108,7 @@ Existing seeds:
 
 Implemented seed:
 
-- `pipeline-async-run-ops`: structured run operations snapshot → normalized operations report → artifact report. The snapshot combines run summary, event tail, and recommended inspect/control messages before the LLM normalization step.
+- `pipeline-async-run-ops`: structured run operations snapshot → normalized operations report → artifact report. The snapshot combines run summary, actor-message tail, and recommended inspect/control messages before the LLM normalization step.
 
 ### Research Brief Cell
 
@@ -197,14 +197,14 @@ Purpose: convert local media directories into controllable playback workflows.
 Pipeline:
 
 ```text
-media scan → playlist build → playback start → event summary → controls
+media scan → playlist build → playback start → message summary → controls
 ```
 
 Likely needed cells:
 
 - playlist builder
 - music player
-- run/event summary
+- run/message summary
 - control recommender
 
 Existing seeds:

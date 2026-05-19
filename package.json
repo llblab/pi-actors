@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.13.4",
+  "version": "0.13.5",
   "private": false,
   "description": "Actor runtime and orchestrator for agent-managed local processes",
   "type": "module",

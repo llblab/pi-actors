@@ -71,7 +71,7 @@ Pipeline recipes demonstrate second-order composition:
 - `recipes/subagent-review-coordinator.json`: Lens reviewers → verifier → merger → judge → normalizer.
 - `recipes/pipeline-release-readiness.json`: Task-first release cell: changelog section → validation → release review → artifact report.
 - `recipes/pipeline-repo-health.json`: Task-first repository-health cell: git status/log → docs index → validation → normalized artifact report.
-- `recipes/pipeline-async-run-ops.json`: Task-first async-run operations cell: run summary → event tail → normalized operations report → artifact report.
+- `recipes/pipeline-async-run-ops.json`: Task-first async-run operations cell: run summary → actor-message tail → normalized operations report → artifact report.
 - `recipes/pipeline-review-readiness.json`: Release/readiness gate over selected lenses.
 - `recipes/pipeline-quorum-review.json`: Quorum vote shape → merge → judge → normalize.
 - `recipes/pipeline-architect-coordinator.json`: Architecture lens fanout → critique → verification → synthesis → next slice.
@@ -91,7 +91,7 @@ These are examples of library composition, not a workflow DSL. Pipeline recipes 
 Utility recipes cover local operator workflows that do not need subagents:
 
 - `recipes/utility-markdown-index.json`: List Markdown files in a directory as input for README/docs index maintenance.
-- `recipes/utility-jsonl-tail.json`: Tail a JSONL/event log with a configurable line count.
+- `recipes/utility-jsonl-tail.json`: Tail a JSONL message/log file with a configurable line count.
 - `recipes/utility-validation-wrapper.json`: Run a caller-supplied validation command in a scoped directory with a bounded timeout.
 - `recipes/utility-git-status.json`: Read concise branch/worktree state for a repo.
 - `recipes/utility-git-log.json`: Read recent decorated commit history for a repo.
@@ -99,7 +99,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-changelog-head.json`: Read the top slice of a changelog for release summary prep.
 - `recipes/utility-playlist-scan.json`: List local media files as playlist-building input.
 - `recipes/utility-run-summary.json`: Use `scripts/recipe-utils.mjs` to summarize async run state files as JSON.
-- `recipes/utility-run-ops-snapshot.json`: Combine async run summaries, event-tail JSONL, and stale/terminal recommendations into one structured operations snapshot.
+- `recipes/utility-run-ops-snapshot.json`: Combine async run summaries, actor-message JSONL tails, and stale/terminal recommendations into one structured operations snapshot.
 - `recipes/utility-playlist-build.json`: Use `scripts/recipe-utils.mjs` to build a filtered playlist listing as newline paths, M3U, or inline `|`-separated source.
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.

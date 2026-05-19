@@ -67,6 +67,18 @@ test("Command template arrays inherit only top-level args and defaults", () => {
   ]);
 });
 
+test("Command template child defaults can reference inherited defaults", () => {
+  const steps = expandCommandTemplateConfigs({
+    defaults: { model: "parent-model", reviewer_model: "reviewer-model" },
+    template: [
+      { defaults: { model: "{model}" }, template: "echo {model}" },
+      { defaults: { model: "{reviewer_model}" }, template: "echo {model}" },
+    ],
+  });
+  assert.equal(steps[0].defaults?.model, "parent-model");
+  assert.equal(steps[1].defaults?.model, "reviewer-model");
+});
+
 test("Template composition expansion preserves retry and critical on step objects", () => {
   const steps = expandCommandTemplateConfigs({
     template: [
@@ -114,7 +126,8 @@ test("Template composition expansion preserves retry and critical on step object
 test("Command template repeat expands numbered defaults", () => {
   const steps = expandCommandTemplateConfigs({
     repeat: 3,
-    template: "render page{_(index+1)}.html prev=page{_(prev+1)}.html next=page{_(next+1)}.html raw={index}/{repeat}"
+    template:
+      "render page{_(index+1)}.html prev=page{_(prev+1)}.html next=page{_(next+1)}.html raw={index}/{repeat}",
   });
   assert.equal(steps.length, 3);
   assert.deepEqual(
@@ -140,17 +153,23 @@ test("Command template repeat expands numbered defaults", () => {
     },
   );
   const invocation = buildCommandTemplateInvocation(steps[0], {}, "/work");
-  assert.deepEqual(invocation.args, ["page01.html", "prev=page03.html", "next=page02.html", "raw=0/3"]);
-  assert.deepEqual(buildCommandTemplateInvocation(steps[2], {}, "/work").args, ["page03.html", "prev=page02.html", "next=page01.html", "raw=2/3"]);
+  assert.deepEqual(invocation.args, [
+    "page01.html",
+    "prev=page03.html",
+    "next=page02.html",
+    "raw=0/3",
+  ]);
+  assert.deepEqual(buildCommandTemplateInvocation(steps[2], {}, "/work").args, [
+    "page03.html",
+    "prev=page02.html",
+    "next=page01.html",
+    "raw=2/3",
+  ]);
 });
 
 test("Command templates detect high-risk trusted executable shapes", () => {
   const warnings = getCommandTemplateWarnings({
-    template: [
-      "bash -c {script}",
-      "node -e {code}",
-      "rm -rf {work_dir}",
-    ],
+    template: ["bash -c {script}", "node -e {code}", "rm -rf {work_dir}"],
   });
   assert.equal(warnings.length, 3);
   assert.match(warnings[0], /bash/);
@@ -179,6 +198,26 @@ test("Command templates resolve defaults and inline placeholder defaults", () =>
   assert.deepEqual(invocation, {
     command: "/work/tts",
     args: ["--text", "hello world", "--lang", "ru", "--rate", "+30%"],
+  });
+});
+
+test("Command templates resolve embedded recursive defaults", () => {
+  const invocation = buildCommandTemplateInvocation(
+    {
+      defaults: {
+        repo: "/repo",
+        docs_dir: "docs",
+        directory: "{repo}/{docs_dir}",
+      },
+      template: "find {directory}",
+    },
+    {},
+    "/work",
+    { missingLabel: "test" },
+  );
+  assert.deepEqual(invocation, {
+    command: "find",
+    args: ["/repo/docs"],
   });
 });
 
@@ -235,11 +274,10 @@ test("Command template retry succeeds on second attempt", async () => {
     fs.writeFileSync(p, String(n));
     if (n < 2) process.exit(1);
   `;
-  const result = await execCommandTemplate(
-    process.execPath,
-    ["-e", script],
-    { retry: 2, killGrace: 10 },
-  );
+  const result = await execCommandTemplate(process.execPath, ["-e", script], {
+    retry: 2,
+    killGrace: 10,
+  });
   assert.equal(result.code, 0);
   assert.equal(readFileSync(counterFile, "utf8").trim(), "2");
   unlinkSync(counterFile);

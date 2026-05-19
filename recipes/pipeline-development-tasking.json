@@ -1,0 +1,69 @@
+{
+  "name": "pipeline-development-tasking",
+  "async": true,
+  "imports": {
+    "planner": "subagent-plan.json",
+    "task_card": "subagent-task-card.json",
+    "critic": "subagent-critic.json",
+    "normalizer": "subagent-normalize.json"
+  },
+  "args": [
+    "goal:string",
+    "allowed:string",
+    "avoided:string",
+    "checks:string",
+    "constraints:string",
+    "model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "allowed": "Caller must provide allowed files, directories, or logical scopes before implementation.",
+    "avoided": "Avoid unrelated files, public contracts, generated artifacts, and broad refactors unless explicitly allowed.",
+    "checks": "Smallest validation that proves the task card is complete.",
+    "constraints": "Split into bounded mutation zones and preserve integrator ownership of shared contracts.",
+    "model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "name": "planner",
+      "values": {
+        "goal": "{goal}",
+        "scope": "Allowed: {allowed}. Avoided: {avoided}.",
+        "constraints": "{constraints}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "task_card",
+      "values": {
+        "goal": "Use plan from stdin to create one bounded implementation assignment for: {goal}",
+        "allowed": "{allowed}",
+        "avoided": "{avoided}",
+        "checks": "{checks}",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "critic",
+      "values": {
+        "target": "Use generated plan and task card from stdin.",
+        "constraints": "{constraints}",
+        "risk_policy": "Find unsafe scope expansion, missing ownership, and weak validation gates.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use plan, task card, and critique from stdin.",
+        "format": "Markdown sections: Task Card, Allowed Files, Avoid Files, Checks, Risks, Integrator Notes.",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

@@ -8,14 +8,23 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { getAgentDir, getConfigPath, getExtensionTmpDir, getRecipeRoot, getRunStateRoot } from "../lib/paths.ts";
+import {
+  getAgentDir,
+  getConfigPath,
+  getExtensionTmpDir,
+  getRecipeRoot,
+  getRunStateRoot,
+} from "../lib/paths.ts";
 
 test("Agent dir defaults to the user pi agent directory", () => {
   assert.equal(getAgentDir({}), join(homedir(), ".pi", "agent"));
 });
 
 test("Agent dir honors PI_CODING_AGENT_DIR", () => {
-  assert.equal(getAgentDir({ PI_CODING_AGENT_DIR: "./agent" }), resolve("./agent"));
+  assert.equal(
+    getAgentDir({ PI_CODING_AGENT_DIR: "./agent" }),
+    resolve("./agent"),
+  );
 });
 
 test("Config path points to auto-tools.json under the agent dir", () => {

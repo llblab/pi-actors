@@ -1,0 +1,14 @@
+{
+  "name": "utility-changelog-section",
+  "args": [
+    "repo:path",
+    "file:path",
+    "version:string"
+  ],
+  "defaults": {
+    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "file": "CHANGELOG.md",
+    "version": "0.7.1"
+  },
+  "template": "{repo}/scripts/recipe-utils.mjs changelog-section {file} {version}"
+}

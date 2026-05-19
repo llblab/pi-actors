@@ -1,0 +1,17 @@
+{
+  "name": "utility-artifact-manifest",
+  "args": [
+    "repo:path",
+    "artifact_path:path",
+    "title:string",
+    "status:enum(draft,ready,blocked,accepted)",
+    "summary:string"
+  ],
+  "defaults": {
+    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "title": "Artifact",
+    "status": "draft",
+    "summary": "Machine-readable artifact manifest."
+  },
+  "template": "{repo}/scripts/recipe-utils.mjs artifact-manifest {artifact_path} {title} {status} {summary}"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "utility-jsonl-tail",
+  "args": [
+    "file:path",
+    "lines:int",
+    "mode:enum(raw,compact)"
+  ],
+  "defaults": {
+    "lines": "40",
+    "mode": "raw"
+  },
+  "template": "tail -n {lines} {file}"
+}

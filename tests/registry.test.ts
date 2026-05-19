@@ -74,7 +74,13 @@ test("Registry mutations register typed command-template args progressively", as
       {},
       harness.deps,
     );
-    assert.deepEqual(harness.tools.get("check_tool")?.args, ["file", "timeout", "speed", "dry_run", "mode"]);
+    assert.deepEqual(harness.tools.get("check_tool")?.args, [
+      "file",
+      "timeout",
+      "speed",
+      "dry_run",
+      "mode",
+    ]);
     assert.deepEqual(harness.tools.get("check_tool")?.storedArgs, [
       "file:path",
       "timeout:int",
@@ -82,8 +88,12 @@ test("Registry mutations register typed command-template args progressively", as
       "dry_run:bool",
       "mode:enum(check,fix)",
     ]);
-    assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.timeout, { kind: "int" });
-    assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.speed, { kind: "number" });
+    assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.timeout, {
+      kind: "int",
+    });
+    assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.speed, {
+      kind: "number",
+    });
   } finally {
     await harness.cleanup();
   }
@@ -102,8 +112,14 @@ test("Registry mutations register template recipe paths through template", async
       {},
       harness.deps,
     );
-    assert.equal(harness.tools.get("shader_run")?.template, "shader-ring-8-parallel.json");
-    assert.deepEqual(harness.tools.get("shader_run")?.args, ["theme", "out_dir"]);
+    assert.equal(
+      harness.tools.get("shader_run")?.template,
+      "shader-ring-8-parallel.json",
+    );
+    assert.deepEqual(harness.tools.get("shader_run")?.args, [
+      "theme",
+      "out_dir",
+    ]);
     assert.deepEqual(harness.runtimeRegistered, ["shader_run"]);
     assert.equal(result.details.template, "shader-ring-8-parallel.json");
   } finally {
@@ -136,7 +152,10 @@ test("Registry mutations register co-located template recipes", async () => {
     assert.deepEqual(harness.tools.get("review_run")?.args, ["scope"]);
     assert.equal(result.details.async, true);
     assert.equal(result.details.recipeName, "review_run");
-    assert.equal(result.details.state_dir, "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs");
+    assert.equal(
+      result.details.state_dir,
+      "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
+    );
   } finally {
     await harness.cleanup();
   }

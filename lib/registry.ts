@@ -121,12 +121,18 @@ function getInputTemplate(
   if (typeof value === "string") return value.trim();
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) {
-    const steps = CommandTemplates.expandCommandTemplateConfigs({ template: value });
+    const steps = CommandTemplates.expandCommandTemplateConfigs({
+      template: value,
+    });
     if (steps.length === 0)
-      throw new Error(Output.formatToolText("Tool template sequence is empty."));
+      throw new Error(
+        Output.formatToolText("Tool template sequence is empty."),
+      );
     return value;
   }
-  throw new Error(Output.formatToolText("Tool template must be a string or sequence."));
+  throw new Error(
+    Output.formatToolText("Tool template must be a string or sequence."),
+  );
 }
 
 function buildConfig(
@@ -148,26 +154,35 @@ function buildConfig(
   }
   const template = getInputTemplate(input.template);
   if (template === null) {
-    throw new Error(Output.formatToolText("Tool template cannot be null here."));
+    throw new Error(
+      Output.formatToolText("Tool template cannot be null here."),
+    );
   }
-  const finalTemplate = template === undefined || template === "" ? existing?.template : template;
+  const finalTemplate =
+    template === undefined || template === "" ? existing?.template : template;
   if (!finalTemplate) {
     throw new Error(Output.formatToolText("Tool template is required."));
   }
   const inputRecipe = typeof input.async === "boolean" ? name : undefined;
   const recipe: RecipeReferences.TemplateRecipeConfig | undefined = inputRecipe
     ? {
-      name: inputRecipe,
-      ...(typeof input.async === "boolean" ? { async: input.async } : {}),
-      ...(typeof input.state_dir === "string" && input.state_dir.trim() ? { state_dir: input.state_dir.trim() } : {}),
-      template: finalTemplate,
-      ...(input.values && typeof input.values === "object" ? { values: input.values } : {}),
-    }
+        name: inputRecipe,
+        ...(typeof input.async === "boolean" ? { async: input.async } : {}),
+        ...(typeof input.state_dir === "string" && input.state_dir.trim()
+          ? { state_dir: input.state_dir.trim() }
+          : {}),
+        template: finalTemplate,
+        ...(input.values && typeof input.values === "object"
+          ? { values: input.values }
+          : {}),
+      }
     : template === undefined
       ? existing?.recipe
       : undefined;
   const defaults = explicitArgs?.defaults ?? existing?.storedDefaults ?? {};
-  const storedArgs = explicitArgs ? explicitArgs.declarations : existing?.storedArgs;
+  const storedArgs = explicitArgs
+    ? explicitArgs.declarations
+    : existing?.storedArgs;
   const storedDefaults =
     Object.keys(defaults).length > 0 ? defaults : undefined;
   const recipeTemplate = RecipeReferences.getRecipeTemplate(finalTemplate);
@@ -175,27 +190,33 @@ function buildConfig(
   const argTemplateConfig: CommandTemplates.CommandTemplateConfig =
     typeof argTemplate === "object" && !Array.isArray(argTemplate)
       ? {
-        ...argTemplate,
-        ...(storedArgs !== undefined ? { args: storedArgs } : {}),
-        defaults: { ...(argTemplate.defaults ?? {}), ...defaults },
-      }
+          ...argTemplate,
+          ...(storedArgs !== undefined ? { args: storedArgs } : {}),
+          defaults: { ...(argTemplate.defaults ?? {}), ...defaults },
+        }
       : {
-        args: storedArgs,
-        defaults,
-        template: argTemplate,
-      };
+          args: storedArgs,
+          defaults,
+          template: argTemplate,
+        };
   const inferredArgTypes = Schema.getTemplateArgTypes(argTemplateConfig);
-  const argTypes = { ...inferredArgTypes, ...(existing?.argTypes ?? {}), ...(explicitArgs?.argTypes ?? {}) };
+  const argTypes = {
+    ...inferredArgTypes,
+    ...(existing?.argTypes ?? {}),
+    ...(explicitArgs?.argTypes ?? {}),
+  };
   return {
     name,
     description,
     template: finalTemplate,
     ...(recipe ? { recipe } : {}),
-    args: RecipeReferences.isRecipeTool(finalTemplate, recipe) && storedArgs !== undefined
-      ? Schema.getExplicitToolArgNames(storedArgs)
-      : RecipeReferences.isRecipeReference(finalTemplate) && !recipeTemplate
+    args:
+      RecipeReferences.isRecipeTool(finalTemplate, recipe) &&
+      storedArgs !== undefined
         ? Schema.getExplicitToolArgNames(storedArgs)
-        : Schema.getToolArgNames(argTemplateConfig),
+        : RecipeReferences.isRecipeReference(finalTemplate) && !recipeTemplate
+          ? Schema.getExplicitToolArgNames(storedArgs)
+          : Schema.getToolArgNames(argTemplateConfig),
     defaults,
     ...(Object.keys(argTypes).length > 0 ? { argTypes } : {}),
     ...(storedArgs !== undefined ? { storedArgs } : {}),
@@ -254,9 +275,10 @@ export async function executeRegisterTool<TContext>(
       ? cfg.template
       : { template: cfg.template! },
   );
-  const warningText = templateWarnings.length > 0
-    ? `\nWarnings:\n${templateWarnings.map((warning) => `- ${warning}`).join("\n")}`
-    : "";
+  const warningText =
+    templateWarnings.length > 0
+      ? `\nWarnings:\n${templateWarnings.map((warning) => `- ${warning}`).join("\n")}`
+      : "";
   return {
     content: [
       textContent(

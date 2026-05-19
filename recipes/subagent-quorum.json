@@ -6,14 +6,20 @@
   },
   "args": [
     "prompt:string",
-    "models:array"
+    "models:array",
+    "thinking:string",
+    "tool_args:string",
+    "output_format:string"
   ],
   "defaults": {
     "models": [
       "openai-codex/gpt-5.5",
       "openai-codex/gpt-5.4",
       "deepseek/deepseek-v4-flash"
-    ]
+    ],
+    "thinking": "off",
+    "tool_args": "--no-tools",
+    "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
   },
   "repeat": "{models.length}",
   "mode": "parallel",
@@ -22,7 +28,10 @@
     "name": "subagent",
     "values": {
       "prompt": "{prompt}",
-      "model": "{models[index]}"
+      "model": "{models[index]}",
+      "thinking": "{thinking}",
+      "tool_args": "{tool_args}",
+      "output_format": "{output_format}"
     }
   }
 }

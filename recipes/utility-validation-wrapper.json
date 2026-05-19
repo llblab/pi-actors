@@ -1,0 +1,14 @@
+{
+  "name": "utility-validation-wrapper",
+  "args": [
+    "command:string",
+    "scope:string",
+    "timeout:int"
+  ],
+  "defaults": {
+    "scope": ".",
+    "timeout": "300000"
+  },
+  "timeout": 300000,
+  "template": "bash -lc 'cd {scope} && {command}'"
+}

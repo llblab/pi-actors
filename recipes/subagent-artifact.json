@@ -1,0 +1,23 @@
+{
+  "name": "subagent-artifact",
+  "async": true,
+  "args": [
+    "input:string",
+    "artifact_path:path",
+    "artifact_format:string",
+    "write_policy:string",
+    "validation_policy:string",
+    "model:string",
+    "thinking:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "artifact_format": "Markdown with stable headings and preserved evidence.",
+    "write_policy": "Prepare content for the artifact path and state whether the caller should write, append, or review before writing.",
+    "validation_policy": "List checks the caller should run before accepting the artifact; distinguish required checks from optional review.",
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "off",
+    "tool_args": "--no-tools"
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Prepare a durable artifact. Target path: {artifact_path}. Format: {artifact_format}. Write policy: {write_policy}. Validation policy: {validation_policy}. Input: {input}"
+}

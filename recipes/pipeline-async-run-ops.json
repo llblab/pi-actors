@@ -1,0 +1,64 @@
+{
+  "name": "pipeline-async-run-ops",
+  "async": true,
+  "imports": {
+    "summary": "utility-run-summary.json",
+    "events": "utility-jsonl-tail.json",
+    "normalizer": "subagent-normalize.json",
+    "artifact": "pipeline-artifact-report.json"
+  },
+  "args": [
+    "state_root:path",
+    "event_file:path",
+    "lines:int",
+    "artifact_path:path",
+    "model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "state_root": "~/.pi/agent/tmp/pi-auto-tools/runs",
+    "event_file": "~/.pi/agent/tmp/pi-auto-tools/runs/music/outbox.jsonl",
+    "lines": "80",
+    "artifact_path": "./async-run-ops.md",
+    "model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "name": "summary",
+      "values": {
+        "state_root": "{state_root}"
+      }
+    },
+    {
+      "name": "events",
+      "failure": "continue",
+      "values": {
+        "file": "{event_file}",
+        "lines": "{lines}",
+        "mode": "raw"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use async run summary and event tail from stdin. State root: {state_root}. Event file: {event_file}.",
+        "format": "Markdown sections: Active Runs, Terminal Runs, Recent Events, Stale/Risky Runs, Recommended Controls, Follow-up Needed.",
+        "model": "{model}",
+        "thinking": "off",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "artifact",
+      "values": {
+        "input": "Use normalized async-run operations report from stdin.",
+        "artifact_path": "{artifact_path}",
+        "artifact_format": "Markdown sections: Status, Events, Risks, Recommended Actions.",
+        "delivery": "log",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

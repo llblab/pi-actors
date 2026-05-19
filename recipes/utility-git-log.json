@@ -1,0 +1,12 @@
+{
+  "name": "utility-git-log",
+  "args": [
+    "repo:path",
+    "count:int"
+  ],
+  "defaults": {
+    "repo": ".",
+    "count": "8"
+  },
+  "template": "git -C {repo} log --oneline --decorate -n {count}"
+}

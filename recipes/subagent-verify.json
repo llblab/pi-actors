@@ -1,0 +1,23 @@
+{
+  "name": "subagent-verify",
+  "async": true,
+  "args": [
+    "claim:string",
+    "evidence:string",
+    "acceptance:string",
+    "evidence_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "acceptance": "Separate proven, disproven, unknown, and missing evidence.",
+    "evidence_policy": "Do not infer beyond provided evidence or inspected artifacts.",
+    "output_format": "Markdown sections: Verdict, Evidence, Gaps, Confidence.",
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "off",
+    "tool_args": "--no-tools"
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Verify this claim against the provided evidence. Claim: {claim}. Evidence or artifact paths: {evidence}. Acceptance: {acceptance}. Evidence policy: {evidence_policy}. Output format: {output_format}"
+}

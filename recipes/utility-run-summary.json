@@ -1,0 +1,12 @@
+{
+  "name": "utility-run-summary",
+  "args": [
+    "repo:path",
+    "state_root:path"
+  ],
+  "defaults": {
+    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "state_root": "~/.pi/agent/tmp/pi-auto-tools/runs"
+  },
+  "template": "{repo}/scripts/recipe-utils.mjs run-summary {state_root}"
+}

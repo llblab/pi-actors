@@ -10,7 +10,13 @@ import { join } from "node:path";
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
 
-export type RunObservedStatus = "running" | "done" | "failed" | "exited" | "cancelled" | "killed";
+export type RunObservedStatus =
+  | "running"
+  | "done"
+  | "failed"
+  | "exited"
+  | "cancelled"
+  | "killed";
 export type RunOutboxDelivery = "log" | "notify" | "followup";
 export type RunOutboxLevel = "info" | "warning" | "error";
 
@@ -57,7 +63,13 @@ export interface RunOutboxEvent {
 
 export type RunTransitionNotificationType = "info" | "warning" | "error";
 
-const TERMINAL = new Set<RunObservedStatus>(["done", "failed", "exited", "cancelled", "killed"]);
+const TERMINAL = new Set<RunObservedStatus>([
+  "done",
+  "failed",
+  "exited",
+  "cancelled",
+  "killed",
+]);
 
 function toNumber(value: unknown): number | undefined {
   const number = Number(value);
@@ -92,7 +104,9 @@ function observeRun(stateDir: string): RunObservation | undefined {
       failures: Array.isArray(progress.failures)
         ? progress.failures.length
         : undefined,
-      ...(typeof status.ownerId === "string" ? { ownerId: status.ownerId } : {}),
+      ...(typeof status.ownerId === "string"
+        ? { ownerId: status.ownerId }
+        : {}),
       run,
       stateDir,
       status: status.status as RunObservedStatus,
@@ -108,7 +122,17 @@ export function summarizeRuns(
   ownerId?: string,
 ): RunSummary {
   if (!existsSync(stateRoot)) {
-    return { cancelled: 0, done: 0, exited: 0, failed: 0, killed: 0, running: 0, runningSubagents: 0, runs: [], total: 0 };
+    return {
+      cancelled: 0,
+      done: 0,
+      exited: 0,
+      failed: 0,
+      killed: 0,
+      running: 0,
+      runningSubagents: 0,
+      runs: [],
+      total: 0,
+    };
   }
   const runs = readdirSync(stateRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -122,14 +146,18 @@ export function summarizeRuns(
   const failed = runs.filter((run) => run.status === "failed").length;
   const cancelled = runs.filter((run) => run.status === "cancelled").length;
   const killed = runs.filter((run) => run.status === "killed").length;
-  const observedSubagents = runs.reduce(
-    (sum, run) => sum + (run.status === "running" ? Math.max(1, run.activeSubagents ?? 0) : 0),
-    0,
-  );
-  const runningSubagents = observedSubagents > 0
-    ? observedSubagents
-    : countRunningSubagents(stateRoot, ownerId);
-  return { cancelled, done, exited, failed, killed, running, runningSubagents, runs, total: runs.length };
+  const runningSubagents = running;
+  return {
+    cancelled,
+    done,
+    exited,
+    failed,
+    killed,
+    running,
+    runningSubagents,
+    runs,
+    total: runs.length,
+  };
 }
 
 function readProcFile(path: string): string | undefined {
@@ -163,8 +191,21 @@ function getRunningRunPids(stateRoot: string, ownerId?: string): Set<string> {
   return pids;
 }
 
-function summarizeRunsWithoutSubagents(stateRoot: string, ownerId?: string): Omit<RunSummary, "runningSubagents"> {
-  if (!existsSync(stateRoot)) return { cancelled: 0, done: 0, exited: 0, failed: 0, killed: 0, running: 0, runs: [], total: 0 };
+function summarizeRunsWithoutSubagents(
+  stateRoot: string,
+  ownerId?: string,
+): Omit<RunSummary, "runningSubagents"> {
+  if (!existsSync(stateRoot))
+    return {
+      cancelled: 0,
+      done: 0,
+      exited: 0,
+      failed: 0,
+      killed: 0,
+      running: 0,
+      runs: [],
+      total: 0,
+    };
   const runs = readdirSync(stateRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => observeRun(join(stateRoot, entry.name)))
@@ -177,10 +218,22 @@ function summarizeRunsWithoutSubagents(stateRoot: string, ownerId?: string): Omi
   const failed = runs.filter((run) => run.status === "failed").length;
   const cancelled = runs.filter((run) => run.status === "cancelled").length;
   const killed = runs.filter((run) => run.status === "killed").length;
-  return { cancelled, done, exited, failed, killed, running, runs, total: runs.length };
+  return {
+    cancelled,
+    done,
+    exited,
+    failed,
+    killed,
+    running,
+    runs,
+    total: runs.length,
+  };
 }
 
-export function countRunningSubagents(stateRoot = Paths.getRunStateRoot(), ownerId?: string): number {
+export function countRunningSubagents(
+  stateRoot = Paths.getRunStateRoot(),
+  ownerId?: string,
+): number {
   const runPids = getRunningRunPids(stateRoot, ownerId);
   if (runPids.size === 0 || !existsSync("/proc")) return 0;
   const parentByPid = new Map<string, string>();
@@ -210,14 +263,22 @@ export function countRunningSubagents(stateRoot = Paths.getRunStateRoot(), owner
   return count;
 }
 
-export function renderSubagentStatus(count: number, frame = 0): string | undefined {
+export function renderSubagentStatus(
+  count: number,
+  frame = 0,
+): string | undefined {
   if (count <= 0) return undefined;
   if (count === 1) return frame % 2 === 0 ? "▶" : "▷";
   const active = frame % count;
-  return Array.from({ length: count }, (_value, index) => index === active ? "▶" : "▷").join(" ");
+  return Array.from({ length: count }, (_value, index) =>
+    index === active ? "▶" : "▷",
+  ).join(" ");
 }
 
-export function renderRunStatus(summary: RunSummary, frame = 0): string | undefined {
+export function renderRunStatus(
+  summary: RunSummary,
+  frame = 0,
+): string | undefined {
   return renderSubagentStatus(summary.runningSubagents, frame);
 }
 
@@ -253,18 +314,22 @@ function parseOutboxLine(
   try {
     const raw = JSON.parse(line) as Record<string, unknown>;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-    const event = typeof raw.event === "string" && raw.event.trim()
-      ? raw.event.trim()
-      : "run.event";
-    const summary = typeof raw.summary === "string" && raw.summary.trim()
-      ? raw.summary.trim()
-      : event;
-    const ts = typeof raw.ts === "string" && raw.ts.trim()
-      ? raw.ts.trim()
-      : new Date(0).toISOString();
-    const id = typeof raw.id === "string" && raw.id.trim()
-      ? raw.id.trim()
-      : `${run.run}:${index}`;
+    const event =
+      typeof raw.event === "string" && raw.event.trim()
+        ? raw.event.trim()
+        : "run.event";
+    const summary =
+      typeof raw.summary === "string" && raw.summary.trim()
+        ? raw.summary.trim()
+        : event;
+    const ts =
+      typeof raw.ts === "string" && raw.ts.trim()
+        ? raw.ts.trim()
+        : new Date(0).toISOString();
+    const id =
+      typeof raw.id === "string" && raw.id.trim()
+        ? raw.id.trim()
+        : `${run.run}:${index}`;
     return {
       ...(raw.data !== undefined ? { data: raw.data } : {}),
       delivery: normalizeOutboxDelivery(raw.delivery),
@@ -330,12 +395,21 @@ export function getRunTransitionNotificationType(
   transition: RunTransition,
 ): RunTransitionNotificationType {
   if (transition.to === "done" || transition.to === "cancelled") return "info";
-  if (transition.to === "killed" || transition.to === "exited") return "warning";
+  if (transition.to === "killed" || transition.to === "exited")
+    return "warning";
   return "error";
 }
 
-export function shouldSendRunTransitionFollowUp(transition: RunTransition): boolean {
-  return getRunTransitionNotificationType(transition) !== "info";
+export function shouldNotifyRunTransition(
+  transition: RunTransition,
+): boolean {
+  return transition.to === "killed" || transition.to === "exited";
+}
+
+export function shouldSendRunTransitionFollowUp(
+  transition: RunTransition,
+): boolean {
+  return shouldNotifyRunTransition(transition);
 }
 
 export function formatRunTransitionMessage(transition: RunTransition): string {

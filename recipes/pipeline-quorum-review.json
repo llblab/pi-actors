@@ -1,0 +1,68 @@
+{
+  "name": "pipeline-quorum-review",
+  "async": true,
+  "imports": {
+    "quorum": "subagent-quorum.json",
+    "merger": "subagent-merge.json",
+    "judge": "subagent-judge.json",
+    "normalizer": "subagent-normalize.json"
+  },
+  "args": [
+    "prompt:string",
+    "models:array",
+    "merge_mode:enum(consensus-first,risk-first)",
+    "merger_model:string",
+    "judge_model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "models": [
+      "openai-codex/gpt-5.5",
+      "openai-codex/gpt-5.4",
+      "deepseek/deepseek-v4-flash"
+    ],
+    "merge_mode": "consensus-first",
+    "merger_model": "openai-codex/gpt-5.5",
+    "judge_model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "name": "quorum",
+      "values": {
+        "prompt": "{prompt}",
+        "models": "{models}",
+        "tool_args": "{tool_args}",
+        "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
+      }
+    },
+    {
+      "name": "merger",
+      "values": {
+        "inputs": "Use quorum outputs from stdin.",
+        "mode": "{merge_mode}",
+        "model": "{merger_model}",
+        "tool_args": "{tool_args}",
+        "risk_policy": "Preserve vote shape, minority severe findings, and confidence disagreements."
+      }
+    },
+    {
+      "name": "judge",
+      "values": {
+        "report": "Use merged quorum report from stdin.",
+        "evidence": "Use raw quorum outputs and merged report from stdin.",
+        "model": "{judge_model}",
+        "tool_args": "{tool_args}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use merged and judged quorum output from stdin.",
+        "format": "Markdown sections: Verdict, Vote Shape, Consensus, Minority Findings, Confidence, Required Action.",
+        "model": "{merger_model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

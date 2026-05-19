@@ -5,6 +5,8 @@
  * Wraps command templates as callable pi tools and stores their definitions in auto-tools.json across reloads and sessions.
  */
 
+import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
+
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -20,6 +22,7 @@ import * as Tools from "./lib/tools.ts";
 
 const CONFIG_PATH = Paths.getConfigPath();
 const TEMP_DIR = Paths.getExtensionTmpDir();
+const RUN_STATE_ROOT = Paths.getRunStateRoot();
 const RESERVED_TOOL_NAMES = new Set([
   "read",
   "write",
@@ -33,7 +36,10 @@ const RESERVED_TOOL_NAMES = new Set([
 ]);
 
 export default function toolRegistryExtension(pi: ExtensionAPI) {
-  let runsInterval: NodeJS.Timeout | undefined;
+  let runsAnimationInterval: NodeJS.Timeout | undefined;
+  let runsNotifyTimeout: NodeJS.Timeout | undefined;
+  let stateRootWatcher: FSWatcher | undefined;
+  const runDirWatchers = new Map<string, FSWatcher>();
   const observedRuns = new Map<string, Observability.RunObservedStatus>();
   const observedRunEventLines = new Map<string, number>();
   let runStatusFrame = 0;
@@ -58,8 +64,10 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     );
     if (!notify) return;
     for (const transition of transitions) {
+      if (!Observability.shouldNotifyRunTransition(transition)) continue;
       const text = Observability.formatRunTransitionMessage(transition);
-      const notificationType = Observability.getRunTransitionNotificationType(transition);
+      const notificationType =
+        Observability.getRunTransitionNotificationType(transition);
       ctx.ui.notify(text, notificationType);
       if (!Observability.shouldSendRunTransitionFollowUp(transition)) continue;
       pi.sendMessage(
@@ -75,7 +83,8 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     for (const event of outboxEvents) {
       if (!Observability.shouldNotifyRunOutboxEvent(event)) continue;
       const text = Observability.formatRunOutboxMessage(event);
-      const notificationType = Observability.getRunOutboxNotificationType(event);
+      const notificationType =
+        Observability.getRunOutboxNotificationType(event);
       ctx.ui.notify(text, notificationType);
       if (!Observability.shouldSendRunOutboxFollowUp(event)) continue;
       pi.sendMessage(
@@ -89,6 +98,53 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       );
     }
   };
+  const closeRunWatchers = (): void => {
+    stateRootWatcher?.close();
+    stateRootWatcher = undefined;
+    for (const watcher of runDirWatchers.values()) watcher.close();
+    runDirWatchers.clear();
+    if (runsNotifyTimeout) clearTimeout(runsNotifyTimeout);
+    runsNotifyTimeout = undefined;
+  };
+  const scheduleRunEventUpdate = (ctx: ExtensionContext): void => {
+    if (runsNotifyTimeout) clearTimeout(runsNotifyTimeout);
+    runsNotifyTimeout = setTimeout(() => {
+      refreshRunWatchers(ctx);
+      updateRunUi(ctx, true);
+    }, 50);
+    runsNotifyTimeout.unref?.();
+  };
+  const watchRunDir = (ctx: ExtensionContext, stateDir: string): void => {
+    if (runDirWatchers.has(stateDir) || !existsSync(stateDir)) return;
+    try {
+      const watcher = watch(stateDir, () => scheduleRunEventUpdate(ctx));
+      watcher.on("error", () => {
+        watcher.close();
+        runDirWatchers.delete(stateDir);
+      });
+      runDirWatchers.set(stateDir, watcher);
+    } catch {
+      // Watching is best-effort; explicit async_run status/tail remains available.
+    }
+  };
+  function refreshRunWatchers(ctx: ExtensionContext): void {
+    if (!existsSync(RUN_STATE_ROOT)) return;
+    if (!stateRootWatcher) {
+      try {
+        stateRootWatcher = watch(RUN_STATE_ROOT, () => scheduleRunEventUpdate(ctx));
+        stateRootWatcher.on("error", () => {
+          stateRootWatcher?.close();
+          stateRootWatcher = undefined;
+        });
+      } catch {
+        // Watching is best-effort; explicit async_run status/tail remains available.
+      }
+    }
+    for (const entry of readdirSync(RUN_STATE_ROOT, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      watchRunDir(ctx, `${RUN_STATE_ROOT}/${entry.name}`);
+    }
+  }
   const runtime = Runtime.createAutoToolsRuntime({
     configPath: CONFIG_PATH,
     exec: CommandTemplates.execCommandTemplate,
@@ -100,13 +156,16 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     await Temp.prepareExtensionTempDir(TEMP_DIR);
     runtime.loadTools(ctx);
     updateRunUi(ctx);
-    if (runsInterval) clearInterval(runsInterval);
-    runsInterval = setInterval(() => updateRunUi(ctx, true), 250);
-    runsInterval.unref?.();
+    closeRunWatchers();
+    refreshRunWatchers(ctx);
+    if (runsAnimationInterval) clearInterval(runsAnimationInterval);
+    runsAnimationInterval = setInterval(() => updateRunUi(ctx, false), 1000);
+    runsAnimationInterval.unref?.();
   });
   pi.on("session_shutdown", async () => {
-    if (runsInterval) clearInterval(runsInterval);
-    runsInterval = undefined;
+    if (runsAnimationInterval) clearInterval(runsAnimationInterval);
+    runsAnimationInterval = undefined;
+    closeRunWatchers();
   });
   pi.on("before_agent_start", async (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,
@@ -123,7 +182,5 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
     }),
   );
-  pi.registerTool(
-    Tools.createAsyncRunToolDefinition<ExtensionContext>(),
-  );
+  pi.registerTool(Tools.createAsyncRunToolDefinition<ExtensionContext>());
 }

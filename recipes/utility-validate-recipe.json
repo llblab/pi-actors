@@ -1,0 +1,14 @@
+{
+  "name": "utility-validate-recipe",
+  "args": [
+    "target:path",
+    "all_flag:string",
+    "repo:path"
+  ],
+  "defaults": {
+    "target": "recipes",
+    "all_flag": "--all",
+    "repo": "~/.pi/agent/extensions/pi-auto-tools"
+  },
+  "template": "{repo}/scripts/validate-recipe.mjs {target} {all_flag}"
+}

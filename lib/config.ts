@@ -143,30 +143,46 @@ export function normalizeStoredTool(
     };
   }
   if (Object.hasOwn(record, "tool")) {
-    return { changed: false, warning: `Tool "${name}" cannot define tool; use template directly.` };
+    return {
+      changed: false,
+      warning: `Tool "${name}" cannot define tool; use template directly.`,
+    };
   }
   if (record.job !== undefined || record.recipe !== undefined) {
-    return { changed: false, warning: `Tool "${name}" uses legacy job/recipe config. Use template with optional name and async fields.` };
+    return {
+      changed: false,
+      warning: `Tool "${name}" uses legacy job/recipe config. Use template with optional name and async fields.`,
+    };
   }
-  const keyedRecipeName = key !== undefined && typeof record.name === "string" && record.name.trim()
-    ? record.name.trim()
-    : undefined;
+  const keyedRecipeName =
+    key !== undefined && typeof record.name === "string" && record.name.trim()
+      ? record.name.trim()
+      : undefined;
   if ((keyedRecipeName || typeof record.async === "boolean") && !template) {
-    return { changed: false, warning: `Tool "${name}" uses recipe config without template. Add template to make it a co-located template recipe.` };
+    return {
+      changed: false,
+      warning: `Tool "${name}" uses recipe config without template. Add template to make it a co-located template recipe.`,
+    };
   }
   if (!template) {
     return { changed: true, warning: `Tool "${name}" has no template` };
   }
-  const recipeName = keyedRecipeName
-    ?? (typeof record.async === "boolean" ? name : undefined);
+  const recipeName =
+    keyedRecipeName ?? (typeof record.async === "boolean" ? name : undefined);
   const recipe: RecipeReferences.TemplateRecipeConfig | undefined = recipeName
     ? {
-      name: recipeName,
-      ...(typeof record.async === "boolean" ? { async: record.async } : {}),
-      ...(typeof record.state_dir === "string" && record.state_dir.trim() ? { state_dir: record.state_dir.trim() } : {}),
-      template,
-      ...(record.values && typeof record.values === "object" && !Array.isArray(record.values) ? { values: record.values as Record<string, unknown> } : {}),
-    }
+        name: recipeName,
+        ...(typeof record.async === "boolean" ? { async: record.async } : {}),
+        ...(typeof record.state_dir === "string" && record.state_dir.trim()
+          ? { state_dir: record.state_dir.trim() }
+          : {}),
+        template,
+        ...(record.values &&
+        typeof record.values === "object" &&
+        !Array.isArray(record.values)
+          ? { values: record.values as Record<string, unknown> }
+          : {}),
+      }
     : undefined;
   const isRecipe = RecipeReferences.isRecipeTool(template, recipe);
   const recipeTemplate = RecipeReferences.getRecipeTemplate(template);
@@ -181,7 +197,9 @@ export function normalizeStoredTool(
     record.args,
     record.defaults,
   );
-  const storedArgs = declarations.provided ? declarations.declarations : undefined;
+  const storedArgs = declarations.provided
+    ? declarations.declarations
+    : undefined;
   const storedDefaults =
     declarations.provided && Object.keys(declarations.defaults).length > 0
       ? declarations.defaults
@@ -189,25 +207,29 @@ export function normalizeStoredTool(
   const argTemplateConfig: CommandTemplates.CommandTemplateConfig =
     typeof argTemplate === "object" && !Array.isArray(argTemplate)
       ? {
-        ...argTemplate,
-        ...(storedArgs !== undefined ? { args: storedArgs } : {}),
-        defaults: { ...(argTemplate.defaults ?? {}), ...declarations.defaults },
-      }
+          ...argTemplate,
+          ...(storedArgs !== undefined ? { args: storedArgs } : {}),
+          defaults: {
+            ...(argTemplate.defaults ?? {}),
+            ...declarations.defaults,
+          },
+        }
       : {
-        args: storedArgs,
-        defaults: declarations.defaults,
-        template: argTemplate,
-      };
+          args: storedArgs,
+          defaults: declarations.defaults,
+          template: argTemplate,
+        };
   const inferredArgTypes = Schema.getTemplateArgTypes(argTemplateConfig);
   const argTypes = { ...inferredArgTypes, ...declarations.argTypes };
   const cfg = {
     name,
     description,
-    args: isRecipe && storedArgs !== undefined
-      ? Schema.getExplicitToolArgNames(storedArgs)
-      : RecipeReferences.isRecipeReference(template) && !recipeTemplate
+    args:
+      isRecipe && storedArgs !== undefined
         ? Schema.getExplicitToolArgNames(storedArgs)
-        : Schema.getToolArgNames(argTemplateConfig),
+        : RecipeReferences.isRecipeReference(template) && !recipeTemplate
+          ? Schema.getExplicitToolArgNames(storedArgs)
+          : Schema.getToolArgNames(argTemplateConfig),
     defaults: declarations.defaults,
     ...(Object.keys(argTypes).length > 0 ? { argTypes } : {}),
     ...(recipe ? { recipe } : {}),

@@ -1,0 +1,23 @@
+{
+  "name": "subagent-followup",
+  "async": true,
+  "args": [
+    "checkpoint:string",
+    "reply:string",
+    "mode:enum(same-context,degraded-new-branch)",
+    "continuity_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "mode": "degraded-new-branch",
+    "continuity_policy": "If mode is degraded-new-branch, explicitly state what context continuity was lost and what was reconstructed from the checkpoint.",
+    "output_format": "Markdown sections: Continuation Mode, Applied Reply, Lost Context, Continued Work, Next Actions.",
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "off",
+    "tool_args": "--no-tools"
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Continue from checkpoint using mode {mode}. Checkpoint: {checkpoint}. Coordinator reply: {reply}. Continuity policy: {continuity_policy}. Output format: {output_format}"
+}

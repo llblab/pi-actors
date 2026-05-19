@@ -1,0 +1,24 @@
+{
+  "name": "subagent-event",
+  "async": true,
+  "args": [
+    "event_type:string",
+    "payload:string",
+    "delivery:enum(log,notify,followup)",
+    "event_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "event_type": "component.update",
+    "delivery": "log",
+    "event_policy": "Emit an outbox-event-shaped JSON object for the coordinator; do not call transport tools directly.",
+    "output_format": "JSON object with type, delivery, summary, payload, confidence, and next_action.",
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "off",
+    "tool_args": "--no-tools"
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Create an event-shaped record. Event type: {event_type}. Delivery: {delivery}. Event policy: {event_policy}. Payload: {payload}. Output format: {output_format}"
+}

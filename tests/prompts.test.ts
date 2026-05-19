@@ -28,15 +28,26 @@ test("Register tool parameter descriptions cover public input fields", () => {
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.args, /file,lang/);
 });
 
-
 test("Onboarding system prompt explains recipe and async run model compactly", () => {
   const lines = Prompts.ONBOARDING_SYSTEM_PROMPT.split("\n");
   assert.equal(lines.length <= 20, true);
-  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Local-first cybernetic tool memory/);
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /Local-first cybernetic tool memory/,
+  );
   assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Command templates stay sync/);
-  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Recipe imports are local variables/);
-  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /parent async:true creates one run/);
-  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /If asked to explore pi-auto-tools/);
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /Recipe imports are local variables/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /parent async:true creates one run/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /If asked to explore pi-auto-tools/,
+  );
 });
 
 test("Registered tool prompt snippet includes the command template", () => {

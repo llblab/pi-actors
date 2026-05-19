@@ -9,9 +9,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { cancelRun, getRunStatus, killRun, listRuns, readRunEvents, sendRunMessage, startRun, tailRun } from "../lib/async-runs.ts";
+import {
+  cancelRun,
+  getRunStatus,
+  killRun,
+  listRuns,
+  readRunEvents,
+  sendRunMessage,
+  startRun,
+  tailRun,
+} from "../lib/async-runs.ts";
 
-async function waitForResult(stateDir: string): Promise<Record<string, unknown>> {
+async function waitForResult(
+  stateDir: string,
+): Promise<Record<string, unknown>> {
   for (let i = 0; i < 40; i++) {
     const status = getRunStatus(stateDir);
     if (status.result) return status.result as Record<string, unknown>;
@@ -32,7 +43,10 @@ async function waitForFile(path: string): Promise<void> {
   throw new Error(`file did not appear: ${path}`);
 }
 
-async function waitForStatus(stateDir: string, expected: string): Promise<Record<string, unknown>> {
+async function waitForStatus(
+  stateDir: string,
+  expected: string,
+): Promise<Record<string, unknown>> {
   for (let i = 0; i < 40; i++) {
     const status = getRunStatus(stateDir);
     if (status.status === expected) return status;
@@ -62,7 +76,10 @@ test("Async runs write state files and finish", async () => {
     assert.equal(status.status, "done");
     assert.equal((listRuns(root)[0] || {}).run, "hello");
     assert.match(tailRun(stateDir), /run\.(start|runner\.start|done)/);
-    assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /hello world/);
+    assert.match(
+      await readFile(join(stateDir, "stdout.log"), "utf8"),
+      /hello world/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -173,7 +190,10 @@ test("Async runs can start from recipe files with overrides", async () => {
     assert.equal(meta.values.state_dir, stateDir);
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
-    assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /hello override/);
+    assert.match(
+      await readFile(join(stateDir, "stdout.log"), "utf8"),
+      /hello override/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -233,7 +253,8 @@ test("Recipe files reject tool references", async () => {
 test("Async runs expose script-authored outbox events", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
   const stateDir = join(root, "outbox");
-  const script = "const fs=require('fs');const path=require('path');fs.appendFileSync(path.join(process.argv[1],'outbox.jsonl'),JSON.stringify({event:'demo.update',summary:'Demo update',level:'warning',delivery:'notify',data:{ok:true}})+'\\n')";
+  const script =
+    "const fs=require('fs');const path=require('path');fs.appendFileSync(path.join(process.argv[1],'outbox.jsonl'),JSON.stringify({event:'demo.update',summary:'Demo update',level:'warning',delivery:'notify',data:{ok:true}})+'\\n')";
   try {
     startRun(
       {
@@ -257,34 +278,40 @@ test("Async runs expose script-authored outbox events", async () => {
   }
 });
 
-test("Async runs can send line messages to a run control FIFO", { skip: process.platform === "win32" }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
-  const stateDir = join(root, "controlled");
-  const readyFile = join(root, "ready");
-  const messageFile = join(root, "message");
-  const script = "mkfifo \"$1/control.fifo\"; printf ready >\"$2\"; IFS= read -r message <\"$1/control.fifo\"; printf %s \"$message\" >\"$3\"";
-  try {
-    startRun(
-      {
-        run_id: "controlled",
-        state_dir: stateDir,
-        template: "bash -lc {script} -- {state_dir} {readyFile} {messageFile}",
-        values: { messageFile, readyFile, script },
-      },
-      process.cwd(),
-    );
-    await waitForFile(readyFile);
-    const result = sendRunMessage(stateDir, "next");
-    assert.equal(result.sent, true);
-    assert.equal(result.control, "control.fifo");
-    await waitForFile(messageFile);
-    assert.equal(await readFile(messageFile, "utf8"), "next");
-    assert.equal((await waitForResult(stateDir)).code, 0);
-    assert.match(tailRun(stateDir), /run\.message/);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
+test(
+  "Async runs can send line messages to a run control FIFO",
+  { skip: process.platform === "win32" },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+    const stateDir = join(root, "controlled");
+    const readyFile = join(root, "ready");
+    const messageFile = join(root, "message");
+    const script =
+      'mkfifo "$1/control.fifo"; printf ready >"$2"; IFS= read -r message <"$1/control.fifo"; printf %s "$message" >"$3"';
+    try {
+      startRun(
+        {
+          run_id: "controlled",
+          state_dir: stateDir,
+          template:
+            "bash -lc {script} -- {state_dir} {readyFile} {messageFile}",
+          values: { messageFile, readyFile, script },
+        },
+        process.cwd(),
+      );
+      await waitForFile(readyFile);
+      const result = sendRunMessage(stateDir, "next");
+      assert.equal(result.sent, true);
+      assert.equal(result.control, "control.fifo");
+      await waitForFile(messageFile);
+      assert.equal(await readFile(messageFile, "utf8"), "next");
+      assert.equal((await waitForResult(stateDir)).code, 0);
+      assert.match(tailRun(stateDir), /run\.message/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("Async run cancel terminates matching running runs", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
@@ -304,7 +331,10 @@ test("Async run cancel terminates matching running runs", async () => {
     }
     const result = cancelRun(stateDir);
     assert.equal(result.cancelled, true);
-    assert.equal((await waitForStatus(stateDir, "cancelled")).status, "cancelled");
+    assert.equal(
+      (await waitForStatus(stateDir, "cancelled")).status,
+      "cancelled",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

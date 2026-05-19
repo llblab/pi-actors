@@ -1,0 +1,48 @@
+{
+  "name": "pipeline-media-library",
+  "async": true,
+  "imports": {
+    "playlist": "utility-playlist-build.json",
+    "artifact": "pipeline-artifact-report.json"
+  },
+  "args": [
+    "source_dir:path",
+    "extensions:string",
+    "max_depth:int",
+    "output_mode:enum(paths,m3u,inline)",
+    "artifact_path:path",
+    "model:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "source_dir": "~/Music",
+    "extensions": ".mp3,.ogg,.wav,.flac,.m4a",
+    "max_depth": "2",
+    "output_mode": "m3u",
+    "artifact_path": "./media-library.md",
+    "model": "openai-codex/gpt-5.5",
+    "tool_args": "--no-tools"
+  },
+  "template": [
+    {
+      "name": "playlist",
+      "values": {
+        "source_dir": "{source_dir}",
+        "extensions": "{extensions}",
+        "max_depth": "{max_depth}",
+        "output_mode": "{output_mode}"
+      }
+    },
+    {
+      "name": "artifact",
+      "values": {
+        "input": "Use playlist/media listing from stdin. Source directory: {source_dir}. Output mode: {output_mode}.",
+        "artifact_path": "{artifact_path}",
+        "artifact_format": "Markdown sections: Source, Playlist Output, Playback Notes, Next Actions.",
+        "delivery": "log",
+        "model": "{model}",
+        "tool_args": "{tool_args}"
+      }
+    }
+  ]
+}

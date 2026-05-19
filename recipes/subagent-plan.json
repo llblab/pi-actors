@@ -1,0 +1,22 @@
+{
+  "name": "subagent-plan",
+  "async": true,
+  "args": [
+    "goal:string",
+    "constraints:string",
+    "scope:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tool_args:string"
+  ],
+  "defaults": {
+    "constraints": "Prefer small reversible slices, explicit validation gates, and no broad speculative rewrites.",
+    "scope": "Use the provided problem statement and any named artifact paths.",
+    "output_format": "Markdown sections: Goal, Constraints, Plan Slices, Risks, Validation Gates, Stop Conditions.",
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "medium",
+    "tool_args": "--no-tools"
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Plan how to reach this goal: {goal}. Scope: {scope}. Constraints: {constraints}. Output format: {output_format}"
+}

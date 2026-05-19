@@ -47,8 +47,8 @@ function usage() {
   music-player.mjs control <state-dir> <play|pause|toggle|next|previous|stop|status>
 
 Runs a small foreground music player so pi-auto-tools can own it as an async run.
-Control messages are newline-delimited commands written to <state-dir>/control.fifo.
-Use async_run action=send run_id=<run> message=<command>, or direct control commands below.
+Actor message bodies are adapted to newline-delimited commands at <state-dir>/control.fifo.
+Prefer message to=run:<run> type=player.<command> body=<command>, or use direct control commands below.
 Supported players: auto, mpv, ffplay, cvlc, play.
 `);
 }

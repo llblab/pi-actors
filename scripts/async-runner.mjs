@@ -43,6 +43,14 @@ function event(name, data = {}) {
     `${JSON.stringify({ event: name, ts: new Date().toISOString(), ...data })}\n`,
   );
 }
+function quoteCommandDetailPart(value) {
+  if (value === "") return "''";
+  if (/^[A-Za-z0-9_/:=.,@%+\-]+$/.test(value)) return value;
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+function formatCommandDetail(command, args) {
+  return [command, ...args].map(quoteCommandDetailPart).join(" ");
+}
 function getCommandDoneDelivery(result) {
   return result.code !== 0 || activeSubagents > 0 ? "followup" : "log";
 }
@@ -76,30 +84,35 @@ function progressRunning() {
   });
 }
 async function observedExec(command, args, options) {
+  const commandDetail = formatCommandDetail(command, args);
   activeSubagents += 1;
-  event("command.start", { activeSubagents, command });
+  event("command.start", { activeSubagents, command: commandDetail });
   progressRunning();
   const result = await execCommandTemplate(command, args, options);
   activeSubagents = Math.max(0, activeSubagents - 1);
   completedSubagents += 1;
   if (result.code !== 0) {
-    subagentFailures.push({ code: result.code, command, killed: result.killed });
+    subagentFailures.push({
+      code: result.code,
+      command: commandDetail,
+      killed: result.killed,
+    });
   }
   event("command.done", {
     activeSubagents,
     code: result.code,
-    command,
+    command: commandDetail,
     killed: result.killed,
   });
   outbox(
     "command.done",
-    `Command ${command} completed with code ${result.code}`,
+    `Command ${commandDetail} completed with code ${result.code}`,
     {
       activeSubagents,
       ...(meta.artifacts ? { artifacts: meta.artifacts } : {}),
       run_files: [stdoutPath, stderrPath, resultPath, eventsPath, outboxPath],
       code: result.code,
-      command,
+      command: commandDetail,
       killed: result.killed,
     },
     getCommandDoneDelivery(result),

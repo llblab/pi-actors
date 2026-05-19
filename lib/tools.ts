@@ -344,6 +344,9 @@ export function createSpawnToolDefinition<
         template: unionSchema([
           stringSchema("Inline command template string"),
           arraySchema("Inline command-template sequence or parallel tree"),
+          looseObjectSchema(
+            "Inline command-template object with flags such as parallel, repeat, retry, failure, and nested template.",
+          ),
         ]),
         values: looseObjectSchema("Runtime placeholder values passed to the actor."),
         verbose: booleanSchema("Return full JSON instead of compact text."),

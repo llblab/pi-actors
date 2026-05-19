@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.11: Recipe Import Diagnostics Hotfix
+
+- `[Template Recipes]` Added regression coverage proving imported recipe nodes execute correctly under a repeated parallel parent (`imports` + `repeat` + object `template`). Impact: the suspected composition blocker is now guarded as supported behavior instead of relying on manual smoke interpretation.
+- `[Observability]` Expanded command details in foreground execution results and async `command.start`/`command.done` events from executable-only labels to full argv-shaped launch strings. Impact: failed fanout branches no longer appear as misleading `pi && pi && ...` summaries when the real command was `pi -p --model ...` with a long prompt.
+- `[Spawn]` Allowed the public `spawn` schema to accept inline object command-template configs, not only strings and arrays. Impact: agents can launch object-form templates with `parallel`, `repeat`, `failure`, and nested `template` directly through `spawn` as documented.
+
 ## 0.12.10: Actor Ownership and Recipe Operations
 
 - `[Actor Messages]` Added actor-native `control.stop`, `control.cancel`, and `control.kill` handling for run termination while retaining `runtime.cancel` and `runtime.kill` as compatibility aliases. Impact: public examples can use the same control-message vocabulary declared by recipe mailboxes instead of preserving runtime action names.

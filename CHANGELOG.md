@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `[Actor Messages]` Added `tool:<name>` message routing to invoke executable pi tools through the same addressed envelope used for run, branch, and coordinator actors. Impact: tool calls can participate in the actor/message protocol without adding another durable verb.
+- `[Recipe Library]` Added mailbox metadata to the prompt, tool-enabled prompt, and quorum subagent recipes. Impact: the most direct async subagent launchers now advertise their basic control and completion message surface to `inspect view=mailbox`.
 
 ## 0.10.0: Actor Orchestration and Artifact Pipelines
 

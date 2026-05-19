@@ -9,5 +9,9 @@
   "defaults": {
     "model": "openai-codex/gpt-5.5"
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --tools {tools} {prompt}"
 }

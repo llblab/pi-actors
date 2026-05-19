@@ -38,7 +38,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Long async fanout = parent async recipe wrapping template(parallel: true) and imports; packaged fanout recipes bubble branch completion follow-ups by default.
 - If asked to explore pi-actors, read README.md, docs/README.md, docs/template-recipes.md, docs/async-runs.md, and recipes/.
 - Ambient triangles show active async commands/subagents for the launching coordinator.
-- After async run finish, inspect status/tail/events before final artifacts.`;
+- After async run finish, inspect status/tail/messages before final artifacts.`;
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",

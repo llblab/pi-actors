@@ -17,8 +17,7 @@
   ],
   "defaults": {
     "state_root": "~/.pi/agent/tmp/pi-actors/runs",
-    "event_file": "~/.pi/agent/tmp/pi-actors/runs/music/outbox.jsonl",
-    "message_file": "{event_file}",
+    "message_file": "~/.pi/agent/tmp/pi-actors/runs/music/outbox.jsonl",
     "lines": "80",
     "stale_minutes": "60",
     "artifact_path": "./async-run-ops.md",

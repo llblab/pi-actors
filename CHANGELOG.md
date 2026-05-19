@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.3: Actor Vocabulary Cleanup
+
+- `[Docs]` Removed remaining public FIFO/outbox phrasing from actor-message/template-recipe docs and runtime prompt guidance. Impact: agent and operator guidance now consistently describes `spawn`, `message`, and `inspect` without transport-specific vocabulary.
+- `[Recipe Library]` Removed the legacy `event_file` default from async-run operations recipes. Impact: the recipe surface now uses only `message_file` for run actor-message inputs.
+
 ## 0.13.2: Async Run Actor Vocabulary Docs
 
 - `[Docs]` Reframed `docs/async-runs.md` around actor messages and run-local control channels, keeping file names and transport details in implementation sections. Impact: the async-run standard now separates public `spawn`/`message`/`inspect` behavior from storage/transport mechanics more clearly.

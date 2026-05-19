@@ -16,7 +16,7 @@ import { dirname } from "node:path";
 
 import { normalizeToolName } from "./identity.ts";
 import * as CommandTemplates from "./command-templates.ts";
-import * as JobReferences from "./job-references.ts";
+import * as RecipeReferences from "./recipe-references.ts";
 import * as Schema from "./schema.ts";
 import type { CommandTemplateValue } from "./command-templates.ts";
 
@@ -26,7 +26,7 @@ export interface RegisteredTool {
   args: string[];
   defaults: Record<string, string>;
   argTypes?: Record<string, Schema.ToolArgType>;
-  jobRecipe?: JobReferences.JobRecipeConfig;
+  recipe?: RecipeReferences.TemplateRecipeConfig;
   template?: CommandTemplateValue;
   storedArgs?: string[];
   storedDefaults?: Record<string, string>;
@@ -51,10 +51,10 @@ export function serializeTools(
       entry.args = cfg.storedArgs;
     if (cfg.storedDefaults && Object.keys(cfg.storedDefaults).length > 0)
       entry.defaults = cfg.storedDefaults;
-    if (cfg.jobRecipe?.job) entry.job = cfg.jobRecipe.job;
-    if (cfg.jobRecipe?.state_dir) entry.state_dir = cfg.jobRecipe.state_dir;
-    if (cfg.jobRecipe?.stateDir) entry.stateDir = cfg.jobRecipe.stateDir;
-    if (cfg.jobRecipe?.values) entry.values = cfg.jobRecipe.values;
+    if (cfg.recipe?.name) entry.name = cfg.recipe.name;
+    if (cfg.recipe?.async !== undefined) entry.async = cfg.recipe.async;
+    if (cfg.recipe?.state_dir) entry.state_dir = cfg.recipe.state_dir;
+    if (cfg.recipe?.values) entry.values = cfg.recipe.values;
     if (cfg.template) entry.template = cfg.template;
     result[name] = entry;
   }
@@ -124,7 +124,7 @@ export function normalizeStoredTool(
     };
   }
   const record = value as Record<string, unknown>;
-  const rawName = typeof record.name === "string" ? record.name : (key ?? "");
+  const rawName = key ?? (typeof record.name === "string" ? record.name : "");
   const name = normalizeToolName(rawName);
   if (!name) {
     return {
@@ -145,29 +145,37 @@ export function normalizeStoredTool(
   if (Object.hasOwn(record, "tool")) {
     return { changed: false, warning: `Tool "${name}" cannot define tool; use template directly.` };
   }
-  if (typeof record.job === "string" && !template) {
-    return { changed: false, warning: `Tool "${name}" uses legacy job config. Add template to make it a co-located job recipe, or migrate to a template job recipe path.` };
+  if (record.job !== undefined || record.recipe !== undefined) {
+    return { changed: false, warning: `Tool "${name}" uses legacy job/recipe config. Use template with optional name and async fields.` };
+  }
+  const keyedRecipeName = key !== undefined && typeof record.name === "string" && record.name.trim()
+    ? record.name.trim()
+    : undefined;
+  if ((keyedRecipeName || typeof record.async === "boolean") && !template) {
+    return { changed: false, warning: `Tool "${name}" uses recipe config without template. Add template to make it a co-located template recipe.` };
   }
   if (!template) {
     return { changed: true, warning: `Tool "${name}" has no template` };
   }
-  const jobRecipe = typeof record.job === "string" && record.job.trim()
+  const recipeName = keyedRecipeName
+    ?? (typeof record.async === "boolean" ? name : undefined);
+  const recipe: RecipeReferences.TemplateRecipeConfig | undefined = recipeName
     ? {
-      job: record.job.trim(),
+      name: recipeName,
+      ...(typeof record.async === "boolean" ? { async: record.async } : {}),
       ...(typeof record.state_dir === "string" && record.state_dir.trim() ? { state_dir: record.state_dir.trim() } : {}),
-      ...(typeof record.stateDir === "string" && record.stateDir.trim() ? { stateDir: record.stateDir.trim() } : {}),
       template,
       ...(record.values && typeof record.values === "object" && !Array.isArray(record.values) ? { values: record.values as Record<string, unknown> } : {}),
     }
     : undefined;
-  const isJobRecipe = JobReferences.isJobRecipeTool(template, jobRecipe);
-  const recipeTemplate = JobReferences.getJobRecipeTemplate(template);
+  const isRecipe = RecipeReferences.isRecipeTool(template, recipe);
+  const recipeTemplate = RecipeReferences.getRecipeTemplate(template);
   const argTemplate = recipeTemplate ?? template;
   const description =
     typeof record.description === "string" && record.description.trim()
       ? record.description.trim()
-      : isJobRecipe
-        ? `Start template job: ${jobRecipe?.job ?? formatTemplateForDescription(template)}`
+      : isRecipe
+        ? `${recipe?.async === true || RecipeReferences.isAsyncRecipeReference(template) ? "Start async" : "Execute"} template recipe: ${recipe?.name ?? formatTemplateForDescription(template)}`
         : `Execute command template: ${formatTemplateForDescription(template)}`;
   const declarations = Schema.normalizeStoredToolArgDeclarations(
     record.args,
@@ -195,23 +203,22 @@ export function normalizeStoredTool(
   const cfg = {
     name,
     description,
-    args: isJobRecipe && storedArgs !== undefined
+    args: isRecipe && storedArgs !== undefined
       ? Schema.getExplicitToolArgNames(storedArgs)
-      : JobReferences.isJobRecipeReference(template) && !recipeTemplate
+      : RecipeReferences.isRecipeReference(template) && !recipeTemplate
         ? Schema.getExplicitToolArgNames(storedArgs)
         : Schema.getToolArgNames(argTemplateConfig),
     defaults: declarations.defaults,
     ...(Object.keys(argTypes).length > 0 ? { argTypes } : {}),
-    ...(jobRecipe ? { jobRecipe } : {}),
+    ...(recipe ? { recipe } : {}),
     template,
     ...(storedArgs !== undefined ? { storedArgs } : {}),
     ...(storedDefaults !== undefined ? { storedDefaults } : {}),
   };
   const changed =
-    record.name !== undefined ||
+    (key === undefined && record.name !== undefined) ||
     record.label !== undefined ||
     JSON.stringify(record.template) !== JSON.stringify(template) ||
-    (record.job !== undefined && !jobRecipe) ||
     description !== record.description ||
     declarations.changed;
   return { cfg, changed };

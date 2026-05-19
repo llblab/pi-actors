@@ -29,37 +29,61 @@ const RESERVED_TOOL_NAMES = new Set([
   "grep",
   "ls",
   "register_tool",
-  "template_job",
+  "async_run",
 ]);
 
 export default function toolRegistryExtension(pi: ExtensionAPI) {
-  let jobsInterval: NodeJS.Timeout | undefined;
-  const observedJobs = new Map<string, Observability.JobObservedStatus>();
-  let jobStatusFrame = 0;
-  const getJobOwnerId = (ctx: ExtensionContext): string =>
+  let runsInterval: NodeJS.Timeout | undefined;
+  const observedRuns = new Map<string, Observability.RunObservedStatus>();
+  const observedRunEventLines = new Map<string, number>();
+  let runStatusFrame = 0;
+  const getRunOwnerId = (ctx: ExtensionContext): string =>
     ctx.sessionManager.getSessionId();
-  const updateJobUi = (ctx: ExtensionContext, notify = false): void => {
-    const ownerId = getJobOwnerId(ctx);
-    const summary = Observability.summarizeJobs(undefined, ownerId);
-    const status = Observability.renderJobStatus(summary, jobStatusFrame++);
+  const updateRunUi = (ctx: ExtensionContext, notify = false): void => {
+    const ownerId = getRunOwnerId(ctx);
+    const summary = Observability.summarizeRuns(undefined, ownerId);
+    const status = Observability.renderRunStatus(summary, runStatusFrame++);
     ctx.ui.setStatus(
-      "zz-pi-auto-tools-jobs",
+      "zz-pi-auto-tools-runs",
       status ? ctx.ui.theme.fg("dim", status) : undefined,
     );
-    ctx.ui.setWidget("zz-pi-auto-tools-jobs", undefined);
-    if (!notify) return;
-    for (const transition of Observability.detectJobTransitions(
-      observedJobs,
+    ctx.ui.setWidget("zz-pi-auto-tools-runs", undefined);
+    const transitions = Observability.detectRunTransitions(
+      observedRuns,
       summary,
-    )) {
-      const text = Observability.formatJobTransitionMessage(transition);
-      ctx.ui.notify(text, transition.to === "done" ? "info" : "error");
+    );
+    const outboxEvents = Observability.detectRunOutboxEvents(
+      observedRunEventLines,
+      summary,
+    );
+    if (!notify) return;
+    for (const transition of transitions) {
+      const text = Observability.formatRunTransitionMessage(transition);
+      const notificationType = Observability.getRunTransitionNotificationType(transition);
+      ctx.ui.notify(text, notificationType);
+      if (!Observability.shouldSendRunTransitionFollowUp(transition)) continue;
       pi.sendMessage(
         {
-          customType: "pi-auto-tools-job",
+          customType: "pi-auto-tools-run",
           content: text,
           display: true,
           details: transition,
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
+    }
+    for (const event of outboxEvents) {
+      if (!Observability.shouldNotifyRunOutboxEvent(event)) continue;
+      const text = Observability.formatRunOutboxMessage(event);
+      const notificationType = Observability.getRunOutboxNotificationType(event);
+      ctx.ui.notify(text, notificationType);
+      if (!Observability.shouldSendRunOutboxFollowUp(event)) continue;
+      pi.sendMessage(
+        {
+          customType: "pi-auto-tools-run-event",
+          content: text,
+          display: true,
+          details: event,
         },
         { deliverAs: "followUp", triggerTurn: true },
       );
@@ -75,14 +99,14 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     await Temp.prepareExtensionTempDir(TEMP_DIR);
     runtime.loadTools(ctx);
-    updateJobUi(ctx);
-    if (jobsInterval) clearInterval(jobsInterval);
-    jobsInterval = setInterval(() => updateJobUi(ctx, true), 250);
-    jobsInterval.unref?.();
+    updateRunUi(ctx);
+    if (runsInterval) clearInterval(runsInterval);
+    runsInterval = setInterval(() => updateRunUi(ctx, true), 250);
+    runsInterval.unref?.();
   });
   pi.on("session_shutdown", async () => {
-    if (jobsInterval) clearInterval(jobsInterval);
-    jobsInterval = undefined;
+    if (runsInterval) clearInterval(runsInterval);
+    runsInterval = undefined;
   });
   pi.on("before_agent_start", async (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,
@@ -100,8 +124,6 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     }),
   );
   pi.registerTool(
-    Tools.createJobToolDefinition<ExtensionContext>({
-      getTools: runtime.getTools,
-    }),
+    Tools.createAsyncRunToolDefinition<ExtensionContext>(),
   );
 }

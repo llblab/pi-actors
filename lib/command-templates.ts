@@ -8,9 +8,8 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
-export const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
-
 export type CommandTemplateMode = "sequence" | "parallel";
+export type CommandTemplateFailureScope = "continue" | "branch" | "root";
 
 export interface CommandTemplateObjectConfig {
   label?: string;
@@ -23,7 +22,9 @@ export interface CommandTemplateObjectConfig {
   output?: string;
   retry?: number;
   critical?: boolean;
-  repeat?: number;
+  failure?: CommandTemplateFailureScope;
+  recover?: CommandTemplateValue;
+  repeat?: number | string;
 }
 
 export type CommandTemplateValue = string | CommandTemplateConfig[] | CommandTemplateObjectConfig;
@@ -72,23 +73,92 @@ export function normalizeCommandTemplateConfig(
   return typeof config === "string" ? { template: config } : config;
 }
 
+function normalizeRecoverConfig(
+  config: CommandTemplateValue | undefined,
+): CommandTemplateConfig | undefined {
+  if (config === undefined) return undefined;
+  return Array.isArray(config) ? { template: config } : config;
+}
+
 function normalizeCommandTemplateDefaults(
   defaults: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
   if (!defaults) return undefined;
   const normalized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(defaults)) {
-    normalized[key] =
-      value === undefined || value === null ? "" : String(value);
+    normalized[key] = Array.isArray(value)
+      ? value
+      : value === undefined || value === null ? "" : String(value);
   }
   return normalized;
 }
 
-function normalizeRepeat(value: number | undefined): number | undefined {
+export function resolveCommandTemplateRepeat(
+  value: number | string | undefined,
+  values: Record<string, unknown> = {},
+): number | undefined {
   if (value === undefined) return undefined;
-  if (!Number.isInteger(value) || value < 1)
-    throw new Error("Command template repeat must be a positive integer.");
-  return value;
+  if (typeof value === "number") {
+    if (!Number.isInteger(value) || value < 1)
+      throw new Error("Command template repeat must be a positive integer.");
+    return value;
+  }
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  const lengthMatch = trimmed.match(/^\{?([A-Za-z_][A-Za-z0-9_-]*)\.length\}?$/);
+  if (lengthMatch) {
+    const source = values[lengthMatch[1]];
+    if (Array.isArray(source)) return source.length;
+    if (source === undefined) return undefined;
+  }
+  throw new Error("Command template repeat must be a positive integer or {array.length}.");
+}
+
+function getExecutableName(command: string | undefined): string {
+  if (!command) return "";
+  return command.split(/[\\/]/).pop()?.toLowerCase() ?? "";
+}
+
+function hasAnyFlag(args: string[], flags: string[]): boolean {
+  return args.some((arg) => flags.includes(arg));
+}
+
+function hasRiskyPathArg(args: string[]): boolean {
+  return args.some((arg) =>
+    arg === "/" ||
+    arg === "~" ||
+    arg === "./" ||
+    arg === "../" ||
+    arg.includes("{") ||
+    arg.startsWith("~/") ||
+    arg.startsWith("/"),
+  );
+}
+
+function getLeafCommandTemplateWarnings(
+  config: CommandTemplateLeafConfig,
+): string[] {
+  const parts = splitCommandTemplate(config.template);
+  const command = getExecutableName(parts[0]);
+  const args = parts.slice(1);
+  const warnings: string[] = [];
+  if (["bash", "sh", "zsh", "fish"].includes(command)) {
+    const mode = hasAnyFlag(args, ["-c"]) ? "shell command strings" : "shell scripts";
+    warnings.push(`${config.label ?? command}: invokes ${command}; ${mode} are trusted executable content and are not sandboxed by command-template argv splitting.`);
+  }
+  if (["node", "deno", "bun"].includes(command) && hasAnyFlag(args, ["-e", "--eval"])) {
+    warnings.push(`${config.label ?? command}: invokes ${command} eval mode; code strings are trusted executable content and are not sandboxed.`);
+  }
+  if (["python", "python3", "perl", "ruby"].includes(command) && hasAnyFlag(args, ["-c", "-e"])) {
+    warnings.push(`${config.label ?? command}: invokes ${command} code-eval mode; code strings are trusted executable content and are not sandboxed.`);
+  }
+  if (command === "rm" && (args.some((arg) => /^-[^-]*r/.test(arg) || /^-[^-]*f/.test(arg)) || hasRiskyPathArg(args))) {
+    warnings.push(`${config.label ?? command}: removes filesystem paths; verify placeholders and paths before running trusted destructive commands.`);
+  }
+  if (["mv", "cp", "rsync"].includes(command) && hasRiskyPathArg(args)) {
+    warnings.push(`${config.label ?? command}: mutates broad filesystem paths; verify placeholders and paths before running trusted commands.`);
+  }
+  return warnings;
 }
 
 function pad(value: number, width: number): string {
@@ -124,7 +194,7 @@ function expandRepeatConfig(
   config: CommandTemplateObjectConfig,
   context: Pick<CommandTemplateObjectConfig, "args" | "defaults">,
 ): CommandTemplateObjectConfig[] | undefined {
-  const repeat = normalizeRepeat(config.repeat);
+  const repeat = resolveCommandTemplateRepeat(config.repeat, context.defaults ?? {});
   if (repeat === undefined) return undefined;
   return Array.from({ length: repeat }, (_unused, index0) => {
     const { repeat: _repeat, ...rest } = config;
@@ -164,12 +234,19 @@ export function expandCommandTemplateConfigs(
   if (repeated) {
     return repeated.flatMap((step) => expandCommandTemplateConfigs(step, context));
   }
+  const recoverConfig = normalizeRecoverConfig(normalizedConfig.recover);
+  const recoverSteps = recoverConfig
+    ? expandCommandTemplateConfigs(recoverConfig, context)
+    : [];
   if (Array.isArray(normalizedConfig.template)) {
-    return normalizedConfig.template.flatMap((step) =>
-      expandCommandTemplateConfigs(step, context),
-    );
+    return [
+      ...normalizedConfig.template.flatMap((step) =>
+        expandCommandTemplateConfigs(step, context),
+      ),
+      ...recoverSteps,
+    ];
   }
-  if (typeof normalizedConfig.template !== "string") return [];
+  if (typeof normalizedConfig.template !== "string") return recoverSteps;
   return [
     {
       ...normalizedConfig,
@@ -178,6 +255,18 @@ export function expandCommandTemplateConfigs(
       retry: normalizedConfig.retry,
       critical: normalizedConfig.critical,
     },
+    ...recoverSteps,
+  ];
+}
+
+export function getCommandTemplateWarnings(
+  config: CommandTemplateConfig,
+): string[] {
+  return [
+    ...new Set(
+      expandCommandTemplateConfigs(config)
+        .flatMap((leaf) => getLeafCommandTemplateWarnings(leaf)),
+    ),
   ];
 }
 
@@ -192,7 +281,7 @@ function parseCommandTemplateArgToken(value: string): { name: string; defaultVal
 }
 
 function parseCommandTemplatePlaceholderContent(content: string): { name: string; inlineDefault?: string } | undefined {
-  const match = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?::(?:string|path|int|number|bool|enum\([^)]*\)))?(?:=([^}]*))?$/);
+  const match = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)(?::(?:string|path|int|number|bool|array|enum\([^)]*\)))?(?:=([^}]*))?$/);
   if (!match) return undefined;
   return { name: match[1], ...(match[2] !== undefined ? { inlineDefault: match[2] } : {}) };
 }
@@ -272,7 +361,7 @@ export function expandCommandTemplateExecutable(
 
 function evaluateCommandTemplateExpression(
   expression: string,
-  values: Record<string, string>,
+  values: Record<string, unknown>,
 ): number {
   let index = 0;
   const source = expression.replace(/\s+/g, "");
@@ -299,7 +388,7 @@ function evaluateCommandTemplateExpression(
     if (nameMatch) {
       index += nameMatch[0].length;
       const value = values[nameMatch[0]];
-      if (value === undefined || !/^-?\d+$/.test(value))
+      if (value === undefined || !/^-?\d+$/.test(String(value)))
         throw new Error(`Invalid command template expression variable: ${nameMatch[0]}`);
       return Number(value);
     }
@@ -329,7 +418,7 @@ function evaluateCommandTemplateExpression(
 
 function substituteCommandTemplateExpression(
   content: string,
-  values: Record<string, string>,
+  values: Record<string, unknown>,
 ): string | undefined {
   const padded = content.match(/^(_{1,6})\((.+)\)$/);
   if (padded) {
@@ -339,21 +428,50 @@ function substituteCommandTemplateExpression(
   return String(evaluateCommandTemplateExpression(content, values));
 }
 
+function resolveCommandTemplateValue(
+  content: string,
+  values: Record<string, unknown>,
+  missingLabel: string,
+  depth = 0,
+): string | undefined {
+  if (depth > 5) throw new Error(`Command template value recursion exceeded: ${content}`);
+  const indexed = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)\[([A-Za-z_][A-Za-z0-9_-]*|\d+)\]$/);
+  if (indexed) {
+    const source = values[indexed[1]];
+    const indexValue = /^\d+$/.test(indexed[2]) ? indexed[2] : values[indexed[2]];
+    const index = Number(indexValue);
+    if (!Array.isArray(source) || !Number.isInteger(index) || index < 0 || index >= source.length) {
+      throw new Error(`Missing ${missingLabel} value: ${content}`);
+    }
+    return String(source[index] ?? "");
+  }
+  const simple = parseCommandTemplatePlaceholderContent(content);
+  if (simple) {
+    if (Object.hasOwn(values, simple.name)) {
+      const raw = values[simple.name] ?? "";
+      if (typeof raw === "string" && /^\{[^{}]+\}$/.test(raw)) {
+        return substituteCommandTemplateToken(raw, values, missingLabel, depth + 1);
+      }
+      return Array.isArray(raw) ? JSON.stringify(raw) : String(raw);
+    }
+    if (simple.inlineDefault !== undefined) return simple.inlineDefault;
+  }
+  const expression = substituteCommandTemplateExpression(content, values);
+  if (expression !== undefined) return expression;
+  return undefined;
+}
+
 export function substituteCommandTemplateToken(
   token: string,
-  values: Record<string, string>,
+  values: Record<string, unknown>,
   missingLabel = "command template",
+  depth = 0,
 ): string {
   return token.replace(
     /\{([^{}]+)\}/g,
     (_match, content: string) => {
-      const simple = parseCommandTemplatePlaceholderContent(content);
-      if (simple) {
-        if (Object.hasOwn(values, simple.name)) return values[simple.name] ?? "";
-        if (simple.inlineDefault !== undefined) return simple.inlineDefault;
-      }
-      const expression = substituteCommandTemplateExpression(content, values);
-      if (expression !== undefined) return expression;
+      const resolved = resolveCommandTemplateValue(content, values, missingLabel, depth);
+      if (resolved !== undefined) return resolved;
       throw new Error(`Missing ${missingLabel} value: ${content}`);
     },
   );
@@ -420,8 +538,6 @@ function execCommandTemplateOnce(
     }
     if (options.timeout !== undefined && options.timeout > 0)
       timeoutId = setTimeout(killProcess, options.timeout);
-    else if (options.timeout === undefined)
-      timeoutId = setTimeout(killProcess, DEFAULT_COMMAND_TIMEOUT_MS);
     proc.stdout?.on("data", (data) => {
       stdout += data.toString();
     });
@@ -442,7 +558,7 @@ function execCommandTemplateOnce(
 
 export function buildCommandTemplateInvocation(
   config: CommandTemplateConfig,
-  values: Record<string, string>,
+  values: Record<string, unknown>,
   cwd: string,
   options: { emptyMessage?: string; missingLabel?: string } = {},
 ): CommandTemplateInvocation {

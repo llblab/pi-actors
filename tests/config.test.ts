@@ -96,7 +96,7 @@ test("Stored tool normalization derives args from standard inline placeholders",
   assert.equal(result.cfg?.storedArgs, undefined);
 });
 
-test("Stored tool normalization accepts job recipe paths in template", () => {
+test("Stored tool normalization accepts template recipe paths in template", () => {
   const result = normalizeStoredTool(
     "shader_launcher",
     {
@@ -119,13 +119,14 @@ test("Stored tool normalization accepts job recipe paths in template", () => {
   });
 });
 
-test("Stored tool normalization accepts co-located job recipes", () => {
+test("Stored tool normalization accepts co-located template recipes", () => {
   const result = normalizeStoredTool(
     "review_launcher",
     {
-      description: "Start review job",
-      job: "review-docs",
-      state_dir: "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+      async: true,
+      description: "Start review run",
+      name: "review-docs",
+      state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     },
@@ -134,12 +135,13 @@ test("Stored tool normalization accepts co-located job recipes", () => {
   assert.equal(result.warning, undefined);
   assert.deepEqual(result.cfg, {
     name: "review_launcher",
-    description: "Start review job",
+    description: "Start review run",
     args: ["scope"],
     defaults: {},
-    jobRecipe: {
-      job: "review-docs",
-      state_dir: "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+    recipe: {
+      async: true,
+      name: "review-docs",
+      state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     },
@@ -147,12 +149,12 @@ test("Stored tool normalization accepts co-located job recipes", () => {
   });
 });
 
-test("Stored tool normalization rejects co-located job recipes with tool", () => {
+test("Stored tool normalization rejects co-located template recipes with tool", () => {
   const result = normalizeStoredTool(
     "review_launcher",
     {
-      description: "Start review job",
-      job: "review-docs",
+      description: "Start review run",
+      name: "review-docs",
       template: "review {scope}",
       tool: "review_tool",
     },
@@ -162,13 +164,13 @@ test("Stored tool normalization rejects co-located job recipes with tool", () =>
   assert.match(result.warning ?? "", /cannot define tool/);
 });
 
-test("Stored tool normalization derives args from existing job recipe files", async () => {
-  const path = join(homedir(), ".pi", "agent", "jobs", "derive-args-test.json");
+test("Stored tool normalization derives args from existing template recipe files", async () => {
+  const path = join(homedir(), ".pi", "agent", "recipes", "derive-args-test.json");
   try {
-    await mkdir(join(homedir(), ".pi", "agent", "jobs"), { recursive: true });
+    await mkdir(join(homedir(), ".pi", "agent", "recipes"), { recursive: true });
     await writeFile(
       path,
-      JSON.stringify({ job: "derive-args-test", template: "review {scope} {mode=fast}" }),
+      JSON.stringify({ name: "derive-args-test", template: "review {scope} {mode=fast}" }),
     );
     const result = normalizeStoredTool(
       "derive_job",
@@ -185,14 +187,14 @@ test("Stored tool normalization derives args from existing job recipe files", as
   }
 });
 
-test("Stored tool normalization derives args from compact repeated job recipe files", async () => {
-  const path = join(homedir(), ".pi", "agent", "jobs", "derive-repeat-args-test.json");
+test("Stored tool normalization derives args from compact repeated template recipe files", async () => {
+  const path = join(homedir(), ".pi", "agent", "recipes", "derive-repeat-args-test.json");
   try {
-    await mkdir(join(homedir(), ".pi", "agent", "jobs"), { recursive: true });
+    await mkdir(join(homedir(), ".pi", "agent", "recipes"), { recursive: true });
     await writeFile(
       path,
       JSON.stringify({
-        job: "derive-repeat-args-test",
+        name: "derive-repeat-args-test",
         mode: "parallel",
         repeat: 3,
         template: "render {scope} page{_(index+1)}.html prev=page{_(prev+1)}.html zero=page{_index}.html",
@@ -212,6 +214,53 @@ test("Stored tool normalization derives args from compact repeated job recipe fi
   } finally {
     await rm(path, { force: true });
   }
+});
+
+test("Stored tool normalization derives args from template recipe recover fields", async () => {
+  const path = join(homedir(), ".pi", "agent", "recipes", "derive-recover-args-test.json");
+  try {
+    await mkdir(join(homedir(), ".pi", "agent", "recipes"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({
+        failure: "branch",
+        name: "derive-recover-args-test",
+        recover: "cleanup {work_dir}",
+        retry: 2,
+        template: "run {scope}",
+      }),
+    );
+    const result = normalizeStoredTool(
+      "derive_recover_job",
+      {
+        description: "Start derived recover job",
+        template: "derive-recover-args-test.json",
+      },
+      reserved,
+    );
+    assert.equal(result.warning, undefined);
+    assert.deepEqual(result.cfg?.args, ["scope", "work_dir"]);
+  } finally {
+    await rm(path, { force: true });
+  }
+});
+
+test("Stored tool normalization derives args from recover templates", () => {
+  const result = normalizeStoredTool(
+    "recovering_tool",
+    {
+      description: "Run with cleanup",
+      template: [
+        {
+          recover: "cleanup {work_dir}",
+          retry: 2,
+          template: "run {scope}",
+        },
+      ],
+    },
+    reserved,
+  );
+  assert.deepEqual(result.cfg?.args, ["scope", "work_dir"]);
 });
 
 test("Stored tool normalization accepts command-template sequences", () => {
@@ -241,14 +290,23 @@ test("Stored tool normalization rejects legacy script entries", () => {
   assert.match(result.warning ?? "", /legacy script config/);
 });
 
-test("Stored tool normalization rejects legacy job entries", () => {
+test("Stored tool normalization rejects legacy job or recipe fields", () => {
+  const jobResult = normalizeStoredTool("old_job", { job: "review", template: "review {scope}" }, reserved);
+  const recipeResult = normalizeStoredTool("old_recipe", { recipe: "review", template: "review {scope}" }, reserved);
+  assert.equal(jobResult.cfg, undefined);
+  assert.equal(recipeResult.cfg, undefined);
+  assert.match(jobResult.warning ?? "", /legacy job\/recipe config/);
+  assert.match(recipeResult.warning ?? "", /legacy job\/recipe config/);
+});
+
+test("Stored tool normalization rejects recipe entries without templates", () => {
   const result = normalizeStoredTool(
     "mixed",
-    { job: "job", description: "Mixed" },
+    { name: "mixed-recipe", description: "Mixed" },
     reserved,
   );
   assert.equal(result.cfg, undefined);
-  assert.match(result.warning ?? "", /legacy job config/);
+  assert.match(result.warning ?? "", /recipe config without template/);
 });
 
 test("Serialized tool entries keep template last", () => {
@@ -267,13 +325,14 @@ test("Serialized tool entries keep template last", () => {
   ]);
 });
 
-test("Serialized co-located job recipe launchers keep job envelope before template", () => {
+test("Serialized co-located template recipe launchers keep recipe metadata before template", () => {
   const tool: RegisteredTool = {
     name: "review",
     description: "Start review",
-    jobRecipe: {
-      job: "review",
-      state_dir: "~/.pi/agent/tmp/pi-auto-tools/jobs/review",
+    recipe: {
+      async: true,
+      name: "review",
+      state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     },
@@ -283,14 +342,15 @@ test("Serialized co-located job recipe launchers keep job envelope before templa
   };
   assert.deepEqual(Object.keys(serializeTools(new Map([[tool.name, tool]])).review as Record<string, unknown>), [
     "description",
-    "job",
+    "name",
+    "async",
     "state_dir",
     "values",
     "template",
   ]);
 });
 
-test("Serialized job recipe launchers keep template path", () => {
+test("Serialized template recipe launchers keep template path", () => {
   const tool: RegisteredTool = {
     name: "launcher",
     description: "Start job",

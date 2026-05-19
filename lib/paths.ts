@@ -1,7 +1,7 @@
 /**
  * Registry path helpers
  * Zones: paths, registry config, temp directory
- * Owns agent directory and auto-tools config path resolution
+ * Owns agent directory, auto-tools config, recipe root, and async run state root resolution
  */
 
 import { homedir } from "node:os";
@@ -26,10 +26,10 @@ export function getExtensionTmpDir(
   return join(agentDir, "tmp", extensionName);
 }
 
-export function getJobStateRoot(agentDir = getAgentDir()): string {
-  return join(getExtensionTmpDir(agentDir), "jobs");
+export function getRunStateRoot(agentDir = getAgentDir()): string {
+  return join(getExtensionTmpDir(agentDir), "runs");
 }
 
-export function getJobTemplateRoot(agentDir = getAgentDir()): string {
-  return join(agentDir, "jobs");
+export function getRecipeRoot(agentDir = getAgentDir()): string {
+  return join(agentDir, "recipes");
 }

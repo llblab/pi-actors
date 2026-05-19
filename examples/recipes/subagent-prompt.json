@@ -1,0 +1,12 @@
+{
+  "name": "subagent-prompt",
+  "async": true,
+  "args": [
+    "prompt:string",
+    "model:string"
+  ],
+  "defaults": {
+    "model": "openai-codex/gpt-5.5"
+  },
+  "template": "pi -p --model {model} --no-tools {prompt}"
+}

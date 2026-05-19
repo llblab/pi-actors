@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-auto-tools",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": false,
   "description": "Persistent template-backed tools for pi",
   "type": "module",
@@ -30,6 +30,7 @@
     "index.ts",
     "lib",
     "scripts",
+    "examples",
     "README.md",
     "AGENTS.md",
     "BACKLOG.md",

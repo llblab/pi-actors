@@ -1,0 +1,19 @@
+{
+  "name": "subagents-prompts",
+  "async": true,
+  "imports": {
+    "subagent": "subagent-prompt.json"
+  },
+  "args": [
+    "prompts:array"
+  ],
+  "repeat": "{prompts.length}",
+  "mode": "parallel",
+  "failure": "branch",
+  "template": {
+    "name": "subagent",
+    "values": {
+      "prompt": "{prompts[index]}"
+    }
+  }
+}

@@ -45,7 +45,7 @@ test("Registered tool execution expands command and returns formatted payload", 
       command: join(homedir(), "bin/transcribe"),
       args: ["/tmp/a b.ogg", "ru"],
       retry: undefined,
-      timeout: 30_000,
+      timeout: undefined,
     },
   ]);
   assert.deepEqual(result.content, [{ type: "text", text: "\ntext" }]);
@@ -120,7 +120,7 @@ test("Registered tool execution runs template sequences with previous stdout as 
       args: ["/tmp/a.ogg"],
       stdin: undefined,
       retry: undefined,
-      timeout: 30_000,
+      timeout: undefined,
     },
     {
       command: "/work/second",
@@ -159,6 +159,31 @@ test("Registered tool execution repeats template nodes", async () => {
   assert.match(text, /page01-of-3/);
   assert.match(text, /page02-of-3/);
   assert.match(text, /page03-of-3/);
+  assert.equal(result.details.branches?.length, 3);
+});
+
+test("Registered tool execution repeats template nodes from array length", async () => {
+  const result = await executeRegisteredTool(
+    {
+      name: "prompt_fanout",
+      description: "prompt fanout",
+      args: ["prompts"],
+      defaults: {},
+      argTypes: { prompts: { kind: "array" } },
+      template: {
+        mode: "parallel",
+        repeat: "{prompts.length}",
+        template: "subagent {prompts[index]}",
+      },
+    },
+    { prompts: ["left", "right", "third"] },
+    async (_command, args) => ({ stdout: `${args[0]}\n`, stderr: "", code: 0, killed: false }),
+    process.cwd(),
+  );
+  const text = result.content[0].text;
+  assert.match(text, /left/);
+  assert.match(text, /right/);
+  assert.match(text, /third/);
   assert.equal(result.details.branches?.length, 3);
 });
 
@@ -268,6 +293,20 @@ test("Registered tool execution throws formatted command failures", async () => 
     ),
     /Exit code 1[\s\S]*stderr:\nboom[\s\S]*stdout:\npartial/,
   );
+});
+
+test("Registered tool execution exposes high-risk template warnings", async () => {
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: "bash -c {script}",
+      args: ["script"],
+    },
+    { script: "echo ok" },
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+    "/work",
+  );
+  assert.match(result.details.templateWarnings?.[0] ?? "", /bash/);
 });
 
 test("Registered tool execution passes retry into template steps", async () => {
@@ -403,4 +442,124 @@ test("Registered tool execution aborts on critical composition failures", async 
     /Exit code 1[\s\S]*stderr:\nfatal/,
   );
   assert.deepEqual(calls, ["/work/scan"]);
+});
+
+test("Registered tool execution stops a failed branch without cancelling siblings", async () => {
+  const calls: string[] = [];
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        {
+          mode: "parallel",
+          template: [
+            {
+              failure: "branch",
+              label: "agent-a",
+              template: ["./work-a {file}", "./validate-a {file}", "./commit-a {file}"],
+            },
+            { label: "agent-b", template: "./work-b {file}" },
+          ],
+        },
+        "./merge {file}",
+      ],
+    },
+    { file: "/tmp/a.ogg" },
+    async (command, _args, options) => {
+      calls.push(command);
+      if (command === "/work/validate-a")
+        return { stdout: "", stderr: "invalid", code: 2, killed: false };
+      if (command === "/work/merge")
+        return { stdout: String(options?.stdin), stderr: "", code: 0, killed: false };
+      return { stdout: command.endsWith("work-b") ? "b" : "a", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.equal(calls.includes("/work/commit-a"), false);
+  assert.equal(calls.at(-1), "/work/merge");
+  assert.deepEqual(new Set(calls), new Set(["/work/work-a", "/work/work-b", "/work/validate-a", "/work/merge"]));
+  assert.match(result.content[0].text, /branch: agent-a status: failed/);
+  assert.match(result.content[0].text, /branch: agent-b status: done/);
+  assert.equal(result.details.branches?.find((branch) => branch.label === "agent-a")?.status, "failed");
+  assert.deepEqual(result.details.softQuorum, {
+    coverage: 0.5,
+    degraded: true,
+    done: 1,
+    expected: 2,
+    failed: 1,
+    usable: true,
+  });
+});
+
+test("Registered tool execution retries a sequence with recover between attempts", async () => {
+  const calls: string[] = [];
+  let validationAttempts = 0;
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        {
+          failure: "branch",
+          recover: "./reset {file}",
+          retry: 2,
+          template: ["./write {file}", "./validate {file}"],
+        },
+        "./publish {file}",
+      ],
+    },
+    { file: "/tmp/a.ogg" },
+    async (command) => {
+      calls.push(command);
+      if (command === "/work/validate") {
+        validationAttempts += 1;
+        if (validationAttempts === 1)
+          return { stdout: "", stderr: "bad", code: 1, killed: false };
+      }
+      return { stdout: command.endsWith("publish") ? "published" : "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, [
+    "/work/write",
+    "/work/validate",
+    "/work/reset",
+    "/work/write",
+    "/work/validate",
+    "/work/publish",
+  ]);
+  assert.deepEqual(result.content, [{ type: "text", text: "\npublished" }]);
+  assert.deepEqual(result.details.nonCriticalFailures, [
+    { code: 1, command: "/work/validate", killed: false },
+  ]);
+});
+
+test("Registered tool execution stops retries when recover fails", async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    executeRegisteredTool(
+      {
+        ...tool,
+        template: [
+          {
+            failure: "branch",
+            recover: "./reset {file}",
+            retry: 2,
+            template: ["./write {file}", "./validate {file}"],
+          },
+        ],
+      },
+      { file: "/tmp/a.ogg" },
+      async (command) => {
+        calls.push(command);
+        if (command === "/work/reset")
+          return { stdout: "", stderr: "reset failed", code: 3, killed: false };
+        if (command === "/work/validate")
+          return { stdout: "", stderr: "bad", code: 1, killed: false };
+        return { stdout: "ok", stderr: "", code: 0, killed: false };
+      },
+      "/work",
+    ),
+    /Exit code 3[\s\S]*stderr:\nreset failed/,
+  );
+  assert.deepEqual(calls, ["/work/write", "/work/validate", "/work/reset"]);
 });

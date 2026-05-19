@@ -1,0 +1,23 @@
+{
+  "name": "music-player-sh",
+  "async": true,
+  "args": [
+    "repo:path",
+    "command:enum(play,pause,resume,toggle,next,previous,stop,status)",
+    "source:string",
+    "loop:bool",
+    "volume:int",
+    "player:enum(auto,mpv,ffplay,cvlc,play)",
+    "state_dir:path",
+    "event_delivery:enum(log,notify,followup)"
+  ],
+  "defaults": {
+    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "command": "play",
+    "loop": "true",
+    "volume": "70",
+    "player": "auto",
+    "event_delivery": "log"
+  },
+  "template": "{repo}/examples/scripts/music-player.sh {command} {source} {loop} {volume} {player} {state_dir} {event_delivery}"
+}

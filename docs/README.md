@@ -5,9 +5,10 @@ Living index of all documentation in the `/docs` directory.
 ## Documents
 
 - [command-templates.md](./command-templates.md) — Portable synchronous command execution standard
-- [template-jobs.md](./template-jobs.md) — Portable async extension around command templates
-- [job-primitives.md](./job-primitives.md) — pi-auto-tools adapter for `template_job`, state files, observability, and the local template-job library
+- [template-recipes.md](./template-recipes.md) — Saved JSON recipe standard, imports, and reusable command-template graph composition
+- [async-runs.md](./async-runs.md) — Detached run lifecycle, state files, outbox events, cancellation, and ambient indicators
 - [tool-registry.md](./tool-registry.md) — Local `pi-auto-tools` registry storage and `register_tool` adaptation
+- [experimental-recipes.md](./experimental-recipes.md) — Packaged experimental recipes such as async subagents and music playback
 
 ## Root Context
 

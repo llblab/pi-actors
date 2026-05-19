@@ -17,7 +17,7 @@ Async-run standard owns:
 - Detached process lifecycle for one execution instance.
 - Run identity, state directory, pid/process-group tracking, logs, status, list, tail, events, send, cancel, and kill.
 - Injected lifecycle values such as `{run_id}` and `{state_dir}`.
-- Coordinator-scoped observability and script-authored outbox delivery.
+- Coordinator-scoped observability and script-authored actor messages.
 
 Async-run standard does not own:
 
@@ -43,7 +43,7 @@ Rule of thumb:
 ```text
 short call or pipeline → foreground template/tool
 reusable saved graph   → template recipe
-long or background work → async recipe or async_run start
+long or background work → spawn run actor
 ```
 
 ## Starting Runs
@@ -58,22 +58,21 @@ A recipe with `async: true` starts detached when invoked through its registered 
 }
 ```
 
-A caller can also start any recipe or inline template explicitly through `async_run`:
+A caller can also start any recipe or inline template explicitly through `spawn`:
 
 ```json
 {
-  "action": "start",
+  "as": "run:music",
   "file": "music-player",
-  "run_id": "music",
   "values": {
     "source": "~/Music"
   }
 }
 ```
 
-`async_run action=start` always starts a detached run. Registered recipe tools follow the recipe's `async` flag.
+`spawn` always starts a detached run actor. Registered recipe tools follow the recipe's `async` flag.
 
-Use `run_id` on async recipe tools or the `async_run` action API when the caller wants a stable id for later status or cancellation. Recipe `name` identifies the saved definition; `run_id` identifies one execution instance of that recipe. Async runs inject `{run_id}` and `{state_dir}` into template values so scripts can write run-local status files or control endpoints.
+Use `run_id` on async recipe tools or `as: "run:<id>"` on `spawn` when the caller wants a stable id for later inspection or control. Recipe `name` identifies the saved definition; the run id identifies one execution instance of that recipe. Async runs inject `{run_id}` and `{state_dir}` into template values so scripts can write run-local status files or control endpoints.
 
 ## State Files
 
@@ -128,32 +127,28 @@ The core loop is:
 
 4. Do not inspect just because time passed. Inspect `status`, `tail`, or `events` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
 
-`message` and outbox follow-ups are the paired control plane: outbox events carry run-to-coordinator signals upward, while addressed messages carry coordinator-to-run commands downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-auto-tools owns the safe run-local transport, ownership checks, and delivery policy.
+Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-auto-tools owns the safe run-local transport, ownership checks, and coordinator attention policy.
 
 ## Tool Surface
 
 The actor-level surface is:
 
 - `spawn`: start a detached `run:<id>` actor from `file`, `recipe`, or inline `template`.
-- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, or `coordinator`.
-- `inspect`: intentionally read `run:<id>` status, tail, events, artifacts, files, or mailbox metadata.
+- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, or `coordinator`.
+- `inspect`: intentionally read `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read `session:<id>` or `session:all` run inventory with optional status filtering.
 
-The low-level async adapter remains available for lifecycle and diagnostic operations:
+Low-level async actions map into the actor surface instead of forming a second public model:
 
-- `async_run action=start`: start a detached run from `file` or inline `template`.
-- `async_run action=status`: read compact run state; add `verbose: true` for full JSON.
-- `async_run action=tail`: read recent lifecycle events or logs.
-- `async_run action=list`: list known runs compactly; add `status: "running"`, `status: "terminal"`, or a concrete terminal status to filter; add `verbose: true` for full JSON.
-- `async_run action=events`: read recent script-authored events from `<state_dir>/outbox.jsonl`.
-- `async_run action=send`: write one newline-delimited `message` to a running recipe's Unix FIFO at `<state_dir>/control.fifo`.
-- `async_run action=cancel`: send graceful termination to an owned run.
-- `async_run action=kill`: force-kill a stuck owned run after the same ownership checks.
+- start → `spawn`
+- send/control → `message`
+- status/tail/events/list → `inspect`
+- stop/kill → runtime control messages with synchronous results
 
-Compact text is returned by default so async management does not flood agent context; use `verbose: true` when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
+Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
 
 ## Run-Local Messages
 
-`message` is the explicit coordinator-to-run command channel. Use it when a running recipe exposes a control vocabulary and the coordinator needs to redirect the run without killing or restarting it.
+`message` is the explicit coordinator-to-actor command channel. Use it when a running recipe exposes a control vocabulary, a branch needs parent-mediated control, a registered tool should be invoked as `tool:<name>`, or the coordinator needs to redirect work without killing or restarting it.
 
 On Unix-like hosts, async runs may expose a control FIFO at:
 
@@ -171,19 +166,19 @@ When present, a caller can send a typed actor message:
 }
 ```
 
-For `run:<id>`, `message` adapts the body to the FIFO command line. For `branch:<run>/<branch>`, it sends the full envelope through the parent run mailbox so the runner can dispatch branch-local control. The generic runtime records the send event but does not interpret arbitrary message content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
+For `run:<id>`, `message` adapts the body to the FIFO command line. For `branch:<run>/<branch>`, it sends the full envelope through the parent run mailbox so the run can dispatch branch-local control. For `tool:<name>`, object bodies become the target tool parameters and primitive bodies are passed as `{ "input": body }`. The generic runtime records send events but does not interpret arbitrary run mailbox content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
 
 Native Windows does not support this Unix FIFO contract. Use WSL/Linux/macOS for FIFO-controlled recipes, or let a Windows-specific recipe expose its own transport such as a Windows named pipe or localhost socket.
 
 ## Coordinator Notifications
 
-The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` outbox events back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local outbox events bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` outbox events for completed leaf commands; map `events.command.done.delivery` to `followup` when a recipe should bubble branch-level completion events. Packaged multi-agent fanout recipes default these completion events to `followup`, because async branch completion is base coordinator context rather than optional diagnostics. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `cancel`, `kill`, and control messages such as `stop` stay out of follow-up context because the initiating action already returns synchronously. If an outbox follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` or low-level `async_run action=status`, `tail`, or `events` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
+The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` actor messages back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local messages bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Packaged multi-agent fanout recipes bubble these completion messages by default because async branch completion is base coordinator context rather than optional diagnostics. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `runtime.cancel`, `runtime.kill`, and control messages such as `stop` stay out of follow-up context because the initiating message already returns synchronously. If a follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
 
-Ambient status indicators may refresh while work is active, but notification delivery is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `async_run action=start`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
+Ambient status indicators may refresh while work is active, but coordinator attention is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
 
-## Run Outbox Events
+## Run Actor Messages
 
-A recipe or script may append JSONL events to:
+A recipe or script may append coordinator-bound actor message records to:
 
 ```text
 <state_dir>/outbox.jsonl
@@ -204,11 +199,11 @@ Shape:
 
 `level` is `info`, `warning`, or `error`. `delivery` is `log`, `notify`, or `followup`:
 
-- `log`: stored only; read explicitly with `async_run action=events`.
+- `log`: stored only; read explicitly with `inspect view=events`.
 - `notify`: shown as a UI notification to the launching coordinator session.
 - `followup`: notification plus compact follow-up context to the launching coordinator session.
 
-Use `followup` for completion and decision-point events that should reach the coordinator, not for every progress tick. Packaged multi-agent branch completion is a completion event and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
+Use `followup` for completion and decision-point messages that should reach the coordinator, not for every progress tick. Packaged multi-agent branch completion is a completion message and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
 
 ## Cancellation And Ownership
 
@@ -216,7 +211,7 @@ An async run belongs to the current user, cwd, and launching agent session at st
 
 On Unix-like systems, cancel and kill signal the runner process group when available, then fall back to the runner pid. The runner starts command-template children in that process group, so long-running descendants such as audio players stop with the run instead of becoming orphaned background processes. After the process exits, status reflects the operator action as `cancelled` or `killed` instead of a generic `exited`.
 
-State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and outbox events may live in the state dir. pi-auto-tools core owns only the generic Unix FIFO write action and the JSONL outbox delivery policy; command and event vocabularies belong to the recipe/script.
+State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and actor-message logs may live in the state dir. pi-auto-tools core owns only the generic Unix FIFO write action and runtime attention policy; command and message vocabularies belong to the recipe/script.
 
 ## Extension Temp Directory
 
@@ -248,7 +243,7 @@ Interactive sessions expose compact activity with minimal screen cost:
 - Triangles disappear as concrete commands exit.
 - No prompt-area widget is shown by default.
 - Terminal `done`/`failed`/unhandled `killed`/`exited` transitions trigger compact follow-up context only in the launching coordinator session; intentional `cancel`, `kill`, and `stop` actions stay out of agent context because the action already reports synchronously.
-- Full logs remain in state files and are accessed through `async_run action=tail`.
+- Full logs remain in state files and are accessed through `inspect target=run:<id> view=tail` or the low-level tail adapter.
 
 This keeps background work visible without blocking the agent, occupying the prompt area, or leaking async context into unrelated sessions.
 
@@ -321,7 +316,7 @@ Coordinator responsibilities stay outside the async runtime:
 - Partition backlog tasks by stable task IDs and non-overlapping mutation zones.
 - Write scope files before starting the run.
 - Pass scope paths and branch names as values.
-- Inspect `async_run action=status` and `async_run action=tail` after terminal events.
+- Use `inspect target=run:<id> view=status` or `view=tail` after terminal events.
 - Treat pushed branches as artifacts for review, not as automatic merges.
 - Record failed scopes back into the backlog.
 

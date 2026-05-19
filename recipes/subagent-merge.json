@@ -18,5 +18,9 @@
     "thinking": "medium",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["merge.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Merge these subagent outputs using mode {mode}: {inputs}. Risk policy: {risk_policy}. Output format: {output_format}"
 }

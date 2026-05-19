@@ -16,5 +16,9 @@
     "thinking": "off",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["normalize.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Normalize this subagent output. Target format: {format}. Preservation policy: {preservation_policy}. Input: {input}"
 }

@@ -1,0 +1,29 @@
+{
+  "name": "subagent-message",
+  "async": true,
+  "args": [
+    "type:string",
+    "payload:string",
+    "to:string",
+    "from:string",
+    "message_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "type": "component.update",
+    "to": "coordinator",
+    "from": "run:{run_id}",
+    "message_policy": "Emit an actor-message envelope-shaped JSON object for the coordinator; do not call transport tools directly.",
+    "output_format": "JSON object with to, from, type, summary, body, metadata, confidence, and next_action.",
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "off",
+    "tools": ""
+  },
+  "mailbox": {
+    "emits": ["component.*"]
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create an actor-message envelope-shaped record. To: {to}. From: {from}. Type: {type}. Message policy: {message_policy}. Payload/body: {payload}. Output format: {output_format}"
+}

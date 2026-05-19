@@ -10,7 +10,7 @@ Command templates are the portable integration format for deterministic local au
 
 Extensions may choose their own config files, selectors, placeholder sources, and examples, but should preserve this core contract.
 
-Layer boundary: command templates own only the synchronous execution graph. Recipe imports, import-reference expressions, recipe lookup, `async: true`, run ids, state dirs, FIFO controls, and outbox events are host/recipe/async-run configuration layers, not portable command-template syntax.
+Layer boundary: command templates own only the synchronous execution graph. Recipe imports, import-reference expressions, recipe lookup, `async: true`, run ids, state dirs, mailbox controls, and actor-message routing are host/recipe/async-run configuration layers, not portable command-template syntax.
 
 ## Layer Ownership
 
@@ -25,7 +25,7 @@ Command-template standard does not own:
 
 - Where templates are stored or how they are named.
 - Recipe imports, import references, or file lookup.
-- Detached lifecycle, run ids, state dirs, logs, cancellation, FIFO, or outbox events.
+- Detached lifecycle, run ids, state dirs, logs, cancellation, mailbox controls, or actor-message routing.
 - Registry metadata such as tool descriptions, package install paths, or operator policy.
 
 ## Shape
@@ -279,7 +279,7 @@ exit: 1
 stderr: provider balance exhausted
 ```
 
-Legacy local schemas may accept `pipe` as an alias, but the portable standard is `template: [...]`.
+Some local schemas may accept `pipe` as an alias, but the portable standard is `template: [...]`.
 
 ## Fail-Open Default Policy
 

@@ -39,6 +39,10 @@
     "risk_policy": "Preserve minority high-impact risks and separate confirmed issues from hypotheses.",
     "output_format": "Markdown sections: Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["review.completed", "verification.completed", "merge.completed", "judge.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": [
     {
       "parallel": true,

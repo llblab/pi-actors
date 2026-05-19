@@ -23,6 +23,10 @@
     "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["media.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
+  },
   "template": [
     {
       "name": "playlist",
@@ -39,7 +43,6 @@
         "input": "Use playlist/media listing from stdin. Source directory: {source_dir}. Output mode: {output_mode}.",
         "artifact_path": "{artifact_path}",
         "artifact_format": "Markdown sections: Source, Playlist Output, Playback Notes, Next Actions.",
-        "delivery": "log",
         "model": "{model}",
         "tools": "{tools}"
       }

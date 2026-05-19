@@ -28,6 +28,10 @@
     "judge_model": "openai-codex/gpt-5.5",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["review.completed", "pipeline.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": {
     "name": "coordinator",
     "values": {

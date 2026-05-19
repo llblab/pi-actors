@@ -21,7 +21,7 @@ if (!stateDir) {
 }
 const { executeRegisteredTool } = await import("../lib/execution.ts");
 const { execCommandTemplate } = await import("../lib/command-templates.ts");
-const { writeJsonAtomic } = await import("../lib/config.ts");
+const { writeJsonAtomic } = await import("../lib/file-state.ts");
 const runPath = join(stateDir, "run.json");
 const progressPath = join(stateDir, "progress.json");
 const resultPath = join(stateDir, "result.json");
@@ -43,19 +43,8 @@ function event(name, data = {}) {
     `${JSON.stringify({ event: name, ts: new Date().toISOString(), ...data })}\n`,
   );
 }
-function normalizeDelivery(value) {
-  return value === "notify" || value === "followup" ? value : "log";
-}
-function resolveTemplateString(value) {
-  if (typeof value !== "string") return undefined;
-  return value.replace(/\{([A-Za-z_][A-Za-z0-9_-]*)\}/g, (_match, name) =>
-    meta.values?.[name] === undefined || meta.values?.[name] === null
-      ? ""
-      : String(meta.values[name]),
-  );
-}
-function getEventDelivery(name) {
-  return normalizeDelivery(resolveTemplateString(meta.events?.[name]?.delivery));
+function getMessageDelivery(name) {
+  return name === "command.done" ? "followup" : "log";
 }
 function outbox(name, summary, data = {}, delivery = "log", level = "info") {
   appendFileSync(
@@ -113,7 +102,7 @@ async function observedExec(command, args, options) {
       command,
       killed: result.killed,
     },
-    getEventDelivery("command.done"),
+    getMessageDelivery("command.done"),
     result.code === 0 ? "info" : "error",
   );
   progressRunning();
@@ -130,8 +119,8 @@ try {
    */
   const result = await executeRegisteredTool(
     {
-      name: "async_run",
-      description: "Detached command-template async run",
+      name: "run_actor",
+      description: "Detached command-template run actor",
       template: meta.template,
       args: [],
       defaults: {},

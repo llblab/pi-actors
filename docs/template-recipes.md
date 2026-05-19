@@ -103,24 +103,19 @@ Use recipe-level `mailbox` to document the semantic messages a recipe actor acce
 
 `mailbox` is contract metadata, not transport configuration. It should name semantic message types, not FIFO commands, file paths, or CLI fragments.
 
-## Event Delivery
+## Actor Message Delivery
 
-Use recipe-level `events` to map runtime events to delivery policy explicitly:
+Recipes do not declare a second event-delivery policy. A running actor emits addressed messages such as `command.done`, `run.done`, or `checkpoint.needs_input`; the coordinator/runtime decides whether a message stays diagnostic, becomes a notification, or re-enters the agent context. This keeps recipe metadata focused on the actor contract:
 
 ```json
 {
-  "args": ["command_event_delivery:enum(log,notify,followup)"],
-  "defaults": { "command_event_delivery": "followup" },
-  "events": {
-    "command.done": {
-      "delivery": "{command_event_delivery}"
-    }
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["command.done", "run.done", "run.failed"]
   },
   "template": "run-subtask {prompt}"
 }
 ```
-
-Supported delivery values are `log`, `notify`, and `followup`. This keeps event bubbling visible in recipe metadata instead of relying on reserved hidden args. For packaged multi-agent fanout recipes, branch completion should default to `followup` so async work completion reaches the launching coordinator; use `log` only when branch completions are intentionally diagnostic noise.
 
 ## Command-Template Flags At Recipe Top Level
 

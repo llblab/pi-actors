@@ -18,5 +18,9 @@
     "thinking": "medium",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["plan.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Plan how to reach this goal: {goal}. Scope: {scope}. Constraints: {constraints}. Output format: {output_format}"
 }

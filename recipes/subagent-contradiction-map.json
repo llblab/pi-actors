@@ -18,5 +18,9 @@
     "thinking": "medium",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["contradiction.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Map contradictions in these inputs: {inputs}. Focus: {focus}. Resolution policy: {resolution_policy}. Output format: {output_format}"
 }

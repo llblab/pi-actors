@@ -1,0 +1,24 @@
+{
+  "name": "utility-actor-message",
+  "async": false,
+  "args": [
+    "type:string",
+    "to:string",
+    "from:string",
+    "summary:string",
+    "metadata:string",
+    "correlation_id:string",
+    "reply_to:string",
+    "repo:path"
+  ],
+  "defaults": {
+    "to": "coordinator",
+    "from": "run:{run_id}",
+    "summary": "",
+    "metadata": "{}",
+    "correlation_id": "",
+    "reply_to": "",
+    "repo": "~/.pi/agent/extensions/pi-auto-tools"
+  },
+  "template": "node {repo}/scripts/recipe-utils.mjs actor-message {type} {to} {from} {summary} {metadata} {correlation_id} {reply_to}"
+}

@@ -36,6 +36,10 @@
     "judge_model": "openai-codex/gpt-5.5",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["release.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
+  },
   "template": [
     {
       "name": "changelog",
@@ -71,7 +75,6 @@
         "input": "Use release readiness review from stdin.",
         "artifact_path": "{artifact_path}",
         "artifact_format": "Markdown sections: Release Verdict, Evidence, Risks, Checklist, Next Actions.",
-        "delivery": "log",
         "model": "{merger_model}",
         "tools": "{tools}"
       }

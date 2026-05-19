@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  defaultDeliveryForAddress,
   formatActorAddress,
   normalizeActorMessage,
   parseActorAddress,
@@ -36,7 +35,6 @@ test("Actor messages normalize one symmetric envelope", () => {
   assert.deepEqual(
     normalizeActorMessage({
       body: "approve",
-      delivery: "direct",
       from: "coordinator",
       metadata: { urgent: true },
       reply_to: "msg_1",
@@ -46,7 +44,6 @@ test("Actor messages normalize one symmetric envelope", () => {
     }),
     {
       body: "approve",
-      delivery: "direct",
       from: "coordinator",
       metadata: { urgent: true },
       reply_to: "msg_1",
@@ -66,16 +63,13 @@ test("Actor messages validate required address and type", () => {
   );
 });
 
-test("Actor messages default delivery by destination", () => {
-  assert.equal(defaultDeliveryForAddress("coordinator"), "followup");
-  assert.equal(defaultDeliveryForAddress("run:review"), "direct");
-  assert.equal(defaultDeliveryForAddress("branch:review/2"), "direct");
-  assert.equal(
-    normalizeActorMessage({ to: "coordinator", type: "checkpoint.ready" }).delivery,
-    "followup",
+test("Actor messages leave delivery to routing policy", () => {
+  assert.deepEqual(
+    normalizeActorMessage({ to: "coordinator", type: "checkpoint.ready" }),
+    { to: "coordinator", type: "checkpoint.ready" },
   );
-  assert.equal(
-    normalizeActorMessage({ to: "run:review", type: "control.approve" }).delivery,
-    "direct",
+  assert.deepEqual(
+    normalizeActorMessage({ to: "run:review", type: "control.approve" }),
+    { to: "run:review", type: "control.approve" },
   );
 });

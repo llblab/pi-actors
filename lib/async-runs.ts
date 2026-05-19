@@ -26,7 +26,7 @@ import type {
   CommandTemplateValue,
 } from "./command-templates.ts";
 import { substituteCommandTemplateToken } from "./command-templates.ts";
-import { writeJsonAtomic } from "./config.ts";
+import { writeJsonAtomic } from "./file-state.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as Paths from "./paths.ts";
 
@@ -48,7 +48,6 @@ export interface AsyncRunStartParams {
   delay?: number | string;
   output?: string;
   artifacts?: Record<string, string>;
-  events?: Record<string, { delivery?: string }>;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
   retry?: number | string;
   failure?: CommandTemplateFailureScope;
@@ -101,7 +100,6 @@ export interface AsyncRunMeta {
   template: CommandTemplateValue;
   values: Record<string, unknown>;
   artifacts?: Record<string, string>;
-  events?: Record<string, { delivery?: string }>;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
 }
 
@@ -140,7 +138,7 @@ function resolveRunTemplate(params: AsyncRunStartParams): {
   template: CommandTemplateValue;
 } {
   if (!params.template)
-    throw new Error("async_run action=start requires file or template.");
+    throw new Error("spawn requires file or template.");
   const envelope: Record<string, unknown> = {};
   for (const key of [
     "args",
@@ -343,7 +341,6 @@ export function startRun(
     template: resolved.template,
     values,
     ...(artifacts ? { artifacts } : {}),
-    ...(startParams.events ? { events: startParams.events } : {}),
     ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
   };
   writeJsonAtomic(join(stateDir, "run.json"), meta);
@@ -543,17 +540,18 @@ export function appendRunOutboxEvent(
   const stateDir = String(status.state_dir);
   const run = String(status.run ?? runOrDir);
   const type = event.type || event.event || "run.message";
+  const to = event.to || "coordinator";
   const payload = {
     ...(event.body !== undefined ? { body: event.body } : {}),
     ...(event.correlation_id ? { correlation_id: event.correlation_id } : {}),
     ...(event.data !== undefined ? { data: event.data } : {}),
-    delivery: normalizeRunOutboxDelivery(event.delivery),
+    delivery: normalizeRunOutboxDelivery(event.delivery ?? (to === "coordinator" ? "followup" : "log")),
     event: type,
     from: event.from || `run:${run}`,
     level: normalizeRunOutboxLevel(event.level),
     ...(event.reply_to ? { reply_to: event.reply_to } : {}),
     summary: event.summary || type,
-    to: event.to || "coordinator",
+    to,
     ts: new Date().toISOString(),
     type,
   };
@@ -574,7 +572,7 @@ export function sendRunMessage(
 ): Record<string, unknown> {
   if (process.platform === "win32") {
     throw new Error(
-      "async_run action=send requires Unix FIFO support; use WSL/Linux/macOS or a recipe-specific Windows transport.",
+      "run actor messages require Unix FIFO support; use WSL/Linux/macOS or a recipe-specific Windows transport.",
     );
   }
   const status = getRunStatus(runOrDir);

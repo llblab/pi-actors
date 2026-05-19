@@ -38,7 +38,7 @@ Core subagent recipes:
 - `recipes/subagent-merge.json`: Consensus/risk-first synthesis.
 - `recipes/subagent-normalize.json`: Stable output shaping.
 - `recipes/subagent-artifact.json`: Durable artifact-shaped output for a target path. It prepares content and write guidance; it does not write files unless the caller deliberately grants write tools or uses a deterministic writer.
-- `recipes/subagent-event.json`: Outbox-event-shaped coordinator record.
+- `recipes/subagent-message.json`: Prompted actor-message-envelope-shaped coordinator message record with envelope-aligned args.
 - `recipes/subagent-quorum.json`: Same prompt across a model pool.
 - `recipes/subagent-task-card.json`: Bounded implementation task card.
 - `recipes/subagent-conflict-report.json`: Integrator-oriented conflict report.
@@ -46,7 +46,7 @@ Core subagent recipes:
 - `recipes/subagent-followup.json`: Same-context or degraded continuation.
 - `recipes/subagent-judge.json`: Post-merge/report quality judge.
 
-Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Higher-level recipes pass these knobs through instead of hard-coding local policy.
+Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Interactive async atoms also declare mailbox metadata for their basic control, completion, and domain-result message surface. Higher-level recipes pass these knobs through instead of hard-coding local policy.
 
 Register one atom:
 
@@ -80,10 +80,10 @@ Pipeline recipes demonstrate second-order composition:
 - `recipes/pipeline-development-tasking.json`: Plan → task card → critique → integrator handoff.
 - `recipes/pipeline-docs-maintenance.json`: Docs index → documentation review → maintenance plan → artifact report.
 - `recipes/pipeline-media-library.json`: Playlist build → media-library artifact report.
-- `recipes/pipeline-artifact-report.json`: Normalize → artifact-shaped output → event-shaped record. This pipeline prepares a candidate artifact and emits `artifact.prepared`/`artifact.blocked`; the `artifact_path` is a target path, not a guarantee that the file was written.
-- `recipes/pipeline-artifact-write.json`: Normalize → artifact-shaped output → deterministic artifact write → event-shaped record. Use only when the caller explicitly wants filesystem writes; `write_mode` is `create`, `overwrite`, or `append`.
+- `recipes/pipeline-artifact-report.json`: Normalize → artifact-shaped output → actor-message-shaped record. This pipeline prepares a candidate artifact and emits `artifact.prepared`/`artifact.blocked`; the `artifact_path` is a target path, not a guarantee that the file was written.
+- `recipes/pipeline-artifact-write.json`: Normalize → artifact-shaped output → deterministic artifact write → actor-message-shaped record. Use only when the caller explicitly wants filesystem writes; `write_mode` is `create`, `overwrite`, or `append`.
 
-These are examples of library composition, not a workflow DSL. The recipe layer owns imports and saved defaults; command templates own execution shape; async runs own lifecycle.
+These are examples of library composition, not a workflow DSL. Pipeline recipes declare mailbox metadata for their high-level completion, artifact, and control message surface. The recipe layer owns imports and saved defaults; command templates own execution shape; async runs own lifecycle.
 
 ## Utility Recipes
 
@@ -102,6 +102,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.
 - `recipes/utility-artifact-write.json`: Deterministically write prepared artifact content from stdin to `artifact_path` with explicit `create`, `overwrite`, or `append` mode.
+- `recipes/utility-actor-message.json`: Deterministically wrap stdin as a validated addressed actor-message envelope with the same public names as the envelope: `to`, `from`, `type`, `summary`, `body`, optional `correlation_id`/`reply_to`, and `metadata`.
 - `recipes/utility-package-summary.json`: Use `scripts/recipe-utils.mjs` to emit bounded package metadata such as name, version, files, scripts, and dependency counts.
 - `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 
@@ -147,7 +148,7 @@ Start playback:
 music_player source="~/Music" volume=55 run_id=music
 ```
 
-Control it through addressed actor messages. This is the canonical reactive pattern for long-lived recipes: the run emits outbox events upward, and the coordinator sends explicit commands downward instead of polling on a timer.
+Control it through addressed actor messages. This is the canonical reactive pattern for long-lived recipes: the run emits actor messages upward, and the coordinator sends explicit commands downward instead of polling on a timer.
 
 ```text
 message to=run:music type=player.pause body=pause
@@ -165,11 +166,11 @@ The wrapper also accepts control commands directly when a caller already has the
 scripts/music-player.mjs next ~/.pi/agent/tmp/pi-auto-tools/runs/music
 ```
 
-Message body is currently adapted to one newline-delimited command written to `<run state dir>/control.fifo`. The script writes `status.txt`, `player.json`, and track-change events in `outbox.jsonl` in the same state dir. Track-change events default to `delivery: "log"`; set `event_delivery` to `notify` or `followup` only when the coordinator should receive live player events. Other interactive recipes should follow the same shape: define a small command vocabulary for addressed messages, emit decision-point outbox events, and let the coordinator react to messages rather than sleep-polling state.
+Message body is currently adapted to one newline-delimited command written to `<run state dir>/control.fifo`. The script writes `status.txt`, `player.json`, and track-change actor messages in `outbox.jsonl` in the same state dir. Track-change messages stay diagnostic by default; interactive recipes should define a small command vocabulary for addressed messages, emit semantic actor messages for decision points, and let the coordinator react to messages rather than sleep-polling state.
 
 ## Safety Notes
 
 - Only play trusted local files or URLs.
 - Volume is clamped to `0..100` by the wrapper.
 - Prefer a stable `run_id` such as `music` when the operator expects to control the run by name.
-- Use `async_run action=kill` only when graceful cancellation fails.
+- Use `message type=runtime.kill` only when graceful cancellation fails.

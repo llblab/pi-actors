@@ -18,7 +18,7 @@ Every reusable component recipe should make the following clear:
 - **Capability**: the one operation it performs.
 - **Args**: caller-controlled prompts, scopes, paths, models, and policy knobs.
 - **Output**: the expected shape of stdout or artifact paths.
-- **Events**: optional outbox events for checkpoints, questions, progress, or findings.
+- **Messages**: optional actor-message envelopes for checkpoints, questions, progress, or findings.
 - **Failure policy**: whether failures stop the root, only fail a branch, or are recoverable.
 - **Non-goals**: coordination behavior the component intentionally does not own.
 
@@ -72,9 +72,9 @@ Seed example: `recipes/subagent-merge.json`.
 
 ### Normalizers, Artifacts, and Events
 
-Convert variable branch output into stable JSON, Markdown sections, file artifacts, or event records for downstream recipes.
+Convert variable branch output into stable JSON, Markdown sections, file artifacts, or actor-message records for downstream recipes.
 
-Seed examples: `recipes/subagent-normalize.json`, `recipes/subagent-artifact.json`, and `recipes/subagent-event.json`.
+Seed examples: `recipes/subagent-normalize.json`, `recipes/subagent-artifact.json`, and `recipes/subagent-message.json`.
 
 ### Quorum Operators
 
@@ -90,7 +90,7 @@ Seed examples: `recipes/subagent-task-card.json` and `recipes/subagent-conflict-
 
 ### Checkpoint Emitters
 
-Emit bounded coordinator questions, partial state, or branch decisions to the run outbox. Checkpoint components should not pretend same-context resume exists unless the adapter can prove it.
+Emit bounded coordinator questions, partial state, or branch decisions as coordinator-bound actor messages. Checkpoint components should not pretend same-context resume exists unless the adapter can prove it.
 
 Seed example: `recipes/subagent-checkpoint.json`.
 
@@ -124,7 +124,7 @@ Higher-level examples:
 - `recipes/pipeline-research-synthesis.json`: Plan, evidence map, contradiction map, verification, merge, and normalized research synthesis.
 - `recipes/pipeline-checkpoint-continuation.json`: Checkpoint artifact, follow-up continuation, and normalized handoff with explicit degraded-mode handling.
 - `recipes/pipeline-development-tasking.json`: Plan, task card, critique, and normalized integrator handoff for bounded implementation work.
-- `recipes/pipeline-artifact-report.json`: Normalized report → durable artifact-shaped output → outbox-event-shaped record.
+- `recipes/pipeline-artifact-report.json`: Normalized report → durable artifact-shaped output → actor-message-shaped record.
 
 For high-risk work, split breadth and confidence:
 
@@ -143,6 +143,6 @@ task cards → scoped branch agents → conflict reports → integrator merge �
 - Prefer public args/defaults over baked-in local policy.
 - Use `failure: "branch"` for independent fanout branches unless one failure invalidates the whole run.
 - Keep model pools and provider aliases configurable.
-- Use artifacts or outbox events for intermediate outputs that must survive compaction.
+- Use artifacts or actor messages for intermediate outputs that must survive compaction.
 - Do not hide broad coordinator behavior inside a component named like a leaf.
 - Do not introduce scheduler, goto, or workflow-only syntax; compose saved recipes and command templates.

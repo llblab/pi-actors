@@ -8,20 +8,18 @@
     "loop:bool",
     "volume:int",
     "player:enum(auto,mpv,ffplay,cvlc,play)",
-    "state_dir:path",
-    "event_delivery:enum(log,notify,followup)"
+    "state_dir:path"
   ],
   "defaults": {
     "repo": "~/.pi/agent/extensions/pi-auto-tools",
     "command": "play",
     "loop": "true",
     "volume": "70",
-    "player": "auto",
-    "event_delivery": "log"
+    "player": "auto"
   },
   "mailbox": {
     "accepts": ["player.play", "player.pause", "player.resume", "player.toggle", "player.next", "player.previous", "player.stop", "player.status"],
     "emits": ["player.track"]
   },
-  "template": "{repo}/scripts/music-player.mjs {command} {source} {loop} {volume} {player} {state_dir} {event_delivery}"
+  "template": "{repo}/scripts/music-player.mjs {command} {source} {loop} {volume} {player} {state_dir}"
 }

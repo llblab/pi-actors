@@ -9,12 +9,44 @@ function usage() {
   recipe-utils.mjs changelog-section <file> <version>
   recipe-utils.mjs artifact-manifest <artifact-path> <title> <status> [summary]
   recipe-utils.mjs artifact-write <artifact-path> [create|overwrite|append]
+  recipe-utils.mjs actor-message <type> [to] [from] [summary] [metadata-json] [correlation-id] [reply-to]
   recipe-utils.mjs package-summary <package-json>`);
 }
 
 function fail(message) {
   console.error(message);
   process.exit(1);
+}
+
+const ADDRESS_PATTERN = /^[A-Za-z0-9_.-]+$/;
+const MESSAGE_TYPE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/;
+function assertToken(value, label) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) fail(`${label} is required`);
+  if (!ADDRESS_PATTERN.test(normalized)) fail(`${label} contains unsupported characters: ${value}`);
+  return normalized;
+}
+
+function validateActorAddress(address, label) {
+  const value = String(address ?? "").trim();
+  if (value === "coordinator") return value;
+  const separator = value.indexOf(":");
+  if (separator < 0) fail(`${label} must include an actor kind: ${address}`);
+  const kind = value.slice(0, separator);
+  const rest = value.slice(separator + 1);
+  if (kind === "branch") {
+    const [run, branch, ...extra] = rest.split("/");
+    if (extra.length > 0) fail(`${label} branch address has too many parts: ${address}`);
+    return `branch:${assertToken(run, `${label} branch run`)}/${assertToken(branch, `${label} branch id`)}`;
+  }
+  if (["run", "session", "tool"].includes(kind)) return `${kind}:${assertToken(rest, label)}`;
+  fail(`${label} has unsupported actor kind: ${kind}`);
+}
+
+function validateMessageType(type) {
+  const value = String(type ?? "").trim();
+  if (!MESSAGE_TYPE_PATTERN.test(value)) fail(`Invalid actor message type: ${type}`);
+  return value;
 }
 
 function walkFiles(dir, maxDepth = 2, depth = 0, out = []) {
@@ -131,6 +163,42 @@ function artifactWrite(pathValue, mode = "create") {
   console.log(JSON.stringify({ path, mode, bytes: stat.size, written: true }, null, 2));
 }
 
+function actorMessage(type = "event", to = "coordinator", from = "run:{run_id}", summary = "", metadataValue = "", correlationId = "", replyTo = "") {
+  const messageType = validateMessageType(type);
+  const messageTo = validateActorAddress(to, "message.to");
+  const messageFrom = validateActorAddress(from, "message.from");
+  let metadata = {};
+  if (metadataValue) {
+    try {
+      const parsed = JSON.parse(metadataValue);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metadata = parsed;
+      else fail("Actor message metadata must be a JSON object");
+    } catch (error) {
+      fail(`Invalid actor message metadata JSON: ${error.message}`);
+    }
+  }
+  const bodyText = readFileSync(0, "utf8");
+  const trimmed = bodyText.trim();
+  let body = bodyText;
+  if (trimmed) {
+    try {
+      body = JSON.parse(trimmed);
+    } catch {
+      body = bodyText;
+    }
+  }
+  console.log(JSON.stringify({
+    to: messageTo,
+    from: messageFrom,
+    type: messageType,
+    summary: summary || messageType,
+    body,
+    ...(correlationId ? { correlation_id: correlationId } : {}),
+    ...(replyTo ? { reply_to: replyTo } : {}),
+    metadata,
+  }, null, 2));
+}
+
 function packageSummary(fileValue = "package.json") {
   const file = resolve(fileValue.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"));
   const pkg = readJson(file);
@@ -195,6 +263,8 @@ else if (command === "artifact-manifest")
   artifactManifest(args[0] ?? "artifact.md", args[1], args[2], args[3]);
 else if (command === "artifact-write")
   artifactWrite(args[0] ?? "artifact.md", args[1] ?? "create");
+else if (command === "actor-message")
+  actorMessage(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
 else if (command === "package-summary")
   packageSummary(args[0] ?? "package.json");
 else {

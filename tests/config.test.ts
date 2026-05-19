@@ -1,6 +1,6 @@
 /**
  * Config registry regression tests
- * Covers stored tool normalization, legacy script rejection, duplicate handling, and atomic save/load
+ * Covers stored tool normalization, unsupported script rejection, duplicate handling, and atomic save/load
  */
 
 import assert from "node:assert/strict";
@@ -336,14 +336,14 @@ test("Stored tool normalization accepts command-template sequences", () => {
   ]);
 });
 
-test("Stored tool normalization rejects legacy script entries", () => {
+test("Stored tool normalization rejects unsupported script entries", () => {
   const result = normalizeStoredTool("old", { script: "~/bin/old" }, reserved);
   assert.equal(result.cfg, undefined);
   assert.equal(result.changed, false);
-  assert.match(result.warning ?? "", /legacy script config/);
+  assert.match(result.warning ?? "", /unsupported script config/);
 });
 
-test("Stored tool normalization rejects legacy job or recipe fields", () => {
+test("Stored tool normalization rejects unsupported job or recipe fields", () => {
   const jobResult = normalizeStoredTool(
     "old_job",
     { job: "review", template: "review {scope}" },
@@ -356,8 +356,8 @@ test("Stored tool normalization rejects legacy job or recipe fields", () => {
   );
   assert.equal(jobResult.cfg, undefined);
   assert.equal(recipeResult.cfg, undefined);
-  assert.match(jobResult.warning ?? "", /legacy job\/recipe config/);
-  assert.match(recipeResult.warning ?? "", /legacy job\/recipe config/);
+  assert.match(jobResult.warning ?? "", /unsupported job\/recipe config/);
+  assert.match(recipeResult.warning ?? "", /unsupported job\/recipe config/);
 });
 
 test("Stored tool normalization rejects recipe entries without templates", () => {

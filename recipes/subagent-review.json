@@ -22,5 +22,9 @@
     "thinking": "off",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["review.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Review {scope} through this lens: {lens}. Instructions: {instructions}. Evidence policy: {evidence_policy}. Risk policy: {risk_policy}. Output format: {output_format}"
 }

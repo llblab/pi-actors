@@ -18,5 +18,9 @@
     "thinking": "medium",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["judge.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Judge this report: {report}. Rubric: {rubric}. Evidence: {evidence}. Output format: {output_format}"
 }

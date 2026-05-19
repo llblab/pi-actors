@@ -26,6 +26,10 @@
     "judge_model": "openai-codex/gpt-5.5",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["quorum.completed", "review.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": [
     {
       "name": "quorum",

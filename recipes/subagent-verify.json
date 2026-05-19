@@ -19,5 +19,9 @@
     "thinking": "off",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["verification.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Verify this claim against the provided evidence. Claim: {claim}. Evidence or artifact paths: {evidence}. Acceptance: {acceptance}. Evidence policy: {evidence_policy}. Output format: {output_format}"
 }

@@ -17,14 +17,11 @@ export interface ActorAddress {
   branch?: string;
 }
 
-export type MessageDelivery = "direct" | "followup" | "log" | "notify";
-
 export interface ActorMessage {
   to: string;
   type: string;
   body?: unknown;
   correlation_id?: string;
-  delivery?: MessageDelivery;
   from?: string;
   metadata?: Record<string, unknown>;
   reply_to?: string;
@@ -77,19 +74,6 @@ export function formatActorAddress(address: ActorAddress): string {
   return `${address.kind}:${assertToken(address.value || "", `${address.kind} address`)}`;
 }
 
-export function normalizeMessageDelivery(value: unknown): MessageDelivery | undefined {
-  if (value === undefined || value === null || value === "") return undefined;
-  if (
-    value === "direct" ||
-    value === "followup" ||
-    value === "log" ||
-    value === "notify"
-  ) {
-    return value;
-  }
-  throw new Error(`Unsupported message delivery: ${String(value)}`);
-}
-
 function normalizeOptionalString(value: unknown, label: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") throw new Error(`${label} must be a string`);
@@ -121,7 +105,6 @@ export function normalizeActorMessage(input: unknown): ActorMessage {
   const from = normalizeOptionalString(record.from, "message.from");
   if (from) parseActorAddress(from);
   const normalizedTo = formatActorAddress(parsedTo);
-  const delivery = normalizeMessageDelivery(record.delivery) ?? defaultDeliveryForAddress(normalizedTo);
   return {
     to: normalizedTo,
     type,
@@ -129,15 +112,9 @@ export function normalizeActorMessage(input: unknown): ActorMessage {
     ...(record.correlation_id !== undefined
       ? { correlation_id: String(record.correlation_id) }
       : {}),
-    delivery,
     ...(from ? { from: formatActorAddress(parseActorAddress(from)) } : {}),
     ...(record.metadata !== undefined ? { metadata: normalizeMetadata(record.metadata) } : {}),
     ...(record.reply_to !== undefined ? { reply_to: String(record.reply_to) } : {}),
     ...(record.summary !== undefined ? { summary: String(record.summary) } : {}),
   };
-}
-
-export function defaultDeliveryForAddress(address: string): MessageDelivery {
-  const parsed = parseActorAddress(address);
-  return parsed.kind === "coordinator" ? "followup" : "direct";
 }

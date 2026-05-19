@@ -20,6 +20,10 @@
     "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.reply", "control.revise", "control.stop"],
+    "emits": ["checkpoint.needs_input", "checkpoint.continued", "command.done", "run.done", "run.failed"]
+  },
   "template": [
     {
       "name": "checkpoint",

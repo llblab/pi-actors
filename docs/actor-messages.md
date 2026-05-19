@@ -45,7 +45,6 @@ One shape covers upward, downward, lateral, parent-to-branch, and branch-to-pare
   "type": "control.approve",
   "summary": "Approve checkpoint",
   "body": "approve",
-  "delivery": "direct",
   "reply_to": "msg_123",
   "correlation_id": "task_456",
   "metadata": {}
@@ -59,7 +58,7 @@ Field rules:
 - `type`: required semantic message type.
 - `summary`: short human-facing line for notifications/follow-ups.
 - `body`: string or JSON payload.
-- `delivery`: `direct`, `log`, `notify`, or `followup` depending on route. Defaults to `followup` for `coordinator` and `direct` for actor mailboxes.
+- routing/delivery is inferred from `to`, actor ownership, and coordinator runtime policy; recipes should not expose delivery knobs.
 - `reply_to`: optional message id for conversational checkpoints.
 - `correlation_id`: optional task/run/workflow id.
 - `metadata`: optional structured routing or domain hints.
@@ -74,6 +73,7 @@ run -> coordinator
 run -> run
 parent -> branch
 branch -> parent
+coordinator -> tool
 ```
 
 Transports differ, but the public contract does not:
@@ -81,6 +81,7 @@ Transports differ, but the public contract does not:
 - `to: run:<id>` may route to FIFO, mailbox file, socket, or process stdin.
 - `to: coordinator` routes to outbox/watch/follow-up delivery when `from` names a run actor. Generic async-runner `command.done` events and explicit coordinator-bound messages include the actor envelope fields alongside the runtime event fields.
 - `to: branch:<run>/<branch>` routes through the parent run mailbox with the full envelope preserved so the run can dispatch branch-local control.
+- `to: tool:<name>` invokes an executable pi tool by name. Object bodies become tool parameters; primitive bodies are passed as `{ "input": body }`.
 
 Transport is not public API unless a recipe explicitly documents a custom endpoint.
 
@@ -93,16 +94,11 @@ Recipes can declare their conversational surface:
   "mailbox": {
     "accepts": ["control.continue", "control.revise", "control.approve", "control.stop"],
     "emits": ["checkpoint.needs_scope", "branch.done", "run.done"]
-  },
-  "events": {
-    "checkpoint.*": { "delivery": "followup" },
-    "branch.done": { "delivery": "followup" },
-    "progress.tick": { "delivery": "log" }
   }
 }
 ```
 
-`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. `events` remains delivery policy, not transport selection. Packaged interactive and event-oriented recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details.
+`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. Packaged interactive and message-producing recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Message-producing recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so message shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
 
 ## Spawn
 
@@ -117,7 +113,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-Low-level `async_run action=start` becomes an adapter for `spawn` when the actor is a detached run. The implementation supports spawning `run:<id>` actors from a recipe file/name or inline command template. Spawn metadata may include explicit `state_dir`, recipe event delivery policy, and named `artifacts` for terminal follow-ups and inspection.
+`spawn` creates detached `run:<id>` actors from a recipe file/name or inline command template. Spawn metadata may include explicit `state_dir` and named `artifacts` for terminal follow-ups and inspection.
 
 ## Inspect
 
@@ -130,22 +126,19 @@ Low-level `async_run action=start` becomes an adapter for `spawn` when the actor
 }
 ```
 
-The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, plus `status`/`runs` for `session:<id>` actors. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
+The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, plus `status`/`runs` for `session:<id>` and `session:all` actors with optional status filtering. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
 
-## Adapter Direction
+## Runtime Direction
 
-Low-level runtime operations map onto the actor/message vocabulary:
+Runtime operations use the actor/message vocabulary:
 
 ```text
-async_run action=start  -> spawn
-async_run action=send   -> message to run:<id>
-outbox append           -> message to coordinator
-async_run action=status -> inspect view=status
-async_run action=tail   -> inspect view=tail
-async_run action=events -> inspect view=events
+create detached work -> spawn
+run-local control    -> message to run:<id>
+coordinator signal   -> message to coordinator
+tool execution       -> message to tool:<name>
+intentional observe  -> inspect
 ```
-
-Compatibility shims are allowed only when they do not obscure the model.
 
 ## Non-goals
 

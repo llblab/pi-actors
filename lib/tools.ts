@@ -111,20 +111,6 @@ function compactAsyncRunStatus(value: unknown): string {
   return `\n${tokens.join(" ")}`;
 }
 
-function compactAsyncRunList(runs: Array<Record<string, unknown>>): string {
-  if (runs.length === 0) return "\n(no async runs)";
-  return `\n${runs
-    .map((run) =>
-      [
-        `run=${String(run.run ?? "<unknown>")}`,
-        `status=${String(run.status ?? "unknown")}`,
-        ...(run.tool ? [`tool=${String(run.tool)}`] : []),
-        ...(run.recipe ? [`recipe=${String(run.recipe)}`] : []),
-      ].join(" "),
-    )
-    .join("\n")}`;
-}
-
 function compactRunEvents(events: AsyncRuns.RunOutboxEvent[]): string {
   if (events.length === 0) return "\n(no run events)";
   return `\n${events
@@ -138,19 +124,6 @@ function compactRunEvents(events: AsyncRuns.RunOutboxEvent[]): string {
       ].join(" "),
     )
     .join("\n")}`;
-}
-
-function compactSendResult(
-  runId: string,
-  result: Record<string, unknown>,
-): string {
-  const tokens = [
-    `run=${runId}`,
-    `send=${result.sent === true ? "sent" : "not_sent"}`,
-  ];
-  if (result.bytes !== undefined) tokens.push(`bytes=${String(result.bytes)}`);
-  if (result.control) tokens.push(`control=${String(result.control)}`);
-  return `\n${tokens.join(" ")}`;
 }
 
 function compactActorFiles(status: Record<string, unknown>): string {
@@ -185,27 +158,15 @@ function compactActorMessageResult(
   const tokens = [
     `to=${message.to}`,
     `type=${message.type}`,
-    `message=${result.sent === true ? "sent" : "not_sent"}`,
+    `message=${result.sent === true || result.stopped === true ? "sent" : "not_sent"}`,
   ];
   if (result.bytes !== undefined) tokens.push(`bytes=${String(result.bytes)}`);
   if (result.control) tokens.push(`control=${String(result.control)}`);
   if (result.outbox) tokens.push(`outbox=${String(result.outbox)}`);
-  return `\n${tokens.join(" ")}`;
-}
-
-function compactStopResult(
-  action: "cancel" | "kill",
-  runId: string,
-  result: Record<string, unknown>,
-): string {
-  const status = asRecord(result.status);
-  const stopped = result.stopped === true;
-  const tokens = [`run=${runId}`, `${action}=${stopped ? "sent" : "not_sent"}`];
-  if (result.reason)
-    tokens.push(`reason=${String(result.reason).replaceAll(" ", "_")}`);
-  if (status.status) tokens.push(`status=${String(status.status)}`);
+  if (result.tool) tokens.push(`tool=${String(result.tool)}`);
+  if (result.stopped === true) tokens.push("stopped=true");
   if (result.signal) tokens.push(`signal=${String(result.signal)}`);
-  if (result.signalTarget) tokens.push(`target=${String(result.signalTarget)}`);
+  if (result.invoked === true) tokens.push("invoked=true");
   return `\n${tokens.join(" ")}`;
 }
 
@@ -274,6 +235,14 @@ function messageBodyToRunLine(message: ActorMessages.ActorMessage): string {
   return JSON.stringify(message.body);
 }
 
+function messageBodyToToolParams(message: ActorMessages.ActorMessage): Record<string, unknown> {
+  if (message.body && typeof message.body === "object" && !Array.isArray(message.body)) {
+    return message.body as Record<string, unknown>;
+  }
+  if (message.body === undefined) return {};
+  return { input: message.body };
+}
+
 function runIdFromActorAddress(address: string | undefined): string | undefined {
   if (!address) return undefined;
   const parsed = ActorMessages.parseActorAddress(address);
@@ -295,7 +264,6 @@ export function createSpawnToolDefinition<
       {
         artifacts: looseObjectSchema("Optional named artifact paths for the spawned actor."),
         as: stringSchema("Optional actor address for the spawned run, e.g. run:<id>."),
-        events: looseObjectSchema("Optional recipe event delivery policy."),
         file: stringSchema("Optional template recipe JSON file. Bare names resolve under ~/.pi/agent/recipes."),
         recipe: stringSchema("Alias for file; template recipe JSON file/name to spawn."),
         state_dir: stringSchema("Optional explicit run state directory."),
@@ -330,9 +298,6 @@ export function createSpawnToolDefinition<
           ...(input.artifacts && typeof input.artifacts === "object" && !Array.isArray(input.artifacts)
             ? { artifacts: input.artifacts as Record<string, string> }
             : {}),
-          ...(input.events && typeof input.events === "object" && !Array.isArray(input.events)
-            ? { events: input.events as Record<string, { delivery?: string }> }
-            : {}),
         },
         ctx.cwd,
       );
@@ -358,7 +323,8 @@ export function createInspectToolDefinition(): any {
     parameters: objectSchema(
       {
         lines: stringSchema("Line count for tail/events views. Default 40."),
-        target: stringSchema("Actor address to inspect, e.g. run:<id> or session:<id>."),
+        status: stringSchema("Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited."),
+        target: stringSchema("Actor address to inspect, e.g. run:<id>, session:<id>, or session:all."),
         verbose: booleanSchema("Return full JSON instead of compact text where available."),
         view: stringSchema("Inspection view: status, tail, events, artifacts, files, or mailbox."),
       },
@@ -379,9 +345,9 @@ export function createInspectToolDefinition(): any {
         if (view !== "status" && view !== "runs") {
           throw new Error("inspect session:<id> supports view=status or view=runs.");
         }
-        const runs = AsyncRuns.listRuns()
+        const runs = AsyncRuns.listRuns(undefined, typeof input.status === "string" ? input.status : undefined)
           .map((run) => AsyncRuns.getRunStatus(String(run.state_dir)))
-          .filter((run) => run.ownerId === address.value);
+          .filter((run) => address.value === "all" || run.ownerId === address.value);
         return {
           content: [
             {
@@ -456,12 +422,18 @@ export function createInspectToolDefinition(): any {
   };
 }
 
-export function createActorMessageToolDefinition(): any {
+export interface ActorMessageToolDeps<TContext = unknown> {
+  getTool?: (name: string) => any | undefined;
+}
+
+export function createActorMessageToolDefinition<TContext = unknown>(
+  deps: ActorMessageToolDeps<TContext> = {},
+): any {
   return {
     name: "message",
     label: "Message",
     description:
-      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, and coordinator outbox events.",
+      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator-bound run messages.",
     parameters: objectSchema(
       {
         body: unionSchema([
@@ -470,7 +442,6 @@ export function createActorMessageToolDefinition(): any {
           arraySchema("Structured JSON message body array."),
         ]),
         correlation_id: stringSchema("Optional correlation id for workflow/task linkage."),
-        delivery: stringSchema("Optional delivery hint: direct, log, notify, or followup."),
         from: stringSchema("Optional sender address, such as coordinator or run:<id>."),
         metadata: looseObjectSchema("Optional structured metadata for routing or domain hints."),
         reply_to: stringSchema("Optional message id this message replies to."),
@@ -486,22 +457,46 @@ export function createActorMessageToolDefinition(): any {
       params: unknown,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
-      _ctx: unknown,
+      ctx: TContext,
     ) {
       const input = asRecord(params);
       const message = ActorMessages.normalizeActorMessage(input);
       const address = ActorMessages.parseActorAddress(message.to);
       let result: Record<string, unknown>;
       if (address.kind === "run" && address.value) {
-        result = AsyncRuns.sendRunMessage(
-          address.value,
-          messageBodyToRunLine(message),
-        );
+        if (message.type === "runtime.cancel") {
+          result = AsyncRuns.cancelRun(address.value);
+        } else if (message.type === "runtime.kill") {
+          result = AsyncRuns.killRun(address.value);
+        } else {
+          result = AsyncRuns.sendRunMessage(
+            address.value,
+            messageBodyToRunLine(message),
+          );
+        }
       } else if (address.kind === "branch" && address.value) {
         result = AsyncRuns.sendRunMessage(
           address.value,
           JSON.stringify(message),
         );
+      } else if (address.kind === "tool" && address.value) {
+        const tool = deps.getTool?.(address.value);
+        if (!tool || typeof tool.execute !== "function") {
+          throw new Error(`tool actor not found or not executable: ${address.value}`);
+        }
+        const toolResult = await tool.execute(
+          `message:${message.type}`,
+          messageBodyToToolParams(message),
+          _signal,
+          _onUpdate,
+          ctx,
+        );
+        result = {
+          invoked: true,
+          sent: true,
+          tool: address.value,
+          tool_result: toolResult,
+        };
       } else if (address.kind === "coordinator") {
         if (!message.from) {
           throw new Error("message to coordinator requires from=run:<id>.");
@@ -513,7 +508,6 @@ export function createActorMessageToolDefinition(): any {
         result = AsyncRuns.appendRunOutboxEvent(sender.value, {
           body: message.body,
           correlation_id: message.correlation_id,
-          delivery: message.delivery,
           event: message.type,
           from: message.from,
           reply_to: message.reply_to,
@@ -523,7 +517,7 @@ export function createActorMessageToolDefinition(): any {
         });
       } else {
         throw new Error(
-          `message currently supports run:<id>, branch:<run>/<branch>, and coordinator destinations; unsupported destination: ${message.to}`,
+          `message currently supports run:<id>, branch:<run>/<branch>, tool:<name>, and coordinator destinations; unsupported destination: ${message.to}`,
         );
       }
       return {
@@ -539,241 +533,6 @@ export function createActorMessageToolDefinition(): any {
         ],
         details: { message, result },
       };
-    },
-  };
-}
-
-export function createAsyncRunToolDefinition<
-  TContext extends AsyncRunToolContext,
->(): any {
-  return {
-    name: "async_run",
-    label: "Async Run",
-    description:
-      "Manage detached async runs. Actions: start, status, tail, list, events, send, cancel, kill.",
-    parameters: objectSchema(
-      {
-        action: stringSchema(
-          "Action: start, status, tail, list, events, send, cancel, or kill.",
-        ),
-        failure: stringSchema(
-          "Failure propagation for start: continue, branch, or root.",
-        ),
-        file: stringSchema(
-          "Optional template recipe JSON file for start. Bare names resolve under ~/.pi/agent/recipes.",
-        ),
-        lines: stringSchema(
-          "Tail/event line count for tail or events. Default 40.",
-        ),
-        message: stringSchema(
-          "Line-delimited message for send to a run control FIFO. A trailing newline is added when omitted.",
-        ),
-        artifacts: looseObjectSchema(
-          "Optional named recipe artifact paths for start, e.g. { report: 'artifacts/report.md' }. Values may contain placeholders.",
-        ),
-        parallel: booleanSchema(
-          "Run an inline or recipe-envelope template array concurrently for start.",
-        ),
-        recover: unionSchema([
-          stringSchema(
-            "Recovery command template run between failed retry attempts for start",
-          ),
-          arraySchema("Recovery command-template sequence for start"),
-        ]),
-        run_id: stringSchema(
-          "Run id or state directory. Required for status, tail, cancel, and kill. Optional for start.",
-        ),
-        state_dir: stringSchema(
-          "Optional run state directory for start. Defaults to ~/.pi/agent/tmp/pi-auto-tools/runs/{run_id}.",
-        ),
-        state_root: stringSchema(
-          "Optional state root for list. Defaults to ~/.pi/agent/tmp/pi-auto-tools/runs.",
-        ),
-        status: stringSchema(
-          "Optional list filter: all, running, active, terminal, done, failed, cancelled, killed, or exited.",
-        ),
-        template: unionSchema([
-          stringSchema("Command template string for start"),
-          arraySchema("Command template sequence or parallel tree for start"),
-        ]),
-        values: looseObjectSchema(
-          "Runtime placeholder values passed to the template for start",
-        ),
-        when: stringSchema(
-          "Optional start node guard expression, for example flag or !flag.",
-        ),
-        verbose: booleanSchema(
-          "Return full JSON instead of compact text for start, status, list, events, send, cancel, and kill.",
-        ),
-      },
-      ["action"],
-    ),
-    async execute(
-      _toolCallId: string,
-      params: unknown,
-      _signal: AbortSignal | undefined,
-      _onUpdate: unknown,
-      ctx: TContext,
-    ) {
-      const input = params as AsyncRuns.AsyncRunStartParams & {
-        action?: string;
-        lines?: string;
-        message?: string;
-        state_root?: string;
-        status?: string;
-        verbose?: boolean;
-      };
-      switch (input.action) {
-        case "start": {
-          const meta = AsyncRuns.startRun(
-            { ...input, ownerId: getRunOwnerId(ctx) },
-            ctx.cwd,
-          );
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: maybeJsonText(
-                  meta,
-                  input.verbose,
-                  compactAsyncRunStatus(meta),
-                ),
-              },
-            ],
-            details: meta,
-          };
-        }
-        case "status": {
-          if (!input.run_id)
-            throw new Error("async_run action=status requires run_id.");
-          const status = AsyncRuns.getRunStatus(String(input.run_id));
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: maybeJsonText(
-                  status,
-                  input.verbose,
-                  compactAsyncRunStatus(status),
-                ),
-              },
-            ],
-            details: status,
-          };
-        }
-        case "tail": {
-          if (!input.run_id)
-            throw new Error("async_run action=tail requires run_id.");
-          const text = AsyncRuns.tailRun(
-            String(input.run_id),
-            Number(input.lines || 40),
-          );
-          return {
-            content: [{ type: "text" as const, text: `\n${text}` }],
-            details: {},
-          };
-        }
-        case "list": {
-          const runs = AsyncRuns.listRuns(input.state_root, input.status);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: maybeJsonText(
-                  runs,
-                  input.verbose,
-                  compactAsyncRunList(runs),
-                ),
-              },
-            ],
-            details: { runs },
-          };
-        }
-        case "events": {
-          if (!input.run_id)
-            throw new Error("async_run action=events requires run_id.");
-          const events = AsyncRuns.readRunEvents(
-            String(input.run_id),
-            Number(input.lines || 40),
-          );
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: maybeJsonText(
-                  events,
-                  input.verbose,
-                  compactRunEvents(events),
-                ),
-              },
-            ],
-            details: { events },
-          };
-        }
-        case "send": {
-          if (!input.run_id)
-            throw new Error("async_run action=send requires run_id.");
-          if (typeof input.message !== "string")
-            throw new Error("async_run action=send requires message.");
-          const runId = String(input.run_id);
-          const result = AsyncRuns.sendRunMessage(runId, input.message);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: maybeJsonText(
-                  result,
-                  input.verbose,
-                  compactSendResult(runId, result),
-                ),
-              },
-            ],
-            details: result,
-          };
-        }
-        case "cancel": {
-          if (!input.run_id)
-            throw new Error("async_run action=cancel requires run_id.");
-          const runId = String(input.run_id);
-          const result = AsyncRuns.cancelRun(runId);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: maybeJsonText(
-                  result,
-                  input.verbose,
-                  compactStopResult("cancel", runId, result),
-                ),
-              },
-            ],
-            details: result,
-          };
-        }
-        case "kill": {
-          if (!input.run_id)
-            throw new Error("async_run action=kill requires run_id.");
-          const runId = String(input.run_id);
-          const result = AsyncRuns.killRun(runId);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: maybeJsonText(
-                  result,
-                  input.verbose,
-                  compactStopResult("kill", runId, result),
-                ),
-              },
-            ],
-            details: result,
-          };
-        }
-        default:
-          throw new Error(
-            "async_run action must be one of: start, status, tail, list, events, send, cancel, kill.",
-          );
-      }
     },
   };
 }

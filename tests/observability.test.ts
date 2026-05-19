@@ -173,7 +173,7 @@ test("Run observability detects terminal transitions", () => {
   ]);
   assert.equal(
     formatRunTransitionMessage(transitions[0]),
-    "Run review completed successfully.\nArtifacts:\n- Base: `artifacts`\n- Files: `report.md`\nUse async_run action=status or action=tail if the result needs inspection.",
+    "Run review completed successfully.\nArtifacts:\n- Base: `artifacts`\n- Files: `report.md`\nUse inspect target=run:review view=status or view=tail if the result needs inspection.",
   );
   assert.equal(previous.get("review"), "done");
 });
@@ -246,7 +246,7 @@ test("Run observability reports cancelled terminal transitions clearly", () => {
   ]);
   assert.equal(
     formatRunTransitionMessage(transitions[0]),
-    "Run music was cancelled. Use async_run action=status or action=tail if analysis is needed.",
+    "Run music was cancelled. Use inspect target=run:music view=status or view=tail if analysis is needed.",
   );
   assert.equal(getRunTransitionNotificationType(transitions[0]), "info");
   assert.equal(shouldSendRunTransitionFollowUp(transitions[0]), false);

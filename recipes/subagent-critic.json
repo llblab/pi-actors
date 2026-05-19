@@ -20,5 +20,9 @@
     "thinking": "medium",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["critique.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Critique this target through lens {lens}: {target}. Constraints: {constraints}. Risk policy: {risk_policy}. Output format: {output_format}"
 }

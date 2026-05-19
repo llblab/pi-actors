@@ -41,7 +41,6 @@ export interface TemplateRecipeDefinition {
   delay?: number | string;
   output?: string;
   artifacts?: Record<string, string>;
-  events?: Record<string, { delivery?: string }>;
   mailbox?: TemplateRecipeMailbox;
   retry?: number | string;
   failure?: CommandTemplates.CommandTemplateFailureScope;
@@ -534,9 +533,6 @@ export function readResolvedRecipeConfig(
               .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
           ),
         }
-      : {}),
-    ...(isRecord(substituted.events)
-      ? { events: substituted.events as Record<string, { delivery?: string }> }
       : {}),
     ...(isRecord(substituted.mailbox)
       ? {

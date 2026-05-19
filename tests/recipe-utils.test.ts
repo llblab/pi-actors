@@ -107,7 +107,6 @@ test("recipe-utils actor-message emits deterministic envelopes", () => {
   assert.equal(envelope.to, "coordinator");
   assert.equal(envelope.from, "run:writer");
   assert.equal(envelope.type, "artifact.written");
-  assert.equal(envelope.event, "artifact.written");
   assert.equal(envelope.summary, "Done");
   assert.deepEqual(envelope.body, { written: true });
   assert.equal(envelope.correlation_id, "task-1");

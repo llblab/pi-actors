@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `[Actor Messages]` Added actor-native `control.stop`, `control.cancel`, and `control.kill` handling for run termination while retaining `runtime.cancel` and `runtime.kill` as compatibility aliases. Impact: public examples can use the same control-message vocabulary declared by recipe mailboxes instead of preserving runtime action names.
+- `[Actor Messages]` Added `inspect target=tool:<name>` support for registered tool actor status/schema contracts. Impact: tool actors can now be intentionally observed through the same actor vocabulary used to invoke them with `message to=tool:<name>`.
 
 ## 0.12.9: Actor Runtime Hotfix
 

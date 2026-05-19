@@ -126,7 +126,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, plus `status`/`runs` for `session:<id>` and `session:all` actors with optional status filtering. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
+The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `session:<id>` and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
 
 ## Runtime Direction
 

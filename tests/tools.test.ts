@@ -142,6 +142,34 @@ test(
   },
 );
 
+test("Inspect tool reads tool actor contracts", async () => {
+  const definition = createInspectToolDefinition({
+    getTool: (name) =>
+      name === "echo"
+        ? {
+            description: "Echo tool",
+            parameters: {
+              properties: { text: { type: "string" } },
+              required: ["text"],
+              type: "object",
+            },
+            promptSnippet: "Echo text",
+          }
+        : undefined,
+  });
+  const result = await definition.execute(
+    "call-inspect-tool",
+    { target: "tool:echo", view: "status" },
+    undefined,
+    undefined,
+    undefined,
+  );
+  assert.match(result.content[0].text, /tool=echo/);
+  assert.match(result.content[0].text, /args=text/);
+  assert.match(result.content[0].text, /required=text/);
+  assert.equal(result.details.description, "Echo tool");
+});
+
 test("Actor message tool routes tool actors to executable tools", async () => {
   const calls: Array<Record<string, unknown>> = [];
   const definition = createActorMessageToolDefinition({

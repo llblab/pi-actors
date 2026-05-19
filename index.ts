@@ -194,5 +194,9 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       getTool: (name) => actorToolDefinitions.get(name),
     }),
   );
-  pi.registerTool(Tools.createInspectToolDefinition());
+  pi.registerTool(
+    Tools.createInspectToolDefinition<ExtensionContext>({
+      getTool: (name) => actorToolDefinitions.get(name),
+    }),
+  );
 }

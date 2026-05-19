@@ -216,6 +216,15 @@ function compactSessionRuns(session: string, runs: Array<Record<string, unknown>
     .join("\n")}`;
 }
 
+function compactToolActor(name: string, tool: Record<string, unknown>): string {
+  const parameters = asRecord(tool.parameters);
+  const required = Array.isArray(parameters.required)
+    ? parameters.required.join(",")
+    : "";
+  const properties = asRecord(parameters.properties);
+  return `\ntool=${name} description=${String(tool.description ?? "").replaceAll(/\s+/g, "_")} args=${Object.keys(properties).join(",")} required=${required}`;
+}
+
 function compactActorMessageResult(
   message: ActorMessages.ActorMessage,
   result: Record<string, unknown>,
@@ -379,17 +388,23 @@ export function createSpawnToolDefinition<
   };
 }
 
-export function createInspectToolDefinition(): any {
+export interface InspectToolDeps<TContext = unknown> {
+  getTool?: (name: string) => any | undefined;
+}
+
+export function createInspectToolDefinition<TContext = unknown>(
+  deps: InspectToolDeps<TContext> = {},
+): any {
   return {
     name: "inspect",
     label: "Inspect",
     description:
-      "Intentionally inspect an actor. Supports run:<id> views: status, tail, events, artifacts, files, mailbox; and session:<id> status.",
+      "Intentionally inspect an actor. Supports run:<id> views: status, tail, events, artifacts, files, mailbox; session:<id> status; and tool:<name> status/schema.",
     parameters: objectSchema(
       {
         lines: stringSchema("Line count for tail/events views. Default 40."),
         status: stringSchema("Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited."),
-        target: stringSchema("Actor address to inspect, e.g. run:<id>, session:<id>, or session:all."),
+        target: stringSchema("Actor address to inspect, e.g. run:<id>, session:<id>, session:all, or tool:<name>."),
         verbose: booleanSchema("Return full JSON instead of compact text where available."),
         view: stringSchema("Inspection view: status, tail, events, artifacts, files, or mailbox."),
       },
@@ -423,8 +438,30 @@ export function createInspectToolDefinition(): any {
           details: { session: address.value, runs },
         };
       }
+      if (address.kind === "tool" && address.value) {
+        if (view !== "status" && view !== "schema") {
+          throw new Error("inspect tool:<name> supports view=status or view=schema.");
+        }
+        const tool = deps.getTool?.(address.value);
+        if (!tool) throw new Error(`tool actor not found: ${address.value}`);
+        const details = {
+          name: address.value,
+          description: tool.description,
+          parameters: tool.parameters,
+          promptSnippet: tool.promptSnippet,
+        };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: maybeJsonText(details, input.verbose === true || view === "schema", compactToolActor(address.value, details)),
+            },
+          ],
+          details,
+        };
+      }
       const runId = address.kind === "run" ? address.value : undefined;
-      if (!runId) throw new Error("inspect target must be run:<id> or session:<id>.");
+      if (!runId) throw new Error("inspect target must be run:<id>, session:<id>, or tool:<name>.");
       switch (view) {
         case "status": {
           const status = AsyncRuns.getRunStatus(runId);

@@ -26,7 +26,7 @@
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
+    "accepts": ["control.stop", "control.cancel", "control.kill"],
     "emits": ["repo_health.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
   },
   "template": [

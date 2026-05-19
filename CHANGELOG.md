@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.3: Pipeline Termination Mailbox Consistency
+
+- `[Recipe Library]` Added `control.cancel` and `control.kill` mailbox accepts to packaged async pipeline recipes that previously advertised only `control.stop`. Impact: `inspect view=mailbox` now exposes the full actor-native termination set consistently across high-level pipeline actors.
+- `[Tests]` Expanded packaged recipe coverage so all async `pipeline-*` recipes must expose `control.stop`, `control.cancel`, and `control.kill`. Impact: future pipeline recipes cannot silently regress to partial termination mailbox contracts.
+
 ## 0.14.2: Release Readiness Package Evidence
 
 - `[Recipe Library]` Added `utility-package-summary` evidence to `pipeline-release-readiness` between changelog extraction and validation. Impact: release readiness reports can consider package metadata and package contents summary without adding publish automation.

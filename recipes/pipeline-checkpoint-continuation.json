@@ -21,7 +21,7 @@
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.reply", "control.revise", "control.stop"],
+    "accepts": ["control.reply", "control.revise", "control.stop", "control.cancel", "control.kill"],
     "emits": ["checkpoint.needs_input", "checkpoint.continued", "command.done", "run.done", "run.failed"]
   },
   "template": [

@@ -36,7 +36,7 @@
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
+    "accepts": ["control.stop", "control.cancel", "control.kill"],
     "emits": ["artifact.bundle_ready", "artifact.written", "artifact.blocked", "run.done", "run.failed"]
   },
   "artifacts": {

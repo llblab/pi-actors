@@ -23,7 +23,7 @@
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
+    "accepts": ["control.stop", "control.cancel", "control.kill"],
     "emits": ["research.completed", "command.done", "run.done", "run.failed"]
   },
   "template": [

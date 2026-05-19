@@ -329,6 +329,39 @@ test("Actor message tool rejects session messages from differently owned runs", 
   }
 });
 
+test("Actor message tool rejects session messages from unowned runs", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `session-unowned-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-session-message-unowned",
+        {
+          from: `run:${runId}`,
+          to: "session:target-session",
+          type: "checkpoint.needs_scope",
+        },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /requires sender run owner target-session; got no owner/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Spawn tool starts run actors with artifact metadata", async () => {
   const definition = createSpawnToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-"));

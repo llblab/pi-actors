@@ -630,8 +630,13 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           throw new Error(`message to ${address.kind} currently requires from=run:<id>.`);
         }
         const senderStatus = AsyncRuns.getRunStatus(sender.value);
-        if (address.kind === "session" && senderStatus.ownerId && senderStatus.ownerId !== address.value) {
-          throw new Error(`message to session:${address.value} requires sender run owner ${address.value}; got ${senderStatus.ownerId}.`);
+        if (address.kind === "session") {
+          if (!senderStatus.ownerId) {
+            throw new Error(`message to session:${address.value} requires sender run owner ${address.value}; got no owner.`);
+          }
+          if (senderStatus.ownerId !== address.value) {
+            throw new Error(`message to session:${address.value} requires sender run owner ${address.value}; got ${senderStatus.ownerId}.`);
+          }
         }
         result = AsyncRuns.appendRunOutboxEvent(sender.value, {
           body: message.body,

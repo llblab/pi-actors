@@ -79,7 +79,7 @@ coordinator -> tool
 Transports differ, but the public contract does not:
 
 - `to: run:<id>` may route to FIFO, mailbox file, socket, or process stdin.
-- `to: coordinator` routes to outbox/watch/follow-up delivery when `from` names a run actor. `to: session:<id>` uses the same actor-message path for a run owned by that session, making explicit session-directed checkpoints possible without exposing runtime delivery knobs. Generic async-runner `command.done` events and explicit coordinator/session-bound messages include the actor envelope fields alongside the runtime event fields.
+- `to: coordinator` routes to outbox/watch/follow-up delivery when `from` names a run actor. `to: session:<id>` uses the same actor-message path only when the sender run is owned by that session, making explicit session-directed checkpoints possible without exposing runtime delivery knobs. Generic async-runner `command.done` events and explicit coordinator/session-bound messages include the actor envelope fields alongside the runtime event fields.
 - `to: branch:<run>/<branch>` routes through the parent run mailbox with the full envelope preserved so the run can dispatch branch-local control.
 - `to: tool:<name>` invokes an executable pi tool by name. Object bodies become tool parameters; primitive bodies are passed as `{ "input": body }`.
 

@@ -9,6 +9,7 @@
 - `[Recipe Library]` Added `utility-run-ops-snapshot` and routed `pipeline-async-run-ops` through it so run summaries, event tails, and stale/terminal recommendations stay in one structured input. Impact: async-run operations reports no longer lose summary context before normalization and can suggest `inspect` or `control.stop` messages without executing them.
 - `[Actor Messages]` Added `inspect target=coordinator` support for current-session run inventory. Impact: the coordinator actor can now be intentionally observed without spelling out the session id.
 - `[Actor Messages]` Added `message to=session:<id>` support for run-owned session-directed follow-ups. Impact: explicit session checkpoints now use the same actor envelope as coordinator follow-ups while preserving run-owner checks.
+- `[Actor Messages]` Hardened `message to=session:<id>` routing to require an owned sender run. Impact: unowned or cross-session runs cannot synthesize session-directed follow-ups.
 
 ## 0.12.9: Actor Runtime Hotfix
 

@@ -99,7 +99,7 @@ test("recipe-utils artifact-write writes stdin with explicit mode", async () => 
 test("recipe-utils actor-message emits deterministic envelopes", () => {
   const result = spawnSync(
     script,
-    ["actor-message", "artifact.written", "followup", "coordinator", "run:writer", "Done", '{"path":"report.md"}'],
+    ["actor-message", "artifact.written", "followup", "coordinator", "run:writer", "Done", '{"path":"report.md"}', "task-1", "msg-0"],
     { encoding: "utf8", input: '{"written":true}' },
   );
   assert.equal(result.status, 0, result.stderr);
@@ -111,6 +111,8 @@ test("recipe-utils actor-message emits deterministic envelopes", () => {
   assert.equal(envelope.delivery, "followup");
   assert.equal(envelope.summary, "Done");
   assert.deepEqual(envelope.body, { written: true });
+  assert.equal(envelope.correlation_id, "task-1");
+  assert.equal(envelope.reply_to, "msg-0");
   assert.deepEqual(envelope.metadata, { path: "report.md" });
 });
 

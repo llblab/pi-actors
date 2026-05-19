@@ -102,7 +102,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.
 - `recipes/utility-artifact-write.json`: Deterministically write prepared artifact content from stdin to `artifact_path` with explicit `create`, `overwrite`, or `append` mode.
-- `recipes/utility-actor-message.json`: Deterministically wrap stdin as an addressed actor-message envelope with `to`, `from`, `type`, `delivery`, `summary`, `body`, and `metadata`.
+- `recipes/utility-actor-message.json`: Deterministically wrap stdin as an addressed actor-message envelope with `to`, `from`, `type`, `delivery`, `summary`, `body`, optional `correlation_id`/`reply_to`, and `metadata`.
 - `recipes/utility-package-summary.json`: Use `scripts/recipe-utils.mjs` to emit bounded package metadata such as name, version, files, scripts, and dependency counts.
 - `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 

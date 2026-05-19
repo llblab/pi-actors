@@ -9,7 +9,7 @@ function usage() {
   recipe-utils.mjs changelog-section <file> <version>
   recipe-utils.mjs artifact-manifest <artifact-path> <title> <status> [summary]
   recipe-utils.mjs artifact-write <artifact-path> [create|overwrite|append]
-  recipe-utils.mjs actor-message <type> [delivery] [to] [from] [summary] [metadata-json]
+  recipe-utils.mjs actor-message <type> [delivery] [to] [from] [summary] [metadata-json] [correlation-id] [reply-to]
   recipe-utils.mjs package-summary <package-json>`);
 }
 
@@ -132,7 +132,7 @@ function artifactWrite(pathValue, mode = "create") {
   console.log(JSON.stringify({ path, mode, bytes: stat.size, written: true }, null, 2));
 }
 
-function actorMessage(type = "event", delivery = "log", to = "coordinator", from = "run:{run_id}", summary = "", metadataValue = "") {
+function actorMessage(type = "event", delivery = "log", to = "coordinator", from = "run:{run_id}", summary = "", metadataValue = "", correlationId = "", replyTo = "") {
   let metadata = {};
   if (metadataValue) {
     try {
@@ -161,6 +161,8 @@ function actorMessage(type = "event", delivery = "log", to = "coordinator", from
     delivery,
     summary: summary || type,
     body,
+    ...(correlationId ? { correlation_id: correlationId } : {}),
+    ...(replyTo ? { reply_to: replyTo } : {}),
     metadata,
   }, null, 2));
 }
@@ -230,7 +232,7 @@ else if (command === "artifact-manifest")
 else if (command === "artifact-write")
   artifactWrite(args[0] ?? "artifact.md", args[1] ?? "create");
 else if (command === "actor-message")
-  actorMessage(args[0], args[1], args[2], args[3], args[4], args[5]);
+  actorMessage(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
 else if (command === "package-summary")
   packageSummary(args[0] ?? "package.json");
 else {

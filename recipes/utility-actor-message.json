@@ -8,6 +8,8 @@
     "from:string",
     "summary:string",
     "metadata:string",
+    "correlation_id:string",
+    "reply_to:string",
     "repo:path"
   ],
   "defaults": {
@@ -16,7 +18,9 @@
     "from": "run:{run_id}",
     "summary": "",
     "metadata": "{}",
+    "correlation_id": "",
+    "reply_to": "",
     "repo": "~/.pi/agent/extensions/pi-auto-tools"
   },
-  "template": "node {repo}/scripts/recipe-utils.mjs actor-message {event_type} {delivery} {to} {from} {summary} {metadata}"
+  "template": "node {repo}/scripts/recipe-utils.mjs actor-message {event_type} {delivery} {to} {from} {summary} {metadata} {correlation_id} {reply_to}"
 }

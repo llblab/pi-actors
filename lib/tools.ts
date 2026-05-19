@@ -612,9 +612,9 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       let result: Record<string, unknown>;
       if (address.kind === "run" && address.value) {
         assertRunAccessibleToContext(address.value, ctx);
-        if (message.type === "control.stop" || message.type === "control.cancel" || message.type === "runtime.cancel") {
+        if (message.type === "control.stop" || message.type === "control.cancel") {
           result = AsyncRuns.cancelRun(address.value);
-        } else if (message.type === "control.kill" || message.type === "runtime.kill") {
+        } else if (message.type === "control.kill") {
           result = AsyncRuns.killRun(address.value);
         } else {
           result = AsyncRuns.sendRunMessage(

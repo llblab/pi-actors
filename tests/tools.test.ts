@@ -678,6 +678,43 @@ test("Actor tools start, inspect, and stop run actors", async () => {
   }
 });
 
+test("Actor message tool does not treat legacy runtime control types as termination aliases", async () => {
+  const message = createActorMessageToolDefinition();
+  const runId = `legacy-control-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        template: `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      () => message.execute(
+        "call-legacy-runtime-cancel",
+        { to: `run:${runId}`, type: "runtime.cancel" },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /Run control FIFO not found/,
+    );
+    const cancelled = await message.execute(
+      "call-actor-cancel",
+      { to: `run:${runId}`, type: "control.cancel" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(cancelled.content[0].text, /type=control\.cancel/);
+    assert.match(cancelled.content[0].text, /stopped=true/);
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Runtime tool definition exposes run id override for async co-located recipes", () => {
   const definition = createRuntimeToolDefinition(
     {

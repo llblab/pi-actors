@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0: Actor-Native Control Surface
+
+- `[Actor Messages]` Removed `runtime.cancel` and `runtime.kill` termination aliases from `message to=run:<id>`. Impact: run termination now uses only actor-native `control.stop`, `control.cancel`, and `control.kill`; runtime-prefixed control names are no longer treated as public API.
+
 ## 0.12.15: Run Operations Message File Vocabulary
 
 - `[Recipe Library]` Renamed async-run operations recipe inputs from `event_file` to `message_file`, with legacy `event_file` retained only as an internal default fallback. Impact: public recipe args align with the actor-message vocabulary while existing value-based launches can still supply the old key.

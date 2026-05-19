@@ -2,6 +2,8 @@
 
 Persistent template-backed tool registry extension for the pi coding agent.
 
+`pi-auto-tools` is a local-first, cybernetic automation layer for agents. It is MCP-adjacent in spirit, but instead of waiting for external servers to define every capability, the agent can turn trusted local commands, scripts, and recipes into durable tools itself. Those tools persist across reloads as a kind of operational muscle memory: short semantic names, typed args, reusable recipes, and async runs replace repeated shell reconstruction.
+
 ## Start Here
 
 - [Project Context](./AGENTS.md)
@@ -11,6 +13,7 @@ Persistent template-backed tool registry extension for the pi coding agent.
 
 ## Key Features
 
+- **Local-First Tool Memory**: Lets agents create and persist their own trusted local tools, forming durable operational muscle memory instead of one-off shell commands.
 - **Commands Become Capabilities**: Turns stable local workflows into semantic agent tools, so the agent chooses what it can do instead of reconstructing how to run shell commands.
 - **Persistent Tool Registry**: Stores tool definitions in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
 - **Compact Semantic Interface**: Exposes short tool names, descriptions, named args, and defaults instead of long paths, positional command-arg order, and repeated command boilerplate.
@@ -18,10 +21,10 @@ Persistent template-backed tool registry extension for the pi coding agent.
 - **Reusable Building Blocks**: Makes skill scripts, sub-agent wrappers, diagnostics, and project workflows available as composable agent capabilities.
 - **Immediate Updates**: Registered and updated tools become callable in the active session; deleted tools are removed from active tools and fully disappear after reload.
 - **Bounded Output**: Tool stdout is returned to the agent with truncation safeguards; full oversized output is saved to a temp file.
-- **Template Jobs**: Starts detached template jobs from inline config or `~/.pi/agent/jobs/*.json`, with generic status, tail, list, and cancel actions backed by simple state files under `~/.pi/agent/tmp/pi-auto-tools`.
-- **Job Launch Tools**: Registers lightweight tools whose `template` points to reusable job recipes, keeping large parallel agent templates in `~/.pi/agent/jobs/*.json` while exposing a compact callable button to the agent.
-- **Context Onboarding**: Injects a compact system-prompt note explaining templates, jobs, tasks, and agent fanout so installed sessions have the mental model available by default.
-- **Coordinator-Scoped Job Observability**: Shows one stable triangle per active job sub-agent started by the current agent session, then injects a compact completion event only back to that launching coordinator when its job finishes.
+- **Template Recipes**: Stores reusable command-template JSON under `~/.pi/agent/recipes/*.json`; recipes can import other recipes, reuse defaults, and run foreground or declare `async: true` for detached lifecycle.
+- **Async Runs**: Starts detached recipe or inline-template runs with generic status, tail, list, events, send, cancel, and kill actions backed by state files under `~/.pi/agent/tmp/pi-auto-tools`.
+- **Context Onboarding**: Injects a compact system-prompt note explaining templates, recipes, async runs, tasks, and agent fanout so installed sessions have the mental model available by default.
+- **Coordinator-Scoped Run Observability**: Shows at least one stable triangle per running async run started by the current agent session, adds triangles for active parallel branches, then injects compact completion events only back to the launching coordinator when attention is needed.
 
 ## Install
 
@@ -44,16 +47,18 @@ pi install git:github.com/llblab/pi-auto-tools
 ```text
 command
 → command template
+→ template recipe
 → registered tool
-→ template job
+→ async run
 ```
 
 - A **command** is one concrete local process.
 - A **command template** is the reusable shape of that process, with named placeholders.
-- A **registered tool** gives a command template or job recipe a stable agent-facing name.
-- A **template job** runs a command template detached, writes state and logs, and lets the agent return later with `status`, `tail`, or `cancel`.
+- A **template recipe** is saved JSON containing a template plus defaults and run mode.
+- A **registered tool** gives a command template or recipe a stable agent-facing name.
+- An **async run** is one execution instance with state, logs, script-authored events, status, tail, message send, cancel, and kill.
 
-The template remains the execution language. The job is the async envelope. For large agent fanout, the valid chain is `tool → template → job → template`: the tool's `template` may point to a job recipe file, or the tool entry may co-locate job envelope fields next to `description` and `args`. In both forms, the job owns its own `template(mode: "parallel")`. The tool is the button, the job is the lifecycle, and the template is the execution graph. The extension also injects this compact mental model into the system prompt on each agent turn so new operators do not need to read every doc before using jobs.
+The template remains the execution language. The recipe is saved configuration. `async: true` is the detached lifecycle switch. The extension injects this compact mental model into the system prompt on each agent turn, including where to look first (`README.md`, `docs/README.md`, recipe/async docs, and `examples/recipes`) so an agent asked to inspect pi-auto-tools can quickly understand the model and start composing async subagents or other long-running recipes.
 
 ## Operator Onboarding
 
@@ -63,19 +68,67 @@ Start with foreground templates for short deterministic work:
 register_tool name=lint_docs description="Lint docs" template="npm run lint:docs"
 ```
 
-Move to jobs when work is long-running, parallel, or agentic:
+Move to async recipes when work is long-running, parallel, or agentic:
 
-```text
-template_job action=start file=shader-ring-8-parallel
+```json
+{
+  "name": "shader-ring-8-parallel",
+  "async": true,
+  "mode": "parallel",
+  "template": ["..."]
+}
 ```
 
-Use a job recipe tool when the job recipe is reusable and should feel like a normal capability:
+Expose a reusable recipe as a normal capability:
 
 ```text
-register_tool name=shader_ring_job description="Start shader ring" template="shader-ring-8-parallel.json" args="theme,out_dir"
+register_tool name=shader_ring description="Start shader ring" template="shader-ring-8-parallel.json" args="theme,out_dir"
 ```
 
-`Task` is the user's work item. `Template` is the execution graph. `Job` is one async runtime execution with status, logs, cancellation, and ambient triangles.
+`Task` is the user's work item. `Template` is the execution graph. `Recipe` is saved JSON. `Run` is one execution instance with status, logs, cancellation, and ambient triangles.
+
+## Compose Recipes With Imports
+
+Recipes can import other recipe files and reuse them as named nodes. This keeps reusable steps small while letting a parent recipe decide whether the combined graph runs foreground or as one async run.
+
+`review-one.json`:
+
+```json
+{
+  "name": "review-one",
+  "args": ["scope:string", "model:string"],
+  "defaults": { "model": "openai-codex/gpt-5.5" },
+  "template": "pi -p --model {model} --no-tools \"Review {scope}\""
+}
+```
+
+`review-pair.json`:
+
+```json
+{
+  "name": "review-pair",
+  "async": true,
+  "imports": {
+    "review": "review-one.json"
+  },
+  "mode": "parallel",
+  "failure": "branch",
+  "template": [
+    { "name": "review", "values": { "scope": "README.md" } },
+    { "name": "review", "values": { "scope": "docs/template-recipes.md" } }
+  ]
+}
+```
+
+Register only the parent when that is the operator-facing capability:
+
+```text
+register_tool name=review_pair \
+  description="Start a parallel async docs review" \
+  template="review-pair.json"
+```
+
+Imported recipes are recipe definitions, not nested async runs. The parent recipe's `async: true` creates one run with one state dir; imported recipes contribute command-template graph, args, defaults, and values.
 
 ## Register Tools
 
@@ -91,32 +144,33 @@ register_tool name=transcribe \
   template="/path/to/stt --file {file} --lang {lang=ru}"
 ```
 
-### Job launcher
+### Template recipe
 
-For long-running agentic work, keep the large parallel template in a reusable job recipe and register a small launcher tool:
+For reusable workflows, keep the large template in a recipe file and register a small tool:
 
 ```text
-register_tool name=shader_ring_job \
-  description="Start the shader ring job" \
+register_tool name=shader_ring \
+  description="Start the shader ring recipe" \
   template="shader-ring-8-parallel.json" \
   args="theme,out_dir"
 ```
 
-Calling `shader_ring_job` starts `~/.pi/agent/jobs/shader-ring-8-parallel.json` as a detached template job. Job recipe tools return job metadata immediately and accept optional `job_id` to override the generated run id.
+If the recipe file contains `async: true`, calling `shader_ring` starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
-A job recipe can also be co-located in `auto-tools.json` when keeping metadata and the async envelope together is clearer:
+A recipe can also be co-located in `auto-tools.json` when keeping metadata and the recipe body together is clearer:
 
 ```json
 {
   "review_docs": {
     "description": "Start an async docs review",
-    "job": "review-docs",
+    "name": "review-docs",
+    "async": true,
     "template": "pi -p --model openai-codex/gpt-5.5 --tools read,bash \"Review {scope}\""
   }
 }
 ```
 
-A co-located job entry still cannot define `tool`; it must own `template` directly.
+A co-located recipe entry still cannot define `tool`; it must own `template` directly.
 
 ### Sub-agent
 
@@ -154,8 +208,8 @@ The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; t
     "description": "Run pi as a non-interactive sub-agent",
     "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
   },
-  "shader_ring_job": {
-    "description": "Start the shader ring job",
+  "shader_ring": {
+    "description": "Start the shader ring recipe",
     "args": ["theme", "out_dir"],
     "template": "shader-ring-8-parallel.json"
   }
@@ -164,16 +218,16 @@ The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; t
 
 This file is the durable registry. `register_tool` is the interactive API; `auto-tools.json` is the persisted state that is loaded on future sessions.
 
-## Run Template Jobs
+## Manage Async Runs
 
-Use `template_job` when a command template may outlive the current turn. It starts the work now, returns immediately with state metadata, and keeps ordinary files under `~/.pi/agent/tmp/pi-auto-tools/jobs/<job>` for later inspection.
+Use `async_run` when a command template may outlive the current turn. It starts the work now, returns immediately with state metadata, and keeps ordinary files under `~/.pi/agent/tmp/pi-auto-tools/runs/<run>` for later inspection.
 
 Start from an inline template:
 
 ```json
 {
   "action": "start",
-  "job": "docs-review",
+  "run_id": "docs-review",
   "template": "pi -p --model openai-codex/gpt-5.5 --no-tools {prompt}",
   "values": {
     "prompt": "Review docs/spec.md for contradictions."
@@ -184,16 +238,65 @@ Start from an inline template:
 Check it later:
 
 ```json
-{ "action": "status", "job": "docs-review" }
+{ "action": "status", "run_id": "docs-review" }
 ```
 
 Read recent events or logs:
 
 ```json
-{ "action": "tail", "job": "docs-review", "lines": "80" }
+{ "action": "tail", "run_id": "docs-review", "lines": "80" }
 ```
 
-Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with `action=start` plus `file`. The package does not ship root-level job examples because model names, tool names, and review policy are local operator choices.
+Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. `async_run action=start` always starts a detached run from a file or inline template. Use `async_run action=list status=running` for active runs; list output includes `tool` and `recipe` when the launcher recorded that source context.
+
+## Experimental Recipes
+
+Packaged experimental recipes live under `examples/recipes/` with helper scripts under `examples/scripts/`. They are examples, not automatically installed policy.
+
+The subagent recipes start non-interactive pi subagents as async runs. Use the no-tools recipe for the safest default, the explicit-tool variant when a bounded tool allowlist is needed, or the prompts fanout parent recipe to see imported subagent recipe nodes composed into one async run:
+
+```text
+register_tool name=subagent_prompt \
+  description="Start an async no-tools pi subagent" \
+  template="subagent-prompt.json"
+
+register_tool name=subagent_tools \
+  description="Start an async pi subagent with an explicit tool allowlist" \
+  template="subagent-tools.json"
+
+register_tool name=subagents_prompts \
+  description="Start parallel no-tools subagents from a prompt array as one async run" \
+  template="subagents-prompts.json"
+
+subagent_prompt prompt="Review docs/async-runs.md for unclear wording." run_id=docs-review
+subagent_tools prompt="Inspect package metadata and report risks." tools="read,bash" run_id=package-review
+subagents_prompts \
+  prompts='["Review README.md for unclear release-onboarding wording. Return concise findings.","Review docs/template-recipes.md for unclear recipe-import wording. Return concise findings."]' \
+  run_id=review-prompts
+async_run action=tail run_id=review-prompts
+```
+
+The music player recipes start a local file, URL, directory, or playlist as an async run, keep the agent unblocked, show the ambient triangle indicator in the launching coordinator, and can be controlled on Unix-like hosts by `async_run action=send` messages to the run's control FIFO. The paired recipes differ only by executable wrapper, demonstrating direct shell-script and Node.js-script recipes:
+
+```text
+register_tool name=music_player_sh \
+  description="Start async music player playback through the shell wrapper" \
+  template="music-player-sh.json" \
+  args="source:string,loop:bool=true,volume:int=70,player:enum(auto,mpv,ffplay,cvlc,play)=auto"
+
+register_tool name=music_player_mjs \
+  description="Start async music player playback through the Node.js wrapper" \
+  template="music-player-mjs.json" \
+  args="source:string,loop:bool=true,volume:int=70,player:enum(auto,mpv,ffplay,cvlc,play)=auto"
+
+music_player_sh source="~/Music" volume=55 run_id=music
+async_run action=send run_id=music message=next
+async_run action=send run_id=music message=pause
+async_run action=send run_id=music message=play
+async_run action=send run_id=music message=stop
+```
+
+See [`docs/experimental-recipes.md`](./docs/experimental-recipes.md) for install notes and recipe requirements.
 
 ## Runtime Contract
 
@@ -201,26 +304,35 @@ Reusable local recipes live in `~/.pi/agent/jobs/*.json` and can be started with
 - Reserved built-in names are blocked.
 - Templates are split into shell-like words first, then placeholders are substituted per command arg.
 - Tool args are derived from placeholders when `args` is omitted.
-- Typed arg declarations are progressive: `file:path`, `timeout:int=60000`, `speed:number=1.5`, `dry_run:bool=true`, and `mode:enum(check,fix)=check` can live in `args` or inline placeholders such as `{timeout:int=60000}`. They generate narrower tool schemas and runtime validation while existing untyped `args` and placeholders keep working.
+- Typed arg declarations are progressive: `file:path`, `timeout:int=60000`, `speed:number=1.5`, `dry_run:bool=true`, `prompts:array`, and `mode:enum(check,fix)=check` can live in `args` or inline placeholders such as `{timeout:int=60000}`. They generate narrower tool schemas and runtime validation while existing untyped `args` and placeholders keep working.
 - `{arg=default}` inline defaults resolve after runtime values and stored `defaults`.
 - `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
 - Object nodes may set `mode: "parallel"`; children receive the same stdin and joined stdout flows to the next sequence step.
-- Parallel nodes use soft-quorum semantics: non-critical branch failures are reported as degraded coverage, not treated as total failure.
-- For long-running agentic fanout, prefer wrapping the parallel template in `template_job` so async lifecycle and ambient sub-agent status remain visible.
-- Long-running agent branches should set explicit `timeout` values above the 30s default.
+- Parallel nodes use soft-quorum semantics: failed branches are reported as degraded coverage unless failure propagation escalates to the root.
+- For long-running work or agentic fanout, prefer `async: true` recipes or `async_run action=start` so lifecycle and ambient activity status remain visible.
+- Timeout is disabled by default; set a positive `timeout` on bounded commands that should fail closed.
 - Nodes may set `delay` in milliseconds to wait before launch; delay is not inherited.
-- Non-critical composition step failures continue with empty stdin; `critical: true` aborts the sequence.
-- `retry` retries a step immediately on non-zero exit; default attempts is `1`.
-- Commands execute directly without shell evaluation.
-- `template_job` provides a minimal template job envelope around the same command-template contract.
-- `template_job` uses `action: start | status | tail | list | cancel | kill`.
-- `template_job action=start` can run a template job JSON `file` or an inline `template`.
-- Registered tools may set `template` to a job recipe JSON path/name; calling them starts that recipe asynchronously and returns job metadata.
-- Interactive sessions show ambient job sub-agent activity as stable `▷` triangles aggregated across jobs started by the current agent session, with one moving `▶` wave over the active set; terminal job events are delivered as compact follow-up context only to the launching coordinator agent so unrelated sessions do not receive cross-job noise.
+- Failed steps default to `failure: "continue"`, which records the failure and continues with empty stdin.
+- `failure: "branch"` stops the current sequence/subtree without cancelling sibling parallel branches; `failure: "root"` aborts the composition. `critical: true` remains an alias for root failure.
+- `retry` retries a leaf or whole node on non-zero exit; default attempts is `1`.
+- `recover` runs a cleanup command template between failed retry attempts and stops retries if cleanup fails.
+- Commands execute directly without shell evaluation, but trusted executables still run with the same permissions as pi.
+- Obvious high-risk templates such as shells, interpreter eval modes, and broad filesystem mutation surface lightweight warnings without blocking existing tools.
+- `async: true` on a recipe selects detached run lifecycle; omitted or false async runs the recipe foreground through registered tools.
+- Layer boundaries stay explicit: command templates define synchronous execution graphs; template recipes add saved JSON metadata/import resolution; async runs add detached lifecycle, state, IPC, and observability.
+- `async_run` provides a minimal async run envelope around the same command-template contract.
+- `async_run` uses `action: start | status | tail | list | events | send | cancel | kill`; stopped runs report `cancelled` or `killed` after the process exits.
+- Async run management returns compact text by default; pass `verbose: true` to `async_run` when full JSON state is needed.
+- `async_run action=start` can run a recipe JSON `file` or an inline `template` as a detached run, injecting `{run_id}` and `{state_dir}` into template values for run-local artifacts or recipe-specific control endpoints.
+- `async_run action=events` reads script-authored JSONL events from `<state_dir>/outbox.jsonl`; `delivery: "notify"` and `delivery: "followup"` are surfaced only to the launching coordinator session.
+- `async_run action=send` writes one newline-delimited message to a running recipe's Unix FIFO at `<state_dir>/control.fifo`; the message format is script-owned. Native Windows should use WSL or a recipe-specific transport.
+- Registered tools may set `template` to a recipe JSON path/name; calling them follows that recipe's `async` mode.
+- File-backed recipes may declare `imports` and embed imported recipes with `{ "name": "alias" }` nodes, or read `{alias.defaults.key}`, `{alias.defaults.key=fallback}`, and `{alias.values.key?yes:no}` references before command-template execution.
+- Interactive sessions show ambient async activity as stable `▷` triangles aggregated across runs started by the current agent session. Each running async run contributes at least one triangle; parallel active branches can contribute more. One `▶` wave moves over the active set; terminal run events that need attention are delivered as compact follow-up context only to the launching coordinator agent, while successful `done` and intentional `cancelled` transitions stay silent.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 
-See [`docs/command-templates.md`](./docs/command-templates.md) for the portable synchronous command-template contract; [`docs/template-jobs.md`](./docs/template-jobs.md) for the async job extension; [`docs/job-primitives.md`](./docs/job-primitives.md) for the pi-auto-tools job adapter; and [`docs/tool-registry.md`](./docs/tool-registry.md) for the registry storage shape.
+See [`docs/command-templates.md`](./docs/command-templates.md) for the portable synchronous command-template contract; [`docs/template-recipes.md`](./docs/template-recipes.md) for saved recipe JSON; [`docs/async-runs.md`](./docs/async-runs.md) for detached lifecycle, state files, cancellation, and observability; [`docs/tool-registry.md`](./docs/tool-registry.md) for registry storage; and [`docs/experimental-recipes.md`](./docs/experimental-recipes.md) for packaged experiments.
 
 ## Notes
 

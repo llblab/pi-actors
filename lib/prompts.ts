@@ -5,7 +5,7 @@
  */
 
 export const REGISTER_TOOL_DESCRIPTION =
-  "Register a persistent custom tool from a command template, job recipe path, or co-located job recipe. " +
+  "Register a persistent custom tool from a command template, template recipe path, or co-located template recipe. " +
   "Definitions are stored in auto-tools.json across reloads. " +
   "Use update=true to overwrite an existing auto-tool, template=null/empty to delete.";
 
@@ -13,49 +13,47 @@ export const REGISTER_TOOL_PROMPT_SNIPPET =
   "Register persistent command templates as agent-callable tools";
 
 export const REGISTER_TOOL_GUIDELINES = [
-  "Use register_tool to wrap trusted local commands, scripts, programs, libraries, or job recipes as persistent pi tools.",
+  "Use register_tool to wrap trusted local commands, scripts, programs, libraries, or template recipes as persistent pi tools.",
   "After register_tool succeeds, the new tool is immediately callable and remains available after reload.",
   'Set template=null or template="" in register_tool to delete a persisted auto-tool.',
   "Set update=true in register_tool to overwrite an existing auto-tool registration.",
 ];
 
 export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
-- Command template = what to run.
-- String template = one command.
-- Array template = sync sequence pipeline.
-- Object node flags go before template.
-- mode: "parallel" = sync fanout shape.
-- Command templates stay sync and portable.
-- Parallel is not async lifecycle.
-- Template job = async extension around a template.
-- Job state lives under ~/.pi/agent/tmp/pi-auto-tools/jobs.
-- Use template_job start/status/tail/list/cancel/kill.
-- Put reusable job recipes in ~/.pi/agent/jobs/*.json.
-- Long async fanout = template job wrapping template(mode: "parallel").
-- Tool template may point to or co-locate a job recipe.
-- Tool = compact callable button.
-- Job = lifecycle, logs, status, cancel, kill.
-- Template = execution graph.
-- Tasks are user work units; jobs are runtime executions.
-- For single calls or short pipelines, use templates/tools.
-- For subagents, swarms, or long work, prefer jobs.
-- Ambient triangles show active job subagents.
-- After job finish, inspect status/tail before final artifacts.`;
+- Local-first cybernetic tool memory: agents persist trusted local capabilities instead of repeating shell recipes.
+- Task = user work; template = execution graph; recipe = saved JSON; run = execution instance.
+- Command templates stay sync: string leaf, array sequence, object flags, mode:"parallel" fanout.
+- Template flags: args/defaults, timeout, delay, retry, failure, recover, repeat, output.
+- Recipes live in ~/.pi/agent/recipes/*.json and wrap templates with metadata/defaults/imports.
+- Recipe imports are local variables: imports.alias -> {"name":"alias"} nodes and {alias.defaults.key} refs.
+- Imported recipes are definitions, not nested async runs; parent async:true creates one run.
+- async:true = detached lifecycle; async_run can also start file/template directly.
+- Async run state lives under ~/.pi/agent/tmp/pi-auto-tools/runs.
+- Use async_run action=start/status/tail/list/events/send/cancel/kill.
+- Run lifecycle = state files, logs, outbox events, FIFO send, cancel/kill, compact status.
+- Tool template may be a command template, recipe path/name, or co-located recipe.
+- register_tool makes compact persistent buttons; args may be typed or derived from placeholders.
+- For single calls or short pipelines, use foreground templates/tools.
+- For subagents, swarms, background music, or long fanout, prefer async recipes/runs.
+- Long async fanout = parent async recipe wrapping template(mode:"parallel") and imports.
+- If asked to explore pi-auto-tools, read README.md, docs/README.md, docs/template-recipes.md, docs/async-runs.md, and examples/recipes.
+- Ambient triangles show active async commands/subagents for the launching coordinator.
+- After async run finish, inspect status/tail/events before final artifacts.`;
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",
   description:
     "Describe what the tool does for the LLM. Required unless deleting; omitted updates keep the old description.",
-  job: "Optional job id for a co-located job recipe. Requires template and does not reference another tool.",
-  state_dir: "Optional job state directory for a co-located job recipe.",
+  async: "Set true for a co-located async template recipe. Omit for ordinary command templates or file-backed recipe references.",
+  state_dir: "Optional async run state directory for a co-located template recipe.",
   template:
-    "Command template with {arg} or {arg=default} placeholders, or a job recipe JSON path/name. With job, this is the co-located job recipe body. Bare job names resolve under ~/.pi/agent/jobs. Omitted updates keep the old template. Empty string deletes the tool.",
+    "Command template with {arg} or {arg=default} placeholders, or a template recipe JSON path/name. With async, this is the co-located recipe body. Bare recipe names resolve under ~/.pi/agent/recipes. Omitted updates keep the old template. Empty string deletes the tool.",
   templateArray:
-    "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/critical.",
+    "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/failure/recover/critical.",
   templateNull: "Delete the tool when template is null.",
   args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,model=openai-codex/gpt-5.5",
   update: "Set to true to overwrite an existing auto-tool registration.",
-  values: "Optional default runtime placeholder values for a co-located job recipe.",
+  values: "Optional default runtime placeholder values for a co-located template recipe.",
 } as const;
 
 export function formatRegisteredToolPromptSnippet(template: unknown): string {
@@ -63,6 +61,8 @@ export function formatRegisteredToolPromptSnippet(template: unknown): string {
   return `Execute command template: ${rendered}`;
 }
 
-export function formatJobRecipeToolPromptSnippet(job: string): string {
-  return `Start template job recipe: ${job}`;
+export function formatRecipeToolPromptSnippet(recipe: string, asyncRecipe: boolean): string {
+  return asyncRecipe
+    ? `Start async template recipe: ${recipe}`
+    : `Execute template recipe: ${recipe}`;
 }

@@ -89,52 +89,54 @@ test("Registry mutations register typed command-template args progressively", as
   }
 });
 
-test("Registry mutations register job recipe paths through template", async () => {
+test("Registry mutations register template recipe paths through template", async () => {
   const harness = await createHarness();
   try {
     const result = await executeRegisterTool(
       {
         args: "theme,out_dir=latest",
-        description: "Start shader ring job",
-        name: "shader_job",
+        description: "Start shader ring recipe",
+        name: "shader_run",
         template: "shader-ring-8-parallel.json",
       },
       {},
       harness.deps,
     );
-    assert.equal(harness.tools.get("shader_job")?.template, "shader-ring-8-parallel.json");
-    assert.deepEqual(harness.tools.get("shader_job")?.args, ["theme", "out_dir"]);
-    assert.deepEqual(harness.runtimeRegistered, ["shader_job"]);
+    assert.equal(harness.tools.get("shader_run")?.template, "shader-ring-8-parallel.json");
+    assert.deepEqual(harness.tools.get("shader_run")?.args, ["theme", "out_dir"]);
+    assert.deepEqual(harness.runtimeRegistered, ["shader_run"]);
     assert.equal(result.details.template, "shader-ring-8-parallel.json");
   } finally {
     await harness.cleanup();
   }
 });
 
-test("Registry mutations register co-located job recipes", async () => {
+test("Registry mutations register co-located template recipes", async () => {
   const harness = await createHarness();
   try {
     const result = await executeRegisterTool(
       {
-        description: "Start review job",
-        job: "review-docs",
-        name: "review_job",
-        state_dir: "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+        async: true,
+        description: "Start review run",
+        name: "review_run",
+        state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
         template: "review {scope}",
         values: { prompt: "Review risks." },
       },
       {},
       harness.deps,
     );
-    assert.deepEqual(harness.tools.get("review_job")?.jobRecipe, {
-      job: "review-docs",
-      state_dir: "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs",
+    assert.deepEqual(harness.tools.get("review_run")?.recipe, {
+      async: true,
+      name: "review_run",
+      state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     });
-    assert.deepEqual(harness.tools.get("review_job")?.args, ["scope"]);
-    assert.equal(result.details.job, "review-docs");
-    assert.equal(result.details.state_dir, "~/.pi/agent/tmp/pi-auto-tools/jobs/review-docs");
+    assert.deepEqual(harness.tools.get("review_run")?.args, ["scope"]);
+    assert.equal(result.details.async, true);
+    assert.equal(result.details.recipeName, "review_run");
+    assert.equal(result.details.state_dir, "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs");
   } finally {
     await harness.cleanup();
   }

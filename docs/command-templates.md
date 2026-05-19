@@ -4,11 +4,13 @@ Command templates are the portable integration format for deterministic local au
 
 **Meta-contract:** transportable (bit-for-bit identical across projects), high-density (zero fluff), constant (evolve by crystallizing, not speculating), optimal minimum (add only when it hurts).
 
-**Scope:** portable synchronous command execution format — shell-free exec, composition/pipes, timeout (30s default), delay-before-start, retry, critical-step branching, output artifact selection, and handler-level fallback. Single JSON standard; no platform lock-in.
+**Scope:** portable synchronous command execution format — shell-free exec, composition/pipes, optional timeout, delay-before-start, bounded retry, failure propagation, recover cleanup, output artifact selection, and handler-level fallback. Single JSON standard; no platform lock-in.
 
 ---
 
 Extensions may choose their own config files, selectors, placeholder sources, and examples, but should preserve this core contract.
+
+Layer boundary: command templates own only the synchronous execution graph. Recipe imports, import-reference expressions, recipe lookup, `async: true`, run ids, state dirs, FIFO controls, and outbox events are host/recipe/async-run configuration layers, not portable command-template syntax.
 
 ## Shape
 
@@ -32,13 +34,15 @@ Common object fields:
 
 - `label`: Optional human label for diagnostics and parallel branch reports.
 - `mode`: Optional execution mode for array templates. Default is `"sequence"`; `"parallel"` runs children concurrently.
-- `args`: Optional placeholder declarations. Untyped names remain valid; compact typed forms such as `file:path`, `timeout:int`, `speed:number`, `dry_run:bool`, and `mode:enum(check,fix)` are valid when the host supports typed tool schemas. Defaults belong in `defaults` or inline placeholder defaults; hosts may normalize interactive shorthand such as `timeout:int=60000` before persistence.
+- `args`: Optional placeholder declarations. Untyped names remain valid; compact typed forms such as `file:path`, `timeout:int`, `speed:number`, `dry_run:bool`, `prompts:array`, and `mode:enum(check,fix)` are valid when the host supports typed tool schemas. Defaults belong in `defaults` or inline placeholder defaults; hosts may normalize interactive shorthand such as `timeout:int=60000` before persistence.
 - `defaults`: Placeholder default values by name.
-- `timeout`: Optional execution timeout in milliseconds. Default is `30000`. Long-running agent calls should set this explicitly.
+- `timeout`: Optional execution timeout in milliseconds. Omit it, or set `0`, to leave the command unbounded. Set an explicit positive timeout when a tool must fail closed instead of waiting indefinitely.
 - `delay`: Optional wait in milliseconds before starting this node. Default is no delay.
 - `output`: Optional result selector. Default is `"stdout"`; runtime values such as `"ogg"` are valid.
 - `retry`: Optional max attempts including the first. Default is `1`.
-- `critical`: Optional boolean. When `true`, failure aborts the root composition.
+- `critical`: Optional boolean. Backward-compatible alias for `failure: "root"`.
+- `failure`: Optional failure propagation scope: `continue`, `branch`, or `root`. Default is `continue`.
+- `recover`: Optional command template run between failed retry attempts. Recovery output is ignored; recovery failure stops retries.
 - `template`: Required command string or ordered composition array.
 
 For object form, write `template` last. Read the node flags first, then the executable content. Storage paths, labels, selectors, descriptions, and registry-specific metadata belong to each extension's local schema.
@@ -63,8 +67,9 @@ Supported forms:
 | ---------------- | ------------------------------------------------ |
 | `{name}`         | Required value from runtime values or `defaults` |
 | `{name=default}` | Inline default when no value is provided         |
+| `{items[index]}` | Array item selected by literal or repeat index   |
 
-Resolution order is runtime values → `defaults` → inline default → error.
+Resolution order is runtime values → `defaults` → inline default → error. Default values that are themselves a single placeholder, such as `{prompt}` resolving to `{prompts[index]}`, are resolved recursively with a small depth guard. A repeat node may set `repeat` to `{items.length}` when an array arg should determine fanout width.
 
 ```json
 {
@@ -124,12 +129,12 @@ Composition rules:
 
 - Execute leaves in order when `mode` is omitted or set to `"sequence"`
 - Execute child templates concurrently when `mode` is set to `"parallel"`
-- Parallel composition uses soft-quorum semantics by default: failed non-critical children are reported but do not abort siblings or the next sequence step
-- Non-critical failures are recorded and execution continues, while `critical: true` failures abort the root composition
+- Parallel composition uses soft-quorum semantics by default: failed children are reported as degraded branches unless failure propagation escalates
+- Non-critical failures are recorded and execution continues, while `failure: "branch"` stops the current branch and `failure: "root"` aborts the root composition
 - Treat the whole composition as one handler for selector matching and fallback
 - Top-level `args` and `defaults` apply to every leaf unless the leaf defines private values
 - Leaf `args` replace inherited `args`; leaf `defaults` merge over inherited defaults; `timeout` and `output` are not inherited into leaves
-- Default `30000` (30s) timeout applies automatically; configure `timeout` only for exceptional long-running commands
+- Timeout is disabled by default; configure a positive `timeout` for bounded commands that should fail closed
 - Each sequence leaf receives the previous leaf's stdout on stdin by default, while the final leaf stdout remains the default composition result
 - Each parallel child receives the same stdin, and child stdout values are joined in stable array order before flowing to the next sequence leaf
 - Parallel branch joins include branch label and status, and tool details include branch metadata plus coverage summary
@@ -233,38 +238,76 @@ Legacy local schemas may accept `pipe` as an alias, but the portable standard is
 
 By default, composition continues on failure: the failed step is logged and the next step executes. This is analogous to `make -k` — the user sees all failures at once and decides what to fix.
 
-## Critical Steps
+## Failure Propagation
 
-Set `critical: true` on any leaf to abort the entire root composition on failure. One `critical` leaf can halt the whole pipeline.
+By default, failed steps use `failure: "continue"`: record the failure, clear stdout for that step, and continue the current sequence. This preserves the fail-open profile.
+
+Use `failure` when a node should stop more aggressively:
+
+- `"continue"`: record the failure and continue the current sequence.
+- `"branch"`: stop the current sequence/subtree and return a failed branch to the nearest parent. In a parallel node, sibling branches keep running and the join becomes degraded. At the root, branch failure is still a tool failure.
+- `"root"`: abort the outermost composition.
 
 ```json
 {
+  "mode": "parallel",
   "template": [
-    { "template": "cargo build" },
-    { "template": "cargo fmt --check" },
-    { "critical": true, "template": "cargo test" }
+    {
+      "label": "agent-a",
+      "failure": "branch",
+      "template": [
+        "agent-a-work {scope}",
+        "agent-a-validate {scope}",
+        "agent-a-push {scope}"
+      ]
+    },
+    {
+      "label": "agent-b",
+      "failure": "branch",
+      "template": [
+        "agent-b-work {scope}",
+        "agent-b-validate {scope}",
+        "agent-b-push {scope}"
+      ]
+    }
   ]
 }
 ```
 
-`build` / `fmt` failures are logged, execution continues. `test` failure aborts the root composition immediately.
+If `agent-a-validate` fails, `agent-a-push` is skipped, `agent-b` can still finish, and the parallel join reports degraded branch coverage.
 
-A `critical` leaf in a nested composition still aborts the outermost root `template: [...]`. There is no per-branch scoping in the current standard.
+`critical: true` remains a backward-compatible alias for `failure: "root"`. Prefer `failure` for new templates because it names the propagation scope directly.
 
 ## Retry
 
-Set `retry: N` on a leaf to attempt execution up to `N` times (including the first). Retries happen immediately on non-zero exit. The first successful attempt stops the retry loop.
+Set `retry: N` to attempt execution up to `N` times including the first. The first successful attempt stops the retry loop.
+
+On leaf commands, retry repeats that command. On sequence or parallel nodes, retry repeats the whole node. A retried group only retries when the group returns a failure, so validator checkpoints normally pair group retry with `failure: "branch"` or `failure: "root"`.
 
 ```json
 {
-  "template": [
-    { "retry": 3, "template": "npm install" },
-    { "retry": 2, "critical": true, "template": "npm test" }
-  ]
+  "failure": "branch",
+  "retry": 3,
+  "template": ["implement {scope}", "npm test", "git diff --check"]
 }
 ```
 
-`npm install` is retried up to 3 times. `npm test` is retried up to 2 times; if all attempts fail, the critical step aborts the pipeline.
+Here the whole group runs again when a validator fails. Without `failure: "branch"`, the failed validator would be logged and the group would continue by default.
+
+## Recover
+
+Set `recover` on a retried node to run cleanup after a failed attempt and before the next attempt. `recover` is another command template: it can be a string command, sequence, or mode tree. Its output is ignored and the next retry receives the original stdin.
+
+```json
+{
+  "failure": "branch",
+  "retry": 3,
+  "recover": "git -C {work_dir} reset --hard HEAD",
+  "template": ["pi -p --tools read,edit,bash {scope_file}", "npm test"]
+}
+```
+
+`recover` is not a fallback success path. It is cleanup between attempts. Practical uses include resetting a worktree, removing temp files, clearing generated output, releasing a local lock, or stopping a helper process before trying the node again. If recovery fails, retries stop and the recovery failure is returned. Recovery uses fail-closed semantics by default; set an explicit `failure` inside a recover template only when a softer cleanup failure is intentional.
 
 ## Delay
 
@@ -292,12 +335,24 @@ string           → leaf command
 string[]         → sequential composition
 { template }     → leaf command object
 { mode, template } → sequence or parallel subtree
-{ mode, args, defaults, delay, retry, critical, output, template } → full node
+{ mode, args, defaults, delay, retry, failure, recover, output, template } → full node
 ```
 
-Start with a string. Add composition when needed. Add `mode: "parallel"` when independent work can run concurrently. Add delay when launch pacing matters. Add retry when flaky. Add critical when safety matters. Same contract, growing capability, no dead weight.
+Start with a string. Add composition when needed. Add `mode: "parallel"` when independent work can run concurrently. Add delay when launch pacing matters. Add retry when flaky. Add `failure` when propagation scope matters. Add `recover` when a retried node needs cleanup before another attempt. Same contract, growing capability, no dead weight.
 
-`mode: "parallel"` is the synchronous fanout shape. Detached lifecycle, logs, cancellation, and durable state belong to the separate [Template Job Standard](./template-jobs.md).
+`mode: "parallel"` is the synchronous fanout shape. Saved JSON belongs to the separate [Template Recipe Standard](./template-recipes.md); detached lifecycle, logs, cancellation, and durable state belong to the separate [Async Run Standard](./async-runs.md).
+
+## Trust Boundary
+
+Command templates avoid shell interpolation by splitting the template into argv first and substituting placeholders per arg. A placeholder value containing spaces remains one argv value, not a shell fragment.
+
+This is not a sandbox. The executable still runs with the same user permissions as the host agent. Shells, interpreter eval modes, destructive filesystem commands, and local scripts remain trusted code. Examples that deserve extra operator attention:
+
+- `bash`, `sh`, `zsh`, or `fish`, especially with `-c`.
+- `node -e`, `python -c`, `ruby -e`, `perl -e`, or similar eval modes.
+- `rm`, `mv`, `cp`, or `rsync` over broad paths or placeholder-derived paths.
+
+Hosts may surface lightweight warnings for these obvious high-risk shapes. Warnings should inform review without blocking existing tools, because many trusted local wrappers intentionally use shells or filesystem mutation.
 
 ## Tool Boundary
 

@@ -10,6 +10,7 @@ import {
   buildCommandTemplateInvocation,
   execCommandTemplate,
   expandCommandTemplateConfigs,
+  getCommandTemplateWarnings,
   splitCommandTemplate,
 } from "../lib/command-templates.ts";
 
@@ -143,6 +144,20 @@ test("Command template repeat expands numbered defaults", () => {
   assert.deepEqual(buildCommandTemplateInvocation(steps[2], {}, "/work").args, ["page03.html", "prev=page02.html", "next=page01.html", "raw=2/3"]);
 });
 
+test("Command templates detect high-risk trusted executable shapes", () => {
+  const warnings = getCommandTemplateWarnings({
+    template: [
+      "bash -c {script}",
+      "node -e {code}",
+      "rm -rf {work_dir}",
+    ],
+  });
+  assert.equal(warnings.length, 3);
+  assert.match(warnings[0], /bash/);
+  assert.match(warnings[1], /eval/);
+  assert.match(warnings[2], /removes filesystem paths/);
+});
+
 test("Command templates resolve typed inline placeholders", () => {
   const invocation = buildCommandTemplateInvocation(
     "tool {file:path} {timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
@@ -165,6 +180,18 @@ test("Command templates resolve defaults and inline placeholder defaults", () =>
     command: "/work/tts",
     args: ["--text", "hello world", "--lang", "ru", "--rate", "+30%"],
   });
+});
+
+test("Command templates resolve array-index placeholders and recursive defaults", () => {
+  const invocation = buildCommandTemplateInvocation(
+    {
+      defaults: { prompt: "{prompts[index]}" },
+      template: "subagent {prompt}",
+    },
+    { index: "1", prompts: ["left", "right"] },
+    "/work",
+  );
+  assert.deepEqual(invocation.args, ["right"]);
 });
 
 test("Command template execution writes stdin without invoking a shell", async () => {
@@ -237,7 +264,7 @@ test("Command template retry default is 1 (no retry)", async () => {
   assert.notEqual(result.code, 0);
 });
 
-test("Command templates enforce 30s default timeout", async () => {
+test("Command templates leave timeout disabled by default", async () => {
   const result = await execCommandTemplate(
     process.execPath,
     ["-e", "setTimeout(() => {}, 100);"],

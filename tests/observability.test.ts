@@ -1,89 +1,170 @@
 /**
- * Job observability regression tests
+ * Async run observability regression tests
  * Covers compact ambient summaries and terminal transition detection
  */
 
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { mkdtemp } from "node:fs/promises";
+import { detectRunOutboxEvents, detectRunTransitions, formatRunOutboxMessage, formatRunTransitionMessage, getRunOutboxNotificationType, getRunTransitionNotificationType, renderRunStatus, renderSubagentStatus, shouldNotifyRunOutboxEvent, shouldSendRunOutboxFollowUp, shouldSendRunTransitionFollowUp, summarizeRuns } from "../lib/observability.ts";
 
-import { detectJobTransitions, formatJobTransitionMessage, renderJobStatus, renderSubagentStatus, summarizeJobs } from "../lib/observability.ts";
-
-async function writeJob(
+async function writeRun(
   root: string,
-  job: string,
-  status: "running" | "done" | "exited",
+  run: string,
+  status: "running" | "done" | "failed" | "exited" | "cancelled" | "killed",
   failures: unknown[] = [],
   activeSubagents = 0,
   ownerId?: string,
 ): Promise<void> {
-  const dir = join(root, job);
+  const dir = join(root, run);
   await mkdir(dir, { recursive: true });
   await writeFile(
-    join(dir, "job.json"),
-    JSON.stringify({ createdAt: "2026-01-01T00:00:00.000Z", cwd: process.cwd(), job, ...(ownerId ? { ownerId } : {}), pid: status === "running" ? process.pid : 0, stateDir: dir }),
+    join(dir, "run.json"),
+    JSON.stringify({ createdAt: "2026-01-01T00:00:00.000Z", cwd: process.cwd(), run, ...(ownerId ? { ownerId } : {}), pid: status === "running" ? process.pid : 999999999, state_dir: dir }),
   );
   await writeFile(
     join(dir, "progress.json"),
-    JSON.stringify({ activeSubagents, completed: status === "running" ? 0 : 1, failures, updatedAt: `2026-01-01T00:00:0${job.length}.000Z` }),
+    JSON.stringify({ activeSubagents, completed: status === "running" ? 0 : 1, failures, updatedAt: `2026-01-01T00:00:0${run.length}.000Z` }),
   );
   if (status === "done") await writeFile(join(dir, "result.json"), JSON.stringify({ code: 0 }));
+  if (status === "failed") await writeFile(join(dir, "result.json"), JSON.stringify({ code: 1 }));
+  if (status === "cancelled") await writeFile(join(dir, "events.jsonl"), JSON.stringify({ event: "run.cancel" }));
+  if (status === "killed") await writeFile(join(dir, "events.jsonl"), JSON.stringify({ event: "run.kill" }));
 }
 
-test("Job observability summarizes state root", async () => {
+test("Run observability summarizes state root", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
   try {
-    await writeJob(root, "running", "running");
-    await writeJob(root, "done", "done");
-    const summary = summarizeJobs(root);
-    assert.equal(summary.total, 2);
+    await writeRun(root, "running", "running");
+    await writeRun(root, "done", "done");
+    await writeRun(root, "failed", "failed");
+    await writeRun(root, "cancelled", "cancelled");
+    await writeRun(root, "killed", "killed");
+    const summary = summarizeRuns(root);
+    assert.equal(summary.total, 5);
     assert.equal(summary.running, 1);
     assert.equal(summary.done, 1);
-    assert.equal(summary.runningSubagents, 0);
-    assert.equal(renderJobStatus(summary), undefined);
+    assert.equal(summary.failed, 1);
+    assert.equal(summary.cancelled, 1);
+    assert.equal(summary.killed, 1);
+    assert.equal(summary.runningSubagents, 1);
+    assert.equal(renderRunStatus(summary), "▶");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Job observability filters summaries by coordinator owner", async () => {
+test("Run observability filters summaries by coordinator owner", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
   try {
-    await writeJob(root, "alpha", "running", [], 3, "session-a");
-    await writeJob(root, "beta", "running", [], 2, "session-b");
-    await writeJob(root, "global", "running", [], 4);
-    const summaryA = summarizeJobs(root, "session-a");
-    const summaryB = summarizeJobs(root, "session-b");
-    assert.deepEqual(summaryA.jobs.map((job) => job.job), ["alpha"]);
+    await writeRun(root, "alpha", "running", [], 3, "session-a");
+    await writeRun(root, "beta", "running", [], 2, "session-b");
+    await writeRun(root, "global", "running", [], 4);
+    const summaryA = summarizeRuns(root, "session-a");
+    const summaryB = summarizeRuns(root, "session-b");
+    assert.deepEqual(summaryA.runs.map((run) => run.run), ["alpha"]);
     assert.equal(summaryA.runningSubagents, 3);
-    assert.deepEqual(summaryB.jobs.map((job) => job.job), ["beta"]);
+    assert.deepEqual(summaryB.runs.map((run) => run.run), ["beta"]);
     assert.equal(summaryB.runningSubagents, 2);
-    assert.equal(summarizeJobs(root).total, 3);
+    assert.equal(summarizeRuns(root).total, 3);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Job observability detects terminal transitions", () => {
+test("Run observability detects script-authored outbox events", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    await writeFile(
+      join(root, "music", "outbox.jsonl"),
+      `${JSON.stringify({ event: "player.track", summary: "Now playing: track.flac", delivery: "followup", level: "info", data: { index: 3 } })}\n`,
+    );
+    const summary = summarizeRuns(root, "session-a");
+    const previous = new Map<string, number>();
+    const events = detectRunOutboxEvents(previous, summary);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].event, "player.track");
+    assert.equal(events[0].summary, "Now playing: track.flac");
+    assert.equal(formatRunOutboxMessage(events[0]), "Run music: Now playing: track.flac");
+    assert.equal(getRunOutboxNotificationType(events[0]), "info");
+    assert.equal(shouldNotifyRunOutboxEvent(events[0]), true);
+    assert.equal(shouldSendRunOutboxFollowUp(events[0]), true);
+    assert.deepEqual(detectRunOutboxEvents(previous, summary), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability detects terminal transitions", () => {
   const previous = new Map([["review", "running" as const]]);
-  const transitions = detectJobTransitions(previous, {
+  const transitions = detectRunTransitions(previous, {
+    cancelled: 0,
     done: 1,
     exited: 0,
-    jobs: [{ job: "review", status: "done" }],
+    failed: 0,
+    killed: 0,
     running: 0,
     runningSubagents: 0,
+    runs: [{ run: "review", status: "done" }],
     total: 1,
   });
-  assert.deepEqual(transitions, [{ from: "running", job: "review", to: "done" }]);
-  assert.equal(formatJobTransitionMessage(transitions[0]), "Job review finished with status done. Use template_job action=status or action=tail if analysis is needed.");
+  assert.deepEqual(transitions, [{ from: "running", run: "review", to: "done" }]);
+  assert.equal(formatRunTransitionMessage(transitions[0]), "Run review finished with status done. Use async_run action=status or action=tail if analysis is needed.");
   assert.equal(previous.get("review"), "done");
 });
 
-test("Job observability renders animated subagent triangles", () => {
+test("Run observability detects failed terminal transitions", () => {
+  const previous = new Map([["review", "running" as const]]);
+  const transitions = detectRunTransitions(previous, {
+    cancelled: 0,
+    done: 0,
+    exited: 0,
+    failed: 1,
+    killed: 0,
+    running: 0,
+    runningSubagents: 0,
+    runs: [{ run: "review", status: "failed" }],
+    total: 1,
+  });
+  assert.deepEqual(transitions, [{ from: "running", run: "review", to: "failed" }]);
+});
+
+test("Run observability reports cancelled terminal transitions clearly", () => {
+  const previous = new Map([["music", "running" as const]]);
+  const transitions = detectRunTransitions(previous, {
+    cancelled: 1,
+    done: 0,
+    exited: 0,
+    failed: 0,
+    killed: 0,
+    running: 0,
+    runningSubagents: 0,
+    runs: [{ run: "music", status: "cancelled" }],
+    total: 1,
+  });
+  assert.deepEqual(transitions, [{ from: "running", run: "music", to: "cancelled" }]);
+  assert.equal(formatRunTransitionMessage(transitions[0]), "Run music was cancelled. Use async_run action=status or action=tail if analysis is needed.");
+  assert.equal(getRunTransitionNotificationType(transitions[0]), "info");
+  assert.equal(shouldSendRunTransitionFollowUp(transitions[0]), false);
+});
+
+test("Run observability classifies failed terminal transitions as errors", () => {
+  const failed = { from: "running" as const, run: "review", to: "failed" as const };
+  const killed = { from: "running" as const, run: "review", to: "killed" as const };
+  const done = { from: "running" as const, run: "review", to: "done" as const };
+  assert.equal(getRunTransitionNotificationType(failed), "error");
+  assert.equal(getRunTransitionNotificationType(killed), "warning");
+  assert.equal(getRunTransitionNotificationType(done), "info");
+  assert.equal(shouldSendRunTransitionFollowUp(failed), true);
+  assert.equal(shouldSendRunTransitionFollowUp(killed), true);
+  assert.equal(shouldSendRunTransitionFollowUp(done), false);
+});
+
+test("Run observability renders animated subagent triangles", () => {
   assert.equal(renderSubagentStatus(0), undefined);
   assert.equal(renderSubagentStatus(1, 0), "▶");
   assert.equal(renderSubagentStatus(1, 1), "▷");
@@ -93,20 +174,35 @@ test("Job observability renders animated subagent triangles", () => {
   assert.equal(renderSubagentStatus(3, 3), "▶ ▷ ▷");
 });
 
-test("Job observability sums active subagents from running jobs", async () => {
+test("Run observability sums active subagents from running runs", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
   try {
-    await writeJob(root, "alpha", "running", [], 3);
-    await writeJob(root, "beta", "running", [], 2);
-    await writeJob(root, "done", "done", [], 9);
-    const summary = summarizeJobs(root);
+    await writeRun(root, "alpha", "running", [], 3);
+    await writeRun(root, "beta", "running", [], 2);
+    await writeRun(root, "done", "done", [], 9);
+    const summary = summarizeRuns(root);
     assert.equal(summary.runningSubagents, 5);
-    assert.equal(renderJobStatus(summary, 4), "▷ ▷ ▷ ▷ ▶");
+    assert.equal(renderRunStatus(summary, 4), "▷ ▷ ▷ ▷ ▶");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Job observability hides status when no subagents are running", () => {
-  assert.equal(renderJobStatus({ done: 3, exited: 1, jobs: [], running: 2, runningSubagents: 0, total: 4 }), undefined);
+test("Run observability gives every running async run at least one triangle", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  try {
+    await writeRun(root, "alpha", "running", [], 0);
+    await writeRun(root, "beta", "running", [], 2);
+    await writeRun(root, "gamma", "running", [], 0);
+    const summary = summarizeRuns(root);
+    assert.equal(summary.running, 3);
+    assert.equal(summary.runningSubagents, 4);
+    assert.equal(renderRunStatus(summary, 1), "▷ ▶ ▷ ▷");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability hides status when no runs are running", () => {
+  assert.equal(renderRunStatus({ cancelled: 0, done: 3, exited: 1, failed: 0, killed: 0, running: 0, runningSubagents: 0, runs: [], total: 4 }), undefined);
 });

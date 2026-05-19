@@ -8,15 +8,14 @@ import * as Config from "./config.ts";
 import * as Identity from "./identity.ts";
 import * as Output from "./output.ts";
 import * as CommandTemplates from "./command-templates.ts";
-import * as JobReferences from "./job-references.ts";
+import * as RecipeReferences from "./recipe-references.ts";
 import * as Schema from "./schema.ts";
 
 export interface RegisterToolInput {
   name?: string;
   description?: string;
-  job?: string;
+  async?: boolean;
   state_dir?: string;
-  stateDir?: string;
   template?: CommandTemplates.CommandTemplateValue | null;
   args?: string;
   update?: boolean;
@@ -25,11 +24,13 @@ export interface RegisterToolInput {
 
 export interface RegisterToolResultDetails {
   args?: string[];
+  async?: boolean;
   config?: string;
   defaults?: Record<string, string>;
-  job?: string;
+  recipeName?: string;
   state_dir?: string;
   template?: CommandTemplates.CommandTemplateValue;
+  templateWarnings?: string[];
   tool: string;
 }
 
@@ -153,25 +154,23 @@ function buildConfig(
   if (!finalTemplate) {
     throw new Error(Output.formatToolText("Tool template is required."));
   }
-  const inputJob = typeof input.job === "string" && input.job.trim()
-    ? input.job.trim()
-    : undefined;
-  const jobRecipe = inputJob
+  const inputRecipe = typeof input.async === "boolean" ? name : undefined;
+  const recipe: RecipeReferences.TemplateRecipeConfig | undefined = inputRecipe
     ? {
-      job: inputJob,
+      name: inputRecipe,
+      ...(typeof input.async === "boolean" ? { async: input.async } : {}),
       ...(typeof input.state_dir === "string" && input.state_dir.trim() ? { state_dir: input.state_dir.trim() } : {}),
-      ...(typeof input.stateDir === "string" && input.stateDir.trim() ? { stateDir: input.stateDir.trim() } : {}),
       template: finalTemplate,
       ...(input.values && typeof input.values === "object" ? { values: input.values } : {}),
     }
     : template === undefined
-      ? existing?.jobRecipe
+      ? existing?.recipe
       : undefined;
   const defaults = explicitArgs?.defaults ?? existing?.storedDefaults ?? {};
   const storedArgs = explicitArgs ? explicitArgs.declarations : existing?.storedArgs;
   const storedDefaults =
     Object.keys(defaults).length > 0 ? defaults : undefined;
-  const recipeTemplate = JobReferences.getJobRecipeTemplate(finalTemplate);
+  const recipeTemplate = RecipeReferences.getRecipeTemplate(finalTemplate);
   const argTemplate = recipeTemplate ?? finalTemplate;
   const argTemplateConfig: CommandTemplates.CommandTemplateConfig =
     typeof argTemplate === "object" && !Array.isArray(argTemplate)
@@ -191,10 +190,10 @@ function buildConfig(
     name,
     description,
     template: finalTemplate,
-    ...(jobRecipe ? { jobRecipe } : {}),
-    args: JobReferences.isJobRecipeTool(finalTemplate, jobRecipe) && storedArgs !== undefined
+    ...(recipe ? { recipe } : {}),
+    args: RecipeReferences.isRecipeTool(finalTemplate, recipe) && storedArgs !== undefined
       ? Schema.getExplicitToolArgNames(storedArgs)
-      : JobReferences.isJobRecipeReference(finalTemplate) && !recipeTemplate
+      : RecipeReferences.isRecipeReference(finalTemplate) && !recipeTemplate
         ? Schema.getExplicitToolArgNames(storedArgs)
         : Schema.getToolArgNames(argTemplateConfig),
     defaults,
@@ -250,11 +249,19 @@ export async function executeRegisterTool<TContext>(
   tools.set(name, cfg);
   deps.registerRuntimeTool(cfg);
   deps.notify(ctx, `Tool persisted: ${name}`, "info");
+  const templateWarnings = CommandTemplates.getCommandTemplateWarnings(
+    typeof cfg.template === "object" && !Array.isArray(cfg.template)
+      ? cfg.template
+      : { template: cfg.template! },
+  );
+  const warningText = templateWarnings.length > 0
+    ? `\nWarnings:\n${templateWarnings.map((warning) => `- ${warning}`).join("\n")}`
+    : "";
   return {
     content: [
       textContent(
         Output.formatToolText(
-          `${existing ? "Updated" : "Registered"} tool "${name}" (args: ${Schema.formatToolArgs(cfg.args)}).`,
+          `${existing ? "Updated" : "Registered"} tool "${name}" (args: ${Schema.formatToolArgs(cfg.args)}).${warningText}`,
         ),
       ),
     ],
@@ -262,9 +269,11 @@ export async function executeRegisterTool<TContext>(
       args: cfg.args,
       config: deps.configPath,
       defaults: cfg.defaults,
-      ...(cfg.jobRecipe?.job ? { job: cfg.jobRecipe.job } : {}),
-      ...(cfg.jobRecipe?.state_dir ? { state_dir: cfg.jobRecipe.state_dir } : {}),
+      ...(cfg.recipe?.async !== undefined ? { async: cfg.recipe.async } : {}),
+      ...(cfg.recipe?.name ? { recipeName: cfg.recipe.name } : {}),
+      ...(cfg.recipe?.state_dir ? { state_dir: cfg.recipe.state_dir } : {}),
       ...(cfg.template ? { template: cfg.template } : {}),
+      ...(templateWarnings.length > 0 ? { templateWarnings } : {}),
       tool: name,
     },
   };

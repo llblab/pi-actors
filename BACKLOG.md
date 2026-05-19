@@ -2,7 +2,12 @@
 
 ## Open Work
 
-- Add command-template trust/safety guidance and lightweight risk warnings.
-  - Priority: Medium.
-  - Scope: Document that shell-free argv construction protects placeholder interpolation but does not sandbox trusted executables; detect and surface warnings for obvious interpreter-risk templates such as `bash`, `sh`, `node -e`, `python -c`, and broad filesystem commands.
-  - Exit: Docs explain the trust boundary, tests cover warning detection, and runtime/tool details can show high-risk-template warnings without blocking existing tools.
+No open work that is safe to execute before the gated 0.7.0 release.
+
+## Blocked Work
+
+- Validate branch-local checkpoint semantics with collaborative-runner experiments.
+  - Priority: Low.
+  - Blocked by: At least one real collaborative branch-runner async-run experiment.
+  - Scope: Use real collaborative branch-runner async runs to validate whether `failure: "branch"`, node-level `retry`, and `recover` cleanup are sufficient for branch-local validation and bounded reattempts.
+  - Exit: Decision recorded as sufficient, documentation-only refinement needed, or propose a further minimal command-template extension with tests.

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Detached template-job runner.
+ * Detached async-runner.
  *
  * This process is intentionally thin: the parent tool prepares state files and
- * starts this script in the background; this script loads the recorded job,
+ * starts this script in the background; this script loads the recorded run,
  * executes its command template, and writes ordinary files that status/tail/list
  * tools can inspect later.
  *
@@ -22,19 +22,19 @@ if (!stateDir) {
 const { executeRegisteredTool } = await import("../lib/execution.ts");
 const { execCommandTemplate } = await import("../lib/command-templates.ts");
 const { writeJsonAtomic } = await import("../lib/config.ts");
-const jobPath = join(stateDir, "job.json");
+const runPath = join(stateDir, "run.json");
 const progressPath = join(stateDir, "progress.json");
 const resultPath = join(stateDir, "result.json");
 const eventsPath = join(stateDir, "events.jsonl");
 const stdoutPath = join(stateDir, "stdout.log");
 const stderrPath = join(stateDir, "stderr.log");
-const meta = JSON.parse(readFileSync(jobPath, "utf8"));
+const meta = JSON.parse(readFileSync(runPath, "utf8"));
 
 /**
  * Appends one lifecycle event.
  *
  * events.jsonl is append-only so observers can tail transitions even while the
- * job is still running.
+ * run is still running.
  */
 function event(name, data = {}) {
   appendFileSync(
@@ -85,7 +85,7 @@ async function observedExec(command, args, options) {
   return result;
 }
 try {
-  event("job.runner.start", { pid: process.pid });
+  event("run.runner.start", { pid: process.pid });
   progressRunning();
   /**
    * Reuse the same registered-tool execution path as foreground tools.
@@ -95,8 +95,8 @@ try {
    */
   const result = await executeRegisteredTool(
     {
-      name: "template_job",
-      description: "Detached command-template job",
+      name: "async_run",
+      description: "Detached command-template async run",
       template: meta.template,
       args: [],
       defaults: {},
@@ -122,7 +122,7 @@ try {
     completed: 1,
     failures: result.details.nonCriticalFailures || [],
   });
-  event("job.done", { code: result.details.code });
+  event("run.done", { code: result.details.code });
 } catch (error) {
   /**
    * Represent failure in every observable channel:
@@ -141,6 +141,6 @@ try {
     completedAt: new Date().toISOString(),
   });
   progress("failed", { completed: 0, failures: [{ message }] });
-  event("job.failed", { error: message });
+  event("run.failed", { error: message });
   process.exit(1);
 }

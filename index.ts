@@ -1,8 +1,8 @@
 /**
- * pi-auto-tools — persistent self-registered agent tools.
- * Zones: composition root, pi agent, automation runtime
+ * pi-actors — actor runtime and persistent local tool registry for pi.
+ * Zones: composition root, pi agent, actor runtime
  *
- * Wraps command templates as callable pi tools and stores their definitions in auto-tools.json across reloads and sessions.
+ * Wraps command templates as callable pi tools, stores their definitions in tools.json, and exposes actor orchestration across reloads and sessions.
  */
 
 import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
@@ -52,10 +52,10 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     const summary = Observability.summarizeRuns(undefined, ownerId);
     const status = Observability.renderRunStatus(summary, runStatusFrame++);
     ctx.ui.setStatus(
-      "zz-pi-auto-tools-runs",
+      "zz-pi-actors-runs",
       status ? ctx.ui.theme.fg("dim", status) : undefined,
     );
-    ctx.ui.setWidget("zz-pi-auto-tools-runs", undefined);
+    ctx.ui.setWidget("zz-pi-actors-runs", undefined);
     const transitions = Observability.detectRunTransitions(
       observedRuns,
       summary,
@@ -74,7 +74,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       if (!Observability.shouldSendRunTransitionFollowUp(transition)) continue;
       pi.sendMessage(
         {
-          customType: "pi-auto-tools-run",
+          customType: "pi-actors-run",
           content: text,
           display: true,
           details: transition,
@@ -91,7 +91,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       if (!Observability.shouldSendRunOutboxFollowUp(event)) continue;
       pi.sendMessage(
         {
-          customType: "pi-auto-tools-run-event",
+          customType: "pi-actors-run-message",
           content: text,
           display: true,
           details: event,

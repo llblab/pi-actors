@@ -67,8 +67,8 @@ function listTools<TContext>(
       textContent(
         Output.formatToolText(
           names.length > 0
-            ? `Registered auto-tools:\n${names.map((name) => `- ${name}`).join("\n")}`
-            : "No registered auto-tools.",
+            ? `Registered tools:\n${names.map((name) => `- ${name}`).join("\n")}`
+            : "No registered tools.",
         ),
       ),
     ],

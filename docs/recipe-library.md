@@ -1,6 +1,6 @@
 # Recipe Library
 
-The root `recipes/` directory is the packaged standard recipe library for pi-auto-tools. These recipes are reusable building blocks, not automatically installed operator policy. Copy or reference them from local tool registrations when the operator wants a durable callable tool.
+The root `recipes/` directory is the packaged standard actor recipe library for pi-actors. These recipes are reusable building blocks, not automatically installed operator policy. Copy or reference them from local tool registrations when the operator wants a durable callable tool.
 
 Helper scripts that belong to library recipes live in root `scripts/`. The music player standard uses the executable Node.js wrapper only: `scripts/music-player.mjs`.
 
@@ -163,7 +163,7 @@ Use `inspect target=run:music view=status` only when an event or operator decisi
 The wrapper also accepts control commands directly when a caller already has the run state dir:
 
 ```text
-scripts/music-player.mjs next ~/.pi/agent/tmp/pi-auto-tools/runs/music
+scripts/music-player.mjs next ~/.pi/agent/tmp/pi-actors/runs/music
 ```
 
 Message body is currently adapted to one newline-delimited command written to `<run state dir>/control.fifo`. The script writes `status.txt`, `player.json`, and track-change actor messages in `outbox.jsonl` in the same state dir. Track-change messages stay diagnostic by default; interactive recipes should define a small command vocabulary for addressed messages, emit semantic actor messages for decision points, and let the coordinator react to messages rather than sleep-polling state.

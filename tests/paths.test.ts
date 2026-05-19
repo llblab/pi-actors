@@ -27,16 +27,16 @@ test("Agent dir honors PI_CODING_AGENT_DIR", () => {
   );
 });
 
-test("Config path points to auto-tools.json under the agent dir", () => {
-  assert.equal(getConfigPath("/agent"), "/agent/auto-tools.json");
+test("Config path points to tools.json under the agent dir", () => {
+  assert.equal(getConfigPath("/agent"), "/agent/tools.json");
 });
 
 test("Extension tmp dir lives under the pi agent tmp tree", () => {
-  assert.equal(getExtensionTmpDir("/agent"), "/agent/tmp/pi-auto-tools");
+  assert.equal(getExtensionTmpDir("/agent"), "/agent/tmp/pi-actors");
 });
 
 test("Run state root lives under the extension tmp dir", () => {
-  assert.equal(getRunStateRoot("/agent"), "/agent/tmp/pi-auto-tools/runs");
+  assert.equal(getRunStateRoot("/agent"), "/agent/tmp/pi-actors/runs");
 });
 
 test("Recipe root lives under the agent dir", () => {

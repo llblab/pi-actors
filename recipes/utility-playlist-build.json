@@ -8,7 +8,7 @@
     "output_mode:enum(paths,m3u,inline)"
   ],
   "defaults": {
-    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "repo": "~/.pi/agent/extensions/pi-actors",
     "source_dir": "~/Music",
     "extensions": ".mp3,.ogg,.wav,.flac,.m4a",
     "max_depth": "2",

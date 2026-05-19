@@ -25,7 +25,7 @@ export function writeFullOutput(
   content: string,
 ): string | undefined {
   try {
-    const dir = mkdtempSync(join(tmpdir(), "pi-auto-tools-"));
+    const dir = mkdtempSync(join(tmpdir(), "pi-actors-"));
     const filePath = join(
       dir,
       `${sanitizeFilePart(toolName)}-${sanitizeFilePart(stream)}.txt`,

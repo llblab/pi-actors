@@ -16,7 +16,7 @@ const script = new URL("../scripts/validate-recipe.mjs", import.meta.url).pathna
 const nodeArgs = ["--experimental-strip-types", script];
 
 test("validate-recipe validates one recipe file", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-validate-recipe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-"));
   try {
     const file = join(root, "recipe.json");
     await writeFile(
@@ -35,7 +35,7 @@ test("validate-recipe validates one recipe file", async () => {
 });
 
 test("validate-recipe fails invalid recipe files", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-validate-recipe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-"));
   try {
     const file = join(root, "bad.json");
     await writeFile(file, JSON.stringify({ name: "bad" }));
@@ -56,7 +56,7 @@ test("validate-recipe fails invalid recipe files", async () => {
 });
 
 test("validate-recipe validates recipe directories with --all", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-validate-recipe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-"));
   try {
     await mkdir(join(root, "recipes"));
     await writeFile(join(root, "recipes", "a.json"), JSON.stringify({ template: "echo a" }));

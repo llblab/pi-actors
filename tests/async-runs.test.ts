@@ -57,7 +57,7 @@ async function waitForStatus(
 }
 
 test("Async runs write state files and finish", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "hello");
   try {
     const meta = startRun(
@@ -87,7 +87,7 @@ test("Async runs write state files and finish", async () => {
 });
 
 test("Async runs emit command completion outbox events", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "command-outbox");
   try {
     startRun(
@@ -149,7 +149,7 @@ test("Async runs emit command completion outbox events", async () => {
 });
 
 test("Async runs append actor messages to outbox", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "actor-outbox");
   try {
     startRun(
@@ -183,7 +183,7 @@ test("Async runs append actor messages to outbox", async () => {
 });
 
 test("Async runs expose failed terminal status", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "failed");
   try {
     startRun(
@@ -206,7 +206,7 @@ test("Async runs expose failed terminal status", async () => {
 });
 
 test("Async run restart clears stale terminal state", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "restart");
   try {
     startRun(
@@ -237,7 +237,7 @@ test("Async run restart clears stale terminal state", async () => {
 });
 
 test("Async runs persist coordinator owner ids", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "owned");
   try {
     const meta = startRun(
@@ -258,7 +258,7 @@ test("Async runs persist coordinator owner ids", async () => {
 });
 
 test("Async runs can start from recipe files with overrides", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "file-run");
   const file = join(root, "say.json");
   try {
@@ -299,7 +299,7 @@ test("Async runs can start from recipe files with overrides", async () => {
 });
 
 test("Recipe files can put command-template flags at the recipe top level", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "top-level-parallel");
   const file = join(root, "parallel.json");
   try {
@@ -333,7 +333,7 @@ test("Recipe files can put command-template flags at the recipe top level", asyn
 });
 
 test("Recipe files reject tool references", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const file = join(root, "tool-run.json");
   try {
     await writeFile(
@@ -350,7 +350,7 @@ test("Recipe files reject tool references", async () => {
 });
 
 test("Async runs expose script-authored outbox events", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "outbox");
   const script =
     "const fs=require('fs');const path=require('path');fs.appendFileSync(path.join(process.argv[1],'outbox.jsonl'),JSON.stringify({event:'demo.update',summary:'Demo update',level:'warning',delivery:'notify',data:{ok:true}})+'\\n')";
@@ -383,7 +383,7 @@ test(
   "Async runs can send line messages to a run control FIFO",
   { skip: process.platform === "win32" },
   async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+    const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
     const stateDir = join(root, "controlled");
     const readyFile = join(root, "ready");
     const messageFile = join(root, "message");
@@ -415,7 +415,7 @@ test(
 );
 
 test("Async run cancel terminates matching running runs", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "running");
   try {
     startRun(
@@ -446,7 +446,7 @@ test("Async run cancel terminates matching running runs", async () => {
 });
 
 test("Async run cancel signals the running command process group", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "running-group");
   const pidFile = join(root, "child.pid");
   const termFile = join(root, "child.term");
@@ -480,7 +480,7 @@ test("Async run cancel signals the running command process group", async () => {
 });
 
 test("Async run kill terminates matching stuck runs", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "stuck");
   try {
     startRun(
@@ -513,7 +513,7 @@ test("Async run kill terminates matching stuck runs", async () => {
 });
 
 test("Async run cancel fails closed for completed runs", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "done");
   try {
     startRun(

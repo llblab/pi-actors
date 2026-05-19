@@ -46,7 +46,7 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /If asked to explore pi-auto-tools/,
+    /If asked to explore pi-actors/,
   );
 });
 

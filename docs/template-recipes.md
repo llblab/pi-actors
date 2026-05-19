@@ -166,7 +166,7 @@ Call-time params override file params. `values` are merged with file values; cal
 
 ## Registered Recipe Tools
 
-A registered auto-tool can point at a recipe by storing the recipe path or name in `template`:
+A registered tool can point at an actor recipe by storing the recipe path or name in `template`:
 
 ```json
 {
@@ -180,7 +180,7 @@ A registered auto-tool can point at a recipe by storing the recipe path or name 
 
 If `shader-ring-8-parallel.json` contains `async: true`, calling `shader_ring` starts a detached run and returns metadata. If `async` is omitted or false, calling `shader_ring` executes the recipe foreground and returns normal tool output.
 
-A registered auto-tool may also co-locate a recipe directly in `auto-tools.json`:
+A registered tool may also co-locate an actor recipe directly in `tools.json`:
 
 ```json
 {

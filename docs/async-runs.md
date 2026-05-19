@@ -85,22 +85,22 @@ Use ordinary files under the extension temp directory so status tools stay simpl
 - `stdout.log` and `stderr.log`: detached process output.
 - `result.json`: final code, killed flag, output selector, and optional full-output path.
 
-For pi-auto-tools, async run state defaults to:
+For pi-actors, actor run state defaults to:
 
 ```text
-~/.pi/agent/tmp/pi-auto-tools/runs/
+~/.pi/agent/tmp/pi-actors/runs/
 ```
 
 State files use this shape:
 
 ```text
-~/.pi/agent/tmp/pi-auto-tools/runs/<run>/run.json
-~/.pi/agent/tmp/pi-auto-tools/runs/<run>/progress.json
-~/.pi/agent/tmp/pi-auto-tools/runs/<run>/events.jsonl
-~/.pi/agent/tmp/pi-auto-tools/runs/<run>/outbox.jsonl
-~/.pi/agent/tmp/pi-auto-tools/runs/<run>/stdout.log
-~/.pi/agent/tmp/pi-auto-tools/runs/<run>/stderr.log
-~/.pi/agent/tmp/pi-auto-tools/runs/<run>/result.json
+~/.pi/agent/tmp/pi-actors/runs/<run>/run.json
+~/.pi/agent/tmp/pi-actors/runs/<run>/progress.json
+~/.pi/agent/tmp/pi-actors/runs/<run>/events.jsonl
+~/.pi/agent/tmp/pi-actors/runs/<run>/outbox.jsonl
+~/.pi/agent/tmp/pi-actors/runs/<run>/stdout.log
+~/.pi/agent/tmp/pi-actors/runs/<run>/stderr.log
+~/.pi/agent/tmp/pi-actors/runs/<run>/result.json
 ```
 
 Terminal status is `done` for result code 0 and `failed` for non-zero result code. A stopped run reports `cancelled` after graceful cancel or `killed` after force kill once the runner is no longer alive. If the runner process exits before writing a result and no stop event was recorded, status is `exited`.
@@ -127,7 +127,7 @@ The core loop is:
 
 4. Do not inspect just because time passed. Inspect `status`, `tail`, or `events` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
 
-Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-auto-tools owns the safe run-local transport, ownership checks, and coordinator attention policy.
+Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-actors owns the safe run-local transport, ownership checks, and coordinator attention policy.
 
 ## Tool Surface
 
@@ -211,7 +211,7 @@ An async run belongs to the current user, cwd, and launching agent session at st
 
 On Unix-like systems, cancel and kill signal the runner process group when available, then fall back to the runner pid. The runner starts command-template children in that process group, so long-running descendants such as audio players stop with the run instead of becoming orphaned background processes. After the process exits, status reflects the operator action as `cancelled` or `killed` instead of a generic `exited`.
 
-State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and actor-message logs may live in the state dir. pi-auto-tools core owns only the generic Unix FIFO write action and runtime attention policy; command and message vocabularies belong to the recipe/script.
+State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and actor-message logs may live in the state dir. pi-actors core owns only the generic Unix FIFO write action and runtime attention policy; command and message vocabularies belong to the recipe/script.
 
 ## Extension Temp Directory
 
@@ -255,11 +255,11 @@ Swarm coordinator responsibilities split like this:
 - Swarm semantics: lock rules, quorum manifest shape, raw review retention, merger, post-merge review, conflict policy.
 - Adapter config: model pool, default merger, default reviewer, prompt lens, tool allowlist, timeout.
 
-pi-auto-tools owns generic recipes and async run primitives. Swarm should keep domain-specific quorum and implementation-team semantics unless they become reusable across multiple domains.
+pi-actors owns generic actor recipes and run primitives. Swarm should keep domain-specific quorum and implementation-team semantics unless they become reusable across multiple domains.
 
 ## Collaborative Subagent Branch Adapter
 
-A collaborative implementation swarm can use pi-auto-tools as the async runtime without making pi-auto-tools own swarm semantics. The coordinator prepares scope files and chooses branch names. A trusted local runner owns one branch lifecycle. The async run owns fanout, state, logs, status, tail, cancel, and terminal result metadata.
+A collaborative implementation swarm can use pi-actors as the actor runtime without making pi-actors own swarm semantics. The coordinator prepares scope files and chooses branch names. A trusted local runner owns one branch lifecycle. The async run owns fanout, state, logs, status, tail, cancel, and terminal result metadata.
 
 Recommended flow:
 
@@ -277,7 +277,7 @@ coordinator writes scope files
 Scope files are preferable to large inline prompts because they are inspectable, reusable from logs, and safe for longer task groups. Keep them under an agent-owned run directory such as:
 
 ```text
-~/.pi/agent/tmp/pi-auto-tools/collab-runs/<run>/scopes/agent-01.md
+~/.pi/agent/tmp/pi-actors/collab-runs/<run>/scopes/agent-01.md
 ```
 
 Example recipe:
@@ -309,7 +309,7 @@ Example recipe:
 }
 ```
 
-The runner is intentionally outside pi-auto-tools. It is a trusted local executable, like any other command-template target. Its minimum contract is clone or worktree, checkout branch, run subagent with bounded tools, verify expected branch, verify a commit exists, push branch, and emit a structured result. If one runner fails, `failure: "branch"` preserves sibling results as a degraded run.
+The runner is intentionally outside pi-actors. It is a trusted local executable, like any other command-template target. Its minimum contract is clone or worktree, checkout branch, run subagent with bounded tools, verify expected branch, verify a commit exists, push branch, and emit a structured result. If one runner fails, `failure: "branch"` preserves sibling results as a degraded run.
 
 Coordinator responsibilities stay outside the async runtime:
 
@@ -320,7 +320,7 @@ Coordinator responsibilities stay outside the async runtime:
 - Treat pushed branches as artifacts for review, not as automatic merges.
 - Record failed scopes back into the backlog.
 
-Do not encode backlog parsing, task assignment, pull-request policy, merge policy, or model selection into pi-auto-tools core. Those are swarm, project, or operator policy.
+Do not encode backlog parsing, task assignment, pull-request policy, merge policy, or model selection into pi-actors core. Those are swarm, project, or operator policy.
 
 ## Crystallization Questions
 

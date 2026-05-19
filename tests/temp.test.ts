@@ -17,7 +17,7 @@ import {
 test("Extension temp cleanup removes stale files and directories", async () => {
   const root = join(
     tmpdir(),
-    `pi-auto-tools-temp-${process.pid}-${Date.now()}`,
+    `pi-actors-temp-${process.pid}-${Date.now()}`,
   );
   const staleFile = join(root, "old.txt");
   const staleDir = join(root, "old-dir");
@@ -44,7 +44,7 @@ test("Extension temp cleanup removes stale files and directories", async () => {
 test("Extension temp preparation creates directory", async () => {
   const root = join(
     tmpdir(),
-    `pi-auto-tools-temp-prepare-${process.pid}-${Date.now()}`,
+    `pi-actors-temp-prepare-${process.pid}-${Date.now()}`,
   );
   try {
     await prepareExtensionTempDir(root);

@@ -1,8 +1,8 @@
-# pi-auto-tools
+# pi-actors
 
-Persistent template-backed tool registry extension for the pi coding agent.
+Actor runtime and persistent local tool registry extension for the pi coding agent.
 
-`pi-auto-tools` is a local-first, cybernetic automation layer for agents. It is MCP-adjacent in spirit, but instead of waiting for external servers to define every capability, the agent can turn trusted local commands, scripts, and recipes into durable tools itself. Those tools persist across reloads as a kind of operational muscle memory: short semantic names, typed args, reusable recipes, and async runs replace repeated shell reconstruction.
+`pi-actors` is a local-first, cybernetic actor layer for agents. It is MCP-adjacent in spirit, but instead of waiting for external servers to define every capability, the agent can turn trusted local commands, scripts, and recipes into durable tools itself. Those tools persist across reloads as a kind of operational muscle memory: short semantic names, typed args, reusable recipes, and async runs replace repeated shell reconstruction.
 
 ## Start Here
 
@@ -15,14 +15,14 @@ Persistent template-backed tool registry extension for the pi coding agent.
 
 - **Local-First Tool Memory**: Lets agents create and persist their own trusted local tools, forming durable operational muscle memory instead of one-off shell commands.
 - **Commands Become Capabilities**: Turns stable local workflows into semantic agent tools, so the agent chooses what it can do instead of reconstructing how to run shell commands.
-- **Persistent Tool Registry**: Stores tool definitions in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
+- **Persistent Tool Registry**: Stores tool definitions in `~/.pi/agent/tools.json` and registers them automatically on session start.
 - **Compact Semantic Interface**: Exposes short tool names, descriptions, named args, and defaults instead of long paths, positional command-arg order, and repeated command boilerplate.
 - **Safer Local Automation**: Wraps trusted command templates as narrow tools using split-first command-arg construction, placeholder substitution, and no shell evaluation.
 - **Reusable Building Blocks**: Makes skill scripts, sub-agent wrappers, diagnostics, and project workflows available as composable agent capabilities.
 - **Immediate Updates**: Registered and updated tools become callable in the active session; deleted tools are removed from active tools and fully disappear after reload.
 - **Bounded Output**: Tool stdout is returned to the agent with truncation safeguards; full oversized output is saved to a temp file.
 - **Template Recipes**: Stores reusable command-template JSON under `~/.pi/agent/recipes/*.json`; recipes can import other recipes, reuse defaults, declare ordered named `artifacts`, and run foreground or declare `async: true` for detached lifecycle.
-- **Async Runs**: Starts detached recipe or inline-template runs with generic status, tail, list, events, send, cancel, and kill actions backed by state files under `~/.pi/agent/tmp/pi-auto-tools`.
+- **Actor Runs**: Starts detached recipe or inline-template runs as addressable actors backed by state files under `~/.pi/agent/tmp/pi-actors`.
 - **Context Onboarding**: Injects a compact system-prompt note explaining templates, recipes, async runs, tasks, and agent fanout so installed sessions have the mental model available by default.
 - **Coordinator-Scoped Run Observability**: Shows at least one stable triangle per running async run started by the current agent session, adds triangles for active parallel branches, then injects compact completion events only back to the launching coordinator when attention is needed.
 
@@ -31,18 +31,18 @@ Persistent template-backed tool registry extension for the pi coding agent.
 From npm:
 
 ```bash
-pi install npm:@llblab/pi-auto-tools
+pi install npm:@llblab/pi-actors
 ```
 
 From git:
 
 ```bash
-pi install git:github.com/llblab/pi-auto-tools
+pi install git:github.com/llblab/pi-actors
 ```
 
 ## Mental Model
 
-`pi-auto-tools` has one execution idea that grows in place:
+`pi-actors` has one execution idea that grows in place:
 
 ```text
 command
@@ -58,7 +58,7 @@ command
 - A **registered tool** gives a command template or recipe a stable agent-facing name.
 - An **async run** is one execution instance with state, logs, script-authored events, status, tail, message send, cancel, and kill.
 
-The template remains the execution language. The recipe is saved configuration. `async: true` is the detached lifecycle switch. The extension injects this compact mental model into the system prompt on each agent turn, including where to look first (`README.md`, `docs/README.md`, recipe/async docs, and `recipes/`) so an agent asked to inspect pi-auto-tools can quickly understand the model and start composing async subagents or other long-running recipes.
+The template remains the execution language. The recipe is saved actor configuration. `async: true` is the detached lifecycle switch. The extension injects this compact mental model into the system prompt on each agent turn, including where to look first (`README.md`, `docs/README.md`, recipe/async docs, and `recipes/`) so an agent asked to inspect pi-actors can quickly understand the model and start composing async subagents or other long-running recipes.
 
 ## Operator Onboarding
 
@@ -136,7 +136,7 @@ Imported recipes are recipe definitions, not nested async runs. The parent recip
 
 ### Local command: transcription
 
-`pi-auto-tools` is useful for exposing stable local commands as normal tools. For example, register an STT command:
+`pi-actors` is useful for exposing stable local commands as normal tools. For example, register an STT command:
 
 ```text
 register_tool name=transcribe \
@@ -157,7 +157,7 @@ register_tool name=shader_ring \
 
 If the recipe file contains `async: true`, calling `shader_ring` starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
-A recipe can also be co-located in `auto-tools.json` when keeping metadata and the recipe body together is clearer:
+A recipe can also be co-located in `tools.json` when keeping metadata and the recipe body together is clearer:
 
 ```json
 {
@@ -196,7 +196,7 @@ register_tool name=call_subagent template=null
 
 ## Resulting Config
 
-The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; tool names come from the top-level keys. Stored entries keep `template` last so flags and metadata are read before executable content:
+The commands above persist entries like this in `~/.pi/agent/tools.json`; tool names come from the top-level keys. Stored entries keep `template` last so flags and metadata are read before executable content:
 
 ```json
 {
@@ -216,11 +216,11 @@ The commands above persist entries like this in `~/.pi/agent/auto-tools.json`; t
 }
 ```
 
-This file is the durable registry. `register_tool` is the interactive API; `auto-tools.json` is the persisted state that is loaded on future sessions.
+This file is the durable registry. `register_tool` is the interactive API; `tools.json` is the persisted state that is loaded on future sessions.
 
 ## Manage Run Actors
 
-Use `spawn` when a command template may outlive the current turn. It starts the work now as an addressable actor, returns immediately with state metadata, and keeps ordinary files under `~/.pi/agent/tmp/pi-auto-tools/runs/<run>` for later inspection.
+Use `spawn` when a command template may outlive the current turn. It starts the work now as an addressable actor, returns immediately with state metadata, and keeps ordinary files under `~/.pi/agent/tmp/pi-actors/runs/<run>` for later inspection.
 
 Start from an inline template as an addressable run actor:
 

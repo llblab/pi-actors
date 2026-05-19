@@ -1,6 +1,6 @@
 # Actor Messages
 
-Protocol target for organic communication across pi-auto-tools.
+Protocol target for organic communication across pi-actors.
 
 ## Contract
 

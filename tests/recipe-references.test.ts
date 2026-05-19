@@ -15,7 +15,7 @@ import { readResolvedRecipeConfig } from "../lib/recipe-references.ts";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 test("Template recipes embed imported recipes as pipeline nodes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const child = join(root, "child.json");
     const parent = join(root, "parent.json");
@@ -57,7 +57,7 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
 });
 
 test("Template recipes reject unknown named import nodes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const parent = join(root, "parent.json");
     await writeFile(
@@ -78,7 +78,7 @@ test("Template recipes reject unknown named import nodes", async () => {
 });
 
 test("Template recipes reference imported defaults and explicit values", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const base = join(root, "base.json");
     const parent = join(root, "parent.json");
@@ -141,7 +141,7 @@ test("Template recipes reference imported defaults and explicit values", async (
 });
 
 test("Template recipes preserve mailbox declarations", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const base = join(root, "base.json");
     const recipe = join(root, "mailbox.json");
@@ -210,7 +210,7 @@ test("Packaged async recipes declare mailbox metadata", async () => {
 });
 
 test("Template recipe imports reject cycles", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const a = join(root, "a.json");
     const b = join(root, "b.json");

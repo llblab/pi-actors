@@ -43,7 +43,7 @@ async function writeRun(
 }
 
 test("recipe-utils package-summary emits bounded package metadata", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipe-utils-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     const file = join(root, "package.json");
     await writeFile(
@@ -71,7 +71,7 @@ test("recipe-utils package-summary emits bounded package metadata", async () => 
 });
 
 test("recipe-utils artifact-write writes stdin with explicit mode", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipe-utils-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     const file = join(root, "artifacts", "report.md");
     const created = spawnSync(script, ["artifact-write", file, "create"], {
@@ -125,7 +125,7 @@ test("recipe-utils actor-message rejects invalid envelopes", () => {
 });
 
 test("recipe-utils run-summary reads live progress status over static run status", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipe-utils-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     await writeRun(root, "finished", "done");
     await writeRun(root, "active", "running");

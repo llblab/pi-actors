@@ -8,7 +8,7 @@
   "defaults": {
     "target": "recipes",
     "all": "true",
-    "repo": "~/.pi/agent/extensions/pi-auto-tools"
+    "repo": "~/.pi/agent/extensions/pi-actors"
   },
   "template": "{repo}/scripts/validate-recipe.mjs {target} {all?--all:}"
 }

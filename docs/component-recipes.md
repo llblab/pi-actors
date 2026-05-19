@@ -6,7 +6,7 @@ Component recipes are small saved recipe definitions that expose one coordinatio
 
 This is a weak abstract contract, not a hard dependency model.
 
-- `pi-auto-tools` provides root `recipes/` component definitions and runtime bindings.
+- `pi-actors` provides root `recipes/` actor component definitions and runtime bindings.
 - Portable coordination skills should target capabilities, not this extension by name.
 - Local adapters bind abstract components to concrete recipes, command templates, async runs, model aliases, files, and tool registries.
 - A component should be replaceable by another implementation with the same capability contract.

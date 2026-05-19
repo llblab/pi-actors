@@ -17,7 +17,7 @@ Async-run standard owns:
 - Detached process lifecycle for one execution instance.
 - Run identity, state directory, pid/process-group tracking, logs, status, list, tail, events, send, cancel, and kill.
 - Injected lifecycle values such as `{run_id}` and `{state_dir}`.
-- Coordinator-scoped observability and script-authored outbox delivery.
+- Coordinator-scoped observability and script-authored actor messages.
 
 Async-run standard does not own:
 
@@ -128,7 +128,7 @@ The core loop is:
 
 4. Do not inspect just because time passed. Inspect `status`, `tail`, or `events` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
 
-Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-auto-tools owns the safe run-local transport, ownership checks, and delivery policy.
+Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-auto-tools owns the safe run-local transport, ownership checks, and coordinator attention policy.
 
 ## Tool Surface
 
@@ -179,7 +179,7 @@ Native Windows does not support this Unix FIFO contract. Use WSL/Linux/macOS for
 
 The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` actor messages back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local messages bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Packaged multi-agent fanout recipes bubble these completion messages by default because async branch completion is base coordinator context rather than optional diagnostics. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `cancel`, `kill`, and control messages such as `stop` stay out of follow-up context because the initiating action already returns synchronously. If a follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` or low-level `async_run action=status`, `tail`, or `events` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
 
-Ambient status indicators may refresh while work is active, but notification delivery is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn` or low-level `async_run action=start`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
+Ambient status indicators may refresh while work is active, but coordinator attention is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn` or low-level `async_run action=start`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
 
 ## Run Actor Messages
 
@@ -216,7 +216,7 @@ An async run belongs to the current user, cwd, and launching agent session at st
 
 On Unix-like systems, cancel and kill signal the runner process group when available, then fall back to the runner pid. The runner starts command-template children in that process group, so long-running descendants such as audio players stop with the run instead of becoming orphaned background processes. After the process exits, status reflects the operator action as `cancelled` or `killed` instead of a generic `exited`.
 
-State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and actor-message logs may live in the state dir. pi-auto-tools core owns only the generic Unix FIFO write action and the JSONL delivery policy; command and message vocabularies belong to the recipe/script.
+State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and actor-message logs may live in the state dir. pi-auto-tools core owns only the generic Unix FIFO write action and runtime attention policy; command and message vocabularies belong to the recipe/script.
 
 ## Extension Temp Directory
 

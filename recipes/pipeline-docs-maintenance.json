@@ -64,7 +64,6 @@
         "input": "Use docs review and maintenance plan from stdin.",
         "artifact_path": "{artifact_path}",
         "artifact_format": "Markdown sections: Docs State, Required Updates, Optional Follow-up, Validation.",
-        "delivery": "log",
         "model": "{model}",
         "tools": "{tools}"
       }

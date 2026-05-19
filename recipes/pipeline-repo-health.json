@@ -73,7 +73,6 @@
         "input": "Use normalized repo health output from stdin.",
         "artifact_path": "{artifact_path}",
         "artifact_format": "Markdown sections: Branch State, Validation, Risks, Next Actions.",
-        "delivery": "log",
         "model": "{model}",
         "tools": "{tools}"
       }

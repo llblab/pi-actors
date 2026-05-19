@@ -75,7 +75,6 @@
         "input": "Use release readiness review from stdin.",
         "artifact_path": "{artifact_path}",
         "artifact_format": "Markdown sections: Release Verdict, Evidence, Risks, Checklist, Next Actions.",
-        "delivery": "log",
         "model": "{merger_model}",
         "tools": "{tools}"
       }

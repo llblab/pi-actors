@@ -59,7 +59,6 @@
         "input": "Use normalized async-run operations report from stdin.",
         "artifact_path": "{artifact_path}",
         "artifact_format": "Markdown sections: Status, Events, Risks, Recommended Actions.",
-        "delivery": "log",
         "model": "{model}",
         "tools": "{tools}"
       }

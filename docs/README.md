@@ -6,7 +6,7 @@ Living index of all documentation in the `/docs` directory.
 
 - [command-templates.md](./command-templates.md) — Portable synchronous command execution standard
 - [template-recipes.md](./template-recipes.md) — Saved JSON recipe standard, imports, and reusable command-template graph composition
-- [async-runs.md](./async-runs.md) — Detached run lifecycle, state files, actor-message delivery, cancellation, and ambient indicators
+- [async-runs.md](./async-runs.md) — Detached run lifecycle, state files, actor messages, cancellation, and ambient indicators
 - [actor-messages.md](./actor-messages.md) — Actor/message protocol for symmetric communication primitives
 - [tool-registry.md](./tool-registry.md) — Local `pi-auto-tools` registry storage and `register_tool` adaptation
 - [recipe-library.md](./recipe-library.md) — Packaged standard recipe library such as async subagents, coordinator pipelines, utilities, and music playback

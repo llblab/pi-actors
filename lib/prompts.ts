@@ -30,7 +30,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - async:true = detached lifecycle; spawn creates run actors from recipes/templates.
 - Async run state lives under ~/.pi/agent/tmp/pi-auto-tools/runs.
 - Use spawn/message/inspect for actor-level start/send/observe; async_run remains the low-level lifecycle adapter for list/events/cancel/kill and direct diagnostics.
-- Run lifecycle = state files, logs, actor-message delivery, mailbox send, cancel/kill, compact status; do not busy-poll runs, rely on message/follow-up notifications and use message for explicit run-local commands.
+- Run lifecycle = state files, logs, actor messages, mailbox send, cancel/kill, compact status; do not busy-poll runs, rely on message/follow-up notifications and use message for explicit run-local commands.
 - Tool template may be a command template, recipe path/name, or co-located recipe.
 - register_tool makes compact persistent buttons; args may be typed or derived from placeholders.
 - For single calls or short pipelines, use foreground templates/tools.

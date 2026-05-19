@@ -18,6 +18,45 @@ function fail(message) {
   process.exit(1);
 }
 
+const ADDRESS_PATTERN = /^[A-Za-z0-9_.-]+$/;
+const MESSAGE_TYPE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/;
+const DELIVERIES = new Set(["direct", "followup", "log", "notify"]);
+
+function assertToken(value, label) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) fail(`${label} is required`);
+  if (!ADDRESS_PATTERN.test(normalized)) fail(`${label} contains unsupported characters: ${value}`);
+  return normalized;
+}
+
+function validateActorAddress(address, label) {
+  const value = String(address ?? "").trim();
+  if (value === "coordinator") return value;
+  const separator = value.indexOf(":");
+  if (separator < 0) fail(`${label} must include an actor kind: ${address}`);
+  const kind = value.slice(0, separator);
+  const rest = value.slice(separator + 1);
+  if (kind === "branch") {
+    const [run, branch, ...extra] = rest.split("/");
+    if (extra.length > 0) fail(`${label} branch address has too many parts: ${address}`);
+    return `branch:${assertToken(run, `${label} branch run`)}/${assertToken(branch, `${label} branch id`)}`;
+  }
+  if (["run", "session", "tool"].includes(kind)) return `${kind}:${assertToken(rest, label)}`;
+  fail(`${label} has unsupported actor kind: ${kind}`);
+}
+
+function validateMessageType(type) {
+  const value = String(type ?? "").trim();
+  if (!MESSAGE_TYPE_PATTERN.test(value)) fail(`Invalid actor message type: ${type}`);
+  return value;
+}
+
+function validateDelivery(delivery) {
+  const value = String(delivery ?? "").trim() || "log";
+  if (!DELIVERIES.has(value)) fail(`Invalid actor message delivery: ${delivery}`);
+  return value;
+}
+
 function walkFiles(dir, maxDepth = 2, depth = 0, out = []) {
   if (depth > maxDepth || !existsSync(dir)) return out;
   for (const entry of readdirSync(dir)) {
@@ -133,6 +172,10 @@ function artifactWrite(pathValue, mode = "create") {
 }
 
 function actorMessage(type = "event", delivery = "log", to = "coordinator", from = "run:{run_id}", summary = "", metadataValue = "", correlationId = "", replyTo = "") {
+  const messageType = validateMessageType(type);
+  const messageDelivery = validateDelivery(delivery);
+  const messageTo = validateActorAddress(to, "message.to");
+  const messageFrom = validateActorAddress(from, "message.from");
   let metadata = {};
   if (metadataValue) {
     try {
@@ -154,12 +197,12 @@ function actorMessage(type = "event", delivery = "log", to = "coordinator", from
     }
   }
   console.log(JSON.stringify({
-    to,
-    from,
-    type,
-    event: type,
-    delivery,
-    summary: summary || type,
+    to: messageTo,
+    from: messageFrom,
+    type: messageType,
+    event: messageType,
+    delivery: messageDelivery,
+    summary: summary || messageType,
     body,
     ...(correlationId ? { correlation_id: correlationId } : {}),
     ...(replyTo ? { reply_to: replyTo } : {}),

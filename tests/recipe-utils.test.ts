@@ -116,6 +116,16 @@ test("recipe-utils actor-message emits deterministic envelopes", () => {
   assert.deepEqual(envelope.metadata, { path: "report.md" });
 });
 
+test("recipe-utils actor-message rejects invalid envelopes", () => {
+  const result = spawnSync(
+    script,
+    ["actor-message", "bad type", "teleport", "coordinator", "run:writer"],
+    { encoding: "utf8", input: "body" },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Invalid actor message type/);
+});
+
 test("recipe-utils run-summary reads live progress status over static run status", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipe-utils-"));
   try {

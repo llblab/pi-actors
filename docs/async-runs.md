@@ -248,7 +248,7 @@ Interactive sessions expose compact activity with minimal screen cost:
 - Triangles disappear as concrete commands exit.
 - No prompt-area widget is shown by default.
 - Terminal `done`/`failed`/unhandled `killed`/`exited` transitions trigger compact follow-up context only in the launching coordinator session; intentional `cancel`, `kill`, and `stop` actions stay out of agent context because the action already reports synchronously.
-- Full logs remain in state files and are accessed through `async_run action=tail`.
+- Full logs remain in state files and are accessed through `inspect target=run:<id> view=tail` or the low-level tail adapter.
 
 This keeps background work visible without blocking the agent, occupying the prompt area, or leaking async context into unrelated sessions.
 

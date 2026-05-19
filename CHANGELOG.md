@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.12.3: Package Metadata Hygiene
+
+- `[Package]` Normalized npm repository metadata to the canonical `git+https://` URL form. Impact: npm publish no longer needs to auto-correct package metadata.
+
 ## 0.12.2: Registry Migration Notes
 
 - `[Docs]` Added explicit rename migration instructions for copying `~/.pi/agent/auto-tools.json` or the short-lived `~/.pi/agent/tools.json` to `~/.pi/agent/actors-tools.json`. Impact: operators keep control of config migration while the package avoids silent rewrites of old registry files.

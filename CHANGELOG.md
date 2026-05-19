@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.12.8: Usage Hint Documentation
+
+- `[Docs]` Documented runtime actor-tool argument usage hints in README and tool-registry docs, and covered missing template-value hints separately from typed value errors. Impact: users and agents can discover the self-correction behavior without reading tests.
+
 ## 0.12.7: Tool Argument Usage Hints
 
 - `[Tools]` Added compact usage hints to runtime actor-tool argument errors when typed normalization or placeholder resolution fails. Impact: if an agent supplies a wrong enum/type value or misses a required template value after schema validation, the error now shows the expected call shape with required and optional fields.

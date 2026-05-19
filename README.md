@@ -361,6 +361,7 @@ See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and r
 - Tool args are derived from placeholders when `args` is omitted.
 - Typed arg declarations are progressive: `file:path`, `request_timeout:int=60000`, `speed:number=1.5`, `dry_run:bool=true`, `prompts:array`, and `mode:enum(check,fix)=check` can live in `args` or inline placeholders such as `{request_timeout:int=60000}`. They generate narrower tool schemas and runtime validation while existing untyped `args` and placeholders keep working.
 - `{arg=default}` inline defaults resolve after runtime values and stored `defaults`; `{arg??fallback}` handles empty/null fallback values; `{flag?--flag:}` ternaries map small truthy/falsy values to strings such as optional CLI flags.
+- Runtime actor-tool argument errors include a compact usage hint when typed normalization or template value resolution fails, including example call shape plus required and optional fields.
 - `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
 - Object nodes may set `parallel: true`; children receive the same stdin and joined stdout flows to the next sequence step.
 - Parallel nodes use soft-quorum semantics: failed branches are reported as degraded coverage unless failure propagation escalates to the root.

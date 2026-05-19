@@ -149,6 +149,20 @@ Supported compact types are `string` (implicit), `path`, `int`, `number`, `bool`
 
 Defaults are applied before substitution, with resolution order runtime values → stored `defaults` → inline default → error. Missing required values are rejected before or during execution. Typed runtime values are normalized before substitution: `int` and `number` values become numeric strings, booleans become `true`/`false`, and enums must match one of the declared values.
 
+When typed normalization or template value resolution fails at runtime, the tool error includes a compact usage hint:
+
+```text
+Invalid arguments for tool "check_tool": Argument mode must be one of: check, fix.
+
+Expected call shape for check_tool:
+check_tool({
+  "file": "<file>",
+  "mode": "check"
+})
+Required: file
+Optional: mode
+```
+
 Template recipe tools derive public arguments from the referenced or co-located command template when the recipe is available locally. Explicit `args` is still available when the public tool surface should be narrower or defaulted differently, or when a file-backed recipe is not available during registration. Runtime values are passed as `values`; async recipe tools also accept optional `run_id` to override the generated run id.
 
 ## File Argument Naming

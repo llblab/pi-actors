@@ -6,10 +6,18 @@
   },
   "args": [
     "prompts:array",
+    "model:string",
+    "thinking:string",
+    "tools:string",
+    "output_format:string",
     "report_path:path",
     "summary_path:path"
   ],
   "defaults": {
+    "model": "openai-codex/gpt-5.5",
+    "thinking": "off",
+    "tools": "",
+    "output_format": "Concise Markdown with assumptions and next actions.",
     "report_path": "{state_dir}/stdout.log",
     "summary_path": "{state_dir}/result.json"
   },
@@ -26,7 +34,11 @@
   "template": {
     "name": "subagent",
     "values": {
-      "prompt": "{prompts[index]}"
+      "prompt": "{prompts[index]}",
+      "model": "{model}",
+      "thinking": "{thinking}",
+      "tools": "{tools}",
+      "output_format": "{output_format}"
     }
   }
 }

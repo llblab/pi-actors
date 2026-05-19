@@ -46,7 +46,7 @@ Core subagent recipes:
 - `recipes/subagent-followup.json`: Same-context or degraded continuation.
 - `recipes/subagent-judge.json`: Post-merge/report quality judge.
 
-Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Interactive async atoms also declare mailbox metadata for their basic control, completion, and domain-result message surface. Higher-level recipes pass these knobs through instead of hard-coding local policy.
+Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. The generic prompt launchers, including `subagent-tools` and `subagents-prompts`, expose the same core model/thinking/tool/output knobs so callers do not need separate recipe families for policy tuning. Interactive async atoms also declare mailbox metadata for their basic control, completion, and domain-result message surface. Higher-level recipes pass these knobs through instead of hard-coding local policy.
 
 Register one atom:
 

@@ -14,6 +14,7 @@ Continue progressive component/pipeline expansion in small validated slices; rea
 
 - Progressively increase component parameterization and higher-level recipe composition.
   - Priority: High.
+  - Status: `subagent-tools` and `subagents-prompts` now align with the common subagent policy knobs for thinking, tools, model, and output format.
   - Scope: Iteratively strengthen atom/component recipes with public policy knobs such as model pools, stage-specific models, thinking, tool policy, output format, evidence policy, risk policy, source policy, artifact paths, mailbox contract, handoff format, resume/continuity policy, and validation gates; add higher-level component recipes that compose existing atoms into reusable coordinator patterns.
   - Exit: Each iteration adds or refines at least one atom-level parameterization surface and at least one composed recipe/pipeline, with packaged recipe import validation passing and docs/changelog updated.
 

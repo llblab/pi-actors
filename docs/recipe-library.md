@@ -99,6 +99,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-changelog-head.json`: Read the top slice of a changelog for release summary prep.
 - `recipes/utility-playlist-scan.json`: List local media files as playlist-building input.
 - `recipes/utility-run-summary.json`: Use `scripts/recipe-utils.mjs` to summarize async run state files as JSON.
+- `recipes/utility-run-ops-snapshot.json`: Combine async run summaries, event-tail JSONL, and stale/terminal recommendations into one structured operations snapshot.
 - `recipes/utility-playlist-build.json`: Use `scripts/recipe-utils.mjs` to build a filtered playlist listing as newline paths, M3U, or inline `|`-separated source.
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.

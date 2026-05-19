@@ -6,6 +6,7 @@
 - `[Actor Messages]` Added `inspect target=tool:<name>` support for registered tool actor status/schema contracts. Impact: tool actors can now be intentionally observed through the same actor vocabulary used to invoke them with `message to=tool:<name>`.
 - `[Recipe Library]` Added `pipeline-artifact-bundle`, a task-first handoff pipeline that composes optional validation, deterministic artifact writing, machine-readable manifest generation, deterministic manifest writing, and an actor-message handoff. Impact: callers who explicitly want filesystem writes can produce paired artifact and manifest paths as one reusable bundle workflow.
 - `[Component Recipes]` Aligned `subagent-tools` and `subagents-prompts` with the common subagent policy knobs for `model`, `thinking`, `tools`, and `output_format`. Impact: prompt launchers and prompt fanout can be tuned through the same public controls as the richer subagent atoms.
+- `[Recipe Library]` Added `utility-run-ops-snapshot` and routed `pipeline-async-run-ops` through it so run summaries, event tails, and stale/terminal recommendations stay in one structured input. Impact: async-run operations reports no longer lose summary context before normalization and can suggest `inspect` or `control.stop` messages without executing them.
 
 ## 0.12.9: Actor Runtime Hotfix
 

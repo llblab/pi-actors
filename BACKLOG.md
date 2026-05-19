@@ -26,7 +26,7 @@ Continue progressive component/pipeline expansion in small validated slices; rea
 
 - Grow the standard recipe library with safer structured utility transforms.
   - Priority: Low.
-  - Status: `utility-artifact-manifest` landed for machine-readable artifact metadata; `utility-artifact-write` landed for deterministic writes of accepted prepared artifacts; `utility-package-summary` landed for bounded package metadata used by release/repo-health flows; `utility-validate-recipe` landed with a dedicated recipe validator script.
+  - Status: `utility-artifact-manifest` landed for machine-readable artifact metadata; `utility-artifact-write` landed for deterministic writes of accepted prepared artifacts; `utility-package-summary` landed for bounded package metadata used by release/repo-health flows; `utility-validate-recipe` landed with a dedicated recipe validator script; `utility-run-ops-snapshot` landed for async-run summaries, event tails, and operator-gated cleanup recommendations.
   - Scope: Continue beyond listing/extraction utilities toward structured transforms for artifact packaging, report normalization, release prep, and machine-readable summaries. Keep helpers generic, parameterized, and justified by repeated recipe needs.
   - Exit: A future utility slice adds another structured transform only when a repeated recipe need appears; otherwise treat the current helper-backed utility surface as sufficient.
 

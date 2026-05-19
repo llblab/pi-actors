@@ -5,6 +5,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 function usage() {
   console.error(`Usage:
   recipe-utils.mjs run-summary <state-root>
+  recipe-utils.mjs run-ops-snapshot <state-root> <event-file> [lines] [stale-minutes]
   recipe-utils.mjs playlist <source-dir> [extensions] [max-depth] [paths|m3u|inline]
   recipe-utils.mjs changelog-section <file> <version>
   recipe-utils.mjs artifact-manifest <artifact-path> <title> <status> [summary]
@@ -75,7 +76,7 @@ function getRunStatus(run, progress, result) {
   return run.status ?? "unknown";
 }
 
-function runSummary(rootValue) {
+function collectRunSummary(rootValue) {
   const root = resolve(
     rootValue.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"),
   );
@@ -105,7 +106,43 @@ function runSummary(rootValue) {
   rows.sort((a, b) =>
     `${a.status}:${a.run}`.localeCompare(`${b.status}:${b.run}`),
   );
-  console.log(JSON.stringify(rows, null, 2));
+  return rows;
+}
+
+function runSummary(rootValue) {
+  console.log(JSON.stringify(collectRunSummary(rootValue), null, 2));
+}
+
+function tailJsonl(fileValue, linesValue = "80") {
+  const file = resolve(fileValue.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"));
+  if (!existsSync(file)) return [];
+  const lines = Number.parseInt(linesValue, 10);
+  const count = Number.isFinite(lines) && lines > 0 ? lines : 80;
+  return readFileSync(file, "utf8").trimEnd().split("\n").filter(Boolean).slice(-count).map((line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return { raw: line };
+    }
+  });
+}
+
+function runOpsSnapshot(rootValue, eventFileValue, linesValue = "80", staleMinutesValue = "60") {
+  const runs = collectRunSummary(rootValue);
+  const staleMs = Number(staleMinutesValue) * 60 * 1000;
+  const now = Date.now();
+  const recommendations = runs.flatMap((run) => {
+    const updatedMs = Date.parse(run.updated || "");
+    const stale = Number.isFinite(updatedMs) && Number.isFinite(staleMs) && now - updatedMs > staleMs;
+    if (run.status === "running" && stale) {
+      return [{ run: run.run, reason: "running-stale", suggested_message: `message to=run:${run.run} type=control.stop body=stop` }];
+    }
+    if (["failed", "exited", "killed"].includes(run.status)) {
+      return [{ run: run.run, reason: `terminal-${run.status}`, suggested_inspect: `inspect target=run:${run.run} view=tail` }];
+    }
+    return [];
+  });
+  console.log(JSON.stringify({ runs, events: tailJsonl(eventFileValue, linesValue), recommendations }, null, 2));
 }
 
 function playlist(
@@ -255,6 +292,8 @@ if (!command) {
 
 if (command === "run-summary")
   runSummary(args[0] ?? "~/.pi/agent/tmp/pi-actors/runs");
+else if (command === "run-ops-snapshot")
+  runOpsSnapshot(args[0] ?? "~/.pi/agent/tmp/pi-actors/runs", args[1] ?? "~/.pi/agent/tmp/pi-actors/runs/music/outbox.jsonl", args[2], args[3]);
 else if (command === "playlist")
   playlist(args[0] ?? "~/Music", args[1], args[2], args[3]);
 else if (command === "changelog-section")

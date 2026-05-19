@@ -108,7 +108,7 @@ Existing seeds:
 
 Implemented seed:
 
-- `pipeline-async-run-ops`: run summary → event tail → normalized operations report → artifact report.
+- `pipeline-async-run-ops`: structured run operations snapshot → normalized operations report → artifact report. The snapshot combines run summary, event tail, and recommended inspect/control messages before the LLM normalization step.
 
 ### Research Brief Cell
 

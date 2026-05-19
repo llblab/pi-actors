@@ -127,22 +127,22 @@ The core loop is:
 
 4. Do not inspect just because time passed. Inspect `status`, `tail`, or `events` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
 
-Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-actors owns the safe run-local transport, ownership checks, and coordinator attention policy.
+Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-actors owns the safe run-local transport, coordinator-session ownership checks, and coordinator attention policy.
 
 ## Tool Surface
 
 The actor-level surface is:
 
 - `spawn`: start a detached `run:<id>` actor from `file`, `recipe`, or inline `template`.
-- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, or `coordinator`.
-- `inspect`: intentionally read `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read `session:<id>` or `session:all` run inventory with optional status filtering.
+- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, `coordinator`, or `session:<id>`.
+- `inspect`: intentionally read owned `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
 
 Low-level async actions map into the actor surface instead of forming a second public model:
 
 - start → `spawn`
 - send/control → `message`
 - status/tail/events/list → `inspect`
-- stop/kill → runtime control messages with synchronous results
+- stop/kill → `message` with `control.stop` or `control.kill`, with synchronous results
 
 Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
 
@@ -172,13 +172,13 @@ Native Windows does not support this Unix FIFO contract. Use WSL/Linux/macOS for
 
 ## Coordinator Notifications
 
-The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` actor messages back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local messages bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Failures and in-flight parallel branch completions can bubble as follow-ups, while successful final leaf completions stay diagnostic to avoid flooding long sequential pipelines. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `runtime.cancel`, `runtime.kill`, and control messages such as `stop` stay out of follow-up context because the initiating message already returns synchronously. If a follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
+The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` actor messages back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local messages bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Failures and in-flight parallel branch completions can bubble as follow-ups, while successful final leaf completions stay diagnostic to avoid flooding long sequential pipelines. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `control.stop`, `control.kill`, and recipe-local stop commands stay out of follow-up context because the initiating message already returns synchronously. If a follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
 
 Ambient status indicators may refresh while work is active, but coordinator attention is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
 
 ## Run Actor Messages
 
-A recipe or script may append coordinator-bound actor message records to:
+A recipe or script may append coordinator-bound or session-bound actor message records to:
 
 ```text
 <state_dir>/outbox.jsonl
@@ -200,7 +200,7 @@ Shape:
 
 `level` is `info`, `warning`, or `error`. The public message describes sender, receiver, type, summary, and body; it does not choose notification mechanics. Runtime attention policy infers whether a coordinator-bound message stays available for explicit `inspect`, becomes a UI notification, or re-enters the launching coordinator as compact follow-up context.
 
-Use coordinator-bound messages for completion and decision points, not for every progress tick. Packaged multi-agent branch completion is a completion message and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
+Use coordinator/session-bound messages for completion and decision points, not for every progress tick. Packaged multi-agent branch completion is a completion message and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
 
 ## Cancellation And Ownership
 

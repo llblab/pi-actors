@@ -216,6 +216,15 @@ function compactSessionRuns(session: string, runs: Array<Record<string, unknown>
     .join("\n")}`;
 }
 
+function compactToolActor(name: string, tool: Record<string, unknown>): string {
+  const parameters = asRecord(tool.parameters);
+  const required = Array.isArray(parameters.required)
+    ? parameters.required.join(",")
+    : "";
+  const properties = asRecord(parameters.properties);
+  return `\ntool=${name} description=${String(tool.description ?? "").replaceAll(/\s+/g, "_")} args=${Object.keys(properties).join(",")} required=${required}`;
+}
+
 function compactActorMessageResult(
   message: ActorMessages.ActorMessage,
   result: Record<string, unknown>,
@@ -379,17 +388,44 @@ export function createSpawnToolDefinition<
   };
 }
 
-export function createInspectToolDefinition(): any {
+export interface InspectToolDeps<TContext = unknown> {
+  getTool?: (name: string) => any | undefined;
+}
+
+function getContextSessionId(ctx: unknown): string | undefined {
+  return (ctx as AsyncRunToolContext | undefined)?.sessionManager?.getSessionId?.();
+}
+
+function requireContextSessionId(ctx: unknown, actor: string): string {
+  const sessionId = getContextSessionId(ctx);
+  if (!sessionId) {
+    throw new Error(`${actor} requires a current coordinator session; use session:<id> or session:all for explicit session inventory.`);
+  }
+  return sessionId;
+}
+
+function assertRunAccessibleToContext(runId: string, ctx: unknown): Record<string, unknown> {
+  const status = AsyncRuns.getRunStatus(runId);
+  const sessionId = getContextSessionId(ctx);
+  if (sessionId && status.ownerId && status.ownerId !== sessionId) {
+    throw new Error(`run:${runId} is owned by session:${status.ownerId}; current session is ${sessionId}.`);
+  }
+  return status;
+}
+
+export function createInspectToolDefinition<TContext = unknown>(
+  deps: InspectToolDeps<TContext> = {},
+): any {
   return {
     name: "inspect",
     label: "Inspect",
     description:
-      "Intentionally inspect an actor. Supports run:<id> views: status, tail, events, artifacts, files, mailbox; and session:<id> status.",
+      "Intentionally inspect an actor. Supports run:<id> views: status, tail, events, artifacts, files, mailbox; coordinator/session status; and tool:<name> status/schema.",
     parameters: objectSchema(
       {
         lines: stringSchema("Line count for tail/events views. Default 40."),
         status: stringSchema("Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited."),
-        target: stringSchema("Actor address to inspect, e.g. run:<id>, session:<id>, or session:all."),
+        target: stringSchema("Actor address to inspect, e.g. run:<id>, coordinator, session:<id>, session:all, or tool:<name>."),
         verbose: booleanSchema("Return full JSON instead of compact text where available."),
         view: stringSchema("Inspection view: status, tail, events, artifacts, files, or mailbox."),
       },
@@ -400,12 +436,30 @@ export function createInspectToolDefinition(): any {
       params: unknown,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
-      _ctx: unknown,
+      ctx: TContext,
     ) {
       const input = asRecord(params);
       const target = String(input.target ?? "");
       const address = ActorMessages.parseActorAddress(target);
       const view = String(input.view ?? "");
+      if (address.kind === "coordinator") {
+        if (view !== "status" && view !== "runs") {
+          throw new Error("inspect coordinator supports view=status or view=runs.");
+        }
+        const session = requireContextSessionId(ctx, "inspect coordinator");
+        const runs = AsyncRuns.listRuns(undefined, typeof input.status === "string" ? input.status : undefined)
+          .map((run) => AsyncRuns.getRunStatus(String(run.state_dir)))
+          .filter((run) => run.ownerId === session);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: maybeJsonText({ session, runs }, input.verbose === true, compactSessionRuns(session, runs)),
+            },
+          ],
+          details: { session, runs },
+        };
+      }
       if (address.kind === "session") {
         if (view !== "status" && view !== "runs") {
           throw new Error("inspect session:<id> supports view=status or view=runs.");
@@ -423,11 +477,33 @@ export function createInspectToolDefinition(): any {
           details: { session: address.value, runs },
         };
       }
+      if (address.kind === "tool" && address.value) {
+        if (view !== "status" && view !== "schema") {
+          throw new Error("inspect tool:<name> supports view=status or view=schema.");
+        }
+        const tool = deps.getTool?.(address.value);
+        if (!tool) throw new Error(`tool actor not found: ${address.value}`);
+        const details = {
+          name: address.value,
+          description: tool.description,
+          parameters: tool.parameters,
+          promptSnippet: tool.promptSnippet,
+        };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: maybeJsonText(details, input.verbose === true || view === "schema", compactToolActor(address.value, details)),
+            },
+          ],
+          details,
+        };
+      }
       const runId = address.kind === "run" ? address.value : undefined;
-      if (!runId) throw new Error("inspect target must be run:<id> or session:<id>.");
+      if (!runId) throw new Error("inspect target must be run:<id>, coordinator, session:<id>, or tool:<name>.");
       switch (view) {
         case "status": {
-          const status = AsyncRuns.getRunStatus(runId);
+          const status = assertRunAccessibleToContext(runId, ctx);
           return {
             content: [
               {
@@ -439,10 +515,12 @@ export function createInspectToolDefinition(): any {
           };
         }
         case "tail": {
+          assertRunAccessibleToContext(runId, ctx);
           const text = AsyncRuns.tailRun(runId, Number(input.lines || 40));
           return { content: [{ type: "text" as const, text: `\n${text}` }], details: {} };
         }
         case "events": {
+          assertRunAccessibleToContext(runId, ctx);
           const events = AsyncRuns.readRunEvents(runId, Number(input.lines || 40));
           return {
             content: [
@@ -456,7 +534,7 @@ export function createInspectToolDefinition(): any {
         }
         case "artifacts":
         case "files": {
-          const status = AsyncRuns.getRunStatus(runId);
+          const status = assertRunAccessibleToContext(runId, ctx);
           return {
             content: [
               {
@@ -468,7 +546,7 @@ export function createInspectToolDefinition(): any {
           };
         }
         case "mailbox": {
-          const status = AsyncRuns.getRunStatus(runId);
+          const status = assertRunAccessibleToContext(runId, ctx);
           const mailbox = asRecord(status.mailbox);
           return {
             content: [
@@ -498,7 +576,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
     name: "message",
     label: "Message",
     description:
-      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator-bound run messages.",
+      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator/session-bound run messages.",
     parameters: objectSchema(
       {
         body: unionSchema([
@@ -529,9 +607,10 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       const address = ActorMessages.parseActorAddress(message.to);
       let result: Record<string, unknown>;
       if (address.kind === "run" && address.value) {
-        if (message.type === "runtime.cancel") {
+        assertRunAccessibleToContext(address.value, ctx);
+        if (message.type === "control.stop" || message.type === "control.cancel" || message.type === "runtime.cancel") {
           result = AsyncRuns.cancelRun(address.value);
-        } else if (message.type === "runtime.kill") {
+        } else if (message.type === "control.kill" || message.type === "runtime.kill") {
           result = AsyncRuns.killRun(address.value);
         } else {
           result = AsyncRuns.sendRunMessage(
@@ -540,6 +619,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           );
         }
       } else if (address.kind === "branch" && address.value) {
+        assertRunAccessibleToContext(address.value, ctx);
         result = AsyncRuns.sendRunMessage(
           address.value,
           JSON.stringify(message),
@@ -562,17 +642,27 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           tool: address.value,
           tool_result: toolResult,
         };
-      } else if (address.kind === "coordinator") {
+      } else if (address.kind === "coordinator" || address.kind === "session") {
         if (!message.from) {
-          throw new Error("message to coordinator requires from=run:<id>.");
+          throw new Error(`message to ${address.kind} requires from=run:<id>.`);
         }
         const sender = ActorMessages.parseActorAddress(message.from);
         if (sender.kind !== "run" || !sender.value) {
-          throw new Error("message to coordinator currently requires from=run:<id>.");
+          throw new Error(`message to ${address.kind} currently requires from=run:<id>.`);
+        }
+        const senderStatus = assertRunAccessibleToContext(sender.value, ctx);
+        if (address.kind === "session") {
+          if (!senderStatus.ownerId) {
+            throw new Error(`message to session:${address.value} requires sender run owner ${address.value}; got no owner.`);
+          }
+          if (senderStatus.ownerId !== address.value) {
+            throw new Error(`message to session:${address.value} requires sender run owner ${address.value}; got ${senderStatus.ownerId}.`);
+          }
         }
         result = AsyncRuns.appendRunOutboxEvent(sender.value, {
           body: message.body,
           correlation_id: message.correlation_id,
+          delivery: address.kind === "session" ? "followup" : undefined,
           event: message.type,
           from: message.from,
           metadata: message.metadata,
@@ -583,7 +673,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         });
       } else {
         throw new Error(
-          `message currently supports run:<id>, branch:<run>/<branch>, tool:<name>, and coordinator destinations; unsupported destination: ${message.to}`,
+          `message currently supports run:<id>, branch:<run>/<branch>, tool:<name>, coordinator, and session:<id> destinations; unsupported destination: ${message.to}`,
         );
       }
       return {

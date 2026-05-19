@@ -142,6 +142,34 @@ test(
   },
 );
 
+test("Inspect tool reads tool actor contracts", async () => {
+  const definition = createInspectToolDefinition({
+    getTool: (name) =>
+      name === "echo"
+        ? {
+            description: "Echo tool",
+            parameters: {
+              properties: { text: { type: "string" } },
+              required: ["text"],
+              type: "object",
+            },
+            promptSnippet: "Echo text",
+          }
+        : undefined,
+  });
+  const result = await definition.execute(
+    "call-inspect-tool",
+    { target: "tool:echo", view: "status" },
+    undefined,
+    undefined,
+    undefined,
+  );
+  assert.match(result.content[0].text, /tool=echo/);
+  assert.match(result.content[0].text, /args=text/);
+  assert.match(result.content[0].text, /required=text/);
+  assert.equal(result.details.description, "Echo tool");
+});
+
 test("Actor message tool routes tool actors to executable tools", async () => {
   const calls: Array<Record<string, unknown>> = [];
   const definition = createActorMessageToolDefinition({
@@ -226,6 +254,182 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
   }
 });
 
+test("Actor message tool routes session messages through owned run outboxes", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `session-sender-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "session-target",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    const result = await definition.execute(
+      "call-session-message",
+      {
+        body: { needs: "scope" },
+        from: `run:${runId}`,
+        summary: "Need scope",
+        to: "session:session-target",
+        type: "checkpoint.needs_scope",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /to=session:session-target/);
+    assert.match(result.content[0].text, /outbox=outbox\.jsonl/);
+    const event = JSON.parse(await readFile(join(stateDir, "outbox.jsonl"), "utf8"));
+    assert.equal(event.to, "session:session-target");
+    assert.equal(event.from, `run:${runId}`);
+    assert.equal(event.type, "checkpoint.needs_scope");
+    assert.equal(event.delivery, "followup");
+    assert.deepEqual(event.body, { needs: "scope" });
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects session messages from differently owned runs", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `session-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "session-owner",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-session-message-mismatch",
+        {
+          from: `run:${runId}`,
+          to: "session:other-session",
+          type: "checkpoint.needs_scope",
+        },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /requires sender run owner other-session; got session-owner/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects run messages across session ownership", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `run-owner-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "other-session",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-run-message-mismatch",
+        {
+          body: "stop",
+          to: `run:${runId}`,
+          type: "control.stop",
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "current-session" } },
+      ),
+      /owned by session:other-session; current session is current-session/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects coordinator messages across session ownership", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `coordinator-owner-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "other-session",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-coordinator-message-mismatch",
+        {
+          from: `run:${runId}`,
+          to: "coordinator",
+          type: "checkpoint.ready",
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "current-session" } },
+      ),
+      /owned by session:other-session; current session is current-session/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects session messages from unowned runs", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `session-unowned-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-session-message-unowned",
+        {
+          from: `run:${runId}`,
+          to: "session:target-session",
+          type: "checkpoint.needs_scope",
+        },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /requires sender run owner target-session; got no owner/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Spawn tool starts run actors with artifact metadata", async () => {
   const definition = createSpawnToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-"));
@@ -249,6 +453,49 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Inspect tool reads coordinator-owned runs", async () => {
+  const definition = createInspectToolDefinition();
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: `coordinator-inspect-${process.pid}-${Date.now()}`,
+        ownerId: "session-demo",
+        template: `${process.execPath} -e "console.log('ok')"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    const result = await definition.execute(
+      "call-inspect-coordinator",
+      { target: "coordinator", view: "status", status: "running" },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "session-demo" } },
+    );
+    assert.match(result.content[0].text, /session=session-demo/);
+    assert.equal(result.details.runs.length, 1);
+    assert.equal(result.details.runs[0].run, meta.run);
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Inspect tool requires session context for coordinator inventory", async () => {
+  const definition = createInspectToolDefinition();
+  await assert.rejects(
+    definition.execute(
+      "call-inspect-coordinator-no-context",
+      { target: "coordinator", view: "status" },
+      undefined,
+      undefined,
+      undefined,
+    ),
+    /requires a current coordinator session/,
+  );
 });
 
 test("Inspect tool reads session runs", async () => {
@@ -283,6 +530,36 @@ test("Inspect tool reads session runs", async () => {
       undefined,
     );
     assert.equal(all.details.runs.some((run: { run: string }) => run.run === meta.run), true);
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Inspect tool rejects run views across session ownership", async () => {
+  const definition = createInspectToolDefinition();
+  const runId = `inspect-owner-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "other-session",
+        template: `${process.execPath} -e "console.log('ok')"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-inspect-run-mismatch",
+        { target: `run:${runId}`, view: "status" },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "current-session" } },
+      ),
+      /owned by session:other-session; current session is current-session/,
+    );
     await waitForFile(join(stateDir, "result.json"));
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
@@ -355,12 +632,12 @@ test("Actor tools start, inspect, and stop run actors", async () => {
 
     const cancelled = await message.execute(
       "call-3",
-      { to: `run:${runId}`, type: "runtime.cancel" },
+      { to: `run:${runId}`, type: "control.stop" },
       undefined,
       undefined,
       ctx,
     );
-    assert.match(cancelled.content[0].text, /type=runtime\.cancel/);
+    assert.match(cancelled.content[0].text, /type=control\.stop/);
     assert.match(cancelled.content[0].text, /stopped=true/);
     assert.doesNotMatch(cancelled.content[0].text, /state_dir|argv/);
   } finally {

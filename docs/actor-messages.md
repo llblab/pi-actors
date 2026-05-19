@@ -58,7 +58,7 @@ Field rules:
 - `type`: required semantic message type.
 - `summary`: short human-facing line for notifications/follow-ups.
 - `body`: string or JSON payload.
-- routing/delivery is inferred from `to`, actor ownership, and coordinator runtime policy; recipes should not expose delivery knobs.
+- routing/delivery is inferred from `to`, actor ownership, and coordinator runtime policy; recipes should not expose delivery knobs. When a coordinator session is known, addressed run/branch/control messages fail closed before controlling or emitting from runs owned by another session.
 - `reply_to`: optional message id for conversational checkpoints.
 - `correlation_id`: optional task/run/workflow id.
 - `metadata`: optional structured routing or domain hints.
@@ -79,7 +79,7 @@ coordinator -> tool
 Transports differ, but the public contract does not:
 
 - `to: run:<id>` may route to FIFO, mailbox file, socket, or process stdin.
-- `to: coordinator` routes to outbox/watch/follow-up delivery when `from` names a run actor. Generic async-runner `command.done` events and explicit coordinator-bound messages include the actor envelope fields alongside the runtime event fields.
+- `to: coordinator` routes to outbox/watch/follow-up delivery when `from` names a run actor. `to: session:<id>` uses the same actor-message path only when the sender run is owned by that session, making explicit session-directed checkpoints possible without exposing runtime delivery knobs. Generic async-runner `command.done` events and explicit coordinator/session-bound messages include the actor envelope fields alongside the runtime event fields.
 - `to: branch:<run>/<branch>` routes through the parent run mailbox with the full envelope preserved so the run can dispatch branch-local control.
 - `to: tool:<name>` invokes an executable pi tool by name. Object bodies become tool parameters; primitive bodies are passed as `{ "input": body }`.
 
@@ -126,7 +126,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, plus `status`/`runs` for `session:<id>` and `session:all` actors with optional status filtering. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
+The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
 
 ## Runtime Direction
 
@@ -135,7 +135,8 @@ Runtime operations use the actor/message vocabulary:
 ```text
 create detached work -> spawn
 run-local control    -> message to run:<id>
-coordinator signal   -> message to coordinator
+run stop/kill        -> message type control.stop/control.kill
+coordinator signal   -> message to coordinator/session
 tool execution       -> message to tool:<name>
 intentional observe  -> inspect
 ```

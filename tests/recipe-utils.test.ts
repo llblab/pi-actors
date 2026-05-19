@@ -124,6 +124,30 @@ test("recipe-utils actor-message rejects invalid envelopes", () => {
   assert.match(result.stderr, /Invalid actor message type/);
 });
 
+test("recipe-utils run-ops-snapshot combines runs, events, and recommendations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
+  try {
+    await writeRun(root, "active", "running");
+    await writeRun(root, "failed", "failed");
+    const eventFile = join(root, "active", "outbox.jsonl");
+    await writeFile(eventFile, `${JSON.stringify({ event: "demo", summary: "Demo" })}\n`);
+    const { stdout } = await execFileAsync(script, ["run-ops-snapshot", root, eventFile, "5", "1"]);
+    const snapshot = JSON.parse(stdout);
+    assert.equal(snapshot.runs.length, 2);
+    assert.equal(snapshot.events[0].event, "demo");
+    assert.equal(
+      snapshot.recommendations.some((item: { suggested_message?: string }) => item.suggested_message === "message to=run:active type=control.stop body=stop"),
+      true,
+    );
+    assert.equal(
+      snapshot.recommendations.some((item: { suggested_inspect?: string }) => item.suggested_inspect === "inspect target=run:failed view=tail"),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("recipe-utils run-summary reads live progress status over static run status", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {

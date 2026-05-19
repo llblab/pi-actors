@@ -307,7 +307,7 @@ Read recent events or logs only after a follow-up asks for inspection, at a real
 { "target": "run:docs-review", "view": "tail", "lines": "80" }
 ```
 
-Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. Use `spawn` for explicit detached starts from a file or inline template, and `inspect target=session:<id> view=runs status=running` or `inspect target=session:all view=runs` for explicit inventory/diagnosis. List output includes `tool` and `recipe` when the launcher recorded that source context.
+Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. Use `spawn` for explicit detached starts from a file or inline template, and `inspect target=coordinator view=runs status=running`, `inspect target=session:<id> view=runs status=running`, or `inspect target=session:all view=runs` for explicit inventory/diagnosis. List output includes `tool` and `recipe` when the launcher recorded that source context.
 
 ## Recipe Library
 
@@ -376,8 +376,8 @@ See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and r
 - Obvious high-risk templates such as shells, interpreter eval modes, and broad filesystem mutation surface lightweight warnings without blocking existing tools.
 - `async: true` on a recipe selects detached run lifecycle; omitted or false async runs the recipe foreground through registered tools.
 - Layer boundaries stay explicit: command templates define synchronous execution graphs; template recipes add saved JSON metadata/import resolution and named `artifacts`; async runs add detached lifecycle, state, IPC, and observability.
-- `spawn`, `message`, and `inspect` are high-level actor adapters. `spawn` creates `run:<id>` actors from recipes or inline templates with optional state/artifact metadata, `message` sends one typed envelope to `run:<id>` mailboxes, `branch:<run>/<branch>` mailboxes, `tool:<name>` calls, or the coordinator attention path, and `inspect` intentionally reads `run:<id>` status/tail/events/mailbox metadata or `session:<id>` run status while the broader actor/message protocol is refined.
-- `spawn`, `message`, and `inspect` are the public async coordination vocabulary. Low-level async actions map to this actor API: start belongs to `spawn`; send/control belongs to `message`; status/tail/events/list belong to `inspect`; stop/kill are runtime control messages with synchronous results.
+- `spawn`, `message`, and `inspect` are high-level actor adapters. `spawn` creates `run:<id>` actors from recipes or inline templates with optional state/artifact metadata, `message` sends one typed envelope to `run:<id>` mailboxes, `branch:<run>/<branch>` mailboxes, `tool:<name>` calls, or coordinator/session attention paths, and `inspect` intentionally reads `run:<id>` status/tail/events/mailbox metadata, coordinator/session run status, or registered `tool:<name>` contracts while the broader actor/message protocol is refined.
+- `spawn`, `message`, and `inspect` are the public async coordination vocabulary. Low-level async actions map to this actor API: start belongs to `spawn`; send/control/stop/kill belongs to `message`; status/tail/events/list belongs to `inspect`. Prefer `control.stop` and `control.kill` for run termination; legacy `runtime.cancel` and `runtime.kill` remain compatibility aliases.
 - Actor management returns compact text by default; pass `verbose: true` to `inspect` when full JSON state is needed.
 - Detached runs inject `{run_id}` and `{state_dir}` into template values for run-local artifacts or recipe-specific control endpoints.
 - Runtime actor messages are stored in `<state_dir>/outbox.jsonl`; coordinator attention is inferred by the runtime, not exposed as recipe or message-envelope input. Follow-ups preserve bounded body previews and metadata for decision messages.

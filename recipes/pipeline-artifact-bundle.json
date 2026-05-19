@@ -1,0 +1,92 @@
+{
+  "name": "pipeline-artifact-bundle",
+  "async": true,
+  "imports": {
+    "artifactWrite": "pipeline-artifact-write.json",
+    "manifest": "utility-artifact-manifest.json",
+    "manifestWrite": "utility-artifact-write.json",
+    "validation": "utility-validation-wrapper.json",
+    "message": "utility-actor-message.json"
+  },
+  "args": [
+    "input:string",
+    "artifact_path:path",
+    "manifest_path:path",
+    "artifact_title:string",
+    "artifact_format:string",
+    "artifact_status:enum(draft,ready,blocked,accepted)",
+    "write_mode:enum(create,overwrite,append)",
+    "run_validation:bool",
+    "validation_command:string",
+    "validation_scope:string",
+    "validation_timeout_ms:int",
+    "model:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "artifact_title": "Artifact Bundle",
+    "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
+    "artifact_status": "ready",
+    "write_mode": "create",
+    "run_validation": "false",
+    "validation_command": "true",
+    "validation_scope": ".",
+    "validation_timeout_ms": "300000",
+    "model": "openai-codex/gpt-5.5",
+    "tools": ""
+  },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["artifact.bundle_ready", "artifact.written", "artifact.blocked", "run.done", "run.failed"]
+  },
+  "artifacts": {
+    "artifact": "{artifact_path}",
+    "manifest": "{manifest_path}"
+  },
+  "template": [
+    {
+      "when": "run_validation",
+      "name": "validation",
+      "values": {
+        "command": "{validation_command}",
+        "scope": "{validation_scope}",
+        "timeout_ms": "{validation_timeout_ms}"
+      }
+    },
+    {
+      "name": "artifactWrite",
+      "values": {
+        "input": "{input}",
+        "artifact_path": "{artifact_path}",
+        "artifact_format": "{artifact_format}",
+        "write_mode": "{write_mode}",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "manifest",
+      "values": {
+        "artifact_path": "{artifact_path}",
+        "title": "{artifact_title}",
+        "status": "{artifact_status}",
+        "summary": "Artifact bundle manifest for {artifact_path}."
+      }
+    },
+    {
+      "name": "manifestWrite",
+      "values": {
+        "artifact_path": "{manifest_path}",
+        "mode": "{write_mode}"
+      }
+    },
+    {
+      "name": "message",
+      "values": {
+        "type": "artifact.bundle_ready",
+        "summary": "Artifact bundle ready: {artifact_path} with manifest {manifest_path}.",
+        "metadata": "{\"artifact\":\"{artifact_path}\",\"manifest\":\"{manifest_path}\"}"
+      }
+    }
+  ]
+}

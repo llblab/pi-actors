@@ -32,7 +32,7 @@ Keep components narrow. Higher-level recipes should own composition, not hidden 
 
 Start one subagent or branch with a caller-provided prompt and model. Launchers do not judge or merge output.
 
-Example: `recipes/subagent-prompt.json`.
+Examples: `recipes/subagent-prompt.json`, `recipes/subagent-tools.json`, and `recipes/subagents-prompts.json`.
 
 ### Reviewers
 

@@ -104,24 +104,18 @@ test("Registry mutations register template recipe paths through template", async
   try {
     const result = await executeRegisterTool(
       {
-        args: "theme,out_dir=latest",
-        description: "Start shader ring recipe",
-        name: "shader_run",
-        template: "shader-ring-8-parallel.json",
+        args: "scope:path,model:string=openai-codex/gpt-5.5",
+        description: "Start docs review actor",
+        name: "docs_review",
+        template: "docs-review.json",
       },
       {},
       harness.deps,
     );
-    assert.equal(
-      harness.tools.get("shader_run")?.template,
-      "shader-ring-8-parallel.json",
-    );
-    assert.deepEqual(harness.tools.get("shader_run")?.args, [
-      "theme",
-      "out_dir",
-    ]);
-    assert.deepEqual(harness.runtimeRegistered, ["shader_run"]);
-    assert.equal(result.details.template, "shader-ring-8-parallel.json");
+    assert.equal(harness.tools.get("docs_review")?.template, "docs-review.json");
+    assert.deepEqual(harness.tools.get("docs_review")?.args, ["scope", "model"]);
+    assert.deepEqual(harness.runtimeRegistered, ["docs_review"]);
+    assert.equal(result.details.template, "docs-review.json");
   } finally {
     await harness.cleanup();
   }

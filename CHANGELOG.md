@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.5: Actor Message Snapshot Wording
+
+- `[Docs]` Replaced remaining task-first and recipe-library event-tail wording for async-run operations with actor-message tail terminology. Impact: operations guidance now matches the `message_file` recipe surface and `inspect view=messages` actor vocabulary.
+- `[Utilities]` Updated the `recipe-utils.mjs run-ops-snapshot` usage text from `<event-file>` to `<message-file>`. Impact: helper diagnostics no longer teach the old public noun.
+
 ## 0.13.4: Interactive Recipe Termination Contracts
 
 - `[Recipe Library]` Added actor-native `control.stop`, `control.cancel`, and `control.kill` mailbox accepts to interactive artifact/message/fanout recipes and the music player recipe. Impact: `inspect view=mailbox` now advertises the run termination messages that the actor runtime supports for these long-lived recipe actors.

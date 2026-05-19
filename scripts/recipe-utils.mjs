@@ -5,7 +5,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 function usage() {
   console.error(`Usage:
   recipe-utils.mjs run-summary <state-root>
-  recipe-utils.mjs run-ops-snapshot <state-root> <event-file> [lines] [stale-minutes]
+  recipe-utils.mjs run-ops-snapshot <state-root> <message-file> [lines] [stale-minutes]
   recipe-utils.mjs playlist <source-dir> [extensions] [max-depth] [paths|m3u|inline]
   recipe-utils.mjs changelog-section <file> <version>
   recipe-utils.mjs artifact-manifest <artifact-path> <title> <status> [summary]

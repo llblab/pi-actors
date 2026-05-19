@@ -98,6 +98,20 @@ function createTemplateConfig(
   return { args: cfg.args, defaults: cfg.defaults, template: cfg.template };
 }
 
+function quoteCommandDetailPart(value: string): string {
+  if (value === "") return "''";
+  if (/^[A-Za-z0-9_/:=.,@%+\-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function formatInvocationDetail(
+  invocation: CommandTemplates.CommandTemplateInvocation,
+): string {
+  return [invocation.command, ...invocation.args]
+    .map(quoteCommandDetailPart)
+    .join(" ");
+}
+
 function formatCommandDetail(commands: string[]): string {
   return commands.length === 1 ? commands[0] : commands.join(" && ");
 }
@@ -494,7 +508,7 @@ async function executeTemplateConfig(
     });
     return {
       branches: [],
-      commands: [invocation.command],
+      commands: [formatInvocationDetail(invocation)],
       failures: [],
       result,
     };

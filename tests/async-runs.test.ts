@@ -334,6 +334,62 @@ test("Recipe files can put command-template flags at the recipe top level", asyn
   }
 });
 
+test("Recipe imports execute under repeated parallel parent nodes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
+  const stateDir = join(root, "import-repeat");
+  const child = join(root, "child.json");
+  const parent = join(root, "parent.json");
+  try {
+    await writeFile(
+      child,
+      JSON.stringify(
+        {
+          name: "child",
+          args: ["word:string"],
+          template: `${process.execPath} -e "console.log(process.argv[1])" {word}-{index}-{_index}`,
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      parent,
+      JSON.stringify(
+        {
+          name: "parent",
+          state_dir: stateDir,
+          imports: {
+            node: {
+              from: "child.json",
+              values: { word: "base" },
+            },
+          },
+          repeat: 3,
+          parallel: true,
+          failure: "branch",
+          template: {
+            name: "node",
+            values: { word: "{index}" },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const meta = startRun({ file: parent }, process.cwd());
+    assert.equal(meta.run, "parent");
+    const result = await waitForResult(stateDir);
+    assert.equal(result.code, 0);
+    assert.match(String(result.command), /node .*0-0-00/);
+    const stdout = await readFile(join(stateDir, "stdout.log"), "utf8");
+    assert.match(stdout, /0-0-00/);
+    assert.match(stdout, /1-1-01/);
+    assert.match(stdout, /2-2-02/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Recipe files reject tool references", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const file = join(root, "tool-run.json");

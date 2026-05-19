@@ -50,7 +50,10 @@ test("Registered tool execution expands command and returns formatted payload", 
   ]);
   assert.deepEqual(result.content, [{ type: "text", text: "\ntext" }]);
   assert.equal(result.details.tool, "transcribe");
-  assert.equal(result.details.command, join(homedir(), "bin/transcribe"));
+  assert.equal(
+    result.details.command,
+    `${join(homedir(), "bin/transcribe")} '/tmp/a b.ogg' ru`,
+  );
   assert.equal(result.details.truncated, false);
 });
 
@@ -578,7 +581,7 @@ test("Registered tool execution continues after non-critical composition failure
   assert.deepEqual(calls, ["/work/scan", "/work/transcribe"]);
   assert.deepEqual(result.content, [{ type: "text", text: "\ntext" }]);
   assert.deepEqual(result.details.nonCriticalFailures, [
-    { code: 1, command: "/work/scan", killed: false },
+    { code: 1, command: "/work/scan /tmp/a.ogg", killed: false },
   ]);
 });
 
@@ -721,7 +724,7 @@ test("Registered tool execution retries a sequence with recover between attempts
   ]);
   assert.deepEqual(result.content, [{ type: "text", text: "\npublished" }]);
   assert.deepEqual(result.details.nonCriticalFailures, [
-    { code: 1, command: "/work/validate", killed: false },
+    { code: 1, command: "/work/validate /tmp/a.ogg", killed: false },
   ]);
 });
 

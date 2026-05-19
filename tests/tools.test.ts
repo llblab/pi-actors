@@ -68,6 +68,10 @@ test("Spawn tool definition exposes actor creation schema", () => {
   assert.equal(properties.file.type, "string");
   assert.equal(properties.state_dir.type, "string");
   assert.equal(Array.isArray(properties.template.anyOf), true);
+  assert.equal(
+    properties.template.anyOf.some((item: any) => item.type === "object"),
+    true,
+  );
   assert.equal(properties.values.type, "object");
 });
 

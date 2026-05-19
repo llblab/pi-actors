@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.2: Async Run Actor Vocabulary Docs
+
+- `[Docs]` Reframed `docs/async-runs.md` around actor messages and run-local control channels, keeping file names and transport details in implementation sections. Impact: the async-run standard now separates public `spawn`/`message`/`inspect` behavior from storage/transport mechanics more clearly.
+
 ## 0.13.1: Public Actor Vocabulary Docs
 
 - `[Docs]` Replaced remaining public README and recipe-library wording that described run coordination as events, FIFO, or outbox paths with actor-message and run-local control-channel terminology. Impact: operator-facing docs now teach the actor vocabulary first while keeping transport details in the async-run implementation reference.

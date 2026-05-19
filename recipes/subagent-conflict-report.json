@@ -17,5 +17,9 @@
     "thinking": "off",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["conflict_report.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Write a bounded conflict report. My change: {change}. Conflict: {conflict}. Preserve policy: {preserve_policy}. Output format: {output_format}"
 }

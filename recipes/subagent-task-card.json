@@ -20,5 +20,9 @@
     "thinking": "off",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["task_card.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create a bounded implementation task card. Goal: {goal}. Allowed: {allowed}. Avoided: {avoided}. Checks: {checks}. Handoff format: {handoff_format}"
 }

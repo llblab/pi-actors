@@ -18,5 +18,9 @@
     "thinking": "medium",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["evidence.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Build an evidence map for question: {question}. Sources: {sources}. Source policy: {source_policy}. Output format: {output_format}"
 }

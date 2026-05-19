@@ -456,6 +456,30 @@ test("Runtime tool argument errors include compact usage hints", async () => {
   );
 });
 
+test("Runtime tool missing value errors include compact usage hints", async () => {
+  const definition = createRuntimeToolDefinition(
+    {
+      args: ["file", "out"],
+      defaults: {},
+      description: "Copy file",
+      name: "copy_file",
+      template: "cp {file} {out}",
+    },
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+  );
+  await assert.rejects(
+    () =>
+      definition.execute(
+        "call-1",
+        { file: "README.md" },
+        undefined,
+        undefined,
+        { cwd: "/work" },
+      ),
+    /Invalid arguments for tool "copy_file": Missing command template value: out\n\nExpected call shape for copy_file:\ncopy_file\(\{\n  "file": "<file>",\n  "out": "<out>"\n\}\)\nRequired: file, out/,
+  );
+});
+
 test("Runtime tool definition marks defaulted args optional", () => {
   const definition = createRuntimeToolDefinition(
     {

@@ -522,6 +522,36 @@ test("Inspect tool reads session runs", async () => {
   }
 });
 
+test("Inspect tool rejects run views across session ownership", async () => {
+  const definition = createInspectToolDefinition();
+  const runId = `inspect-owner-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "other-session",
+        template: `${process.execPath} -e "console.log('ok')"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-inspect-run-mismatch",
+        { target: `run:${runId}`, view: "status" },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "current-session" } },
+      ),
+      /owned by session:other-session; current session is current-session/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Inspect tool reads run mailbox metadata", async () => {
   const definition = createInspectToolDefinition();
   let stateDir = "";

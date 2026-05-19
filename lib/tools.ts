@@ -495,7 +495,7 @@ export function createInspectToolDefinition<TContext = unknown>(
       if (!runId) throw new Error("inspect target must be run:<id>, coordinator, session:<id>, or tool:<name>.");
       switch (view) {
         case "status": {
-          const status = AsyncRuns.getRunStatus(runId);
+          const status = assertRunAccessibleToContext(runId, ctx);
           return {
             content: [
               {
@@ -507,10 +507,12 @@ export function createInspectToolDefinition<TContext = unknown>(
           };
         }
         case "tail": {
+          assertRunAccessibleToContext(runId, ctx);
           const text = AsyncRuns.tailRun(runId, Number(input.lines || 40));
           return { content: [{ type: "text" as const, text: `\n${text}` }], details: {} };
         }
         case "events": {
+          assertRunAccessibleToContext(runId, ctx);
           const events = AsyncRuns.readRunEvents(runId, Number(input.lines || 40));
           return {
             content: [
@@ -524,7 +526,7 @@ export function createInspectToolDefinition<TContext = unknown>(
         }
         case "artifacts":
         case "files": {
-          const status = AsyncRuns.getRunStatus(runId);
+          const status = assertRunAccessibleToContext(runId, ctx);
           return {
             content: [
               {
@@ -536,7 +538,7 @@ export function createInspectToolDefinition<TContext = unknown>(
           };
         }
         case "mailbox": {
-          const status = AsyncRuns.getRunStatus(runId);
+          const status = assertRunAccessibleToContext(runId, ctx);
           const mailbox = asRecord(status.mailbox);
           return {
             content: [

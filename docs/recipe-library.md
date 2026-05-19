@@ -173,4 +173,4 @@ Message body is currently adapted to one newline-delimited command written to `<
 - Only play trusted local files or URLs.
 - Volume is clamped to `0..100` by the wrapper.
 - Prefer a stable `run_id` such as `music` when the operator expects to control the run by name.
-- Use `message type=runtime.kill` only when graceful cancellation fails.
+- Use `message type=control.kill` only when graceful `control.stop` cancellation fails.

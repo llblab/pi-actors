@@ -529,9 +529,9 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       const address = ActorMessages.parseActorAddress(message.to);
       let result: Record<string, unknown>;
       if (address.kind === "run" && address.value) {
-        if (message.type === "runtime.cancel") {
+        if (message.type === "control.stop" || message.type === "control.cancel" || message.type === "runtime.cancel") {
           result = AsyncRuns.cancelRun(address.value);
-        } else if (message.type === "runtime.kill") {
+        } else if (message.type === "control.kill" || message.type === "runtime.kill") {
           result = AsyncRuns.killRun(address.value);
         } else {
           result = AsyncRuns.sendRunMessage(

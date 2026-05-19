@@ -135,6 +135,7 @@ Runtime operations use the actor/message vocabulary:
 ```text
 create detached work -> spawn
 run-local control    -> message to run:<id>
+run stop/kill        -> message type control.stop/control.kill
 coordinator signal   -> message to coordinator
 tool execution       -> message to tool:<name>
 intentional observe  -> inspect

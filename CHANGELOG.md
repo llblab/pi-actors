@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `[Actor Messages]` Added actor-native `control.stop`, `control.cancel`, and `control.kill` handling for run termination while retaining `runtime.cancel` and `runtime.kill` as compatibility aliases. Impact: public examples can use the same control-message vocabulary declared by recipe mailboxes instead of preserving runtime action names.
+
 ## 0.12.9: Actor Runtime Hotfix
 
 - `[Async Runs]` Protected the `runs` state root from session-start temp pruning, tightened live-run status around owned runner processes, and kept non-Linux FIFO control usable without `/proc`-only checks. Impact: long-lived actors are less likely to disappear or be misclassified during startup and stale PID reuse is reduced on Linux.

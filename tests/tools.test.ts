@@ -355,12 +355,12 @@ test("Actor tools start, inspect, and stop run actors", async () => {
 
     const cancelled = await message.execute(
       "call-3",
-      { to: `run:${runId}`, type: "runtime.cancel" },
+      { to: `run:${runId}`, type: "control.stop" },
       undefined,
       undefined,
       ctx,
     );
-    assert.match(cancelled.content[0].text, /type=runtime\.cancel/);
+    assert.match(cancelled.content[0].text, /type=control\.stop/);
     assert.match(cancelled.content[0].text, /stopped=true/);
     assert.doesNotMatch(cancelled.content[0].text, /state_dir|argv/);
   } finally {

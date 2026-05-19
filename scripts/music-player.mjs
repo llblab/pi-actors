@@ -46,7 +46,7 @@ function usage() {
   music-player.mjs <pause|resume|toggle|next|previous|stop|status> <state-dir>
   music-player.mjs control <state-dir> <play|pause|toggle|next|previous|stop|status>
 
-Runs a small foreground music player so pi-auto-tools can own it as an async run.
+Runs a small foreground music player so pi-actors can own it as an actor run.
 Actor message bodies are adapted to newline-delimited commands at <state-dir>/control.fifo.
 Prefer message to=run:<run> type=player.<command> body=<command>, or use direct control commands below.
 Supported players: auto, mpv, ffplay, cvlc, play.
@@ -498,7 +498,7 @@ async function playMain(args) {
     rawStateDir ||
       join(
         process.env.TMPDIR || "/tmp",
-        `pi-auto-tools-music-player-${process.pid}`,
+        `pi-actors-music-player-${process.pid}`,
       ),
   );
   mkdirSync(stateDir, { recursive: true });

@@ -6,7 +6,7 @@
     "max_depth:int"
   ],
   "defaults": {
-    "state_root": "~/.pi/agent/tmp/pi-auto-tools/runs",
+    "state_root": "~/.pi/agent/tmp/pi-actors/runs",
     "file_name": "run.json",
     "max_depth": "2"
   },

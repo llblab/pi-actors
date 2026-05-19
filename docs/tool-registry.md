@@ -1,12 +1,12 @@
 # Tool Registry
 
-`pi-auto-tools` stores registered command-template tools and template-recipe launchers in `~/.pi/agent/auto-tools.json` and registers them automatically on session start.
+`pi-actors` stores registered command-template tools and template-recipe launchers in `~/.pi/agent/tools.json` and registers them automatically on session start.
 
 This document is the local adaptation of the portable [Command Template Standard](./command-templates.md).
 
 ## Registering Tools
 
-`register_tool` is the interactive API for listing, creating, updating, or deleting persistent tools. Call it without arguments to list registered auto-tools.
+`register_tool` is the interactive API for listing, creating, updating, or deleting persistent tools. Call it without arguments to list registered tools.
 
 ```text
 register_tool name=transcribe_groq \
@@ -87,7 +87,7 @@ Tool names come from the top-level registry keys. Tool entries define `template`
 
 ## Args and Defaults
 
-When `args` is omitted, `pi-auto-tools` derives tool parameters from placeholders in `template`:
+When `args` is omitted, `pi-actors` derives tool parameters from placeholders in `template`:
 
 ```text
 template="~/bin/transcribe {file} {lang=ru} {model=whisper-large-v3-turbo}"

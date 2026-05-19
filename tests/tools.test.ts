@@ -33,7 +33,7 @@ async function waitForFile(path: string): Promise<void> {
 
 function createRegistryDeps() {
   return {
-    configPath: "/tmp/auto-tools.json",
+    configPath: "/tmp/tools.json",
     getActiveTools: () => [],
     getExternalToolConflict: () => undefined,
     getTools: () => new Map<string, RegisteredTool>(),
@@ -99,7 +99,7 @@ test(
   { skip: process.platform === "win32" },
   async () => {
     const definition = createActorMessageToolDefinition();
-    const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-message-"));
+    const root = await mkdtemp(join(tmpdir(), "pi-actors-message-"));
     let stateDir = "";
     const readyFile = join(root, "ready");
     const messageFile = join(root, "message");
@@ -185,7 +185,7 @@ test("Actor message tool routes tool actors to executable tools", async () => {
 
 test("Actor message tool routes coordinator messages through run outboxes", async () => {
   const definition = createActorMessageToolDefinition();
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-message-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-message-"));
   let stateDir = "";
   try {
     const meta = startRun(
@@ -226,7 +226,7 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
 
 test("Spawn tool starts run actors with artifact metadata", async () => {
   const definition = createSpawnToolDefinition();
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-spawn-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-"));
   const stateDir = join(root, "spawned");
   try {
     const result = await definition.execute(

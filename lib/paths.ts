@@ -1,7 +1,7 @@
 /**
  * Registry path helpers
  * Zones: paths, registry config, temp directory
- * Owns agent directory, auto-tools config, recipe root, and async run state root resolution
+ * Owns agent directory, tools config, recipe root, and actor run state root resolution
  */
 
 import { homedir } from "node:os";
@@ -16,12 +16,12 @@ export function getAgentDir(
 }
 
 export function getConfigPath(agentDir = getAgentDir()): string {
-  return join(agentDir, "auto-tools.json");
+  return join(agentDir, "tools.json");
 }
 
 export function getExtensionTmpDir(
   agentDir = getAgentDir(),
-  extensionName = "pi-auto-tools",
+  extensionName = "pi-actors",
 ): string {
   return join(agentDir, "tmp", extensionName);
 }

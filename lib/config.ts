@@ -1,7 +1,7 @@
 /**
  * Persistent tool registry config helpers
  * Zones: registry config, persistence, migration boundary
- * Owns auto-tools.json loading, normalization, unsupported-shape rejection, and serialization
+ * Owns tools.json loading, normalization, unsupported-shape rejection, and serialization
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -116,7 +116,7 @@ export function normalizeStoredTool(
   if (!template && typeof record.script === "string") {
     return {
       changed: false,
-      warning: `Tool "${name}" uses unsupported script config. Use template because pi-auto-tools cannot load script entries.`,
+      warning: `Tool "${name}" uses unsupported script config. Use template because pi-actors cannot load script entries.`,
     };
   }
   if (Object.hasOwn(record, "tool")) {

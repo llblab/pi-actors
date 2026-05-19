@@ -151,7 +151,7 @@ test("Stored tool normalization accepts co-located template recipes", () => {
       async: true,
       description: "Start review run",
       name: "review-docs",
-      state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
+      state_dir: "~/.pi/agent/tmp/pi-actors/runs/review-docs",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     },
@@ -166,7 +166,7 @@ test("Stored tool normalization accepts co-located template recipes", () => {
     recipe: {
       async: true,
       name: "review-docs",
-      state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
+      state_dir: "~/.pi/agent/tmp/pi-actors/runs/review-docs",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     },
@@ -397,7 +397,7 @@ test("Serialized co-located template recipe launchers keep recipe metadata befor
     recipe: {
       async: true,
       name: "review",
-      state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review",
+      state_dir: "~/.pi/agent/tmp/pi-actors/runs/review",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     },
@@ -431,8 +431,8 @@ test("Serialized template recipe launchers keep template path", () => {
 });
 
 test("Config save and load round-trip template-backed tools", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-auto-tools-config-"));
-  const path = join(dir, "auto-tools.json");
+  const dir = await mkdtemp(join(tmpdir(), "pi-actors-config-"));
+  const path = join(dir, "tools.json");
   try {
     const tool: RegisteredTool = {
       name: "transcribe",
@@ -455,8 +455,8 @@ test("Config save and load round-trip template-backed tools", async () => {
 });
 
 test("Config load keeps last duplicate and reports warning", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-auto-tools-config-"));
-  const path = join(dir, "auto-tools.json");
+  const dir = await mkdtemp(join(tmpdir(), "pi-actors-config-"));
+  const path = join(dir, "tools.json");
   try {
     await writeFile(
       path,

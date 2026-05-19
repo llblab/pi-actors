@@ -72,7 +72,7 @@ async function writeRun(
 }
 
 test("Run observability summarizes state root", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
     await writeRun(root, "running", "running");
     await writeRun(root, "done", "done");
@@ -94,7 +94,7 @@ test("Run observability summarizes state root", async () => {
 });
 
 test("Run observability filters summaries by coordinator owner", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
     await writeRun(root, "alpha", "running", [], 3, "session-a");
     await writeRun(root, "beta", "running", [], 2, "session-b");
@@ -118,7 +118,7 @@ test("Run observability filters summaries by coordinator owner", async () => {
 });
 
 test("Run observability detects script-authored outbox events", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
     await writeRun(root, "music", "running", [], 0, "session-a");
     await writeFile(
@@ -190,7 +190,7 @@ test("Run observability suppresses terminal follow-up after handled stop message
 });
 
 test("Run observability keeps command done follow-ups compact", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
     await writeRun(root, "review", "running", [], 0, "session-a");
     await writeFile(
@@ -293,7 +293,7 @@ test("Run observability renders animated subagent triangles", () => {
 });
 
 test("Run observability counts active parallel branches", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
     await writeRun(root, "alpha", "running", [], 3);
     await writeRun(root, "beta", "running", [], 2);
@@ -308,7 +308,7 @@ test("Run observability counts active parallel branches", async () => {
 });
 
 test("Run observability keeps at least one triangle per running async run", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
     await writeRun(root, "alpha", "running", [], 0);
     await writeRun(root, "beta", "running", [], 2);

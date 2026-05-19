@@ -6,7 +6,7 @@
     "version:string"
   ],
   "defaults": {
-    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "repo": "~/.pi/agent/extensions/pi-actors",
     "file": "CHANGELOG.md",
     "version": "0.7.1"
   },

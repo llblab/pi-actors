@@ -13,7 +13,7 @@ import type { RegisteredTool } from "../lib/config.ts";
 import { executeRegisterTool } from "../lib/registry.ts";
 
 async function createHarness() {
-  const dir = await mkdtemp(join(tmpdir(), "pi-auto-tools-registry-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-actors-registry-"));
   const tools = new Map<string, RegisteredTool>();
   const notifications: string[] = [];
   const runtimeRegistered: string[] = [];
@@ -22,7 +22,7 @@ async function createHarness() {
     activeTools: () => activeTools,
     cleanup: () => rm(dir, { recursive: true, force: true }),
     deps: {
-      configPath: join(dir, "auto-tools.json"),
+      configPath: join(dir, "tools.json"),
       getActiveTools: () => activeTools,
       getExternalToolConflict: () => undefined,
       getTools: () => tools,
@@ -135,7 +135,7 @@ test("Registry mutations register co-located template recipes", async () => {
         async: true,
         description: "Start review run",
         name: "review_run",
-        state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
+        state_dir: "~/.pi/agent/tmp/pi-actors/runs/review-docs",
         template: "review {scope}",
         values: { prompt: "Review risks." },
       },
@@ -145,7 +145,7 @@ test("Registry mutations register co-located template recipes", async () => {
     assert.deepEqual(harness.tools.get("review_run")?.recipe, {
       async: true,
       name: "review_run",
-      state_dir: "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
+      state_dir: "~/.pi/agent/tmp/pi-actors/runs/review-docs",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     });
@@ -154,7 +154,7 @@ test("Registry mutations register co-located template recipes", async () => {
     assert.equal(result.details.recipeName, "review_run");
     assert.equal(
       result.details.state_dir,
-      "~/.pi/agent/tmp/pi-auto-tools/runs/review-docs",
+      "~/.pi/agent/tmp/pi-actors/runs/review-docs",
     );
   } finally {
     await harness.cleanup();

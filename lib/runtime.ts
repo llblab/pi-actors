@@ -1,5 +1,5 @@
 /**
- * Auto-tool runtime coordinator
+ * Tool registry runtime coordinator
  * Zones: runtime coordination, registry loading, pi tools
  * Owns persisted tool loading, conflict detection, runtime registration, and warning notification
  */
@@ -19,7 +19,7 @@ export interface ToolInfoLike {
   name: string;
 }
 
-export interface AutoToolsRuntimeDeps {
+export interface ToolRegistryRuntimeDeps {
   configPath: string;
   exec: RegisteredToolExec;
   getAllTools: () => ToolInfoLike[];
@@ -29,7 +29,7 @@ export interface AutoToolsRuntimeDeps {
   reservedToolNames: Set<string>;
 }
 
-export interface AutoToolsRuntime {
+export interface ToolRegistryRuntime {
   getExternalToolConflict(name: string): string | undefined;
   getTools(): Map<string, Config.RegisteredTool>;
   loadTools(ctx: RuntimeContext): void;
@@ -42,8 +42,8 @@ export interface AutoToolsRuntime {
 }
 
 export function createAutoToolsRuntime(
-  deps: AutoToolsRuntimeDeps,
-): AutoToolsRuntime {
+  deps: ToolRegistryRuntimeDeps,
+): ToolRegistryRuntime {
   const tools = new Map<string, Config.RegisteredTool>();
   const runtimeTools = new Set<string>();
   function notify(
@@ -57,7 +57,7 @@ export function createAutoToolsRuntime(
     if (runtimeTools.has(name)) return undefined;
     const existing = deps.getAllTools().find((tool) => tool.name === name);
     return existing
-      ? `Tool "${name}" is already registered outside pi-auto-tools.`
+      ? `Tool "${name}" is already registered outside pi-actors.`
       : undefined;
   }
   function registerRuntimeTool(cfg: Config.RegisteredTool) {

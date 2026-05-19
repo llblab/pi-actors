@@ -254,7 +254,7 @@ if (!command) {
 }
 
 if (command === "run-summary")
-  runSummary(args[0] ?? "~/.pi/agent/tmp/pi-auto-tools/runs");
+  runSummary(args[0] ?? "~/.pi/agent/tmp/pi-actors/runs");
 else if (command === "playlist")
   playlist(args[0] ?? "~/Music", args[1], args[2], args[3]);
 else if (command === "changelog-section")

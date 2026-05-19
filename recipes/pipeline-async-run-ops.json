@@ -16,8 +16,8 @@
     "tools:string"
   ],
   "defaults": {
-    "state_root": "~/.pi/agent/tmp/pi-auto-tools/runs",
-    "event_file": "~/.pi/agent/tmp/pi-auto-tools/runs/music/outbox.jsonl",
+    "state_root": "~/.pi/agent/tmp/pi-actors/runs",
+    "event_file": "~/.pi/agent/tmp/pi-actors/runs/music/outbox.jsonl",
     "lines": "80",
     "artifact_path": "./async-run-ops.md",
     "model": "openai-codex/gpt-5.5",

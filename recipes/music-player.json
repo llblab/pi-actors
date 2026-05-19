@@ -11,7 +11,7 @@
     "state_dir:path"
   ],
   "defaults": {
-    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "repo": "~/.pi/agent/extensions/pi-actors",
     "command": "play",
     "loop": "true",
     "volume": "70",

@@ -55,11 +55,13 @@ export interface RunTransition {
 }
 
 export interface RunOutboxEvent {
+  body?: unknown;
   data?: unknown;
   delivery: RunOutboxDelivery;
   event: string;
   id: string;
   level: RunOutboxLevel;
+  metadata?: Record<string, unknown>;
   run: string;
   stateDir: string;
   summary: string;
@@ -351,11 +353,13 @@ function parseOutboxLine(
         ? raw.id.trim()
         : `${run.run}:${index}`;
     return {
+      ...(raw.body !== undefined ? { body: raw.body } : {}),
       ...(raw.data !== undefined ? { data: raw.data } : {}),
       delivery: normalizeOutboxDelivery(raw.delivery),
       event,
       id,
       level: normalizeOutboxLevel(raw.level),
+      ...(raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { metadata: raw.metadata as Record<string, unknown> } : {}),
       run: run.run,
       stateDir: run.stateDir,
       summary,
@@ -465,9 +469,17 @@ function getOutboxField(event: RunOutboxEvent, key: string): unknown {
     : undefined;
 }
 
+function formatBodyPreview(body: unknown): string {
+  if (body === undefined) return "";
+  const rendered = typeof body === "string" ? body : JSON.stringify(body);
+  const compact = rendered.replaceAll(/\s+/g, " ").trim();
+  if (!compact) return "";
+  return `\nBody: ${compact.length > 500 ? `${compact.slice(0, 500)}…` : compact}`;
+}
+
 export function formatRunOutboxMessage(event: RunOutboxEvent): string {
   if (event.event === "command.done") return `Run ${event.run}: ${event.summary}`;
-  return `Run ${event.run}: ${event.summary}${formatNamedArtifacts(getOutboxField(event, "artifacts"))}${formatRunFileList(getOutboxField(event, "run_files"))}`;
+  return `Run ${event.run}: ${event.summary}${formatBodyPreview(event.body)}${formatNamedArtifacts(getOutboxField(event, "artifacts"))}${formatRunFileList(getOutboxField(event, "run_files"))}`;
 }
 
 export function getRunTransitionNotificationType(

@@ -20,6 +20,7 @@ import {
   writeSync,
 } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
+import { platform } from "node:os";
 
 import type {
   CommandTemplateFailureScope,
@@ -76,6 +77,7 @@ export interface RunOutboxEvent {
   from?: string;
   id: string;
   level: RunOutboxLevel;
+  metadata?: Record<string, unknown>;
   reply_to?: string;
   run: string;
   state_dir: string;
@@ -225,6 +227,7 @@ function isAlive(pid: number): boolean {
 }
 
 function pidMatchesRun(pid: number, cwd: string, stateDir: string): boolean {
+  if (platform() !== "linux" || !existsSync(`/proc/${pid}`)) return isAlive(pid);
   try {
     const procCwd = readlinkSync(`/proc/${pid}/cwd`);
     const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
@@ -405,6 +408,7 @@ function normalizeRunOutboxEvent(
     ...(typeof record.correlation_id === "string" ? { correlation_id: record.correlation_id } : {}),
     ...(record.data !== undefined ? { data: record.data } : {}),
     delivery: normalizeRunOutboxDelivery(record.delivery),
+    ...(record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata) ? { metadata: record.metadata as Record<string, unknown> } : {}),
     event,
     ...(typeof record.from === "string" ? { from: record.from } : {}),
     id,
@@ -442,11 +446,16 @@ export function getRunStatus(runOrDir: string): Record<string, unknown> {
   if (!meta) throw new Error(`Run not found: ${runOrDir}`);
   const result = readJson(join(stateDir, "result.json"));
   const pid = Number(meta.pid || 0);
+  const aliveOwnedRunner = Boolean(
+    pid &&
+      isAlive(pid) &&
+      (!Array.isArray(meta.argv) || pidMatchesRun(pid, String(meta.cwd ?? ""), stateDir)),
+  );
   const status: AsyncRunStatus = result
     ? Number(result.code ?? 0) === 0
       ? "done"
       : "failed"
-    : isAlive(pid)
+    : aliveOwnedRunner
       ? "running"
       : (getInterruptedRunStatus(stateDir) ?? "exited");
   const terminalHandled = readJson(join(stateDir, "terminal-handled.json"));
@@ -530,6 +539,7 @@ export function appendRunOutboxEvent(
     event?: string;
     from?: string;
     level?: string;
+    metadata?: Record<string, unknown>;
     reply_to?: string;
     summary?: string;
     to?: string;
@@ -549,6 +559,7 @@ export function appendRunOutboxEvent(
     event: type,
     from: event.from || `run:${run}`,
     level: normalizeRunOutboxLevel(event.level),
+    ...(event.metadata ? { metadata: event.metadata } : {}),
     ...(event.reply_to ? { reply_to: event.reply_to } : {}),
     summary: event.summary || type,
     to,

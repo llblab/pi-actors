@@ -575,6 +575,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           correlation_id: message.correlation_id,
           event: message.type,
           from: message.from,
+          metadata: message.metadata,
           reply_to: message.reply_to,
           summary: message.summary,
           to: message.to,

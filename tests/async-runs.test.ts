@@ -117,7 +117,7 @@ test("Async runs emit command completion outbox events", async () => {
     assert.equal(outbox[0].type, "command.done");
     assert.equal(outbox[0].to, "coordinator");
     assert.equal(outbox[0].from, "run:command-outbox");
-    assert.equal(outbox[0].delivery, "followup");
+    assert.equal(outbox[0].delivery, "log");
     assert.match(String(outbox[0].summary), /completed with code 0/);
     assert.deepEqual(
       (outbox[0].data as Record<string, unknown>).artifacts,
@@ -165,6 +165,7 @@ test("Async runs append actor messages to outbox", async () => {
       delivery: "followup",
       event: "checkpoint.ready",
       from: "run:actor-outbox",
+      metadata: { checkpoint: "ready" },
       summary: "Ready for approval",
       to: "coordinator",
       type: "checkpoint.ready",
@@ -176,6 +177,7 @@ test("Async runs append actor messages to outbox", async () => {
     assert.equal(events[0].to, "coordinator");
     assert.equal(events[0].from, "run:actor-outbox");
     assert.equal(events[0].delivery, "followup");
+    assert.deepEqual(events[0].metadata, { checkpoint: "ready" });
     assert.deepEqual(events[0].body, { ok: true });
   } finally {
     await rm(root, { recursive: true, force: true });

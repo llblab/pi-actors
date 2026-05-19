@@ -13,6 +13,7 @@ export async function cleanupStaleTempEntries(
   tempDir: string,
   maxAgeMs = DEFAULT_TEMP_MAX_AGE_MS,
   now = Date.now(),
+  preservedEntries = new Set(["runs"]),
 ): Promise<number> {
   let entries: Array<{ name: string }>;
   let removed = 0;
@@ -22,6 +23,7 @@ export async function cleanupStaleTempEntries(
     return 0;
   }
   for (const entry of entries) {
+    if (preservedEntries.has(entry.name)) continue;
     const path = join(tempDir, entry.name);
     try {
       const info = await stat(path);

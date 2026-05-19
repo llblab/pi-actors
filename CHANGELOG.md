@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `[Actor Messages]` Added `tool:<name>` message routing to invoke executable pi tools through the same addressed envelope used for run, branch, and coordinator actors, and migrated `subagent-event` to request actor-message-envelope-shaped records. Impact: tool calls and recipe-authored event records can participate in the actor/message protocol without adding another durable verb.
+- `[Actor Messages]` Added `tool:<name>` message routing to invoke executable pi tools through the same addressed envelope used for run, branch, and coordinator actors, migrated `subagent-event` to request actor-message-envelope-shaped records, and updated async-run docs to prefer actor `message`/`spawn` vocabulary for coordination examples. Impact: tool calls and recipe-authored event records can participate in the actor/message protocol without adding another durable verb.
 - `[Recipe Library]` Added mailbox metadata to all async packaged recipes, including prompt launchers, quorum, core subagent atoms, the review coordinator, and pipelines, with regression coverage requiring mailbox declarations for async packaged recipes. Impact: async subagent launchers and composed pipelines now advertise their basic control, completion, artifact, and domain-result message surface to `inspect view=mailbox`.
 
 ## 0.10.0: Actor Orchestration and Artifact Pipelines

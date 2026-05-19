@@ -423,14 +423,14 @@ export function createInspectToolDefinition<TContext = unknown>(
     name: "inspect",
     label: "Inspect",
     description:
-      "Intentionally inspect an actor. Supports run:<id> views: status, tail, events, artifacts, files, mailbox; coordinator/session status; and tool:<name> status/schema.",
+      "Intentionally inspect an actor. Supports run:<id> views: status, tail, messages, artifacts, files, mailbox; coordinator/session status; and tool:<name> status/schema.",
     parameters: objectSchema(
       {
-        lines: stringSchema("Line count for tail/events views. Default 40."),
+        lines: stringSchema("Line count for tail/messages views. Default 40."),
         status: stringSchema("Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited."),
         target: stringSchema("Actor address to inspect, e.g. run:<id>, coordinator, session:<id>, session:all, or tool:<name>."),
         verbose: booleanSchema("Return full JSON instead of compact text where available."),
-        view: stringSchema("Inspection view: status, tail, messages, events, artifacts, files, or mailbox."),
+        view: stringSchema("Inspection view: status, tail, messages, artifacts, files, or mailbox."),
       },
       ["target", "view"],
     ),
@@ -522,8 +522,7 @@ export function createInspectToolDefinition<TContext = unknown>(
           const text = AsyncRuns.tailRun(runId, Number(input.lines || 40));
           return { content: [{ type: "text" as const, text: `\n${text}` }], details: {} };
         }
-        case "messages":
-        case "events": {
+        case "messages": {
           assertRunAccessibleToContext(runId, ctx);
           const messages = AsyncRuns.readRunEvents(runId, Number(input.lines || 40));
           return {
@@ -533,7 +532,7 @@ export function createInspectToolDefinition<TContext = unknown>(
                 text: maybeJsonText(messages, input.verbose === true, compactRunEvents(messages)),
               },
             ],
-            details: { messages, events: messages },
+            details: { messages },
           };
         }
         case "artifacts":
@@ -563,7 +562,7 @@ export function createInspectToolDefinition<TContext = unknown>(
           };
         }
         default:
-          throw new Error("inspect view must be one of: status, tail, messages, events, artifacts, files, mailbox.");
+          throw new Error("inspect view must be one of: status, tail, messages, artifacts, files, mailbox.");
       }
     },
   };

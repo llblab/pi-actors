@@ -279,6 +279,35 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
   }
 });
 
+test("Inspect tool reads coordinator-owned runs", async () => {
+  const definition = createInspectToolDefinition();
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: `coordinator-inspect-${process.pid}-${Date.now()}`,
+        ownerId: "session-demo",
+        template: `${process.execPath} -e "console.log('ok')"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    const result = await definition.execute(
+      "call-inspect-coordinator",
+      { target: "coordinator", view: "status", status: "running" },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "session-demo" } },
+    );
+    assert.match(result.content[0].text, /session=session-demo/);
+    assert.equal(result.details.runs.length, 1);
+    assert.equal(result.details.runs[0].run, meta.run);
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Inspect tool reads session runs", async () => {
   const definition = createInspectToolDefinition();
   let stateDir = "";

@@ -392,6 +392,10 @@ export interface InspectToolDeps<TContext = unknown> {
   getTool?: (name: string) => any | undefined;
 }
 
+function getContextSessionId(ctx: unknown): string | undefined {
+  return (ctx as AsyncRunToolContext | undefined)?.sessionManager?.getSessionId?.();
+}
+
 export function createInspectToolDefinition<TContext = unknown>(
   deps: InspectToolDeps<TContext> = {},
 ): any {
@@ -399,12 +403,12 @@ export function createInspectToolDefinition<TContext = unknown>(
     name: "inspect",
     label: "Inspect",
     description:
-      "Intentionally inspect an actor. Supports run:<id> views: status, tail, events, artifacts, files, mailbox; session:<id> status; and tool:<name> status/schema.",
+      "Intentionally inspect an actor. Supports run:<id> views: status, tail, events, artifacts, files, mailbox; coordinator/session status; and tool:<name> status/schema.",
     parameters: objectSchema(
       {
         lines: stringSchema("Line count for tail/events views. Default 40."),
         status: stringSchema("Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited."),
-        target: stringSchema("Actor address to inspect, e.g. run:<id>, session:<id>, session:all, or tool:<name>."),
+        target: stringSchema("Actor address to inspect, e.g. run:<id>, coordinator, session:<id>, session:all, or tool:<name>."),
         verbose: booleanSchema("Return full JSON instead of compact text where available."),
         view: stringSchema("Inspection view: status, tail, events, artifacts, files, or mailbox."),
       },
@@ -415,12 +419,30 @@ export function createInspectToolDefinition<TContext = unknown>(
       params: unknown,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
-      _ctx: unknown,
+      ctx: TContext,
     ) {
       const input = asRecord(params);
       const target = String(input.target ?? "");
       const address = ActorMessages.parseActorAddress(target);
       const view = String(input.view ?? "");
+      if (address.kind === "coordinator") {
+        if (view !== "status" && view !== "runs") {
+          throw new Error("inspect coordinator supports view=status or view=runs.");
+        }
+        const session = getContextSessionId(ctx) ?? "current";
+        const runs = AsyncRuns.listRuns(undefined, typeof input.status === "string" ? input.status : undefined)
+          .map((run) => AsyncRuns.getRunStatus(String(run.state_dir)))
+          .filter((run) => !getContextSessionId(ctx) || run.ownerId === getContextSessionId(ctx));
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: maybeJsonText({ session, runs }, input.verbose === true, compactSessionRuns(session, runs)),
+            },
+          ],
+          details: { session, runs },
+        };
+      }
       if (address.kind === "session") {
         if (view !== "status" && view !== "runs") {
           throw new Error("inspect session:<id> supports view=status or view=runs.");
@@ -461,7 +483,7 @@ export function createInspectToolDefinition<TContext = unknown>(
         };
       }
       const runId = address.kind === "run" ? address.value : undefined;
-      if (!runId) throw new Error("inspect target must be run:<id>, session:<id>, or tool:<name>.");
+      if (!runId) throw new Error("inspect target must be run:<id>, coordinator, session:<id>, or tool:<name>.");
       switch (view) {
         case "status": {
           const status = AsyncRuns.getRunStatus(runId);

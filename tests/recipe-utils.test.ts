@@ -136,11 +136,20 @@ test("recipe-utils run-ops-snapshot combines runs, events, and recommendations",
     assert.equal(snapshot.runs.length, 2);
     assert.equal(snapshot.events[0].event, "demo");
     assert.equal(
-      snapshot.recommendations.some((item: { suggested_message?: string }) => item.suggested_message === "message to=run:active type=control.stop body=stop"),
+      snapshot.recommendations.some(
+        (item: { suggested_message?: Record<string, unknown> }) =>
+          item.suggested_message?.to === "run:active" &&
+          item.suggested_message?.type === "control.stop" &&
+          item.suggested_message?.body === "stop",
+      ),
       true,
     );
     assert.equal(
-      snapshot.recommendations.some((item: { suggested_inspect?: string }) => item.suggested_inspect === "inspect target=run:failed view=tail"),
+      snapshot.recommendations.some(
+        (item: { suggested_inspect?: Record<string, unknown> }) =>
+          item.suggested_inspect?.target === "run:failed" &&
+          item.suggested_inspect?.view === "tail",
+      ),
       true,
     );
   } finally {

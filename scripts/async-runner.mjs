@@ -51,6 +51,11 @@ function quoteCommandDetailPart(value) {
 function formatCommandDetail(command, args) {
   return [command, ...args].map(quoteCommandDetailPart).join(" ");
 }
+function summarizeCommandDetail(commandDetail) {
+  return commandDetail.length > 160
+    ? `${commandDetail.slice(0, 157)}...`
+    : commandDetail;
+}
 function getCommandDoneDelivery(result) {
   return result.code !== 0 || activeSubagents > 0 ? "followup" : "log";
 }
@@ -106,7 +111,7 @@ async function observedExec(command, args, options) {
   });
   outbox(
     "command.done",
-    `Command ${commandDetail} completed with code ${result.code}`,
+    `Command ${summarizeCommandDetail(commandDetail)} completed with code ${result.code}`,
     {
       activeSubagents,
       ...(meta.artifacts ? { artifacts: meta.artifacts } : {}),

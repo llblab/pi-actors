@@ -89,6 +89,7 @@ test("Async runs write state files and finish", async () => {
 test("Async runs emit command completion outbox events", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "command-outbox");
+  const longArg = "x".repeat(220);
   try {
     startRun(
       {
@@ -99,7 +100,7 @@ test("Async runs emit command completion outbox events", async () => {
           report: "{report_path}",
           summary: "{state_dir}/result.json",
         },
-        template: `${process.execPath} -e "console.log('artifact')"`,
+        template: `${process.execPath} -e "console.log('artifact')" ${longArg}`,
       },
       process.cwd(),
     );
@@ -119,6 +120,11 @@ test("Async runs emit command completion outbox events", async () => {
     assert.equal(outbox[0].from, "run:command-outbox");
     assert.equal(outbox[0].delivery, "log");
     assert.match(String(outbox[0].summary), /completed with code 0/);
+    assert.equal(String(outbox[0].summary).includes(longArg), false);
+    assert.match(
+      String((outbox[0].data as Record<string, unknown>).command),
+      new RegExp(longArg),
+    );
     assert.deepEqual(
       (outbox[0].data as Record<string, unknown>).artifacts,
       {

@@ -227,7 +227,7 @@ Prefer adding a high-level recipe when at least three cells already exist and th
 Good next candidates for the standard library after the first task-first wave:
 
 1. Package/release metadata enrichment: use `utility-package-summary` with changelog and validation cells to make release-readiness reports more evidence-rich without adding publish automation.
-2. Artifact packaging and manifesting: compose `pipeline-artifact-write`, `utility-artifact-manifest`, artifact reports, and validation summaries into a machine-readable handoff bundle when the caller explicitly requests filesystem writes.
+2. Artifact packaging and manifesting: implemented as `pipeline-artifact-bundle`, which composes optional validation, `pipeline-artifact-write`, `utility-artifact-manifest`, deterministic manifest writing, and an actor-message handoff when the caller explicitly requests filesystem writes.
 3. Async run cleanup planning: extend async-run operations with stale-run classification and recommended `message`, `cancel`, or `kill` controls, keeping actual control execution operator-gated.
 
-Each candidate should land with the minimum missing cells rather than a broad one-shot framework. Already implemented task-first seeds include `pipeline-release-readiness`, `pipeline-repo-health`, `pipeline-async-run-ops`, `pipeline-docs-maintenance`, and `pipeline-media-library`.
+Each candidate should land with the minimum missing cells rather than a broad one-shot framework. Already implemented task-first seeds include `pipeline-release-readiness`, `pipeline-repo-health`, `pipeline-async-run-ops`, `pipeline-docs-maintenance`, `pipeline-media-library`, and `pipeline-artifact-bundle`.

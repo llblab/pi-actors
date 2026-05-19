@@ -19,7 +19,7 @@ Continue progressive component/pipeline expansion in small validated slices; rea
 
 - Add another task-first high-level pipeline candidate from the design map.
   - Priority: Medium.
-  - Status: `pipeline-release-readiness`, `pipeline-repo-health`, `pipeline-async-run-ops`, `pipeline-docs-maintenance`, and `pipeline-media-library` landed. `pipeline-media-library` required playlist output-mode parameterization, then reused playlist and artifact-report cells.
+  - Status: `pipeline-release-readiness`, `pipeline-repo-health`, `pipeline-async-run-ops`, `pipeline-docs-maintenance`, `pipeline-media-library`, and `pipeline-artifact-bundle` landed. `pipeline-media-library` required playlist output-mode parameterization, then reused playlist and artifact-report cells. `pipeline-artifact-bundle` reused artifact-write, artifact-manifest, validation, manifest-write, and actor-message cells.
   - Scope: Reassess `docs/task-first-recipes.md` for the next high-value task cell, then implement only the minimum missing cells needed for that task.
   - Exit: Another task-first pipeline lands with docs, package validation, and a note about which missing atoms/utilities it required.
 

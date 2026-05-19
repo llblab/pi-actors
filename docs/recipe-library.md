@@ -148,7 +148,7 @@ Start playback:
 music_player source="~/Music" volume=55 run_id=music
 ```
 
-Control it through addressed actor messages. This is the canonical reactive pattern for long-lived recipes: the run emits outbox events upward, and the coordinator sends explicit commands downward instead of polling on a timer.
+Control it through addressed actor messages. This is the canonical reactive pattern for long-lived recipes: the run emits actor messages upward, and the coordinator sends explicit commands downward instead of polling on a timer.
 
 ```text
 message to=run:music type=player.pause body=pause
@@ -166,7 +166,7 @@ The wrapper also accepts control commands directly when a caller already has the
 scripts/music-player.mjs next ~/.pi/agent/tmp/pi-auto-tools/runs/music
 ```
 
-Message body is currently adapted to one newline-delimited command written to `<run state dir>/control.fifo`. The script writes `status.txt`, `player.json`, and track-change events in `outbox.jsonl` in the same state dir. Track-change events default to `delivery: "log"`; set `event_delivery` to `notify` or `followup` only when the coordinator should receive live player events. Other interactive recipes should follow the same shape: define a small command vocabulary for addressed messages, emit decision-point outbox events, and let the coordinator react to messages rather than sleep-polling state.
+Message body is currently adapted to one newline-delimited command written to `<run state dir>/control.fifo`. The script writes `status.txt`, `player.json`, and track-change actor messages in `outbox.jsonl` in the same state dir. Track-change messages default to `delivery: "log"`; set `event_delivery` to `notify` or `followup` only when the coordinator should receive live player events. Other interactive recipes should follow the same shape: define a small command vocabulary for addressed messages, emit decision-point actor messages, and let the coordinator react to messages rather than sleep-polling state.
 
 ## Safety Notes
 

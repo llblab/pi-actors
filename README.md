@@ -40,6 +40,28 @@ From git:
 pi install git:github.com/llblab/pi-actors
 ```
 
+## Rename Migration
+
+`pi-actors` reads persistent actor-control tools from:
+
+```text
+~/.pi/agent/actors-tools.json
+```
+
+If you previously used `pi-auto-tools`, copy the old registry intentionally:
+
+```bash
+cp ~/.pi/agent/auto-tools.json ~/.pi/agent/actors-tools.json
+```
+
+If you installed the brief `0.12.0`/`0.12.1` line and created `tools.json`, copy that file instead:
+
+```bash
+cp ~/.pi/agent/tools.json ~/.pi/agent/actors-tools.json
+```
+
+The extension does not silently rewrite old registry files; keep or delete the old file after confirming the new registry loads as expected.
+
 ## Mental Model
 
 `pi-actors` has one execution idea that grows in place:

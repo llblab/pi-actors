@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.12.2: Registry Migration Notes
+
+- `[Docs]` Added explicit rename migration instructions for copying `~/.pi/agent/auto-tools.json` or the short-lived `~/.pi/agent/tools.json` to `~/.pi/agent/actors-tools.json`. Impact: operators keep control of config migration while the package avoids silent rewrites of old registry files.
+
 ## 0.12.1: Actor Tool Registry Name
 
 - `[Registry]` Renamed the new pi-actors registry filename from `tools.json` to `actors-tools.json`. Impact: the persisted config name now clearly describes actor-control tools instead of implying every pi tool belongs to this extension.

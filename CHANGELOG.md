@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.4: Interactive Recipe Termination Contracts
+
+- `[Recipe Library]` Added actor-native `control.stop`, `control.cancel`, and `control.kill` mailbox accepts to interactive artifact/message/fanout recipes and the music player recipe. Impact: `inspect view=mailbox` now advertises the run termination messages that the actor runtime supports for these long-lived recipe actors.
+
 ## 0.13.3: Actor Vocabulary Cleanup
 
 - `[Docs]` Removed remaining public FIFO/outbox phrasing from actor-message/template-recipe docs and runtime prompt guidance. Impact: agent and operator guidance now consistently describes `spawn`, `message`, and `inspect` without transport-specific vocabulary.

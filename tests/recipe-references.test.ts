@@ -218,6 +218,30 @@ test("Packaged async recipes declare mailbox metadata", async () => {
   assert.deepEqual(missing, []);
 });
 
+test("Packaged interactive async recipes expose actor-native termination controls", () => {
+  const recipeDir = join(__dirname, "..", "recipes");
+  const files = [
+    "music-player.json",
+    "pipeline-artifact-report.json",
+    "pipeline-artifact-write.json",
+    "subagent-artifact.json",
+    "subagent-message.json",
+    "subagents-prompts.json",
+  ];
+
+  for (const file of files) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    const accepts = config?.mailbox?.accepts ?? [];
+    assert.deepEqual(
+      ["control.stop", "control.cancel", "control.kill"].filter(
+        (type) => !accepts.includes(type),
+      ),
+      [],
+      `${file} should expose actor-native termination controls`,
+    );
+  }
+});
+
 test("Template recipe imports reject cycles", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {

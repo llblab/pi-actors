@@ -26,6 +26,7 @@
     "summary": "{summary_path}"
   },
   "mailbox": {
+    "accepts": ["control.stop", "control.cancel", "control.kill"],
     "emits": ["command.done", "run.done", "run.failed"]
   },
   "repeat": "{prompts.length}",

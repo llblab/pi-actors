@@ -22,6 +22,7 @@
     "tools": ""
   },
   "mailbox": {
+    "accepts": ["control.stop", "control.cancel", "control.kill"],
     "emits": ["artifact.written", "artifact.blocked"]
   },
   "artifacts": {

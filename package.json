@@ -1,8 +1,8 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "private": false,
-  "description": "Persistent template-backed tools for pi",
+  "description": "Actor runtime and orchestrator for agent-managed local processes",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -16,9 +16,10 @@
   "keywords": [
     "pi-package",
     "pi-extension",
-    "tools",
+    "actors",
+    "orchestration",
     "automation",
-    "binding"
+    "tools"
   ],
   "scripts": {
     "check": "node --experimental-strip-types -e \"await import('./index.ts'); console.log('pi-actors: extension import ok')\"",

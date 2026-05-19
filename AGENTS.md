@@ -9,7 +9,7 @@
 
 ## Concept
 
-`pi-actors` is a local-first, cybernetic actor layer for pi. It persists user/agent-registered actor-control tools in `~/.pi/agent/actors-tools.json` and registers them automatically across sessions, giving agents durable operational muscle memory for trusted local commands, scripts, actor recipes, and async actor runs. Treat it as MCP-adjacent local capability creation: the agent can create and refine its own tools instead of depending only on external tool servers.
+`pi-actors` is a local-first actor runtime and orchestrator for pi. It wraps trusted local programs, scripts, services, pipelines, and recipes as addressable actors that agents can `spawn`, control with typed `message` envelopes, and observe with `inspect`. It also persists user/agent-registered actor-control tools in `~/.pi/agent/actors-tools.json`, giving agents durable operational muscle memory for launching and managing the local actor zoo.
 
 ## Topology
 
@@ -30,7 +30,7 @@
 - Prefer explicit migration boundaries over silent user-config rewrites
 - Keep published documentation portable: use `~`, `<repo>`, or relative paths instead of machine-local absolute paths
 - Preserve runtime output discipline because tool output flows directly into agent context
-- Keep the project lens local-first and cybernetic: agents create durable local capabilities, then use semantic tools instead of repeatedly reconstructing shell commands
+- Keep the project lens local-first and cybernetic: agents wrap durable local capabilities as actors, then use semantic tools and messages instead of repeatedly reconstructing shell commands
 - Design recipes as agent-callable tools: make prompts, scopes, paths, models, and policy knobs public args/defaults when the caller should decide them at invocation time
 
 ## Durable Conventions

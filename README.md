@@ -1,8 +1,10 @@
 # pi-actors
 
-Actor runtime and persistent local tool registry extension for the pi coding agent.
+Actor runtime and orchestrator for agent-managed local processes.
 
-`pi-actors` is a local-first, cybernetic actor layer for agents. It is MCP-adjacent in spirit, but instead of waiting for external servers to define every capability, the agent can turn trusted local commands, scripts, and recipes into durable tools itself. Those tools persist across reloads as a kind of operational muscle memory: short semantic names, typed args, reusable recipes, and async runs replace repeated shell reconstruction.
+`pi-actors` turns local programs, scripts, services, recipes, and long-running processes into addressable actors that agents can start, message, inspect, and compose. A music player, a sub-agent fanout, a repo-health pipeline, or any trusted local process can become an actor when it has a template-backed launch path, a mailbox contract, and observable runtime state.
+
+The persistent tool registry is still useful: it lets agents keep durable operational muscle memory for trusted local commands and wrappers. But the project lens is broader than stored tools. `pi-actors` is a local-first orchestration runtime for wrapping capabilities as agent-managed entities with explicit interfaces.
 
 ## Start Here
 
@@ -11,20 +13,48 @@ Actor runtime and persistent local tool registry extension for the pi coding age
 - [Changelog](./CHANGELOG.md)
 - [Documentation](./docs/README.md)
 
+## What It Is
+
+`pi-actors` is the runtime layer that lets a pi agent turn a local capability into a controllable actor:
+
+```text
+program/process/service
+→ command template
+→ actor recipe
+→ spawn
+→ addressable actor
+→ message / inspect / artifacts
+```
+
+An actor can be:
+
+- A sub-agent running `pi -p` in a clean context.
+- A background music player controlled by `player.next` or `player.pause` messages.
+- A validation or repo-health pipeline that reports completion and artifacts.
+- A parallel quorum review with branch-level progress.
+- Any trusted local process with a launch template and a useful control surface.
+
+The key move is not just “register a command.” It is to wrap a process in an agent-readable contract:
+
+- **Launch**: `spawn` starts the actor from a template or recipe.
+- **Interface**: `mailbox` declares accepted and emitted message types.
+- **Control**: `message` sends typed envelopes to runs, branches, tools, or the coordinator.
+- **Observation**: `inspect` reads status, logs, messages, mailbox metadata, files, and artifacts intentionally.
+- **Persistence**: `artifacts` and state files make outcomes durable.
+- **Memory**: `actors-tools.json` stores reusable actor-control wrappers across sessions.
+
 ## Key Features
 
-- **Local-First Tool Memory**: Lets agents create and persist their own trusted local tools, forming durable operational muscle memory instead of one-off shell commands.
-- **Commands Become Capabilities**: Turns stable local workflows into semantic agent tools, so the agent chooses what it can do instead of reconstructing how to run shell commands.
-- **Actor Tool Registry**: Stores actor-control tool definitions in `~/.pi/agent/actors-tools.json` and registers them automatically on session start.
-- **Compact Semantic Interface**: Exposes short tool names, descriptions, named args, and defaults instead of long paths, positional command-arg order, and repeated command boilerplate.
-- **Safer Local Automation**: Wraps trusted command templates as narrow tools using split-first command-arg construction, placeholder substitution, and no shell evaluation.
-- **Reusable Building Blocks**: Makes skill scripts, sub-agent wrappers, diagnostics, and project workflows available as composable agent capabilities.
-- **Immediate Updates**: Registered and updated tools become callable in the active session; deleted tools are removed from active tools and fully disappear after reload.
-- **Bounded Output**: Tool stdout is returned to the agent with truncation safeguards; full oversized output is saved to a temp file.
-- **Template Recipes**: Stores reusable command-template JSON under `~/.pi/agent/recipes/*.json`; recipes can import other recipes, reuse defaults, declare ordered named `artifacts`, and run foreground or declare `async: true` for detached lifecycle.
-- **Actor Runs**: Starts detached recipe or inline-template runs as addressable actors backed by state files under `~/.pi/agent/tmp/pi-actors`.
-- **Context Onboarding**: Injects a compact system-prompt note explaining templates, recipes, async runs, tasks, and agent fanout so installed sessions have the mental model available by default.
-- **Coordinator-Scoped Run Observability**: Shows at least one stable triangle per running async run started by the current agent session, adds triangles for active parallel branches, then injects compact completion events only back to the launching coordinator when attention is needed.
+- **Actor Runtime**: Starts local templates and recipes as addressable `run:<id>` actors with state, logs, message mailboxes, cancellation, and artifacts.
+- **Agent-Managed Processes**: Wraps sub-agents, media players, pipelines, diagnostics, and other local programs as controllable entities instead of one-off commands.
+- **Message-Oriented Control**: Uses `spawn`, `message`, and `inspect` as the public coordination vocabulary for start, control, and observation.
+- **Mailbox Contracts**: Lets recipes declare what messages they accept and emit, so agents can discover how to interact with an actor.
+- **Actor Tool Registry**: Stores persistent actor-control tool definitions in `~/.pi/agent/actors-tools.json` and registers them automatically on session start.
+- **Command Template Substrate**: Keeps process launch portable with named placeholders, typed args, defaults, sequences, guarded nodes, retries, failure policy, and `parallel: true` fanout.
+- **Composable Actor Recipes**: Stores reusable recipe JSON under `~/.pi/agent/recipes/*.json`; recipes can import other recipes, reuse defaults, declare artifacts, and opt into detached actor lifecycle with `async: true`.
+- **Coordinator-Scoped Observability**: Shows ambient triangles for active actor runs and sends compact completion or request-for-attention follow-ups only to the launching coordinator.
+- **Bounded Context Impact**: Returns compact output by default, truncates oversized stdout, and keeps full logs/artifacts in files for intentional inspection.
+- **Local-First Tool Memory**: Still lets agents create durable semantic tools from trusted commands so they do not repeatedly reconstruct shell invocations.
 
 ## Install
 
@@ -64,33 +94,35 @@ The extension does not silently rewrite old registry files; keep or delete the o
 
 ## Mental Model
 
-`pi-actors` has one execution idea that grows in place:
+`pi-actors` separates launch mechanics from actor semantics:
 
 ```text
-command
-→ command template
-→ template recipe
-→ registered tool
-→ async run
+command template = how to start work
+actor recipe     = saved actor definition
+spawn            = create actor instance
+message          = connect/control actors
+inspect          = observe intentionally
+artifacts        = persist outcomes
+mailbox          = declare interaction contract
 ```
 
 - A **command** is one concrete local process.
-- A **command template** is the reusable shape of that process, with named placeholders.
-- A **template recipe** is saved JSON containing a template plus defaults and run mode.
-- A **registered tool** gives a command template or recipe a stable agent-facing name.
-- An **async run** is one execution instance with state, logs, script-authored events, status, tail, message send, cancel, and kill.
+- A **command template** is the reusable launch shape for that process, with named placeholders.
+- An **actor recipe** is saved JSON containing a template, defaults, imports, mailbox metadata, artifacts, and optional detached lifecycle.
+- A **registered tool** gives a template or actor recipe a stable agent-facing name.
+- A **run actor** is one execution instance with state, logs, actor messages, mailbox metadata, status, cancellation, and kill control.
 
-The template remains the execution language. The recipe is saved actor configuration. `async: true` is the detached lifecycle switch. The extension injects this compact mental model into the system prompt on each agent turn, including where to look first (`README.md`, `docs/README.md`, recipe/async docs, and `recipes/`) so an agent asked to inspect pi-actors can quickly understand the model and start composing async subagents or other long-running recipes.
+The template remains the execution substrate. The recipe is the actor definition. `async: true` opts into detached actor lifecycle. `spawn` creates actors, `message` connects or controls them, and `inspect` observes them without teaching agents to poll blindly.
 
 ## Operator Onboarding
 
-Start with foreground templates for short deterministic work:
+Start with foreground templates when the work is short and deterministic:
 
 ```text
 register_tool name=lint_docs description="Lint docs" template="npm run lint:docs"
 ```
 
-Move to async recipes when work is long-running, parallel, or agentic:
+Move to actor recipes when work is long-running, parallel, service-like, or agentic:
 
 ```json
 {
@@ -101,13 +133,13 @@ Move to async recipes when work is long-running, parallel, or agentic:
 }
 ```
 
-Expose a reusable recipe as a normal capability:
+Expose a reusable actor recipe as a normal capability:
 
 ```text
 register_tool name=shader_ring description="Start shader ring" template="shader-ring-8-parallel.json" args="theme,out_dir"
 ```
 
-`Task` is the user's work item. `Template` is the execution graph. `Recipe` is saved JSON. `Run` is one execution instance with status, logs, cancellation, and ambient triangles.
+`Task` is the user's work item. `Template` is the execution graph. `Actor recipe` is saved JSON. `Run` is one actor instance with status, logs, messages, cancellation, artifacts, and ambient triangles.
 
 ## Compose Recipes With Imports
 
@@ -152,13 +184,13 @@ register_tool name=review_pair \
 
 Imported recipes are recipe definitions, not nested async runs. The parent recipe's `async: true` creates one run with one state dir; imported recipes contribute command-template graph, args, defaults, and values.
 
-## Register Tools
+## Register Actor-Control Tools
 
-`register_tool` lists, registers, updates, or deletes persistent tools. Call it without arguments to list the current registry.
+`register_tool` lists, registers, updates, or deletes persistent actor-control tools. Call it without arguments to list the current registry. These tools are convenient handles for creating or invoking actors, not the whole runtime model.
 
 ### Local command: transcription
 
-`pi-actors` is useful for exposing stable local commands as normal tools. For example, register an STT command:
+`pi-actors` is also useful for exposing stable local commands as normal tools. For example, register an STT command:
 
 ```text
 register_tool name=transcribe \
@@ -168,7 +200,7 @@ register_tool name=transcribe \
 
 ### Template recipe
 
-For reusable workflows, keep the large template in a recipe file and register a small tool:
+For reusable actor workflows, keep the large template and mailbox contract in a recipe file and register a small tool:
 
 ```text
 register_tool name=shader_ring \
@@ -240,9 +272,9 @@ The commands above persist entries like this in `~/.pi/agent/actors-tools.json`;
 
 This file is the durable actor-tool registry. `register_tool` is the interactive API; `actors-tools.json` is the persisted state that is loaded on future sessions.
 
-## Manage Run Actors
+## Manage Actors
 
-Use `spawn` when a command template may outlive the current turn. It starts the work now as an addressable actor, returns immediately with state metadata, and keeps ordinary files under `~/.pi/agent/tmp/pi-actors/runs/<run>` for later inspection.
+Use `spawn` when a command template, service, pipeline, or recipe may outlive the current turn. It starts the work now as an addressable actor, returns immediately with state metadata, and keeps ordinary files under `~/.pi/agent/tmp/pi-actors/runs/<run>` for later inspection.
 
 Start from an inline template as an addressable run actor:
 
@@ -316,7 +348,7 @@ See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and r
 
 ## Runtime Contract
 
-- Tool names are normalized to snake_case.
+- Actor-control tool names are normalized to snake_case.
 - Reserved built-in names are blocked.
 - Templates are split into shell-like words first, then placeholders are substituted per command arg.
 - Tool args are derived from placeholders when `args` is omitted.

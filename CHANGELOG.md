@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.12: Async Command Summary Hygiene
+
+- `[Observability]` Kept async `command.done` summaries bounded while preserving full argv-shaped command details in event payloads. Impact: long prompted fanouts keep diagnostic fidelity without flooding coordinator follow-ups with huge command lines.
+
 ## 0.12.11: Recipe Import Diagnostics Hotfix
 
 - `[Template Recipes]` Added regression coverage proving imported recipe nodes execute correctly under a repeated parallel parent (`imports` + `repeat` + object `template`). Impact: the suspected composition blocker is now guarded as supported behavior instead of relying on manual smoke interpretation.

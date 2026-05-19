@@ -60,7 +60,7 @@ function getEventDelivery(name) {
 function outbox(name, summary, data = {}, delivery = "log", level = "info") {
   appendFileSync(
     outboxPath,
-    `${JSON.stringify({ event: name, summary, delivery, level, data, ts: new Date().toISOString() })}\n`,
+    `${JSON.stringify({ body: data, data, delivery, event: name, from: `run:${meta.run}`, level, summary, to: "coordinator", ts: new Date().toISOString(), type: name })}\n`,
   );
 }
 /**

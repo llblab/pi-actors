@@ -19,5 +19,9 @@
     "player": "auto",
     "event_delivery": "log"
   },
+  "mailbox": {
+    "accepts": ["player.play", "player.pause", "player.resume", "player.toggle", "player.next", "player.previous", "player.stop", "player.status"],
+    "emits": ["player.track"]
+  },
   "template": "{repo}/scripts/music-player.mjs {command} {source} {loop} {volume} {player} {state_dir} {event_delivery}"
 }

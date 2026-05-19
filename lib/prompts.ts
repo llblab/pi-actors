@@ -27,10 +27,10 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - Recipes live in ~/.pi/agent/recipes/*.json and wrap templates with metadata/defaults/imports/artifacts.
 - Recipe imports are local variables: imports.alias -> {"name":"alias"} nodes and {alias.defaults.key} refs.
 - Imported recipes are definitions, not nested async runs; parent async:true creates one run.
-- async:true = detached lifecycle; async_run can also start file/template directly.
+- async:true = detached lifecycle; spawn creates run actors from recipes/templates.
 - Async run state lives under ~/.pi/agent/tmp/pi-auto-tools/runs.
-- Use async_run action=start/status/tail/list/events/send/cancel/kill.
-- Run lifecycle = state files, logs, outbox events, FIFO send, cancel/kill, compact status; do not busy-poll runs, rely on event/follow-up notifications and use async_run action=send for explicit run-local commands.
+- Use spawn/message/inspect for actor-level start/send/observe; async_run remains the low-level lifecycle adapter for list/events/cancel/kill and direct diagnostics.
+- Run lifecycle = state files, logs, outbox events, FIFO send, cancel/kill, compact status; do not busy-poll runs, rely on event/follow-up notifications and use message for explicit run-local commands.
 - Tool template may be a command template, recipe path/name, or co-located recipe.
 - register_tool makes compact persistent buttons; args may be typed or derived from placeholders.
 - For single calls or short pipelines, use foreground templates/tools.

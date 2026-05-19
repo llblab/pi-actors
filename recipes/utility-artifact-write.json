@@ -1,0 +1,17 @@
+{
+  "name": "utility-artifact-write",
+  "async": false,
+  "args": [
+    "repo:path",
+    "artifact_path:path",
+    "mode:enum(create,overwrite,append)"
+  ],
+  "defaults": {
+    "repo": "~/.pi/agent/extensions/pi-auto-tools",
+    "mode": "create"
+  },
+  "template": {
+    "template": "{repo}/scripts/recipe-utils.mjs artifact-write {artifact_path} {mode}",
+    "output": "stdout"
+  }
+}

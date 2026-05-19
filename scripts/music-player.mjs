@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import {
+  basename,
   delimiter,
   dirname,
   extname,
@@ -300,12 +301,16 @@ function emitTrackEvent(ctx, index, count, track, player) {
   writeText(
     ctx.eventFile,
     `${JSON.stringify({
-      event: "player.track",
-      summary: `Now playing: ${title}`,
-      level: "info",
-      delivery: ctx.eventDelivery,
-      ts: new Date().toISOString(),
+      body: { count, index, player, track },
       data: { count, index, player, track },
+      delivery: ctx.eventDelivery,
+      event: "player.track",
+      from: `run:${basename(ctx.stateDir)}`,
+      level: "info",
+      summary: `Now playing: ${title}`,
+      to: "coordinator",
+      ts: new Date().toISOString(),
+      type: "player.track",
     })}\n`,
     "a",
   );

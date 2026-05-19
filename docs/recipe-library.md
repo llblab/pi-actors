@@ -37,7 +37,7 @@ Core subagent recipes:
 - `recipes/subagent-verify.json`: Claim verification.
 - `recipes/subagent-merge.json`: Consensus/risk-first synthesis.
 - `recipes/subagent-normalize.json`: Stable output shaping.
-- `recipes/subagent-artifact.json`: Durable artifact-shaped output for a target path.
+- `recipes/subagent-artifact.json`: Durable artifact-shaped output for a target path. It prepares content and write guidance; it does not write files unless the caller deliberately grants write tools or uses a deterministic writer.
 - `recipes/subagent-event.json`: Outbox-event-shaped coordinator record.
 - `recipes/subagent-quorum.json`: Same prompt across a model pool.
 - `recipes/subagent-task-card.json`: Bounded implementation task card.
@@ -60,8 +60,8 @@ Start it:
 
 ```text
 subagent_prompt prompt="Review docs/async-runs.md for unclear wording." run_id=docs-review
-async_run action=status run_id=docs-review
-async_run action=tail run_id=docs-review
+inspect target=run:docs-review view=status
+inspect target=run:docs-review view=tail
 ```
 
 ## Composed Pipelines
@@ -80,7 +80,8 @@ Pipeline recipes demonstrate second-order composition:
 - `recipes/pipeline-development-tasking.json`: Plan → task card → critique → integrator handoff.
 - `recipes/pipeline-docs-maintenance.json`: Docs index → documentation review → maintenance plan → artifact report.
 - `recipes/pipeline-media-library.json`: Playlist build → media-library artifact report.
-- `recipes/pipeline-artifact-report.json`: Normalize → artifact-shaped output → event-shaped record.
+- `recipes/pipeline-artifact-report.json`: Normalize → artifact-shaped output → event-shaped record. This pipeline prepares a candidate artifact and emits `artifact.prepared`/`artifact.blocked`; the `artifact_path` is a target path, not a guarantee that the file was written.
+- `recipes/pipeline-artifact-write.json`: Normalize → artifact-shaped output → deterministic artifact write → event-shaped record. Use only when the caller explicitly wants filesystem writes; `write_mode` is `create`, `overwrite`, or `append`.
 
 These are examples of library composition, not a workflow DSL. The recipe layer owns imports and saved defaults; command templates own execution shape; async runs own lifecycle.
 
@@ -100,6 +101,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-playlist-build.json`: Use `scripts/recipe-utils.mjs` to build a filtered playlist listing as newline paths, M3U, or inline `|`-separated source.
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.
+- `recipes/utility-artifact-write.json`: Deterministically write prepared artifact content from stdin to `artifact_path` with explicit `create`, `overwrite`, or `append` mode.
 - `recipes/utility-package-summary.json`: Use `scripts/recipe-utils.mjs` to emit bounded package metadata such as name, version, files, scripts, and dependency counts.
 - `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 
@@ -112,7 +114,7 @@ Files:
 - `recipes/music-player.json`
 - `scripts/music-player.mjs`
 
-Purpose: start a local or URL audio source as an async run so the agent can continue working while playback runs in the background. The running script exposes one run-local FIFO, so `async_run action=send` can control playback without a second recipe.
+Purpose: start a local or URL audio source as an async run so the agent can continue working while playback runs in the background. The running script exposes one run-local mailbox/FIFO, so addressed `message` calls can control playback without a second recipe.
 
 Requirements: Linux, macOS, or WSL with `mkfifo`, Node.js, and one of `mpv`, `ffplay`, `cvlc`, or SoX `play`. Native Windows is not supported because the wrapper uses a Unix FIFO and Unix signals.
 
@@ -145,16 +147,17 @@ Start playback:
 music_player source="~/Music" volume=55 run_id=music
 ```
 
-Control it through the generic async-run message action. This is the canonical reactive pattern for long-lived recipes: the run emits outbox events upward, and the coordinator sends explicit commands downward instead of polling on a timer.
+Control it through addressed actor messages. This is the canonical reactive pattern for long-lived recipes: the run emits outbox events upward, and the coordinator sends explicit commands downward instead of polling on a timer.
 
 ```text
-async_run action=send run_id=music message=pause
-async_run action=send run_id=music message=play
-async_run action=send run_id=music message=next
-async_run action=send run_id=music message=previous
-async_run action=status run_id=music
-async_run action=send run_id=music message=stop
+message to=run:music type=player.pause body=pause
+message to=run:music type=player.play body=play
+message to=run:music type=player.next body=next
+message to=run:music type=player.previous body=previous
+message to=run:music type=player.stop body=stop
 ```
+
+Use `inspect target=run:music view=status` only when an event or operator decision requires inspection.
 
 The wrapper also accepts control commands directly when a caller already has the run state dir:
 
@@ -162,7 +165,7 @@ The wrapper also accepts control commands directly when a caller already has the
 scripts/music-player.mjs next ~/.pi/agent/tmp/pi-auto-tools/runs/music
 ```
 
-Message format is one newline-delimited command written to `<run state dir>/control.fifo`. The script writes `status.txt`, `player.json`, and track-change events in `outbox.jsonl` in the same state dir. Track-change events default to `delivery: "log"`; set `event_delivery` to `notify` or `followup` only when the coordinator should receive live player events. Other interactive recipes should follow the same shape: define a small command vocabulary for `send`, emit decision-point outbox events, and let the coordinator react to messages rather than sleep-polling state.
+Message body is currently adapted to one newline-delimited command written to `<run state dir>/control.fifo`. The script writes `status.txt`, `player.json`, and track-change events in `outbox.jsonl` in the same state dir. Track-change events default to `delivery: "log"`; set `event_delivery` to `notify` or `followup` only when the coordinator should receive live player events. Other interactive recipes should follow the same shape: define a small command vocabulary for addressed messages, emit decision-point outbox events, and let the coordinator react to messages rather than sleep-polling state.
 
 ## Safety Notes
 

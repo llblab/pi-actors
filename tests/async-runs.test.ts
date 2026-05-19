@@ -10,6 +10,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  appendRunOutboxEvent,
   cancelRun,
   getRunStatus,
   killRun,
@@ -115,10 +116,20 @@ test("Async runs emit command completion outbox events", async () => {
       summary: `${stateDir}/result.json`,
     });
     assert.equal(outbox[0].event, "command.done");
+    assert.equal(outbox[0].type, "command.done");
+    assert.equal(outbox[0].to, "coordinator");
+    assert.equal(outbox[0].from, "run:command-outbox");
     assert.equal(outbox[0].delivery, "followup");
     assert.match(String(outbox[0].summary), /completed with code 0/);
     assert.deepEqual(
       (outbox[0].data as Record<string, unknown>).artifacts,
+      {
+        report: `${stateDir}/report.md`,
+        summary: `${stateDir}/result.json`,
+      },
+    );
+    assert.deepEqual(
+      (outbox[0].body as Record<string, unknown>).artifacts,
       {
         report: `${stateDir}/report.md`,
         summary: `${stateDir}/result.json`,
@@ -134,6 +145,40 @@ test("Async runs emit command completion outbox events", async () => {
         join(stateDir, "outbox.jsonl"),
       ],
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async runs append actor messages to outbox", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const stateDir = join(root, "actor-outbox");
+  try {
+    startRun(
+      {
+        run_id: "actor-outbox",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
+      },
+      process.cwd(),
+    );
+    const result = appendRunOutboxEvent(stateDir, {
+      body: { ok: true },
+      delivery: "followup",
+      event: "checkpoint.ready",
+      from: "run:actor-outbox",
+      summary: "Ready for approval",
+      to: "coordinator",
+      type: "checkpoint.ready",
+    });
+    assert.equal(result.sent, true);
+    const events = readRunEvents(stateDir);
+    assert.equal(events[0].event, "checkpoint.ready");
+    assert.equal(events[0].type, "checkpoint.ready");
+    assert.equal(events[0].to, "coordinator");
+    assert.equal(events[0].from, "run:actor-outbox");
+    assert.equal(events[0].delivery, "followup");
+    assert.deepEqual(events[0].body, { ok: true });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -225,6 +270,7 @@ test("Async runs can start from recipe files with overrides", async () => {
         {
           name: "from-file",
           state_dir: stateDir,
+          mailbox: { accepts: ["control.continue"], emits: ["run.done"] },
           template: `${process.execPath} -e "console.log(process.argv[1] + ' ' + process.argv[2])" {greeting} {name}`,
           values: { greeting: "hello", name: "file" },
         },
@@ -239,6 +285,7 @@ test("Async runs can start from recipe files with overrides", async () => {
     assert.equal(meta.run, "override-run");
     assert.equal(meta.recipe, "from-file");
     assert.equal(meta.values.greeting, "hello");
+    assert.deepEqual(meta.mailbox, { accepts: ["control.continue"], emits: ["run.done"] });
     assert.equal(meta.values.name, "override");
     assert.equal(meta.values.run_id, "override-run");
     assert.equal(meta.values.state_dir, stateDir);

@@ -88,6 +88,21 @@ Use recipe-level `artifacts` to declare stable artifact names and paths for the 
 
 `output` and `artifacts` are intentionally different. `output` is the command-template primary result selector and defaults to stdout; it participates in sequence/stdin flow. `artifacts` is recipe metadata: an ordered named artifact manifest for humans, async completion events, and downstream tooling. `stdout` remains the default command result channel and is not renamed by `artifacts`.
 
+## Mailbox
+
+Use recipe-level `mailbox` to document the semantic messages a recipe actor accepts and emits:
+
+```json
+{
+  "mailbox": {
+    "accepts": ["control.continue", "control.revise", "control.approve", "control.stop"],
+    "emits": ["checkpoint.needs_scope", "branch.done", "run.done"]
+  }
+}
+```
+
+`mailbox` is contract metadata, not transport configuration. It should name semantic message types, not FIFO commands, file paths, or CLI fragments.
+
 ## Event Delivery
 
 Use recipe-level `events` to map runtime events to delivery policy explicitly:
@@ -268,8 +283,8 @@ Supported references are:
 
 Nested object keys are dot-separated. Import references are resolved before normal command-template placeholders, so ordinary values such as `{label}` still flow through command-template defaults and call-time values. Ternaries use simple falsy checks for missing, null, false, zero, and empty string. Missing imports, missing values without fallback, and import cycles fail during recipe loading.
 
-## Compatibility
+## Recipe Shape
 
-The 0.8 line intentionally tightens terminology before release. Use `name` for an explicit recipe id, rely on the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
+Use `name` for an explicit recipe id, rely on the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
 
 If a proposed recipe needs a scheduler, queue daemon, `goto`, or custom workflow syntax, stop. Keep the recipe as saved command-template JSON and put policy in the registered tool, script, or caller.

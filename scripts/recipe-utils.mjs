@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 
 function usage() {
@@ -8,6 +8,7 @@ function usage() {
   recipe-utils.mjs playlist <source-dir> [extensions] [max-depth] [paths|m3u|inline]
   recipe-utils.mjs changelog-section <file> <version>
   recipe-utils.mjs artifact-manifest <artifact-path> <title> <status> [summary]
+  recipe-utils.mjs artifact-write <artifact-path> [create|overwrite|append]
   recipe-utils.mjs package-summary <package-json>`);
 }
 
@@ -114,6 +115,22 @@ function artifactManifest(pathValue, title = "Artifact", status = "draft", summa
   }, null, 2));
 }
 
+function artifactWrite(pathValue, mode = "create") {
+  const path = resolve(pathValue.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"));
+  if (!["create", "overwrite", "append"].includes(mode)) {
+    fail(`Invalid artifact write mode: ${mode}`);
+  }
+  if (mode === "create" && existsSync(path)) {
+    fail(`Artifact already exists: ${path}`);
+  }
+  const content = readFileSync(0, "utf8");
+  mkdirSync(dirname(path), { recursive: true });
+  if (mode === "append") appendFileSync(path, content);
+  else writeFileSync(path, content, "utf8");
+  const stat = statSync(path);
+  console.log(JSON.stringify({ path, mode, bytes: stat.size, written: true }, null, 2));
+}
+
 function packageSummary(fileValue = "package.json") {
   const file = resolve(fileValue.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"));
   const pkg = readJson(file);
@@ -176,6 +193,8 @@ else if (command === "changelog-section")
   changelogSection(args[0] ?? "CHANGELOG.md", args[1] ?? "Unreleased");
 else if (command === "artifact-manifest")
   artifactManifest(args[0] ?? "artifact.md", args[1], args[2], args[3]);
+else if (command === "artifact-write")
+  artifactWrite(args[0] ?? "artifact.md", args[1] ?? "create");
 else if (command === "package-summary")
   packageSummary(args[0] ?? "package.json");
 else {

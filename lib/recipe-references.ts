@@ -23,6 +23,11 @@ export interface TemplateRecipeImportBinding {
 
 export type TemplateRecipeImport = string | TemplateRecipeImportBinding;
 
+export interface TemplateRecipeMailbox {
+  accepts?: string[];
+  emits?: string[];
+}
+
 export interface TemplateRecipeDefinition {
   name?: string;
   imports?: Record<string, TemplateRecipeImport>;
@@ -37,6 +42,7 @@ export interface TemplateRecipeDefinition {
   output?: string;
   artifacts?: Record<string, string>;
   events?: Record<string, { delivery?: string }>;
+  mailbox?: TemplateRecipeMailbox;
   retry?: number | string;
   failure?: CommandTemplates.CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
@@ -531,6 +537,18 @@ export function readResolvedRecipeConfig(
       : {}),
     ...(isRecord(substituted.events)
       ? { events: substituted.events as Record<string, { delivery?: string }> }
+      : {}),
+    ...(isRecord(substituted.mailbox)
+      ? {
+          mailbox: {
+            ...(Array.isArray(substituted.mailbox.accepts)
+              ? { accepts: substituted.mailbox.accepts.filter((value): value is string => typeof value === "string") }
+              : {}),
+            ...(Array.isArray(substituted.mailbox.emits)
+              ? { emits: substituted.mailbox.emits.filter((value): value is string => typeof value === "string") }
+              : {}),
+          },
+        }
       : {}),
     ...(typeof substituted.retry === "number" || typeof substituted.retry === "string"
       ? { retry: substituted.retry }

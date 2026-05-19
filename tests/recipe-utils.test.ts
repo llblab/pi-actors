@@ -4,8 +4,8 @@
  */
 
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile, spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -65,6 +65,32 @@ test("recipe-utils package-summary emits bounded package metadata", async () => 
     assert.deepEqual(summary.scripts, ["build", "test"]);
     assert.equal(summary.dependencyCount, 1);
     assert.equal(summary.devDependencyCount, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("recipe-utils artifact-write writes stdin with explicit mode", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipe-utils-"));
+  try {
+    const file = join(root, "artifacts", "report.md");
+    const created = spawnSync(script, ["artifact-write", file, "create"], {
+      encoding: "utf8",
+      input: "# Report\n",
+    });
+    assert.equal(created.status, 0, created.stderr);
+    assert.equal(await readFile(file, "utf8"), "# Report\n");
+    const duplicate = spawnSync(script, ["artifact-write", file, "create"], {
+      encoding: "utf8",
+      input: "again",
+    });
+    assert.notEqual(duplicate.status, 0);
+    const appended = spawnSync(script, ["artifact-write", file, "append"], {
+      encoding: "utf8",
+      input: "More\n",
+    });
+    assert.equal(appended.status, 0, appended.stderr);
+    assert.equal(await readFile(file, "utf8"), "# Report\nMore\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

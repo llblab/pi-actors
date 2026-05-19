@@ -19,5 +19,9 @@
     "thinking": "off",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.continue", "control.revise", "control.stop"],
+    "emits": ["checkpoint.needs_input"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create a bounded coordinator checkpoint. State to preserve: {state}. Question: {question}. Options/risk format: {options}. Resume policy: {resume_policy}. Output format: {output_format}"
 }

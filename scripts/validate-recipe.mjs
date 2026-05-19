@@ -52,6 +52,10 @@ function validateFile(file) {
       args: Array.isArray(config.args) ? config.args : [],
       defaults: config.defaults && typeof config.defaults === "object" ? Object.keys(config.defaults).sort() : [],
       imports: config.imports && typeof config.imports === "object" ? Object.keys(config.imports).sort() : [],
+      mailbox: config.mailbox && typeof config.mailbox === "object" ? {
+        accepts: Array.isArray(config.mailbox.accepts) ? config.mailbox.accepts : [],
+        emits: Array.isArray(config.mailbox.emits) ? config.mailbox.emits : [],
+      } : undefined,
       template: templateKind(config.template),
     };
   } catch (error) {

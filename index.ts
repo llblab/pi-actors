@@ -33,6 +33,9 @@ const RESERVED_TOOL_NAMES = new Set([
   "ls",
   "register_tool",
   "async_run",
+  "message",
+  "spawn",
+  "inspect",
 ]);
 
 export default function toolRegistryExtension(pi: ExtensionAPI) {
@@ -183,4 +186,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     }),
   );
   pi.registerTool(Tools.createAsyncRunToolDefinition<ExtensionContext>());
+  pi.registerTool(Tools.createSpawnToolDefinition<ExtensionContext>());
+  pi.registerTool(Tools.createActorMessageToolDefinition());
+  pi.registerTool(Tools.createInspectToolDefinition());
 }

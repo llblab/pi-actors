@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0: Actor Orchestration and Artifact Pipelines
+
+- `[Actor Messages]` Began the 0.10 communication convergence with a draft actor/message protocol, pure address/envelope normalization helpers, recipe `mailbox` metadata, public `spawn`, `message`, and `inspect` tools for `run:<id>` actors as high-level adapters over async start/send/status/tail/events/artifacts/files, actor envelope fields on generic `command.done` and music-player track outbox events, coordinator-bound `message` routing through run outboxes, branch-addressed `message` routing through parent run mailboxes, and async-run docs/prompt guidance centered on `spawn`/`message`/`inspect`, mailbox preservation coverage, recipe validation summaries for mailbox declarations, and mailbox metadata on checkpoint/follow-up/event recipes, mailbox persistence in async run metadata, `inspect view=mailbox`, and route-aware default message delivery, artifact recipe mailbox metadata, and clarified prepared-vs-written artifact-report semantics, and deterministic `utility-artifact-write` support for accepted prepared artifacts, and an opt-in `pipeline-artifact-write` recipe for write-capable artifact flows, a successful `pipeline-artifact-write` smoke (`artifact-write-smoke-010`), `inspect` support for `session:<id>` run status, and `spawn` support for state/artifact metadata. Impact: the next API can consolidate actor creation, upward events, downward commands, and intentional inspection around addressed endpoints while existing async run transports remain implementation details.
+
 ## 0.9.0: Async Observability Polish
 
 - `[Async Observability]` Ambient triangles now reflect active parallel branches inside a running async recipe, while still showing at least one triangle per active run. Impact: multi-agent fanout such as one run with three parallel subagents is visible as three active triangles instead of one.

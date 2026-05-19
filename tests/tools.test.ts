@@ -4,17 +4,33 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
+import { startRun } from "../lib/async-runs.ts";
 import {
+  createActorMessageToolDefinition,
   createAsyncRunToolDefinition,
+  createInspectToolDefinition,
   createRegisterToolDefinition,
   createRuntimeToolDefinition,
+  createSpawnToolDefinition,
 } from "../lib/tools.ts";
+
+async function waitForFile(path: string): Promise<void> {
+  for (let i = 0; i < 40; i++) {
+    try {
+      await readFile(path, "utf8");
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  throw new Error(`file did not appear: ${path}`);
+}
 
 function createRegistryDeps() {
   return {
@@ -40,6 +56,217 @@ test("Register tool definition exposes a JSON schema with no required fields", (
   assert.equal(properties.values.type, "object");
   assert.equal(properties.update.type, "boolean");
   assert.equal(Array.isArray(properties.template.anyOf), true);
+});
+
+test("Spawn tool definition exposes actor creation schema", () => {
+  const definition = createSpawnToolDefinition();
+  assert.equal(definition.name, "spawn");
+  assert.deepEqual(definition.parameters.required, []);
+  const properties = definition.parameters.properties as Record<string, any>;
+  assert.equal(properties.artifacts.type, "object");
+  assert.equal(properties.as.type, "string");
+  assert.equal(properties.recipe.type, "string");
+  assert.equal(properties.file.type, "string");
+  assert.equal(properties.state_dir.type, "string");
+  assert.equal(Array.isArray(properties.template.anyOf), true);
+  assert.equal(properties.values.type, "object");
+});
+
+test("Inspect tool definition exposes intentional observation schema", () => {
+  const definition = createInspectToolDefinition();
+  assert.equal(definition.name, "inspect");
+  assert.deepEqual(definition.parameters.required, ["target", "view"]);
+  const properties = definition.parameters.properties as Record<string, any>;
+  assert.equal(properties.target.type, "string");
+  assert.equal(properties.view.type, "string");
+  assert.equal(properties.lines.type, "string");
+});
+
+test("Actor message tool definition exposes concentrated message schema", () => {
+  const definition = createActorMessageToolDefinition();
+  assert.equal(definition.name, "message");
+  assert.deepEqual(definition.parameters.required, ["to", "type"]);
+  const properties = definition.parameters.properties as Record<string, any>;
+  assert.equal(properties.to.type, "string");
+  assert.equal(properties.type.type, "string");
+  assert.equal(Array.isArray(properties.body.anyOf), true);
+  assert.equal(properties.reply_to.type, "string");
+  assert.equal(properties.correlation_id.type, "string");
+});
+
+test(
+  "Actor message tool routes branch envelopes through parent run mailboxes",
+  { skip: process.platform === "win32" },
+  async () => {
+    const definition = createActorMessageToolDefinition();
+    const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-message-"));
+    let stateDir = "";
+    const readyFile = join(root, "ready");
+    const messageFile = join(root, "message");
+    const script =
+      'mkfifo "$1/control.fifo"; printf ready >"$2"; IFS= read -r message <"$1/control.fifo"; printf %s "$message" >"$3"';
+    try {
+      const meta = startRun(
+        {
+          run_id: "parent",
+          template: "bash -lc {script} -- {state_dir} {readyFile} {messageFile}",
+          values: { messageFile, readyFile, script },
+        },
+        process.cwd(),
+      );
+      stateDir = meta.state_dir;
+      await waitForFile(readyFile);
+      const result = await definition.execute(
+        "call-branch-message",
+        {
+          body: { decision: "approve" },
+          to: "branch:parent/reviewer-a",
+          type: "control.approve",
+        },
+        undefined,
+        undefined,
+        undefined,
+      );
+      assert.match(result.content[0].text, /to=branch:parent\/reviewer-a/);
+      assert.match(result.content[0].text, /message=sent/);
+      await waitForFile(messageFile);
+      const envelope = JSON.parse(await readFile(messageFile, "utf8"));
+      assert.equal(envelope.to, "branch:parent/reviewer-a");
+      assert.equal(envelope.type, "control.approve");
+      assert.deepEqual(envelope.body, { decision: "approve" });
+      await waitForFile(join(stateDir, "result.json"));
+    } finally {
+      if (stateDir) await rm(stateDir, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("Actor message tool routes coordinator messages through run outboxes", async () => {
+  const definition = createActorMessageToolDefinition();
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-message-"));
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: "sender",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    const result = await definition.execute(
+      "call-coordinator-message",
+      {
+        body: { ready: true },
+        from: "run:sender",
+        summary: "Ready",
+        to: "coordinator",
+        type: "checkpoint.ready",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /to=coordinator/);
+    assert.match(result.content[0].text, /outbox=outbox\.jsonl/);
+    const event = JSON.parse(await readFile(join(stateDir, "outbox.jsonl"), "utf8"));
+    assert.equal(event.to, "coordinator");
+    assert.equal(event.from, "run:sender");
+    assert.equal(event.type, "checkpoint.ready");
+    assert.equal(event.delivery, "followup");
+    assert.deepEqual(event.body, { ready: true });
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Spawn tool starts run actors with artifact metadata", async () => {
+  const definition = createSpawnToolDefinition();
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-spawn-"));
+  const stateDir = join(root, "spawned");
+  try {
+    const result = await definition.execute(
+      "call-spawn",
+      {
+        artifacts: { report: "{state_dir}/report.md" },
+        as: "run:spawned",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "console.log('spawned')"`,
+      },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+    assert.match(result.content[0].text, /run=spawned/);
+    assert.deepEqual(result.details.artifacts, { report: `${stateDir}/report.md` });
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Inspect tool reads session runs", async () => {
+  const definition = createInspectToolDefinition();
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: "session-inspect",
+        ownerId: "session-demo",
+        template: `${process.execPath} -e "console.log('ok')"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    const result = await definition.execute(
+      "call-inspect-session",
+      { target: "session:session-demo", view: "status" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /session=session-demo/);
+    assert.equal(result.details.runs.length, 1);
+    assert.equal(result.details.runs[0].run, "session-inspect");
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Inspect tool reads run mailbox metadata", async () => {
+  const definition = createInspectToolDefinition();
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: "mailbox",
+        mailbox: { accepts: ["control.continue"], emits: ["run.done"] },
+        template: `${process.execPath} -e "console.log('ok')"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    const result = await definition.execute(
+      "call-inspect-mailbox",
+      { target: "run:mailbox", view: "mailbox" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /accepts=control\.continue/);
+    assert.match(result.content[0].text, /emits=run\.done/);
+    assert.deepEqual(result.details.mailbox, {
+      accepts: ["control.continue"],
+      emits: ["run.done"],
+    });
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("Async run tool definition exposes action schema", () => {

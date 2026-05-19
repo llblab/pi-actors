@@ -49,6 +49,7 @@ export interface AsyncRunStartParams {
   output?: string;
   artifacts?: Record<string, string>;
   events?: Record<string, { delivery?: string }>;
+  mailbox?: RecipeReferences.TemplateRecipeMailbox;
   retry?: number | string;
   failure?: CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
@@ -68,15 +69,21 @@ export type RunOutboxDelivery = "log" | "notify" | "followup";
 export type RunOutboxLevel = "info" | "warning" | "error";
 
 export interface RunOutboxEvent {
+  body?: unknown;
+  correlation_id?: string;
   data?: unknown;
   delivery: RunOutboxDelivery;
   event: string;
+  from?: string;
   id: string;
   level: RunOutboxLevel;
+  reply_to?: string;
   run: string;
   state_dir: string;
   summary: string;
+  to?: string;
   ts: string;
+  type?: string;
 }
 
 export interface AsyncRunMeta {
@@ -95,6 +102,7 @@ export interface AsyncRunMeta {
   values: Record<string, unknown>;
   artifacts?: Record<string, string>;
   events?: Record<string, { delivery?: string }>;
+  mailbox?: RecipeReferences.TemplateRecipeMailbox;
 }
 
 const DEFAULT_STATE_ROOT = Paths.getRunStateRoot();
@@ -336,6 +344,7 @@ export function startRun(
     values,
     ...(artifacts ? { artifacts } : {}),
     ...(startParams.events ? { events: startParams.events } : {}),
+    ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
   };
   writeJsonAtomic(join(stateDir, "run.json"), meta);
   const child = spawn(process.execPath, argv, {
@@ -395,15 +404,21 @@ function normalizeRunOutboxEvent(
       ? record.id.trim()
       : `${run}:${index}`;
   return {
+    ...(record.body !== undefined ? { body: record.body } : {}),
+    ...(typeof record.correlation_id === "string" ? { correlation_id: record.correlation_id } : {}),
     ...(record.data !== undefined ? { data: record.data } : {}),
     delivery: normalizeRunOutboxDelivery(record.delivery),
     event,
+    ...(typeof record.from === "string" ? { from: record.from } : {}),
     id,
     level: normalizeRunOutboxLevel(record.level),
+    ...(typeof record.reply_to === "string" ? { reply_to: record.reply_to } : {}),
     run,
     state_dir: stateDir,
     summary,
+    ...(typeof record.to === "string" ? { to: record.to } : {}),
     ts,
+    ...(typeof record.type === "string" ? { type: record.type } : {}),
   };
 }
 
@@ -506,6 +521,51 @@ export function readRunEvents(runOrDir: string, lines = 40): RunOutboxEvent[] {
   return tailLines(join(stateDir, "outbox.jsonl"), lines)
     .map((line, index) => parseRunOutboxEventLine(line, run, stateDir, index))
     .filter((event): event is RunOutboxEvent => Boolean(event));
+}
+
+export function appendRunOutboxEvent(
+  runOrDir: string,
+  event: {
+    body?: unknown;
+    correlation_id?: string;
+    data?: unknown;
+    delivery?: string;
+    event?: string;
+    from?: string;
+    level?: string;
+    reply_to?: string;
+    summary?: string;
+    to?: string;
+    type?: string;
+  },
+): Record<string, unknown> {
+  const status = getRunStatus(runOrDir);
+  const stateDir = String(status.state_dir);
+  const run = String(status.run ?? runOrDir);
+  const type = event.type || event.event || "run.message";
+  const payload = {
+    ...(event.body !== undefined ? { body: event.body } : {}),
+    ...(event.correlation_id ? { correlation_id: event.correlation_id } : {}),
+    ...(event.data !== undefined ? { data: event.data } : {}),
+    delivery: normalizeRunOutboxDelivery(event.delivery),
+    event: type,
+    from: event.from || `run:${run}`,
+    level: normalizeRunOutboxLevel(event.level),
+    ...(event.reply_to ? { reply_to: event.reply_to } : {}),
+    summary: event.summary || type,
+    to: event.to || "coordinator",
+    ts: new Date().toISOString(),
+    type,
+  };
+  const line = `${JSON.stringify(payload)}\n`;
+  writeFileSync(join(stateDir, "outbox.jsonl"), line, { flag: "a" });
+  return {
+    bytes: Buffer.byteLength(line),
+    outbox: "outbox.jsonl",
+    run,
+    sent: true,
+    state_dir: stateDir,
+  };
 }
 
 export function sendRunMessage(

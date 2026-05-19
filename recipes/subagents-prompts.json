@@ -19,6 +19,9 @@
     "report": "{report_path}",
     "summary": "{summary_path}"
   },
+  "mailbox": {
+    "emits": ["command.done", "run.done", "run.failed"]
+  },
   "events": {
     "command.done": {
       "delivery": "{command_event_delivery}"

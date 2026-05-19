@@ -5,6 +5,7 @@
  */
 
 import type { RegisteredTool } from "./config.ts";
+import * as ActorMessages from "./actor-messages.ts";
 import * as AsyncRuns from "./async-runs.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import * as Execution from "./execution.ts";
@@ -152,6 +153,46 @@ function compactSendResult(
   return `\n${tokens.join(" ")}`;
 }
 
+function compactActorFiles(status: Record<string, unknown>): string {
+  const run = String(status.run ?? "<unknown>");
+  const artifacts = asRecord(status.artifacts);
+  const files = [
+    status.stdoutLog,
+    status.stderrLog,
+    status.eventsFile,
+    status.outboxFile,
+    status.state_dir ? `${String(status.state_dir)}/result.json` : undefined,
+  ].filter((file): file is string => typeof file === "string");
+  const artifactText = Object.keys(artifacts).length
+    ? ` artifacts=${Object.entries(artifacts)
+        .map(([key, value]) => `${key}:${String(value)}`)
+        .join(",")}`
+    : "";
+  return `\nrun=${run}${artifactText}${files.length ? ` files=${files.join(",")}` : ""}`;
+}
+
+function compactSessionRuns(session: string, runs: Array<Record<string, unknown>>): string {
+  if (runs.length === 0) return `\nsession=${session} runs=0`;
+  return `\nsession=${session} runs=${runs.length}\n${runs
+    .map((run) => `run=${String(run.run ?? "")} status=${String(run.status ?? "")}${run.recipe ? ` recipe=${String(run.recipe)}` : ""}`)
+    .join("\n")}`;
+}
+
+function compactActorMessageResult(
+  message: ActorMessages.ActorMessage,
+  result: Record<string, unknown>,
+): string {
+  const tokens = [
+    `to=${message.to}`,
+    `type=${message.type}`,
+    `message=${result.sent === true ? "sent" : "not_sent"}`,
+  ];
+  if (result.bytes !== undefined) tokens.push(`bytes=${String(result.bytes)}`);
+  if (result.control) tokens.push(`control=${String(result.control)}`);
+  if (result.outbox) tokens.push(`outbox=${String(result.outbox)}`);
+  return `\n${tokens.join(" ")}`;
+}
+
 function compactStopResult(
   action: "cancel" | "kill",
   runId: string,
@@ -225,6 +266,281 @@ export interface AsyncRunToolContext {
 
 function getRunOwnerId(ctx: AsyncRunToolContext): string | undefined {
   return ctx.sessionManager?.getSessionId?.();
+}
+
+function messageBodyToRunLine(message: ActorMessages.ActorMessage): string {
+  if (typeof message.body === "string") return message.body;
+  if (message.body === undefined) return message.type;
+  return JSON.stringify(message.body);
+}
+
+function runIdFromActorAddress(address: string | undefined): string | undefined {
+  if (!address) return undefined;
+  const parsed = ActorMessages.parseActorAddress(address);
+  if (parsed.kind !== "run" || !parsed.value) {
+    throw new Error(`Expected run:<id> actor address, received: ${address}`);
+  }
+  return parsed.value;
+}
+
+export function createSpawnToolDefinition<
+  TContext extends AsyncRunToolContext,
+>(): any {
+  return {
+    name: "spawn",
+    label: "Spawn",
+    description:
+      "Create an addressable actor from a recipe file or inline command template. Currently spawns run:<id> actors backed by async runs.",
+    parameters: objectSchema(
+      {
+        artifacts: looseObjectSchema("Optional named artifact paths for the spawned actor."),
+        as: stringSchema("Optional actor address for the spawned run, e.g. run:<id>."),
+        events: looseObjectSchema("Optional recipe event delivery policy."),
+        file: stringSchema("Optional template recipe JSON file. Bare names resolve under ~/.pi/agent/recipes."),
+        recipe: stringSchema("Alias for file; template recipe JSON file/name to spawn."),
+        state_dir: stringSchema("Optional explicit run state directory."),
+        template: unionSchema([
+          stringSchema("Inline command template string"),
+          arraySchema("Inline command-template sequence or parallel tree"),
+        ]),
+        values: looseObjectSchema("Runtime placeholder values passed to the actor."),
+        verbose: booleanSchema("Return full JSON instead of compact text."),
+      },
+      [],
+    ),
+    async execute(
+      _toolCallId: string,
+      params: unknown,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      ctx: TContext,
+    ) {
+      const input = asRecord(params);
+      const runId = runIdFromActorAddress(
+        typeof input.as === "string" ? input.as : undefined,
+      );
+      const meta = AsyncRuns.startRun(
+        {
+          file: typeof input.file === "string" ? input.file : typeof input.recipe === "string" ? input.recipe : undefined,
+          ownerId: getRunOwnerId(ctx),
+          run_id: runId,
+          state_dir: typeof input.state_dir === "string" ? input.state_dir : undefined,
+          template: input.template as AsyncRuns.AsyncRunStartParams["template"],
+          values: asRecord(input.values),
+          ...(input.artifacts && typeof input.artifacts === "object" && !Array.isArray(input.artifacts)
+            ? { artifacts: input.artifacts as Record<string, string> }
+            : {}),
+          ...(input.events && typeof input.events === "object" && !Array.isArray(input.events)
+            ? { events: input.events as Record<string, { delivery?: string }> }
+            : {}),
+        },
+        ctx.cwd,
+      );
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: maybeJsonText(meta, input.verbose === true, compactAsyncRunStatus(meta)),
+          },
+        ],
+        details: meta,
+      };
+    },
+  };
+}
+
+export function createInspectToolDefinition(): any {
+  return {
+    name: "inspect",
+    label: "Inspect",
+    description:
+      "Intentionally inspect an actor. Supports run:<id> views: status, tail, events, artifacts, files, mailbox; and session:<id> status.",
+    parameters: objectSchema(
+      {
+        lines: stringSchema("Line count for tail/events views. Default 40."),
+        target: stringSchema("Actor address to inspect, e.g. run:<id> or session:<id>."),
+        verbose: booleanSchema("Return full JSON instead of compact text where available."),
+        view: stringSchema("Inspection view: status, tail, events, artifacts, files, or mailbox."),
+      },
+      ["target", "view"],
+    ),
+    async execute(
+      _toolCallId: string,
+      params: unknown,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      _ctx: unknown,
+    ) {
+      const input = asRecord(params);
+      const target = String(input.target ?? "");
+      const address = ActorMessages.parseActorAddress(target);
+      const view = String(input.view ?? "");
+      if (address.kind === "session") {
+        if (view !== "status" && view !== "runs") {
+          throw new Error("inspect session:<id> supports view=status or view=runs.");
+        }
+        const runs = AsyncRuns.listRuns()
+          .map((run) => AsyncRuns.getRunStatus(String(run.state_dir)))
+          .filter((run) => run.ownerId === address.value);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: maybeJsonText({ session: address.value, runs }, input.verbose === true, compactSessionRuns(address.value || "", runs)),
+            },
+          ],
+          details: { session: address.value, runs },
+        };
+      }
+      const runId = address.kind === "run" ? address.value : undefined;
+      if (!runId) throw new Error("inspect target must be run:<id> or session:<id>.");
+      switch (view) {
+        case "status": {
+          const status = AsyncRuns.getRunStatus(runId);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(status, input.verbose === true, compactAsyncRunStatus(status)),
+              },
+            ],
+            details: status,
+          };
+        }
+        case "tail": {
+          const text = AsyncRuns.tailRun(runId, Number(input.lines || 40));
+          return { content: [{ type: "text" as const, text: `\n${text}` }], details: {} };
+        }
+        case "events": {
+          const events = AsyncRuns.readRunEvents(runId, Number(input.lines || 40));
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(events, input.verbose === true, compactRunEvents(events)),
+              },
+            ],
+            details: { events },
+          };
+        }
+        case "artifacts":
+        case "files": {
+          const status = AsyncRuns.getRunStatus(runId);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(status, input.verbose === true, compactActorFiles(status)),
+              },
+            ],
+            details: status,
+          };
+        }
+        case "mailbox": {
+          const status = AsyncRuns.getRunStatus(runId);
+          const mailbox = asRecord(status.mailbox);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(mailbox, input.verbose === true, `\nrun=${String(status.run ?? runId)} accepts=${Array.isArray(mailbox.accepts) ? mailbox.accepts.join(",") : ""} emits=${Array.isArray(mailbox.emits) ? mailbox.emits.join(",") : ""}`),
+              },
+            ],
+            details: { mailbox },
+          };
+        }
+        default:
+          throw new Error("inspect view must be one of: status, tail, events, artifacts, files, mailbox.");
+      }
+    },
+  };
+}
+
+export function createActorMessageToolDefinition(): any {
+  return {
+    name: "message",
+    label: "Message",
+    description:
+      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, and coordinator outbox events.",
+    parameters: objectSchema(
+      {
+        body: unionSchema([
+          stringSchema("Message body. For run:<id>, this is the run-local command line."),
+          looseObjectSchema("Structured JSON message body."),
+          arraySchema("Structured JSON message body array."),
+        ]),
+        correlation_id: stringSchema("Optional correlation id for workflow/task linkage."),
+        delivery: stringSchema("Optional delivery hint: direct, log, notify, or followup."),
+        from: stringSchema("Optional sender address, such as coordinator or run:<id>."),
+        metadata: looseObjectSchema("Optional structured metadata for routing or domain hints."),
+        reply_to: stringSchema("Optional message id this message replies to."),
+        summary: stringSchema("Optional short human-facing summary."),
+        to: stringSchema("Destination actor address, e.g. run:<id>, branch:<run>/<branch>, coordinator, session:<id>, or tool:<name>."),
+        type: stringSchema("Semantic message type, e.g. control.approve or checkpoint.needs_scope."),
+        verbose: booleanSchema("Return full JSON instead of compact text."),
+      },
+      ["to", "type"],
+    ),
+    async execute(
+      _toolCallId: string,
+      params: unknown,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      _ctx: unknown,
+    ) {
+      const input = asRecord(params);
+      const message = ActorMessages.normalizeActorMessage(input);
+      const address = ActorMessages.parseActorAddress(message.to);
+      let result: Record<string, unknown>;
+      if (address.kind === "run" && address.value) {
+        result = AsyncRuns.sendRunMessage(
+          address.value,
+          messageBodyToRunLine(message),
+        );
+      } else if (address.kind === "branch" && address.value) {
+        result = AsyncRuns.sendRunMessage(
+          address.value,
+          JSON.stringify(message),
+        );
+      } else if (address.kind === "coordinator") {
+        if (!message.from) {
+          throw new Error("message to coordinator requires from=run:<id>.");
+        }
+        const sender = ActorMessages.parseActorAddress(message.from);
+        if (sender.kind !== "run" || !sender.value) {
+          throw new Error("message to coordinator currently requires from=run:<id>.");
+        }
+        result = AsyncRuns.appendRunOutboxEvent(sender.value, {
+          body: message.body,
+          correlation_id: message.correlation_id,
+          delivery: message.delivery,
+          event: message.type,
+          from: message.from,
+          reply_to: message.reply_to,
+          summary: message.summary,
+          to: message.to,
+          type: message.type,
+        });
+      } else {
+        throw new Error(
+          `message currently supports run:<id>, branch:<run>/<branch>, and coordinator destinations; unsupported destination: ${message.to}`,
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: maybeJsonText(
+              { message, result },
+              input.verbose === true,
+              compactActorMessageResult(message, result),
+            ),
+          },
+        ],
+        details: { message, result },
+      };
+    },
+  };
 }
 
 export function createAsyncRunToolDefinition<

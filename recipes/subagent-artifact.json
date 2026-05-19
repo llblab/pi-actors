@@ -19,5 +19,8 @@
     "thinking": "off",
     "tools": ""
   },
+  "mailbox": {
+    "emits": ["artifact.prepared", "artifact.blocked"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Prepare a durable artifact. Target path: {artifact_path}. Format: {artifact_format}. Write policy: {write_policy}. Validation policy: {validation_policy}. Input: {input}"
 }

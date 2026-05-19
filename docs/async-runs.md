@@ -79,7 +79,7 @@ Use `run_id` on async recipe tools or the `async_run` action API when the caller
 
 Use ordinary files under the extension temp directory so status tools stay simple and inspectable:
 
-- `run.json`: pid, optional source metadata (`tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, created time, and state dir.
+- `run.json`: pid, optional source metadata (`tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, mailbox metadata, created time, and state dir.
 - `progress.json`: phase, active command count, completed count, failures, and updated time.
 - `events.jsonl`: append-only lifecycle events.
 - `outbox.jsonl`: optional script-authored JSONL events for coordinator inspection, notifications, or follow-up context.
@@ -115,7 +115,7 @@ The core loop is:
 1. Start an async recipe and keep the coordinator free:
 
    ```json
-   { "action": "start", "file": "music-player.json", "run_id": "music" }
+   { "recipe": "music-player.json", "as": "run:music" }
    ```
 
 2. Let terminal events, `command.done`, and script-authored `followup` messages reach the launching coordinator automatically.
@@ -123,16 +123,22 @@ The core loop is:
 3. Respond with explicit run-local messages when needed:
 
    ```json
-   { "action": "send", "run_id": "music", "message": "next" }
+   { "to": "run:music", "type": "player.next", "body": "next" }
    ```
 
 4. Do not inspect just because time passed. Inspect `status`, `tail`, or `events` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
 
-`send` and outbox follow-ups are the paired control plane: outbox events carry run-to-coordinator signals upward, while `async_run action=send` carries coordinator-to-run commands downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-auto-tools owns the safe run-local transport, ownership checks, and delivery policy.
+`message` and outbox follow-ups are the paired control plane: outbox events carry run-to-coordinator signals upward, while addressed messages carry coordinator-to-run commands downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-auto-tools owns the safe run-local transport, ownership checks, and delivery policy.
 
 ## Tool Surface
 
-The public async adapter remains one action tool:
+The actor-level surface is:
+
+- `spawn`: start a detached `run:<id>` actor from `file`, `recipe`, or inline `template`.
+- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, or `coordinator`.
+- `inspect`: intentionally read `run:<id>` status, tail, events, artifacts, files, or mailbox metadata.
+
+The low-level async adapter remains available for lifecycle and diagnostic operations:
 
 - `async_run action=start`: start a detached run from `file` or inline `template`.
 - `async_run action=status`: read compact run state; add `verbose: true` for full JSON.
@@ -143,11 +149,11 @@ The public async adapter remains one action tool:
 - `async_run action=cancel`: send graceful termination to an owned run.
 - `async_run action=kill`: force-kill a stuck owned run after the same ownership checks.
 
-This mirrors `register_tool`: one management surface, explicit actions, and small prompt footprint. `start`, `status`, `list`, `events`, `send`, `cancel`, and `kill` return compact text by default so async management does not flood agent context; use `verbose: true` when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
+Compact text is returned by default so async management does not flood agent context; use `verbose: true` when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
 
 ## Run-Local Messages
 
-`async_run action=send` is the explicit coordinator-to-run command channel. Use it when a running recipe exposes a control vocabulary and the coordinator needs to redirect the run without killing or restarting it.
+`message` is the explicit coordinator-to-run command channel. Use it when a running recipe exposes a control vocabulary and the coordinator needs to redirect the run without killing or restarting it.
 
 On Unix-like hosts, async runs may expose a control FIFO at:
 
@@ -155,23 +161,23 @@ On Unix-like hosts, async runs may expose a control FIFO at:
 <state_dir>/control.fifo
 ```
 
-When present, a caller can send a script-owned command line:
+When present, a caller can send a typed actor message:
 
 ```json
 {
-  "action": "send",
-  "run_id": "music",
-  "message": "next"
+  "to": "run:music",
+  "type": "player.next",
+  "body": "next"
 }
 ```
 
-`async_run action=send` opens the FIFO in non-blocking mode, writes `message`, and appends a trailing newline when omitted. The generic runtime records the send event but does not interpret arbitrary message content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
+For `run:<id>`, `message` adapts the body to the FIFO command line. For `branch:<run>/<branch>`, it sends the full envelope through the parent run mailbox so the runner can dispatch branch-local control. The generic runtime records the send event but does not interpret arbitrary message content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
 
 Native Windows does not support this Unix FIFO contract. Use WSL/Linux/macOS for FIFO-controlled recipes, or let a Windows-specific recipe expose its own transport such as a Windows named pipe or localhost socket.
 
 ## Coordinator Notifications
 
-The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` outbox events back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local outbox events bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` outbox events for completed leaf commands; map `events.command.done.delivery` to `followup` when a recipe should bubble branch-level completion events. Packaged multi-agent fanout recipes default these completion events to `followup`, because async branch completion is base coordinator context rather than optional diagnostics. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `cancel`, `kill`, and control messages such as `stop` stay out of follow-up context because the initiating action already returns synchronously. If an outbox follow-up asks for direction, answer with `async_run action=send` rather than starting a polling loop. Use explicit `async_run action=status`, `tail`, or `events` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
+The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` outbox events back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local outbox events bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` outbox events for completed leaf commands; map `events.command.done.delivery` to `followup` when a recipe should bubble branch-level completion events. Packaged multi-agent fanout recipes default these completion events to `followup`, because async branch completion is base coordinator context rather than optional diagnostics. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `cancel`, `kill`, and control messages such as `stop` stay out of follow-up context because the initiating action already returns synchronously. If an outbox follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` or low-level `async_run action=status`, `tail`, or `events` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
 
 Ambient status indicators may refresh while work is active, but notification delivery is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `async_run action=start`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
 

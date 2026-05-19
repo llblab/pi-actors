@@ -19,5 +19,9 @@
     "thinking": "off",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.reply", "control.revise", "control.stop"],
+    "emits": ["checkpoint.continued"]
+  },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Continue from checkpoint using mode {mode}. Checkpoint: {checkpoint}. Coordinator reply: {reply}. Continuity policy: {continuity_policy}. Output format: {output_format}"
 }

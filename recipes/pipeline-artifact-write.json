@@ -1,27 +1,33 @@
 {
-  "name": "pipeline-artifact-report",
+  "name": "pipeline-artifact-write",
   "async": true,
   "imports": {
     "normalizer": "subagent-normalize.json",
     "artifact": "subagent-artifact.json",
+    "writer": "utility-artifact-write.json",
     "event": "subagent-event.json"
   },
   "args": [
     "input:string",
     "artifact_path:path",
     "artifact_format:string",
+    "write_mode:enum(create,overwrite,append)",
     "delivery:enum(log,notify,followup)",
     "model:string",
     "tools:string"
   ],
   "defaults": {
     "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
+    "write_mode": "create",
     "delivery": "log",
     "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "emits": ["artifact.prepared", "artifact.blocked"]
+    "emits": ["artifact.written", "artifact.blocked"]
+  },
+  "artifacts": {
+    "artifact": "{artifact_path}"
   },
   "template": [
     {
@@ -39,15 +45,23 @@
         "input": "Use normalized report from stdin.",
         "artifact_path": "{artifact_path}",
         "artifact_format": "{artifact_format}",
+        "write_policy": "The caller selected deterministic write mode {write_mode}; produce only the artifact content that should be written, with no surrounding commentary outside the artifact body.",
         "model": "{model}",
         "tools": "{tools}"
       }
     },
     {
+      "name": "writer",
+      "values": {
+        "artifact_path": "{artifact_path}",
+        "mode": "{write_mode}"
+      }
+    },
+    {
       "name": "event",
       "values": {
-        "event_type": "artifact.prepared",
-        "payload": "Artifact prepared for path {artifact_path}. Use previous artifact content from stdin.",
+        "event_type": "artifact.written",
+        "payload": "Artifact written to path {artifact_path} using mode {write_mode}. Use writer JSON from stdin as write evidence.",
         "delivery": "{delivery}",
         "model": "{model}",
         "tools": "{tools}"

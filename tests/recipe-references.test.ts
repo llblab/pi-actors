@@ -140,6 +140,37 @@ test("Template recipes reference imported defaults and explicit values", async (
   }
 });
 
+test("Template recipes preserve mailbox declarations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
+  try {
+    const base = join(root, "base.json");
+    const recipe = join(root, "mailbox.json");
+    await writeFile(
+      base,
+      JSON.stringify({ defaults: { event_type: "checkpoint.ready" }, template: "echo base" }),
+    );
+    await writeFile(
+      recipe,
+      JSON.stringify({
+        imports: { base: "base.json" },
+        mailbox: {
+          accepts: ["control.approve", "control.revise", 7],
+          emits: ["{base.defaults.event_type}", "run.done", false],
+        },
+        template: "echo mailbox",
+      }),
+    );
+
+    const config = readResolvedRecipeConfig(recipe)!;
+    assert.deepEqual(config.mailbox, {
+      accepts: ["control.approve", "control.revise"],
+      emits: ["checkpoint.ready", "run.done"],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Packaged library recipes parse and resolve imports", async () => {
   const recipeDir = join(__dirname, "..", "recipes");
   const files = (await readdir(recipeDir)).filter((file) =>

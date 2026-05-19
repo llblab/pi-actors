@@ -68,6 +68,71 @@ function objectSchema(
   return { additionalProperties: false, properties, required, type: "object" };
 }
 
+function sampleValueForArg(
+  arg: string,
+  type: Schema.ToolArgType | undefined,
+  defaults: Record<string, unknown>,
+): unknown {
+  if (Object.hasOwn(defaults, arg)) return defaults[arg];
+  if (!type || type.kind === "string") return `<${arg}>`;
+  if (type.kind === "path") return `./${arg}`;
+  if (type.kind === "int") return 1;
+  if (type.kind === "number") return 1.5;
+  if (type.kind === "bool") return true;
+  if (type.kind === "array") return [`<${arg}>`];
+  return type.values[0] ?? `<${arg}>`;
+}
+
+function shouldAddRuntimeToolUsageHint(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /^Argument \S+ must /.test(message) ||
+    /^Missing .* value: /.test(message)
+  );
+}
+
+function formatRuntimeToolUsageHint(
+  cfg: RegisteredTool,
+  required: string[],
+  includeRunId: boolean,
+): string {
+  const optional = cfg.args.filter((arg) => !required.includes(arg));
+  const example: Record<string, unknown> = {};
+  for (const arg of required)
+    example[arg] = sampleValueForArg(arg, cfg.argTypes?.[arg], cfg.defaults);
+  for (const arg of optional)
+    example[arg] = sampleValueForArg(arg, cfg.argTypes?.[arg], cfg.defaults);
+  if (includeRunId) example.run_id = `${cfg.name}-1`;
+  const lines = [
+    `Expected call shape for ${cfg.name}:`,
+    `${cfg.name}(${JSON.stringify(example, null, 2)})`,
+  ];
+  if (required.length) lines.push(`Required: ${required.join(", ")}`);
+  if (optional.length || includeRunId)
+    lines.push(
+      `Optional: ${[...optional, ...(includeRunId ? ["run_id"] : [])].join(", ")}`,
+    );
+  return lines.join("\n");
+}
+
+function formatRuntimeToolArgumentError(
+  cfg: RegisteredTool,
+  error: unknown,
+  required: string[],
+  includeRunId: boolean,
+): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!shouldAddRuntimeToolUsageHint(error))
+    return error instanceof Error ? error : new Error(message);
+  return new Error(
+    `Invalid arguments for tool "${cfg.name}": ${message}\n\n${formatRuntimeToolUsageHint(
+      cfg,
+      required,
+      includeRunId,
+    )}`,
+  );
+}
+
 function looseObjectSchema(description: string): JsonSchema {
   return { additionalProperties: true, description, type: "object" };
 }
@@ -594,58 +659,62 @@ export function createRuntimeToolDefinition(
       _onUpdate: unknown,
       ctx: AsyncRunToolContext,
     ) {
-      if (isAsyncRecipe) {
-        const input = params as Record<string, unknown>;
-        const { run_id, ...values } = input;
-        const base = cfg.recipe ? cfg.recipe : { file: String(cfg.template) };
-        const runId =
-          typeof run_id === "string" && run_id.trim()
-            ? run_id.trim()
-            : `${cfg.name}-${Date.now()}`;
-        const meta = AsyncRuns.startRun(
-          {
-            ...base,
-            ownerId: getRunOwnerId(ctx),
-            run_id: runId,
-            tool: cfg.name,
-            values: Schema.normalizeRuntimeValues(
-              { ...(cfg.recipe?.values ?? {}), ...cfg.defaults, ...values },
-              cfg.argTypes,
-            ),
-          },
-          ctx.cwd,
-        );
-        return {
-          content: [
-            { type: "text" as const, text: compactAsyncRunStatus(meta) },
-          ],
-          details: meta,
-        };
-      }
-      if (isRecipe && recipeTemplate) {
-        const paramsWithDefaults = {
-          ...(cfg.recipe?.values ?? {}),
-          ...cfg.defaults,
-          ...(params as Record<string, unknown>),
-        };
-        return Execution.executeRegisteredTool(
-          { ...cfg, template: recipeTemplate },
-          Schema.normalizeRuntimeValues(paramsWithDefaults, cfg.argTypes),
+      try {
+        if (isAsyncRecipe) {
+          const input = params as Record<string, unknown>;
+          const { run_id, ...values } = input;
+          const base = cfg.recipe ? cfg.recipe : { file: String(cfg.template) };
+          const runId =
+            typeof run_id === "string" && run_id.trim()
+              ? run_id.trim()
+              : `${cfg.name}-${Date.now()}`;
+          const meta = AsyncRuns.startRun(
+            {
+              ...base,
+              ownerId: getRunOwnerId(ctx),
+              run_id: runId,
+              tool: cfg.name,
+              values: Schema.normalizeRuntimeValues(
+                { ...(cfg.recipe?.values ?? {}), ...cfg.defaults, ...values },
+                cfg.argTypes,
+              ),
+            },
+            ctx.cwd,
+          );
+          return {
+            content: [
+              { type: "text" as const, text: compactAsyncRunStatus(meta) },
+            ],
+            details: meta,
+          };
+        }
+        if (isRecipe && recipeTemplate) {
+          const paramsWithDefaults = {
+            ...(cfg.recipe?.values ?? {}),
+            ...cfg.defaults,
+            ...(params as Record<string, unknown>),
+          };
+          return await Execution.executeRegisteredTool(
+            { ...cfg, template: recipeTemplate },
+            Schema.normalizeRuntimeValues(paramsWithDefaults, cfg.argTypes),
+            exec,
+            ctx.cwd,
+            signal,
+          );
+        }
+        return await Execution.executeRegisteredTool(
+          cfg,
+          Schema.normalizeRuntimeValues(
+            params as Record<string, unknown>,
+            cfg.argTypes,
+          ),
           exec,
           ctx.cwd,
           signal,
         );
+      } catch (error) {
+        throw formatRuntimeToolArgumentError(cfg, error, required, isAsyncRecipe);
       }
-      return Execution.executeRegisteredTool(
-        cfg,
-        Schema.normalizeRuntimeValues(
-          params as Record<string, unknown>,
-          cfg.argTypes,
-        ),
-        exec,
-        ctx.cwd,
-        signal,
-      );
     },
   };
 }

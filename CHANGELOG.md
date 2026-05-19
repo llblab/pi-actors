@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.12.7: Tool Argument Usage Hints
+
+- `[Tools]` Added compact usage hints to runtime actor-tool argument errors when typed normalization or placeholder resolution fails. Impact: if an agent supplies a wrong enum/type value or misses a required template value after schema validation, the error now shows the expected call shape with required and optional fields.
+
 ## 0.12.6: Documentation Example Alignment
 
 - `[Docs]` Replaced remaining shader-ring recipe examples in registry and template-recipe docs with the concrete docs-review actor recipe example, aligned test fixtures, and changed async-run outbox docs to show actor message envelopes without public delivery knobs. Impact: public docs now consistently demonstrate useful actor wrapping and keep coordinator attention policy out of recipe-authored message examples.

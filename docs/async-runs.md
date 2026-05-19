@@ -188,22 +188,19 @@ Shape:
 
 ```json
 {
-  "event": "player.track",
+  "type": "player.track",
+  "to": "coordinator",
+  "from": "run:music-player",
   "summary": "Now playing: track.flac",
   "level": "info",
-  "delivery": "log",
   "ts": "2026-05-19T00:00:00.000Z",
-  "data": { "track": "/Music/track.flac", "index": 3, "count": 42 }
+  "body": { "track": "/Music/track.flac", "index": 3, "count": 42 }
 }
 ```
 
-`level` is `info`, `warning`, or `error`. `delivery` is `log`, `notify`, or `followup`:
+`level` is `info`, `warning`, or `error`. The public message describes sender, receiver, type, summary, and body; it does not choose notification mechanics. Runtime attention policy infers whether a coordinator-bound message stays available for explicit `inspect`, becomes a UI notification, or re-enters the launching coordinator as compact follow-up context.
 
-- `log`: stored only; read explicitly with `inspect view=events`.
-- `notify`: shown as a UI notification to the launching coordinator session.
-- `followup`: notification plus compact follow-up context to the launching coordinator session.
-
-Use `followup` for completion and decision-point messages that should reach the coordinator, not for every progress tick. Packaged multi-agent branch completion is a completion message and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
+Use coordinator-bound messages for completion and decision points, not for every progress tick. Packaged multi-agent branch completion is a completion message and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
 
 ## Cancellation And Ownership
 

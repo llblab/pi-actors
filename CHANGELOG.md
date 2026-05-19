@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.12.6: Documentation Example Alignment
+
+- `[Docs]` Replaced remaining shader-ring recipe examples in registry and template-recipe docs with the concrete docs-review actor recipe example, aligned test fixtures, and changed async-run outbox docs to show actor message envelopes without public delivery knobs. Impact: public docs now consistently demonstrate useful actor wrapping and keep coordinator attention policy out of recipe-authored message examples.
+
 ## 0.12.5: README Actor Recipe Example
 
 - `[Docs]` Replaced the placeholder shader-ring onboarding recipe with a concrete async docs-review actor recipe that includes typed args, mailbox metadata, and a real launch template. Impact: README onboarding now demonstrates actor wrapping instead of an abstract placeholder.

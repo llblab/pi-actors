@@ -170,15 +170,15 @@ A registered tool can point at an actor recipe by storing the recipe path or nam
 
 ```json
 {
-  "shader_ring": {
-    "description": "Start the shader ring recipe",
-    "args": ["theme", "out_dir"],
-    "template": "shader-ring-8-parallel.json"
+  "docs_review": {
+    "description": "Start an async docs review actor",
+    "args": ["scope:path", "model:string=openai-codex/gpt-5.5"],
+    "template": "docs-review.json"
   }
 }
 ```
 
-If `shader-ring-8-parallel.json` contains `async: true`, calling `shader_ring` starts a detached run and returns metadata. If `async` is omitted or false, calling `shader_ring` executes the recipe foreground and returns normal tool output.
+If `docs-review.json` contains `async: true`, calling `docs_review` starts a detached actor run and returns metadata. If `async` is omitted or false, calling `docs_review` executes the recipe foreground and returns normal tool output.
 
 A registered tool may also co-locate an actor recipe directly in `actors-tools.json`:
 

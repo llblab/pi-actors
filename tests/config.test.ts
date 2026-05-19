@@ -123,24 +123,25 @@ test("Stored tool normalization derives args from standard inline placeholders",
 
 test("Stored tool normalization accepts template recipe paths in template", () => {
   const result = normalizeStoredTool(
-    "shader_launcher",
+    "docs_review",
     {
-      args: ["theme", "out_dir=latest"],
-      description: "Start shader job",
-      template: "shader-ring-8-parallel.json",
+      args: ["scope:path", "model:string=openai-codex/gpt-5.5"],
+      description: "Start docs review actor",
+      template: "docs-review.json",
     },
     reserved,
   );
   assert.equal(result.warning, undefined);
   assert.equal(result.changed, true);
   assert.deepEqual(result.cfg, {
-    name: "shader_launcher",
-    description: "Start shader job",
-    args: ["theme", "out_dir"],
-    defaults: { out_dir: "latest" },
-    template: "shader-ring-8-parallel.json",
-    storedArgs: ["theme", "out_dir"],
-    storedDefaults: { out_dir: "latest" },
+    name: "docs_review",
+    description: "Start docs review actor",
+    args: ["scope", "model"],
+    defaults: { model: "openai-codex/gpt-5.5" },
+    argTypes: { scope: { kind: "path" } },
+    template: "docs-review.json",
+    storedArgs: ["scope:path", "model"],
+    storedDefaults: { model: "openai-codex/gpt-5.5" },
   });
 });
 
@@ -419,14 +420,14 @@ test("Serialized co-located template recipe launchers keep recipe metadata befor
 test("Serialized template recipe launchers keep template path", () => {
   const tool: RegisteredTool = {
     name: "launcher",
-    description: "Start job",
-    template: "shader-ring-8-parallel.json",
+    description: "Start docs review actor",
+    template: "docs-review.json",
     args: [],
     defaults: {},
   };
   assert.deepEqual(serializeTools(new Map([[tool.name, tool]])).launcher, {
-    description: "Start job",
-    template: "shader-ring-8-parallel.json",
+    description: "Start docs review actor",
+    template: "docs-review.json",
   });
 });
 

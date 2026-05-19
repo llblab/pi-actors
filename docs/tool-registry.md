@@ -47,16 +47,16 @@ Use `update=true` to overwrite an existing tool. Omit `template` and co-located 
 ]
 ```
 
-For reusable workflows, register a small tool whose `template` points to a template recipe instead of embedding a large parallel template in the tool itself:
+For reusable actor workflows, register a small tool whose `template` points to an actor recipe instead of embedding the launch graph in the tool itself:
 
 ```text
-register_tool name=shader_ring \
-  description="Start the shader ring recipe" \
-  template="shader-ring-8-parallel.json" \
-  args="theme,out_dir"
+register_tool name=docs_review \
+  description="Start an async docs review actor" \
+  template="docs-review.json" \
+  args="scope:path,model:string=openai-codex/gpt-5.5"
 ```
 
-This stores the recipe path in the registry as `template`. If `~/.pi/agent/recipes/shader-ring-8-parallel.json` contains `async: true`, calling the tool starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
+This stores the recipe path in the registry as `template`. If `~/.pi/agent/recipes/docs-review.json` contains `async: true`, calling the tool starts a detached actor run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
 When co-location is clearer than a separate file, the registry entry may include recipe fields directly beside tool metadata:
 
@@ -93,10 +93,10 @@ Tool names come from the top-level registry keys. Tool entries define `template`
     "description": "Run pi as a non-interactive sub-agent",
     "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
   },
-  "shader_ring": {
-    "description": "Start the shader ring recipe",
-    "args": ["theme", "out_dir"],
-    "template": "shader-ring-8-parallel.json"
+  "docs_review": {
+    "description": "Start an async docs review actor",
+    "args": ["scope:path", "model:string=openai-codex/gpt-5.5"],
+    "template": "docs-review.json"
   }
 }
 ```

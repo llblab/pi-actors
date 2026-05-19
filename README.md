@@ -126,17 +126,24 @@ Move to actor recipes when work is long-running, parallel, service-like, or agen
 
 ```json
 {
-  "name": "shader-ring-8-parallel",
+  "name": "docs-review",
   "async": true,
-  "parallel": true,
-  "template": ["..."]
+  "args": ["scope:path", "model:string"],
+  "defaults": {
+    "model": "openai-codex/gpt-5.5"
+  },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["review.completed", "run.failed"]
+  },
+  "template": "pi -p --model {model} --no-tools \"Review {scope} for unclear actor-runtime onboarding. Return concise findings.\""
 }
 ```
 
 Expose a reusable actor recipe as a normal capability:
 
 ```text
-register_tool name=shader_ring description="Start shader ring" template="shader-ring-8-parallel.json" args="theme,out_dir"
+register_tool name=docs_review description="Start an async docs review actor" template="docs-review.json" args="scope:path,model:string=openai-codex/gpt-5.5"
 ```
 
 `Task` is the user's work item. `Template` is the execution graph. `Actor recipe` is saved JSON. `Run` is one actor instance with status, logs, messages, cancellation, artifacts, and ambient triangles.
@@ -203,13 +210,13 @@ register_tool name=transcribe \
 For reusable actor workflows, keep the large template and mailbox contract in a recipe file and register a small tool:
 
 ```text
-register_tool name=shader_ring \
-  description="Start the shader ring recipe" \
-  template="shader-ring-8-parallel.json" \
-  args="theme,out_dir"
+register_tool name=docs_review \
+  description="Start an async docs review actor" \
+  template="docs-review.json" \
+  args="scope:path,model:string=openai-codex/gpt-5.5"
 ```
 
-If the recipe file contains `async: true`, calling `shader_ring` starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
+If the recipe file contains `async: true`, calling `docs_review` starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
 A recipe can also be co-located in `actors-tools.json` when keeping metadata and the recipe body together is clearer:
 
@@ -262,10 +269,10 @@ The commands above persist entries like this in `~/.pi/agent/actors-tools.json`;
     "description": "Run pi as a non-interactive sub-agent",
     "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
   },
-  "shader_ring": {
-    "description": "Start the shader ring recipe",
-    "args": ["theme", "out_dir"],
-    "template": "shader-ring-8-parallel.json"
+  "docs_review": {
+    "description": "Start an async docs review actor",
+    "args": ["scope:path", "model:string=openai-codex/gpt-5.5"],
+    "template": "docs-review.json"
   }
 }
 ```

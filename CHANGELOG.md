@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.12.5: README Actor Recipe Example
+
+- `[Docs]` Replaced the placeholder shader-ring onboarding recipe with a concrete async docs-review actor recipe that includes typed args, mailbox metadata, and a real launch template. Impact: README onboarding now demonstrates actor wrapping instead of an abstract placeholder.
+
 ## 0.12.4: Actor Runtime Positioning
 
 - `[Docs]` Reframed README and package metadata around `pi-actors` as an actor runtime and orchestrator for agent-managed local processes, while preserving the persistent actor-tool registry as one capability. Impact: new readers see how templates, recipes, mailboxes, messages, artifacts, and run state turn any trusted local process into an agent-controllable actor.

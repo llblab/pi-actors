@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.1: Backlog Vocabulary Reconciliation
+
+- `[Docs]` Reconciled backlog status text after the message-only inspection release. Impact: project context no longer claims `inspect view=events` is retained and describes operations snapshots as actor-message tails instead of event tails.
+
 ## 0.14.0: Message-Only Run Inspection
 
 - `[Actor Tools]` Removed `inspect view=events` as a public compatibility alias. Impact: run actor message streams are inspected only with `inspect view=messages`, keeping the public observation vocabulary aligned with actor messages.

@@ -8,7 +8,7 @@ Compress communication to three durable verbs:
 
 - `spawn`: create an addressable actor from a recipe, template, or tool.
 - `message`: send one typed message to one address.
-- `inspect`: intentionally observe state, logs, events, or artifacts.
+- `inspect`: intentionally observe state, logs, actor messages, or artifacts.
 
 Everything else is an adapter until proven otherwise.
 
@@ -92,7 +92,12 @@ Recipes can declare their conversational surface:
 ```json
 {
   "mailbox": {
-    "accepts": ["control.continue", "control.revise", "control.approve", "control.stop"],
+    "accepts": [
+      "control.continue",
+      "control.revise",
+      "control.approve",
+      "control.stop"
+    ],
     "emits": ["checkpoint.needs_scope", "branch.done", "run.done"]
   }
 }
@@ -126,7 +131,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
+The implementation supports `status`, `tail`, `messages`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. Prefer `messages` for actor-envelope inspection; `events` remains a compatibility alias for the same run outbox. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
 
 ## Runtime Direction
 

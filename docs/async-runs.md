@@ -135,13 +135,13 @@ The actor-level surface is:
 
 - `spawn`: start a detached `run:<id>` actor from `file`, `recipe`, or inline `template`.
 - `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, `coordinator`, or `session:<id>`.
-- `inspect`: intentionally read owned `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
+- `inspect`: intentionally read owned `run:<id>` status, tail, messages, events, artifacts, files, or mailbox metadata; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
 
 Low-level async actions map into the actor surface instead of forming a second public model:
 
 - start → `spawn`
 - send/control → `message`
-- status/tail/events/list → `inspect`
+- status/tail/messages/events/list → `inspect`
 - stop/kill → `message` with `control.stop` or `control.kill`, with synchronous results
 
 Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.

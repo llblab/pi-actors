@@ -84,6 +84,7 @@ test("Inspect tool definition exposes intentional observation schema", () => {
   assert.equal(properties.view.type, "string");
   assert.equal(properties.lines.type, "string");
   assert.equal(properties.status.type, "string");
+  assert.match(properties.view.description, /messages/);
 });
 
 test("Actor message tool definition exposes concentrated message schema", () => {
@@ -565,6 +566,34 @@ test("Inspect tool rejects run views across session ownership", async () => {
       /owned by session:other-session; current session is current-session/,
     );
     await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Inspect tool reads run actor messages", async () => {
+  const definition = createInspectToolDefinition();
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: `messages-${Date.now()}`,
+        template: `${process.execPath} -e "console.log('done')"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await waitForFile(join(stateDir, "result.json"));
+    const result = await definition.execute(
+      "call-inspect-messages",
+      { target: `run:${meta.run}`, view: "messages", verbose: true },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /command\.done/);
+    assert.equal(result.details.messages[0].type, "command.done");
+    assert.equal(result.details.events[0].type, "command.done");
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }

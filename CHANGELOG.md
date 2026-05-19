@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.14: Actor Message Inspection Alias
+
+- `[Actor Messages]` Added `inspect view=messages` for run actors, with `events` retained as a compatibility alias for the same outbox-backed actor messages. Impact: the public inspection vocabulary now matches the actor/message model while preserving existing event-oriented diagnostics.
+
 ## 0.12.13: Structured Run Operations Recommendations
 
 - `[Recipe Utilities]` Changed `utility-run-ops-snapshot` recommendations from shell-like suggestion strings to structured `message` and `inspect` call objects. Impact: async-run operations reports now preserve the actor API shape directly and avoid reintroducing command-string parsing into coordinator handoffs.

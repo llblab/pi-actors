@@ -147,7 +147,7 @@ test("Template recipes preserve mailbox declarations", async () => {
     const recipe = join(root, "mailbox.json");
     await writeFile(
       base,
-      JSON.stringify({ defaults: { event_type: "checkpoint.ready" }, template: "echo base" }),
+      JSON.stringify({ defaults: { message_type: "checkpoint.ready" }, template: "echo base" }),
     );
     await writeFile(
       recipe,
@@ -155,7 +155,7 @@ test("Template recipes preserve mailbox declarations", async () => {
         imports: { base: "base.json" },
         mailbox: {
           accepts: ["control.approve", "control.revise", 7],
-          emits: ["{base.defaults.event_type}", "run.done", false],
+          emits: ["{base.defaults.message_type}", "run.done", false],
         },
         template: "echo mailbox",
       }),
@@ -187,7 +187,7 @@ test("Packaged library recipes parse and resolve imports", async () => {
 
 test("Packaged actor message recipes expose envelope-aligned type args", () => {
   const recipeDir = join(__dirname, "..", "recipes");
-  for (const file of ["subagent-event.json", "utility-actor-message.json"]) {
+  for (const file of ["subagent-message.json", "utility-actor-message.json"]) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
     assert.ok(config?.args?.includes("type:string"), `${file} should expose type:string`);
     assert.ok(!config?.args?.some((arg) => arg.startsWith("event_type")), `${file} should not expose event_type`);

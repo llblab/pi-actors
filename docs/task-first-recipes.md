@@ -103,7 +103,7 @@ Existing seeds:
 
 - `utility-run-summary`
 - `utility-jsonl-tail`
-- `subagent-event`
+- `subagent-message`
 - `pipeline-artifact-report`
 
 Implemented seed:

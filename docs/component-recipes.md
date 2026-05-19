@@ -74,7 +74,7 @@ Seed example: `recipes/subagent-merge.json`.
 
 Convert variable branch output into stable JSON, Markdown sections, file artifacts, or actor-message records for downstream recipes.
 
-Seed examples: `recipes/subagent-normalize.json`, `recipes/subagent-artifact.json`, and `recipes/subagent-event.json`.
+Seed examples: `recipes/subagent-normalize.json`, `recipes/subagent-artifact.json`, and `recipes/subagent-message.json`.
 
 ### Quorum Operators
 

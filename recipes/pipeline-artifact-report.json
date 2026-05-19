@@ -4,7 +4,7 @@
   "imports": {
     "normalizer": "subagent-normalize.json",
     "artifact": "subagent-artifact.json",
-    "event": "utility-actor-message.json"
+    "message": "utility-actor-message.json"
   },
   "args": [
     "input:string",
@@ -42,7 +42,7 @@
       }
     },
     {
-      "name": "event",
+      "name": "message",
       "values": {
         "type": "artifact.prepared",
         "summary": "Artifact prepared for path {artifact_path}."

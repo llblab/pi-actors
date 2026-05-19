@@ -117,9 +117,9 @@ Files:
 - `recipes/music-player.json`
 - `scripts/music-player.mjs`
 
-Purpose: start a local or URL audio source as an async run so the agent can continue working while playback runs in the background. The running script exposes one run-local mailbox/FIFO, so addressed `message` calls can control playback without a second recipe.
+Purpose: start a local or URL audio source as an async run so the agent can continue working while playback runs in the background. The running script exposes a run-local mailbox, so addressed `message` calls can control playback without a second recipe.
 
-Requirements: Linux, macOS, or WSL with `mkfifo`, Node.js, and one of `mpv`, `ffplay`, `cvlc`, or SoX `play`. Native Windows is not supported because the wrapper uses a Unix FIFO and Unix signals.
+Requirements: Linux, macOS, or WSL, Node.js, and one of `mpv`, `ffplay`, `cvlc`, or SoX `play`. Native Windows is not supported by the standard wrapper; use WSL or a platform-specific recipe transport.
 
 The required `source` arg accepts:
 
@@ -160,7 +160,7 @@ message to=run:music type=player.previous body=previous
 message to=run:music type=player.stop body=stop
 ```
 
-Use `inspect target=run:music view=status` only when an event or operator decision requires inspection.
+Use `inspect target=run:music view=status` only when an actor message or operator decision requires inspection.
 
 The wrapper also accepts control commands directly when a caller already has the run state dir:
 
@@ -168,7 +168,7 @@ The wrapper also accepts control commands directly when a caller already has the
 scripts/music-player.mjs next ~/.pi/agent/tmp/pi-actors/runs/music
 ```
 
-Message body is currently adapted to one newline-delimited command written to `<run state dir>/control.fifo`. The script writes `status.txt`, `player.json`, and track-change actor messages in `outbox.jsonl` in the same state dir. Track-change messages stay diagnostic by default; interactive recipes should define a small command vocabulary for addressed messages, emit semantic actor messages for decision points, and let the coordinator react to messages rather than sleep-polling state.
+Message body is adapted to the recipe's run-local control channel. The script writes `status.txt`, `player.json`, and track-change actor messages in the same state dir. Track-change messages stay diagnostic by default; interactive recipes should define a small command vocabulary for addressed messages, emit semantic actor messages for decision points, and let the coordinator react to messages rather than sleep-polling state.
 
 ## Safety Notes
 

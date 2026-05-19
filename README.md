@@ -295,13 +295,13 @@ Start from an inline template as an addressable run actor:
 }
 ```
 
-Do not check it on a timer. Let follow-up events arrive from the run, then react to a run-local request or redirect a long-lived recipe without polling/restarting it:
+Do not check it on a timer. Let follow-up actor messages arrive from the run, then react to a run-local request or redirect a long-lived recipe without polling/restarting it:
 
 ```json
 { "to": "run:docs-review", "type": "control.continue", "body": "continue" }
 ```
 
-Read recent events or logs only after a follow-up asks for inspection, at a real decision point, or during diagnosis:
+Read recent actor messages or logs only after a follow-up asks for inspection, at a real decision point, or during diagnosis:
 
 ```json
 { "target": "run:docs-review", "view": "tail", "lines": "80" }
@@ -377,11 +377,11 @@ See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and r
 - `async: true` on a recipe selects detached run lifecycle; omitted or false async runs the recipe foreground through registered tools.
 - Layer boundaries stay explicit: command templates define synchronous execution graphs; template recipes add saved JSON metadata/import resolution and named `artifacts`; async runs add detached lifecycle, state, IPC, and observability.
 - `spawn`, `message`, and `inspect` are high-level actor adapters. `spawn` creates `run:<id>` actors from recipes or inline templates with optional state/artifact metadata, `message` sends one typed envelope to `run:<id>` mailboxes, `branch:<run>/<branch>` mailboxes, `tool:<name>` calls, or coordinator/session attention paths, and `inspect` intentionally reads `run:<id>` status/tail/messages/mailbox metadata, coordinator/session run status, or registered `tool:<name>` contracts while the broader actor/message protocol is refined.
-- `spawn`, `message`, and `inspect` are the public async coordination vocabulary. Low-level async actions map to this actor API: start belongs to `spawn`; send/control/stop/kill belongs to `message`; status/tail/messages/events/list belongs to `inspect`. Use `control.stop`, `control.cancel`, and `control.kill` for run termination; runtime-prefixed control aliases are no longer part of the public surface.
+- `spawn`, `message`, and `inspect` are the public async coordination vocabulary. Low-level async actions map to this actor API: start belongs to `spawn`; send/control/stop/kill belongs to `message`; status/tail/messages/list belongs to `inspect`; `events` remains a compatibility inspection view. Use `control.stop`, `control.cancel`, and `control.kill` for run termination; runtime-prefixed control aliases are no longer part of the public surface.
 - Actor management returns compact text by default; pass `verbose: true` to `inspect` when full JSON state is needed.
 - Detached runs inject `{run_id}` and `{state_dir}` into template values for run-local artifacts or recipe-specific control endpoints.
-- Runtime actor messages are stored in `<state_dir>/outbox.jsonl`; coordinator attention is inferred by the runtime, not exposed as recipe or message-envelope input. Follow-ups preserve bounded body previews and metadata for decision messages.
-- Native Windows should use WSL or a recipe-specific transport for FIFO-controlled recipes; Linux uses stricter `/proc` runner ownership checks for stale PID protection.
+- Runtime actor messages are persisted in the run state dir; coordinator attention is inferred by the runtime, not exposed as recipe or message-envelope input. Follow-ups preserve bounded body previews and metadata for decision messages.
+- Native Windows should use WSL or a recipe-specific transport for run-local message-controlled recipes; Linux uses stricter `/proc` runner ownership checks for stale PID protection.
 - Registered tools may set `template` to a recipe JSON path/name; calling them follows that recipe's `async` mode.
 - File-backed recipes may declare `imports` and embed imported recipes with `{ "name": "alias" }` nodes, or read `{alias.defaults.key}`, `{alias.defaults.key=fallback}`, and `{alias.values.key?yes:no}` references before command-template execution.
 - Interactive sessions show ambient async activity as stable `▷` triangles aggregated across runs started by the current agent session. Each running async run contributes at least one triangle; parallel active branches can contribute more. One `▶` wave moves over the active set; terminal `done`/`failed`/unhandled `killed`/`exited` messages are delivered as compact follow-up context only to the launching coordinator agent, while intentional `cancel`, `kill`, and `stop` actions stay silent because the action already reports synchronously. Failed commands and in-flight parallel branch completions can bubble through `command.done`; successful final leaf completions remain diagnostic to avoid sequential pipeline noise.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1: Public Actor Vocabulary Docs
+
+- `[Docs]` Replaced remaining public README and recipe-library wording that described run coordination as events, FIFO, or outbox paths with actor-message and run-local control-channel terminology. Impact: operator-facing docs now teach the actor vocabulary first while keeping transport details in the async-run implementation reference.
+
 ## 0.13.0: Actor-Native Control Surface
 
 - `[Actor Messages]` Removed `runtime.cancel` and `runtime.kill` termination aliases from `message to=run:<id>`. Impact: run termination now uses only actor-native `control.stop`, `control.cancel`, and `control.kill`; runtime-prefixed control names are no longer treated as public API.

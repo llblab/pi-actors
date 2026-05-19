@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0: Message-Only Run Inspection
+
+- `[Actor Tools]` Removed `inspect view=events` as a public compatibility alias. Impact: run actor message streams are inspected only with `inspect view=messages`, keeping the public observation vocabulary aligned with actor messages.
+- `[Docs]` Updated README and async-run/actor-message docs to remove the events inspection view and point operators to `inspect view=messages`. Impact: examples and tool descriptions no longer teach the transitional events alias.
+
 ## 0.13.5: Actor Message Snapshot Wording
 
 - `[Docs]` Replaced remaining task-first and recipe-library event-tail wording for async-run operations with actor-message tail terminology. Impact: operations guidance now matches the `message_file` recipe surface and `inspect view=messages` actor vocabulary.

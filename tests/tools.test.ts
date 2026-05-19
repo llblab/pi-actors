@@ -593,7 +593,17 @@ test("Inspect tool reads run actor messages", async () => {
     );
     assert.match(result.content[0].text, /command\.done/);
     assert.equal(result.details.messages[0].type, "command.done");
-    assert.equal(result.details.events[0].type, "command.done");
+    assert.equal(result.details.events, undefined);
+    await assert.rejects(
+      () => definition.execute(
+        "call-inspect-events",
+        { target: `run:${meta.run}`, view: "events" },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /inspect view must be one of: status, tail, messages, artifacts, files, mailbox/,
+    );
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }

@@ -131,7 +131,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-The implementation supports `status`, `tail`, `messages`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. Prefer `messages` for actor-envelope inspection; `events` remains a compatibility alias for the same run message stream. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
+The implementation supports `status`, `tail`, `messages`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. Use `messages` for actor-envelope inspection. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
 
 ## Runtime Direction
 

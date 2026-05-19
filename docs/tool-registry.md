@@ -4,6 +4,22 @@
 
 This document is the local adaptation of the portable [Command Template Standard](./command-templates.md).
 
+## Rename Migration
+
+`pi-actors` reads only `~/.pi/agent/actors-tools.json` as its registry source. When moving from `pi-auto-tools`, copy the previous registry explicitly:
+
+```bash
+cp ~/.pi/agent/auto-tools.json ~/.pi/agent/actors-tools.json
+```
+
+If a short-lived `~/.pi/agent/tools.json` file exists from the early `pi-actors` rename window, copy that file instead:
+
+```bash
+cp ~/.pi/agent/tools.json ~/.pi/agent/actors-tools.json
+```
+
+No automatic rewrite is performed so operators can decide when to retire old config files.
+
 ## Registering Tools
 
 `register_tool` is the interactive API for listing, creating, updating, or deleting persistent tools. Call it without arguments to list registered tools.

@@ -83,7 +83,7 @@ Pipeline recipes demonstrate second-order composition:
 - `recipes/pipeline-artifact-report.json`: Normalize → artifact-shaped output → event-shaped record. This pipeline prepares a candidate artifact and emits `artifact.prepared`/`artifact.blocked`; the `artifact_path` is a target path, not a guarantee that the file was written.
 - `recipes/pipeline-artifact-write.json`: Normalize → artifact-shaped output → deterministic artifact write → event-shaped record. Use only when the caller explicitly wants filesystem writes; `write_mode` is `create`, `overwrite`, or `append`.
 
-These are examples of library composition, not a workflow DSL. The recipe layer owns imports and saved defaults; command templates own execution shape; async runs own lifecycle.
+These are examples of library composition, not a workflow DSL. Pipeline recipes declare mailbox metadata for their high-level completion, artifact, and control message surface. The recipe layer owns imports and saved defaults; command templates own execution shape; async runs own lifecycle.
 
 ## Utility Recipes
 

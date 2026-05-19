@@ -36,6 +36,10 @@
     "judge_model": "openai-codex/gpt-5.5",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["release.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
+  },
   "template": [
     {
       "name": "changelog",

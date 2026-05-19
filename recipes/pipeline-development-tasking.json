@@ -24,6 +24,10 @@
     "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["task_card.completed", "pipeline.completed", "command.done", "run.done", "run.failed"]
+  },
   "template": [
     {
       "name": "planner",

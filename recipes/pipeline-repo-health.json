@@ -25,6 +25,10 @@
     "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
+  "mailbox": {
+    "accepts": ["control.stop"],
+    "emits": ["repo_health.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
+  },
   "template": [
     {
       "name": "git_status",

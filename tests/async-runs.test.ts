@@ -99,9 +99,7 @@ test("Async runs emit command completion outbox events", async () => {
           report: "{report_path}",
           summary: "{state_dir}/result.json",
         },
-        events: { "command.done": { delivery: "{command_event_delivery}" } },
         template: `${process.execPath} -e "console.log('artifact')"`,
-        values: { command_event_delivery: "followup" },
       },
       process.cwd(),
     );

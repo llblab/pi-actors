@@ -6,12 +6,10 @@
   },
   "args": [
     "prompts:array",
-    "command_event_delivery:enum(log,notify,followup)",
     "report_path:path",
     "summary_path:path"
   ],
   "defaults": {
-    "command_event_delivery": "followup",
     "report_path": "{state_dir}/stdout.log",
     "summary_path": "{state_dir}/result.json"
   },
@@ -21,11 +19,6 @@
   },
   "mailbox": {
     "emits": ["command.done", "run.done", "run.failed"]
-  },
-  "events": {
-    "command.done": {
-      "delivery": "{command_event_delivery}"
-    }
   },
   "repeat": "{prompts.length}",
   "parallel": true,

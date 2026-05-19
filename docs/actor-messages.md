@@ -95,16 +95,11 @@ Recipes can declare their conversational surface:
   "mailbox": {
     "accepts": ["control.continue", "control.revise", "control.approve", "control.stop"],
     "emits": ["checkpoint.needs_scope", "branch.done", "run.done"]
-  },
-  "events": {
-    "checkpoint.*": { "delivery": "followup" },
-    "branch.done": { "delivery": "followup" },
-    "progress.tick": { "delivery": "log" }
   }
 }
 ```
 
-`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. `events` remains delivery policy, not transport selection. Packaged interactive and event-oriented recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Event-authoring recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `event`, `delivery`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so event shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
+`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. Packaged interactive and event-oriented recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Event-authoring recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `event`, `delivery`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so event shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
 
 ## Spawn
 
@@ -119,7 +114,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-Low-level `async_run action=start` becomes an adapter for `spawn` when the actor is a detached run. The implementation supports spawning `run:<id>` actors from a recipe file/name or inline command template. Spawn metadata may include explicit `state_dir`, recipe event delivery policy, and named `artifacts` for terminal follow-ups and inspection.
+Low-level `async_run action=start` becomes an adapter for `spawn` when the actor is a detached run. The implementation supports spawning `run:<id>` actors from a recipe file/name or inline command template. Spawn metadata may include explicit `state_dir` and named `artifacts` for terminal follow-ups and inspection.
 
 ## Inspect
 

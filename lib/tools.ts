@@ -305,7 +305,6 @@ export function createSpawnToolDefinition<
       {
         artifacts: looseObjectSchema("Optional named artifact paths for the spawned actor."),
         as: stringSchema("Optional actor address for the spawned run, e.g. run:<id>."),
-        events: looseObjectSchema("Optional recipe event delivery policy."),
         file: stringSchema("Optional template recipe JSON file. Bare names resolve under ~/.pi/agent/recipes."),
         recipe: stringSchema("Alias for file; template recipe JSON file/name to spawn."),
         state_dir: stringSchema("Optional explicit run state directory."),
@@ -339,9 +338,6 @@ export function createSpawnToolDefinition<
           values: asRecord(input.values),
           ...(input.artifacts && typeof input.artifacts === "object" && !Array.isArray(input.artifacts)
             ? { artifacts: input.artifacts as Record<string, string> }
-            : {}),
-          ...(input.events && typeof input.events === "object" && !Array.isArray(input.events)
-            ? { events: input.events as Record<string, { delivery?: string }> }
             : {}),
         },
         ctx.cwd,
@@ -477,7 +473,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
     name: "message",
     label: "Message",
     description:
-      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator outbox events.",
+      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator-bound run messages.",
     parameters: objectSchema(
       {
         body: unionSchema([

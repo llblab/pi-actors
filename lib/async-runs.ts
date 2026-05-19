@@ -48,7 +48,6 @@ export interface AsyncRunStartParams {
   delay?: number | string;
   output?: string;
   artifacts?: Record<string, string>;
-  events?: Record<string, { delivery?: string }>;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
   retry?: number | string;
   failure?: CommandTemplateFailureScope;
@@ -101,7 +100,6 @@ export interface AsyncRunMeta {
   template: CommandTemplateValue;
   values: Record<string, unknown>;
   artifacts?: Record<string, string>;
-  events?: Record<string, { delivery?: string }>;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
 }
 
@@ -343,7 +341,6 @@ export function startRun(
     template: resolved.template,
     values,
     ...(artifacts ? { artifacts } : {}),
-    ...(startParams.events ? { events: startParams.events } : {}),
     ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
   };
   writeJsonAtomic(join(stateDir, "run.json"), meta);

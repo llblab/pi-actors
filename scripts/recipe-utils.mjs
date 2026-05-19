@@ -135,10 +135,18 @@ function runOpsSnapshot(rootValue, eventFileValue, linesValue = "80", staleMinut
     const updatedMs = Date.parse(run.updated || "");
     const stale = Number.isFinite(updatedMs) && Number.isFinite(staleMs) && now - updatedMs > staleMs;
     if (run.status === "running" && stale) {
-      return [{ run: run.run, reason: "running-stale", suggested_message: `message to=run:${run.run} type=control.stop body=stop` }];
+      return [{
+        run: run.run,
+        reason: "running-stale",
+        suggested_message: { to: `run:${run.run}`, type: "control.stop", body: "stop" },
+      }];
     }
     if (["failed", "exited", "killed"].includes(run.status)) {
-      return [{ run: run.run, reason: `terminal-${run.status}`, suggested_inspect: `inspect target=run:${run.run} view=tail` }];
+      return [{
+        run: run.run,
+        reason: `terminal-${run.status}`,
+        suggested_inspect: { target: `run:${run.run}`, view: "tail" },
+      }];
     }
     return [];
   });

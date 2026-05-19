@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.13: Structured Run Operations Recommendations
+
+- `[Recipe Utilities]` Changed `utility-run-ops-snapshot` recommendations from shell-like suggestion strings to structured `message` and `inspect` call objects. Impact: async-run operations reports now preserve the actor API shape directly and avoid reintroducing command-string parsing into coordinator handoffs.
+
 ## 0.12.12: Async Command Summary Hygiene
 
 - `[Observability]` Kept async `command.done` summaries bounded while preserving full argv-shaped command details in event payloads. Impact: long prompted fanouts keep diagnostic fidelity without flooding coordinator follow-ups with huge command lines.

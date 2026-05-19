@@ -5,8 +5,25 @@
     "subagent": "subagent-prompt.json"
   },
   "args": [
-    "prompts:array"
+    "prompts:array",
+    "command_event_delivery:enum(log,notify,followup)",
+    "report_path:path",
+    "summary_path:path"
   ],
+  "defaults": {
+    "command_event_delivery": "followup",
+    "report_path": "{state_dir}/stdout.log",
+    "summary_path": "{state_dir}/result.json"
+  },
+  "artifacts": {
+    "report": "{report_path}",
+    "summary": "{summary_path}"
+  },
+  "events": {
+    "command.done": {
+      "delivery": "{command_event_delivery}"
+    }
+  },
   "repeat": "{prompts.length}",
   "parallel": true,
   "failure": "branch",

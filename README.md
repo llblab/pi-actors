@@ -21,7 +21,7 @@ Persistent template-backed tool registry extension for the pi coding agent.
 - **Reusable Building Blocks**: Makes skill scripts, sub-agent wrappers, diagnostics, and project workflows available as composable agent capabilities.
 - **Immediate Updates**: Registered and updated tools become callable in the active session; deleted tools are removed from active tools and fully disappear after reload.
 - **Bounded Output**: Tool stdout is returned to the agent with truncation safeguards; full oversized output is saved to a temp file.
-- **Template Recipes**: Stores reusable command-template JSON under `~/.pi/agent/recipes/*.json`; recipes can import other recipes, reuse defaults, and run foreground or declare `async: true` for detached lifecycle.
+- **Template Recipes**: Stores reusable command-template JSON under `~/.pi/agent/recipes/*.json`; recipes can import other recipes, reuse defaults, declare ordered named `artifacts`, and run foreground or declare `async: true` for detached lifecycle.
 - **Async Runs**: Starts detached recipe or inline-template runs with generic status, tail, list, events, send, cancel, and kill actions backed by state files under `~/.pi/agent/tmp/pi-auto-tools`.
 - **Context Onboarding**: Injects a compact system-prompt note explaining templates, recipes, async runs, tasks, and agent fanout so installed sessions have the mental model available by default.
 - **Coordinator-Scoped Run Observability**: Shows at least one stable triangle per running async run started by the current agent session, adds triangles for active parallel branches, then injects compact completion events only back to the launching coordinator when attention is needed.
@@ -235,19 +235,19 @@ Start from an inline template:
 }
 ```
 
-Check it later:
+Do not check it on a timer. Let follow-up events arrive from the run, then react to a run-local request or redirect a long-lived recipe without polling/restarting it:
 
 ```json
-{ "action": "status", "run_id": "docs-review" }
+{ "action": "send", "run_id": "docs-review", "message": "continue" }
 ```
 
-Read recent events or logs:
+Read recent events or logs only after a follow-up asks for inspection, at a real decision point, or during diagnosis:
 
 ```json
 { "action": "tail", "run_id": "docs-review", "lines": "80" }
 ```
 
-Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. `async_run action=start` always starts a detached run from a file or inline template. Use `async_run action=list status=running` for active runs; list output includes `tool` and `recipe` when the launcher recorded that source context.
+Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. `async_run action=start` always starts a detached run from a file or inline template. Use `async_run action=list status=running` only for explicit inventory/diagnosis; list output includes `tool` and `recipe` when the launcher recorded that source context.
 
 ## Recipe Library
 
@@ -314,16 +314,16 @@ See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and r
 - Commands execute directly without shell evaluation, but trusted executables still run with the same permissions as pi.
 - Obvious high-risk templates such as shells, interpreter eval modes, and broad filesystem mutation surface lightweight warnings without blocking existing tools.
 - `async: true` on a recipe selects detached run lifecycle; omitted or false async runs the recipe foreground through registered tools.
-- Layer boundaries stay explicit: command templates define synchronous execution graphs; template recipes add saved JSON metadata/import resolution; async runs add detached lifecycle, state, IPC, and observability.
+- Layer boundaries stay explicit: command templates define synchronous execution graphs; template recipes add saved JSON metadata/import resolution and named `artifacts`; async runs add detached lifecycle, state, IPC, and observability.
 - `async_run` provides a minimal async run envelope around the same command-template contract.
 - `async_run` uses `action: start | status | tail | list | events | send | cancel | kill`; stopped runs report `cancelled` or `killed` after the process exits.
 - Async run management returns compact text by default; pass `verbose: true` to `async_run` when full JSON state is needed.
 - `async_run action=start` can run a recipe JSON `file` or an inline `template` as a detached run, injecting `{run_id}` and `{state_dir}` into template values for run-local artifacts or recipe-specific control endpoints.
 - `async_run action=events` reads script-authored JSONL events from `<state_dir>/outbox.jsonl`; `delivery: "notify"` and `delivery: "followup"` are surfaced only to the launching coordinator session.
-- `async_run action=send` writes one newline-delimited message to a running recipe's Unix FIFO at `<state_dir>/control.fifo`; the message format is script-owned. Native Windows should use WSL or a recipe-specific transport.
+- `async_run action=send` is the explicit coordinator-to-run command channel. It writes one newline-delimited message to a running recipe's Unix FIFO at `<state_dir>/control.fifo`; the message format is script-owned. Pair it with outbox follow-ups for reactive coordination: runs report completion/requests upward, coordinators send `continue`, `revise`, `approve`, `next`, or recipe-specific commands downward. Native Windows should use WSL or a recipe-specific transport.
 - Registered tools may set `template` to a recipe JSON path/name; calling them follows that recipe's `async` mode.
 - File-backed recipes may declare `imports` and embed imported recipes with `{ "name": "alias" }` nodes, or read `{alias.defaults.key}`, `{alias.defaults.key=fallback}`, and `{alias.values.key?yes:no}` references before command-template execution.
-- Interactive sessions show ambient async activity as stable `▷` triangles aggregated across runs started by the current agent session. Each running async run contributes at least one triangle; parallel active branches can contribute more. One `▶` wave moves over the active set; terminal run events that need attention are delivered as compact follow-up context only to the launching coordinator agent, while successful `done` and intentional `cancelled` transitions stay silent.
+- Interactive sessions show ambient async activity as stable `▷` triangles aggregated across runs started by the current agent session. Each running async run contributes at least one triangle; parallel active branches can contribute more. One `▶` wave moves over the active set; terminal `done`/`failed`/unhandled `killed`/`exited` events are delivered as compact follow-up context only to the launching coordinator agent, while intentional `cancel`, `kill`, and `stop` actions stay silent because the action already reports synchronously. Packaged multi-agent fanout recipes map `events.command.done.delivery` to `followup` by default so parallel subtask completions reach the coordinator.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 

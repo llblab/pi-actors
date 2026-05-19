@@ -79,7 +79,7 @@ Use `run_id` on async recipe tools or the `async_run` action API when the caller
 
 Use ordinary files under the extension temp directory so status tools stay simple and inspectable:
 
-- `run.json`: pid, optional source metadata (`tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, created time, and state dir.
+- `run.json`: pid, optional source metadata (`tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, created time, and state dir.
 - `progress.json`: phase, active command count, completed count, failures, and updated time.
 - `events.jsonl`: append-only lifecycle events.
 - `outbox.jsonl`: optional script-authored JSONL events for coordinator inspection, notifications, or follow-up context.
@@ -106,6 +106,30 @@ State files use this shape:
 
 Terminal status is `done` for result code 0 and `failed` for non-zero result code. A stopped run reports `cancelled` after graceful cancel or `killed` after force kill once the runner is no longer alive. If the runner process exits before writing a result and no stop event was recorded, status is `exited`.
 
+## Reactive Coordinator Loop
+
+Async runs are designed for event-driven coordination, not polling loops. A good coordinator starts long-lived or multi-agent work, lets completion and decision-point events bubble through `outbox.jsonl`, and sends corrective commands only when the run asks for input or the operator changes direction.
+
+The core loop is:
+
+1. Start an async recipe and keep the coordinator free:
+
+   ```json
+   { "action": "start", "file": "music-player.json", "run_id": "music" }
+   ```
+
+2. Let terminal events, `command.done`, and script-authored `followup` messages reach the launching coordinator automatically.
+
+3. Respond with explicit run-local messages when needed:
+
+   ```json
+   { "action": "send", "run_id": "music", "message": "next" }
+   ```
+
+4. Do not inspect just because time passed. Inspect `status`, `tail`, or `events` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
+
+`send` and outbox follow-ups are the paired control plane: outbox events carry run-to-coordinator signals upward, while `async_run action=send` carries coordinator-to-run commands downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-auto-tools owns the safe run-local transport, ownership checks, and delivery policy.
+
 ## Tool Surface
 
 The public async adapter remains one action tool:
@@ -123,6 +147,8 @@ This mirrors `register_tool`: one management surface, explicit actions, and smal
 
 ## Run-Local Messages
 
+`async_run action=send` is the explicit coordinator-to-run command channel. Use it when a running recipe exposes a control vocabulary and the coordinator needs to redirect the run without killing or restarting it.
+
 On Unix-like hosts, async runs may expose a control FIFO at:
 
 ```text
@@ -139,15 +165,15 @@ When present, a caller can send a script-owned command line:
 }
 ```
 
-`async_run action=send` opens the FIFO in non-blocking mode, writes `message`, and appends a trailing newline when omitted. The generic runtime does not interpret the message. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a different recipe may define a different vocabulary or no vocabulary at all.
+`async_run action=send` opens the FIFO in non-blocking mode, writes `message`, and appends a trailing newline when omitted. The generic runtime records the send event but does not interpret arbitrary message content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
 
 Native Windows does not support this Unix FIFO contract. Use WSL/Linux/macOS for FIFO-controlled recipes, or let a Windows-specific recipe expose its own transport such as a Windows named pipe or localhost socket.
 
 ## Coordinator Notifications
 
-The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers exceptional terminal transitions plus script-authored `notify`/`followup` outbox events back to the owning session. Expected `done`, `failed`, and `cancelled` terminal states do not enqueue duplicate async follow-ups: start/cancel calls already return optimistic synchronous results, and failed run details should be inspected only when the operator or coordinator needs analysis. Use explicit `async_run action=status`, `tail`, or `events` only at decision points, after a delivered follow-up, or when diagnosing a suspected stuck run.
+The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` outbox events back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local outbox events bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` outbox events for completed leaf commands; map `events.command.done.delivery` to `followup` when a recipe should bubble branch-level completion events. Packaged multi-agent fanout recipes default these completion events to `followup`, because async branch completion is base coordinator context rather than optional diagnostics. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `cancel`, `kill`, and control messages such as `stop` stay out of follow-up context because the initiating action already returns synchronously. If an outbox follow-up asks for direction, answer with `async_run action=send` rather than starting a polling loop. Use explicit `async_run action=status`, `tail`, or `events` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
 
-Ambient status indicators may refresh while work is active, but notification delivery is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `async_run action=start`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents unfinished async run instances, not internal command-template branches: one triangle per started run that has not reached a terminal state. If a coordinator starts one parent run and four separate child async runs, five triangles are shown; if one run executes a parallel command-template stage internally, it still contributes one triangle.
+Ambient status indicators may refresh while work is active, but notification delivery is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `async_run action=start`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
 
 ## Run Outbox Events
 
@@ -176,7 +202,7 @@ Shape:
 - `notify`: shown as a UI notification to the launching coordinator session.
 - `followup`: notification plus compact follow-up context to the launching coordinator session.
 
-Use `followup` sparingly. It is intended for events that should interrupt the coordinator's context, not for every progress tick.
+Use `followup` for completion and decision-point events that should reach the coordinator, not for every progress tick. Packaged multi-agent branch completion is a completion event and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
 
 ## Cancellation And Ownership
 
@@ -215,7 +241,7 @@ Interactive sessions expose compact activity with minimal screen cost:
 - With one active command, the triangle blinks between `▶` and `▷`.
 - Triangles disappear as concrete commands exit.
 - No prompt-area widget is shown by default.
-- Terminal run transitions trigger compact follow-up context only in the launching coordinator session when attention is needed; successful `done` and intentional `cancelled` transitions stay out of agent context.
+- Terminal `done`/`failed`/unhandled `killed`/`exited` transitions trigger compact follow-up context only in the launching coordinator session; intentional `cancel`, `kill`, and `stop` actions stay out of agent context because the action already reports synchronously.
 - Full logs remain in state files and are accessed through `async_run action=tail`.
 
 This keeps background work visible without blocking the agent, occupying the prompt area, or leaking async context into unrelated sessions.

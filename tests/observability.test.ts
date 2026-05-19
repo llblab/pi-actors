@@ -105,12 +105,12 @@ test("Run observability filters summaries by coordinator owner", async () => {
       summaryA.runs.map((run) => run.run),
       ["alpha"],
     );
-    assert.equal(summaryA.runningSubagents, 1);
+    assert.equal(summaryA.runningSubagents, 3);
     assert.deepEqual(
       summaryB.runs.map((run) => run.run),
       ["beta"],
     );
-    assert.equal(summaryB.runningSubagents, 1);
+    assert.equal(summaryB.runningSubagents, 2);
     assert.equal(summarizeRuns(root).total, 3);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -123,7 +123,7 @@ test("Run observability detects script-authored outbox events", async () => {
     await writeRun(root, "music", "running", [], 0, "session-a");
     await writeFile(
       join(root, "music", "outbox.jsonl"),
-      `${JSON.stringify({ event: "player.track", summary: "Now playing: track.flac", delivery: "followup", level: "info", data: { index: 3 } })}\n`,
+      `${JSON.stringify({ event: "player.track", summary: "Now playing: track.flac", delivery: "followup", level: "info", data: { index: 3, artifacts: { report: join(root, "music", "report.md") }, run_files: [join(root, "music", "stdout.log")] } })}\n`,
     );
     const summary = summarizeRuns(root, "session-a");
     const previous = new Map<string, number>();
@@ -133,7 +133,7 @@ test("Run observability detects script-authored outbox events", async () => {
     assert.equal(events[0].summary, "Now playing: track.flac");
     assert.equal(
       formatRunOutboxMessage(events[0]),
-      "Run music: Now playing: track.flac",
+      `Run music: Now playing: track.flac\nArtifacts:\n- Base: \`${join(root, "music")}\`\n- Files: \`report.md\`\nRun files:\n- Base: \`${join(root, "music")}\`\n- Files: \`stdout.log\``,
     );
     assert.equal(getRunOutboxNotificationType(events[0]), "info");
     assert.equal(shouldNotifyRunOutboxEvent(events[0]), true);
@@ -154,17 +154,60 @@ test("Run observability detects terminal transitions", () => {
     killed: 0,
     running: 0,
     runningSubagents: 0,
-    runs: [{ run: "review", status: "done" }],
+    runs: [
+      {
+        artifacts: { report: "artifacts/report.md" },
+        run: "review",
+        status: "done",
+      },
+    ],
     total: 1,
   });
   assert.deepEqual(transitions, [
-    { from: "running", run: "review", to: "done" },
+    {
+      from: "running",
+      artifacts: { report: "artifacts/report.md" },
+      run: "review",
+      to: "done",
+    },
   ]);
   assert.equal(
     formatRunTransitionMessage(transitions[0]),
-    "Run review finished with status done. Use async_run action=status or action=tail if analysis is needed.",
+    "Run review completed successfully.\nArtifacts:\n- Base: `artifacts`\n- Files: `report.md`\nUse async_run action=status or action=tail if the result needs inspection.",
   );
   assert.equal(previous.get("review"), "done");
+});
+
+test("Run observability suppresses terminal follow-up after handled stop messages", () => {
+  const transition = {
+    from: "running" as const,
+    run: "music",
+    terminalHandled: true,
+    to: "done" as const,
+  };
+  assert.equal(shouldNotifyRunTransition(transition), false);
+  assert.equal(shouldSendRunTransitionFollowUp(transition), false);
+});
+
+test("Run observability keeps command done follow-ups compact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
+  try {
+    await writeRun(root, "review", "running", [], 0, "session-a");
+    await writeFile(
+      join(root, "review", "outbox.jsonl"),
+      `${JSON.stringify({ event: "command.done", summary: "Command pi completed with code 0", delivery: "followup", level: "info", data: { artifacts: { report: join(root, "review", "report.md") }, run_files: [join(root, "review", "stdout.log")] } })}\n`,
+    );
+    const events = detectRunOutboxEvents(
+      new Map<string, number>(),
+      summarizeRuns(root, "session-a"),
+    );
+    assert.equal(
+      formatRunOutboxMessage(events[0]),
+      "Run review: Command pi completed with code 0",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Run observability detects failed terminal transitions", () => {
@@ -229,14 +272,14 @@ test("Run observability suppresses duplicate handled terminal transitions", () =
   assert.equal(getRunTransitionNotificationType(failed), "error");
   assert.equal(getRunTransitionNotificationType(killed), "warning");
   assert.equal(getRunTransitionNotificationType(done), "info");
-  assert.equal(shouldNotifyRunTransition(failed), false);
+  assert.equal(shouldNotifyRunTransition(failed), true);
   assert.equal(shouldNotifyRunTransition(cancelled), false);
-  assert.equal(shouldNotifyRunTransition(done), false);
+  assert.equal(shouldNotifyRunTransition(done), true);
   assert.equal(shouldNotifyRunTransition(killed), true);
-  assert.equal(shouldSendRunTransitionFollowUp(failed), false);
+  assert.equal(shouldSendRunTransitionFollowUp(failed), true);
   assert.equal(shouldSendRunTransitionFollowUp(cancelled), false);
   assert.equal(shouldSendRunTransitionFollowUp(killed), true);
-  assert.equal(shouldSendRunTransitionFollowUp(done), false);
+  assert.equal(shouldSendRunTransitionFollowUp(done), true);
 });
 
 test("Run observability renders animated subagent triangles", () => {
@@ -249,21 +292,22 @@ test("Run observability renders animated subagent triangles", () => {
   assert.equal(renderSubagentStatus(3, 3), "▶ ▷ ▷");
 });
 
-test("Run observability counts unfinished async runs", async () => {
+test("Run observability counts active parallel branches", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
   try {
     await writeRun(root, "alpha", "running", [], 3);
     await writeRun(root, "beta", "running", [], 2);
     await writeRun(root, "done", "done", [], 9);
     const summary = summarizeRuns(root);
-    assert.equal(summary.runningSubagents, 2);
-    assert.equal(renderRunStatus(summary, 1), "▷ ▶");
+    assert.equal(summary.running, 2);
+    assert.equal(summary.runningSubagents, 5);
+    assert.equal(renderRunStatus(summary, 1), "▷ ▶ ▷ ▷ ▷");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Run observability gives one triangle per running async run", async () => {
+test("Run observability keeps at least one triangle per running async run", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-observe-"));
   try {
     await writeRun(root, "alpha", "running", [], 0);
@@ -271,8 +315,8 @@ test("Run observability gives one triangle per running async run", async () => {
     await writeRun(root, "gamma", "running", [], 0);
     const summary = summarizeRuns(root);
     assert.equal(summary.running, 3);
-    assert.equal(summary.runningSubagents, 3);
-    assert.equal(renderRunStatus(summary, 1), "▷ ▶ ▷");
+    assert.equal(summary.runningSubagents, 4);
+    assert.equal(renderRunStatus(summary, 1), "▷ ▶ ▷ ▷");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

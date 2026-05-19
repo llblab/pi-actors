@@ -23,6 +23,7 @@
     "tools": ""
   },
   "mailbox": {
+    "accepts": ["control.stop", "control.cancel", "control.kill"],
     "emits": ["component.*"]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create an actor-message envelope-shaped record. To: {to}. From: {from}. Type: {type}. Message policy: {message_policy}. Payload/body: {payload}. Output format: {output_format}"

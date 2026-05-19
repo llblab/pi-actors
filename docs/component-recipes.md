@@ -72,7 +72,7 @@ Seed example: `recipes/subagent-merge.json`.
 
 ### Normalizers, Artifacts, and Events
 
-Convert variable branch output into stable JSON, Markdown sections, file artifacts, or event records for downstream recipes.
+Convert variable branch output into stable JSON, Markdown sections, file artifacts, or actor-message records for downstream recipes.
 
 Seed examples: `recipes/subagent-normalize.json`, `recipes/subagent-artifact.json`, and `recipes/subagent-event.json`.
 

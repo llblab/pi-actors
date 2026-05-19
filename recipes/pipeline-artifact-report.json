@@ -46,7 +46,7 @@
     {
       "name": "event",
       "values": {
-        "event_type": "artifact.prepared",
+        "type": "artifact.prepared",
         "summary": "Artifact prepared for path {artifact_path}.",
         "delivery": "{delivery}"
       }

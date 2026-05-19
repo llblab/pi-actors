@@ -2,7 +2,7 @@
   "name": "utility-actor-message",
   "async": false,
   "args": [
-    "event_type:string",
+    "type:string",
     "delivery:enum(log,notify,followup)",
     "to:string",
     "from:string",
@@ -22,5 +22,5 @@
     "reply_to": "",
     "repo": "~/.pi/agent/extensions/pi-auto-tools"
   },
-  "template": "node {repo}/scripts/recipe-utils.mjs actor-message {event_type} {delivery} {to} {from} {summary} {metadata} {correlation_id} {reply_to}"
+  "template": "node {repo}/scripts/recipe-utils.mjs actor-message {type} {delivery} {to} {from} {summary} {metadata} {correlation_id} {reply_to}"
 }

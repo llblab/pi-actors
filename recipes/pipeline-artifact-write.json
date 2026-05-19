@@ -60,7 +60,7 @@
     {
       "name": "event",
       "values": {
-        "event_type": "artifact.written",
+        "type": "artifact.written",
         "summary": "Artifact written to path {artifact_path} using mode {write_mode}.",
         "delivery": "{delivery}"
       }

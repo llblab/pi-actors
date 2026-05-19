@@ -138,18 +138,14 @@ The actor-level surface is:
 - `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, or `coordinator`.
 - `inspect`: intentionally read `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read `session:<id>` run status.
 
-The low-level async adapter remains available for lifecycle and diagnostic operations:
+Low-level async actions map into the actor surface instead of forming a second public model:
 
-- `async_run action=start`: start a detached run from `file` or inline `template`.
-- `async_run action=status`: read compact run state; add `verbose: true` for full JSON.
-- `async_run action=tail`: read recent lifecycle events or logs.
-- `async_run action=list`: list known runs compactly; add `status: "running"`, `status: "terminal"`, or a concrete terminal status to filter; add `verbose: true` for full JSON.
-- `async_run action=events`: read recent script-authored events from `<state_dir>/outbox.jsonl`.
-- `async_run action=send`: low-level adapter that writes one newline-delimited `message` to a running recipe's Unix FIFO at `<state_dir>/control.fifo`; prefer `message to=run:<id>` for actor-level coordination.
-- `async_run action=cancel`: send graceful termination to an owned run.
-- `async_run action=kill`: force-kill a stuck owned run after the same ownership checks.
+- start → `spawn`
+- send/control → `message`
+- status/tail/events/list → `inspect`
+- stop/kill → runtime control messages with synchronous results
 
-Compact text is returned by default so async management does not flood agent context; use `verbose: true` when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
+Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
 
 ## Run-Local Messages
 

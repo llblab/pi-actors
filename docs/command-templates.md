@@ -279,7 +279,7 @@ exit: 1
 stderr: provider balance exhausted
 ```
 
-Legacy local schemas may accept `pipe` as an alias, but the portable standard is `template: [...]`.
+Some local schemas may accept `pipe` as an alias, but the portable standard is `template: [...]`.
 
 ## Fail-Open Default Policy
 

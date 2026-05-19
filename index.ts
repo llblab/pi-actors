@@ -2,7 +2,7 @@
  * pi-actors — actor runtime and persistent local tool registry for pi.
  * Zones: composition root, pi agent, actor runtime
  *
- * Wraps command templates as callable pi tools, stores their definitions in tools.json, and exposes actor orchestration across reloads and sessions.
+ * Wraps command templates as callable pi tools, stores their definitions in actors-tools.json, and exposes actor orchestration across reloads and sessions.
  */
 
 import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";

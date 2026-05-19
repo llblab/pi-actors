@@ -6,7 +6,7 @@
 
 export const REGISTER_TOOL_DESCRIPTION =
   "Register a persistent custom tool from a command template, template recipe path, or co-located template recipe. " +
-  "Definitions are stored in tools.json across reloads. " +
+  "Definitions are stored in actors-tools.json across reloads. " +
   "Use update=true to overwrite an existing tool, template=null/empty to delete.";
 
 export const REGISTER_TOOL_PROMPT_SNIPPET =

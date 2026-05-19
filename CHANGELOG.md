@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.12.1: Actor Tool Registry Name
+
+- `[Registry]` Renamed the new pi-actors registry filename from `tools.json` to `actors-tools.json`. Impact: the persisted config name now clearly describes actor-control tools instead of implying every pi tool belongs to this extension.
+
+## 0.12.0: Rename to pi-actors
+
 - `[Rename]` Renamed the package and current public surface from `@llblab/pi-auto-tools` / `pi-auto-tools` to `@llblab/pi-actors` / `pi-actors`, moved the persistent registry filename from `auto-tools.json` to `tools.json`, and moved runtime state defaults from `~/.pi/agent/tmp/pi-auto-tools` to `~/.pi/agent/tmp/pi-actors`. Impact: the package name now matches the actor API model introduced in 0.10-0.11, while the durable registry becomes the generic pi agent tools config.
 
 ## 0.11.0: Actor API Compression

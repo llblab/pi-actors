@@ -1,6 +1,6 @@
 # Tool Registry
 
-`pi-actors` stores registered command-template tools and template-recipe launchers in `~/.pi/agent/tools.json` and registers them automatically on session start.
+`pi-actors` stores registered actor-control command-template tools and template-recipe launchers in `~/.pi/agent/actors-tools.json` and registers them automatically on session start.
 
 This document is the local adaptation of the portable [Command Template Standard](./command-templates.md).
 

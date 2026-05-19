@@ -13,7 +13,7 @@ For each high-level recipe candidate:
 3. Sketch the recipe pipeline at the highest useful abstraction.
 4. Identify missing component cells.
 5. Decide which cells are subagent components, local utilities, or helper-backed transforms.
-6. Keep policy knobs public: models, tools, paths, evidence/risk policy, output shape, event delivery, and validation gates.
+6. Keep domain policy knobs public: models, tools, paths, evidence/risk policy, output shape, mailbox contract, and validation gates.
 7. Add only the next smallest recipe/helper slice that validates the design.
 
 ## High-Level Recipe Cells

@@ -42,7 +42,7 @@ const CONTROL_COMMANDS = new Set([
 
 function usage() {
   console.error(`Usage:
-  music-player.mjs play <source-file-dir-url-playlist-or-list> [loop=true] [volume=70] [player=auto] [state-dir] [event-delivery=log]
+  music-player.mjs play <source-file-dir-url-playlist-or-list> [loop=true] [volume=70] [player=auto] [state-dir]
   music-player.mjs <pause|resume|toggle|next|previous|stop|status> <state-dir>
   music-player.mjs control <state-dir> <play|pause|toggle|next|previous|stop|status>
 
@@ -156,12 +156,6 @@ function parseBool(value) {
 function normalizeVolume(value) {
   if (!/^\d+$/.test(String(value))) fail("volume must be an integer 0..100", 2);
   return Math.min(Number(value), 100);
-}
-
-function normalizeDelivery(value) {
-  const normalized = String(value).toLowerCase();
-  if (["log", "notify", "followup"].includes(normalized)) return normalized;
-  fail(`invalid event delivery: ${value}`, 2);
 }
 
 function selectPlayer(requested) {
@@ -303,7 +297,7 @@ function emitTrackEvent(ctx, index, count, track, player) {
     `${JSON.stringify({
       body: { count, index, player, track },
       data: { count, index, player, track },
-      delivery: ctx.eventDelivery,
+      delivery: "log",
       event: "player.track",
       from: `run:${basename(ctx.stateDir)}`,
       level: "info",
@@ -495,7 +489,6 @@ async function playMain(args) {
     volumeArg = "70",
     playerArg = "auto",
     rawStateDir,
-    eventDeliveryArg = "log",
   ] = args;
   if (!sourceArg || sourceArg === "-h" || sourceArg === "--help") {
     usage();
@@ -513,7 +506,6 @@ async function playMain(args) {
     commandFile: join(stateDir, "command.txt"),
     controlFifo: join(stateDir, "control.fifo"),
     current: undefined,
-    eventDelivery: normalizeDelivery(eventDeliveryArg),
     eventFile: join(stateDir, "outbox.jsonl"),
     pidFile: join(stateDir, "current.pid"),
     stateDir,

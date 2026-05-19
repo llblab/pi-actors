@@ -484,6 +484,20 @@ test("Inspect tool reads coordinator-owned runs", async () => {
   }
 });
 
+test("Inspect tool requires session context for coordinator inventory", async () => {
+  const definition = createInspectToolDefinition();
+  await assert.rejects(
+    definition.execute(
+      "call-inspect-coordinator-no-context",
+      { target: "coordinator", view: "status" },
+      undefined,
+      undefined,
+      undefined,
+    ),
+    /requires a current coordinator session/,
+  );
+});
+
 test("Inspect tool reads session runs", async () => {
   const definition = createInspectToolDefinition();
   let stateDir = "";

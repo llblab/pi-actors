@@ -12,6 +12,7 @@
 - `[Actor Messages]` Hardened `message to=session:<id>` routing to require an owned sender run. Impact: unowned or cross-session runs cannot synthesize session-directed follow-ups.
 - `[Actor Messages]` Applied coordinator-session ownership checks to addressed run, branch, and coordinator message routes when a session context is available. Impact: actor messages now fail closed before controlling or emitting from runs owned by another coordinator session.
 - `[Actor Messages]` Applied the same coordinator-session ownership gate to direct `inspect target=run:<id>` views. Impact: explicit run inspection no longer leaks cross-session run details when the current session is known.
+- `[Actor Messages]` Tightened `inspect target=coordinator` to require a current coordinator session instead of falling back to all runs. Impact: callers without session context must use explicit `session:<id>` or `session:all` inventory.
 
 ## 0.12.9: Actor Runtime Hotfix
 

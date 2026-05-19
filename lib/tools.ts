@@ -396,6 +396,14 @@ function getContextSessionId(ctx: unknown): string | undefined {
   return (ctx as AsyncRunToolContext | undefined)?.sessionManager?.getSessionId?.();
 }
 
+function requireContextSessionId(ctx: unknown, actor: string): string {
+  const sessionId = getContextSessionId(ctx);
+  if (!sessionId) {
+    throw new Error(`${actor} requires a current coordinator session; use session:<id> or session:all for explicit session inventory.`);
+  }
+  return sessionId;
+}
+
 function assertRunAccessibleToContext(runId: string, ctx: unknown): Record<string, unknown> {
   const status = AsyncRuns.getRunStatus(runId);
   const sessionId = getContextSessionId(ctx);
@@ -438,10 +446,10 @@ export function createInspectToolDefinition<TContext = unknown>(
         if (view !== "status" && view !== "runs") {
           throw new Error("inspect coordinator supports view=status or view=runs.");
         }
-        const session = getContextSessionId(ctx) ?? "current";
+        const session = requireContextSessionId(ctx, "inspect coordinator");
         const runs = AsyncRuns.listRuns(undefined, typeof input.status === "string" ? input.status : undefined)
           .map((run) => AsyncRuns.getRunStatus(String(run.state_dir)))
-          .filter((run) => !getContextSessionId(ctx) || run.ownerId === getContextSessionId(ctx));
+          .filter((run) => run.ownerId === session);
         return {
           content: [
             {

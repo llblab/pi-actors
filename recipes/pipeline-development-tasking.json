@@ -14,7 +14,7 @@
     "checks:string",
     "constraints:string",
     "model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "allowed": "Caller must provide allowed files, directories, or logical scopes before implementation.",
@@ -22,7 +22,7 @@
     "checks": "Smallest validation that proves the task card is complete.",
     "constraints": "Split into bounded mutation zones and preserve integrator ownership of shared contracts.",
     "model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -32,7 +32,7 @@
         "scope": "Allowed: {allowed}. Avoided: {avoided}.",
         "constraints": "{constraints}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -43,7 +43,7 @@
         "avoided": "{avoided}",
         "checks": "{checks}",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -53,7 +53,7 @@
         "constraints": "{constraints}",
         "risk_policy": "Find unsafe scope expansion, missing ownership, and weak validation gates.",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -62,7 +62,7 @@
         "input": "Use plan, task card, and critique from stdin.",
         "format": "Markdown sections: Task Card, Allowed Files, Avoid Files, Checks, Risks, Integrator Notes.",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

@@ -9,7 +9,7 @@
     "output_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "event_type": "component.update",
@@ -18,7 +18,7 @@
     "output_format": "JSON object with type, delivery, summary, payload, confidence, and next_action.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "off",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Create an event-shaped record. Event type: {event_type}. Delivery: {delivery}. Event policy: {event_policy}. Payload: {payload}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create an event-shaped record. Event type: {event_type}. Delivery: {delivery}. Event policy: {event_policy}. Payload: {payload}. Output format: {output_format}"
 }

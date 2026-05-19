@@ -8,7 +8,7 @@
     "prompt:string",
     "models:array",
     "thinking:string",
-    "tool_args:string",
+    "tools:string",
     "output_format:string"
   ],
   "defaults": {
@@ -18,11 +18,11 @@
       "deepseek/deepseek-v4-flash"
     ],
     "thinking": "off",
-    "tool_args": "--no-tools",
+    "tools": "",
     "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
   },
   "repeat": "{models.length}",
-  "mode": "parallel",
+  "parallel": true,
   "failure": "branch",
   "template": {
     "name": "subagent",
@@ -30,7 +30,7 @@
       "prompt": "{prompt}",
       "model": "{models[index]}",
       "thinking": "{thinking}",
-      "tool_args": "{tool_args}",
+      "tools": "{tools}",
       "output_format": "{output_format}"
     }
   }

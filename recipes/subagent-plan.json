@@ -8,7 +8,7 @@
     "output_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "constraints": "Prefer small reversible slices, explicit validation gates, and no broad speculative rewrites.",
@@ -16,7 +16,7 @@
     "output_format": "Markdown sections: Goal, Constraints, Plan Slices, Risks, Validation Gates, Stop Conditions.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Plan how to reach this goal: {goal}. Scope: {scope}. Constraints: {constraints}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Plan how to reach this goal: {goal}. Scope: {scope}. Constraints: {constraints}. Output format: {output_format}"
 }

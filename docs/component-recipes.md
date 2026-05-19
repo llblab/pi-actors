@@ -22,7 +22,7 @@ Every reusable component recipe should make the following clear:
 - **Failure policy**: whether failures stop the root, only fail a branch, or are recoverable.
 - **Non-goals**: coordination behavior the component intentionally does not own.
 
-Reusable components should expose common policy knobs instead of baking in local choices: `model`, `thinking`, `tool_args`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity/resume policy, handoff format, merge mode, model pools, and stage-specific models. Higher-level recipes may pass these knobs through so the same component can run as a safe no-tools reviewer, a file-reading reviewer, a release gate, a research synthesizer, a task-card author, or a high-thinking merger.
+Reusable components should expose common policy knobs instead of baking in local choices: `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity/resume policy, handoff format, merge mode, model pools, and stage-specific models. Higher-level recipes may pass these knobs through so the same component can run as a safe no-tools reviewer, a file-reading reviewer, a release gate, a research synthesizer, a task-card author, or a high-thinking merger.
 
 Keep components narrow. Higher-level recipes should own composition, not hidden behavior inside a leaf.
 

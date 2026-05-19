@@ -13,7 +13,7 @@
     "lines:int",
     "artifact_path:path",
     "model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "state_root": "~/.pi/agent/tmp/pi-auto-tools/runs",
@@ -21,7 +21,7 @@
     "lines": "80",
     "artifact_path": "./async-run-ops.md",
     "model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -46,7 +46,7 @@
         "format": "Markdown sections: Active Runs, Terminal Runs, Recent Events, Stale/Risky Runs, Recommended Controls, Follow-up Needed.",
         "model": "{model}",
         "thinking": "off",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -57,7 +57,7 @@
         "artifact_format": "Markdown sections: Status, Events, Risks, Recommended Actions.",
         "delivery": "log",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

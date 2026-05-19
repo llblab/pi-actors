@@ -8,7 +8,7 @@
     "output_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "mode": "consensus-first",
@@ -16,7 +16,7 @@
     "output_format": "Markdown sections: Summary, Consensus, Minority Findings, Contradictions, Next Actions.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Merge these subagent outputs using mode {mode}: {inputs}. Risk policy: {risk_policy}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Merge these subagent outputs using mode {mode}: {inputs}. Risk policy: {risk_policy}. Output format: {output_format}"
 }

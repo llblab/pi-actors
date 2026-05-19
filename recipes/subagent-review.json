@@ -10,7 +10,7 @@
     "output_format:string",
     "model:string",
     "thinking:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "lens": "evidence-grounded review",
@@ -20,7 +20,7 @@
     "output_format": "Markdown sections: Findings, Evidence, Risks, Next Actions.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "off",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tool_args} Review {scope} through this lens: {lens}. Instructions: {instructions}. Evidence policy: {evidence_policy}. Risk policy: {risk_policy}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Review {scope} through this lens: {lens}. Instructions: {instructions}. Evidence policy: {evidence_policy}. Risk policy: {risk_policy}. Output format: {output_format}"
 }

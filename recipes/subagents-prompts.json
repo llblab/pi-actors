@@ -8,7 +8,7 @@
     "prompts:array"
   ],
   "repeat": "{prompts.length}",
-  "mode": "parallel",
+  "parallel": true,
   "failure": "branch",
   "template": {
     "name": "subagent",

@@ -60,17 +60,17 @@ test("Registered tool execution normalizes typed runtime values", async () => {
     {
       name: "check_tool",
       description: "Run checker",
-      template: "check {timeout} {speed} {dry_run} {mode}",
-      args: ["timeout", "speed", "dry_run", "mode"],
+      template: "check {request_timeout} {speed} {dry_run} {mode}",
+      args: ["request_timeout", "speed", "dry_run", "mode"],
       defaults: {},
       argTypes: {
         dry_run: { kind: "bool" },
         speed: { kind: "number" },
         mode: { kind: "enum", values: ["check", "fix"] },
-        timeout: { kind: "int" },
+        request_timeout: { kind: "int" },
       },
     },
-    { timeout: 60, speed: 1.5, dry_run: false, mode: "fix" },
+    { request_timeout: 60, speed: 1.5, dry_run: false, mode: "fix" },
     async (_command, args) => {
       calls.push(args);
       return { stdout: "ok", stderr: "", code: 0, killed: false };
@@ -158,6 +158,29 @@ test("Registered tool execution runs template sequences with previous stdout as 
   assert.deepEqual(result.content, [{ type: "text", text: "\nsecond out" }]);
 });
 
+test("Registered tool execution skips nodes when when guard is false", async () => {
+  const calls: string[] = [];
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        "first",
+        { when: "enabled", template: "skip" },
+        { when: "!enabled", template: "fallback" },
+        "last",
+      ],
+    },
+    { enabled: false },
+    async (command, _args, options) => {
+      calls.push(`${command}:${options?.stdin ?? ""}`);
+      return { stdout: command, stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, ["first:", "fallback:first", "last:fallback"]);
+  assert.deepEqual(result.content, [{ type: "text", text: "\nlast" }]);
+});
+
 test("Registered tool execution runs nested object template values", async () => {
   const calls: string[][] = [];
   await executeRegisteredTool(
@@ -212,7 +235,7 @@ test("Registered tool execution repeats template nodes", async () => {
       args: [],
       defaults: {},
       template: {
-        mode: "parallel",
+        parallel: true,
         repeat: 3,
         template: `${process.execPath} -e "console.log(process.argv[1])" page{_(index+1)}-of-{repeat}`,
       },
@@ -242,7 +265,7 @@ test("Registered tool execution repeats template nodes from array length", async
       defaults: {},
       argTypes: { prompts: { kind: "array" } },
       template: {
-        mode: "parallel",
+        parallel: true,
         repeat: "{prompts.length}",
         template: "subagent {prompts[index]}",
       },
@@ -271,7 +294,7 @@ test("Registered tool execution runs nested parallel template nodes", async () =
       template: [
         "./prepare {file}",
         {
-          mode: "parallel",
+          parallel: true,
           template: [
             { label: "gpt", timeout: 120000, template: "./review-gpt {file}" },
             {
@@ -334,7 +357,7 @@ test("Registered tool execution reports degraded soft quorum without aborting", 
       ...tool,
       template: [
         {
-          mode: "parallel",
+          parallel: true,
           template: [
             { label: "ok", timeout: 120000, template: "./ok {file}" },
             { label: "bad", timeout: 120000, template: "./bad {file}" },
@@ -422,6 +445,27 @@ test("Registered tool execution passes retry into template steps", async () => {
   assert.deepEqual(calls, [{ command: "/work/flaky", retry: 3 }]);
 });
 
+test("Registered tool execution resolves timeout from runtime values", async () => {
+  const calls: Array<{ timeout?: number }> = [];
+  await executeRegisteredTool(
+    {
+      ...tool,
+      template: {
+        args: ["timeout_ms:int"],
+        timeout: "{timeout_ms}",
+        template: "./slow {file}",
+      },
+    },
+    { file: "/tmp/a.ogg", timeout_ms: 123 },
+    async (_command, _args, options) => {
+      calls.push({ timeout: options?.timeout });
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(calls, [{ timeout: 123 }]);
+});
+
 test("Registered tool execution waits before delayed leaf steps", async () => {
   const startedAt = Date.now();
   const calls: Array<{ command: string; elapsed: number; timeout?: number }> =
@@ -487,7 +531,7 @@ test("Registered tool execution applies parallel branch delays independently", a
       ...tool,
       template: [
         {
-          mode: "parallel",
+          parallel: true,
           template: [
             { label: "fast", template: "./fast {file}" },
             { delay: 20, label: "slow", template: "./slow {file}" },
@@ -538,14 +582,14 @@ test("Registered tool execution continues after non-critical composition failure
   ]);
 });
 
-test("Registered tool execution aborts on critical composition failures", async () => {
+test("Registered tool execution aborts on root composition failures", async () => {
   const calls: string[] = [];
   await assert.rejects(
     executeRegisteredTool(
       {
         ...tool,
         template: [
-          { template: "./scan {file}", critical: true },
+          { template: "./scan {file}", failure: "root" },
           "./transcribe {file}",
         ],
       },
@@ -568,7 +612,7 @@ test("Registered tool execution stops a failed branch without cancelling sibling
       ...tool,
       template: [
         {
-          mode: "parallel",
+          parallel: true,
           template: [
             {
               failure: "branch",

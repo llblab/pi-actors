@@ -31,12 +31,12 @@ test("Tool arg declarations parse defaults and reject duplicates", () => {
 
 test("Tool arg declarations parse progressive compact types", () => {
   const parsed = parseToolArgDeclarations(
-    "file:path, out_dir:path, timeout:int=60000, speed:number=1.5, dry_run:bool=true, prompts:array, mode:enum(check,fix)=check",
+    "file:path, out_dir:path, request_timeout:int=60000, speed:number=1.5, dry_run:bool=true, prompts:array, mode:enum(check,fix)=check",
   );
   assert.deepEqual(parsed.args, [
     "file",
     "out_dir",
-    "timeout",
+    "request_timeout",
     "speed",
     "dry_run",
     "prompts",
@@ -45,7 +45,7 @@ test("Tool arg declarations parse progressive compact types", () => {
   assert.deepEqual(parsed.declarations, [
     "file:path",
     "out_dir:path",
-    "timeout:int",
+    "request_timeout:int",
     "speed:number",
     "dry_run:bool",
     "prompts:array",
@@ -55,7 +55,7 @@ test("Tool arg declarations parse progressive compact types", () => {
     dry_run: "true",
     mode: "check",
     speed: "1.5",
-    timeout: "60000",
+    request_timeout: "60000",
   });
   assert.deepEqual(parsed.argTypes.mode, {
     kind: "enum",
@@ -65,12 +65,12 @@ test("Tool arg declarations parse progressive compact types", () => {
 
 test("Typed runtime values normalize and reject invalid values", () => {
   const parsed = parseToolArgDeclarations(
-    "timeout:int, speed:number, dry_run:bool, mode:enum(check,fix), prompts:array",
+    "request_timeout:int, speed:number, dry_run:bool, mode:enum(check,fix), prompts:array",
   );
   assert.deepEqual(
     normalizeRuntimeValues(
       {
-        timeout: 42,
+        request_timeout: 42,
         speed: 1.5,
         dry_run: false,
         mode: "fix",
@@ -79,7 +79,7 @@ test("Typed runtime values normalize and reject invalid values", () => {
       parsed.argTypes,
     ),
     {
-      timeout: "42",
+      request_timeout: "42",
       speed: "1.5",
       dry_run: "false",
       mode: "fix",
@@ -109,18 +109,19 @@ test("Tool arg names are derived from placeholders when args are omitted", () =>
   );
   assert.deepEqual(
     getToolArgNames(
-      "tool {file:path} {timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
+      "tool {file:path} {request_timeout:int=60000} {speed:number=1.5} {mode:enum(check,fix)=check}",
     ),
-    ["file", "timeout", "speed", "mode"],
+    ["file", "request_timeout", "speed", "mode"],
   );
   assert.deepEqual(
     getTemplateArgTypes(
-      "tool {file:path} {timeout:int=60000} {speed:number=1.5}",
+      "tool {file:path} {request_timeout:int=60000} {speed:number=1.5} {all?--all:}",
     ),
     {
+      all: { kind: "bool" },
       file: { kind: "path" },
       speed: { kind: "number" },
-      timeout: { kind: "int" },
+      request_timeout: { kind: "int" },
     },
   );
   assert.deepEqual(
@@ -129,6 +130,15 @@ test("Tool arg names are derived from placeholders when args are omitted", () =>
       template: "run {scope}",
     }),
     ["scope", "work_dir"],
+  );
+  assert.deepEqual(getToolArgNames("tool {target??default}"), ["target"]);
+  assert.deepEqual(
+    getToolArgNames({ timeout: "{timeout_ms}", template: "tool {file}" }),
+    ["file", "timeout_ms"],
+  );
+  assert.deepEqual(
+    getTemplateArgTypes({ when: "enabled", template: "run" }),
+    { enabled: { kind: "bool" } },
   );
   assert.equal(formatToolArgs([]), "none");
   assert.equal(formatToolArgs(["file", "lang"]), "file, lang");

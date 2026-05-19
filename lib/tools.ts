@@ -252,6 +252,9 @@ export function createAsyncRunToolDefinition<
         message: stringSchema(
           "Line-delimited message for send to a run control FIFO. A trailing newline is added when omitted.",
         ),
+        parallel: booleanSchema(
+          "Run an inline or recipe-envelope template array concurrently for start.",
+        ),
         recover: unionSchema([
           stringSchema(
             "Recovery command template run between failed retry attempts for start",
@@ -272,10 +275,13 @@ export function createAsyncRunToolDefinition<
         ),
         template: unionSchema([
           stringSchema("Command template string for start"),
-          arraySchema("Command template sequence or mode tree for start"),
+          arraySchema("Command template sequence or parallel tree for start"),
         ]),
         values: looseObjectSchema(
           "Runtime placeholder values passed to the template for start",
+        ),
+        when: stringSchema(
+          "Optional start node guard expression, for example flag or !flag.",
         ),
         verbose: booleanSchema(
           "Return full JSON instead of compact text for start, status, list, events, send, cancel, and kill.",

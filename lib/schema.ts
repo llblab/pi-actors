@@ -224,6 +224,10 @@ function parseTemplatePlaceholderDeclaration(
   content: string,
 ): ParsedToolArgToken | undefined {
   if (content.startsWith("_(")) return undefined;
+  const nullish = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)\?\?.*$/);
+  if (nullish) return parseToolArgToken(nullish[1]);
+  const ternary = content.match(/^([A-Za-z_][A-Za-z0-9_-]*)\?[^:]*:.*$/);
+  if (ternary) return parseToolArgToken(`${ternary[1]}:bool=false`);
   const typedMatch = content.match(
     /^([A-Za-z_][A-Za-z0-9_-]*)(?::(?:string|path|int|number|bool|array|enum\([^)]*\)))?(?:=([^}]*))?$/,
   );
@@ -237,15 +241,38 @@ function parseTemplatePlaceholderDeclaration(
   return parsed;
 }
 
+function collectTemplatePlaceholderDeclarations(
+  source: string,
+  declarations: ParsedToolArgToken[],
+): void {
+  for (const match of source.matchAll(/\{([^{}]+)\}/g)) {
+    const parsed = parseTemplatePlaceholderDeclaration(match[1]);
+    if (parsed) declarations.push(parsed);
+  }
+}
+
+function collectWhenDeclarations(
+  source: string,
+  declarations: ParsedToolArgToken[],
+): void {
+  collectTemplatePlaceholderDeclarations(source, declarations);
+  const bareCondition = source.match(/^!?([A-Za-z_][A-Za-z0-9_-]*)$/);
+  if (bareCondition)
+    declarations.push(parseToolArgToken(`${bareCondition[1]}:bool=false`));
+}
+
 function getTemplatePlaceholderDeclarations(
   config: CommandTemplates.CommandTemplateConfig,
 ): ParsedToolArgToken[] {
   const declarations: ParsedToolArgToken[] = [];
   for (const step of CommandTemplates.expandCommandTemplateConfigs(config)) {
-    for (const match of step.template.matchAll(/\{([^{}]+)\}/g)) {
-      const parsed = parseTemplatePlaceholderDeclaration(match[1]);
-      if (parsed) declarations.push(parsed);
+    collectTemplatePlaceholderDeclarations(step.template, declarations);
+    for (const field of [step.timeout, step.delay, step.retry]) {
+      if (typeof field === "string")
+        collectTemplatePlaceholderDeclarations(field, declarations);
     }
+    if (typeof step.when === "string")
+      collectWhenDeclarations(step.when, declarations);
   }
   return declarations;
 }

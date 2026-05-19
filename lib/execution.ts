@@ -171,7 +171,6 @@ function getFailureScope(
   config: CommandTemplates.CommandTemplateConfig,
 ): CommandTemplates.CommandTemplateFailureScope {
   const normalized = CommandTemplates.normalizeCommandTemplateConfig(config);
-  if (normalized.critical) return "root";
   return normalizeFailureScope(normalized.failure);
 }
 
@@ -186,11 +185,15 @@ function maxFailureScope(
   );
 }
 
-function normalizeRetry(value: number | undefined): number {
-  if (value === undefined) return 1;
-  if (!Number.isInteger(value) || value < 1)
+function normalizeRetry(
+  value: number | string | undefined,
+  values: Record<string, unknown>,
+): number {
+  const resolved = resolveNumericControlField(value, values, "retry");
+  if (resolved === undefined) return 1;
+  if (!Number.isInteger(resolved) || resolved < 1)
     throw new Error("Command template retry must be a positive integer.");
-  return value;
+  return resolved;
 }
 
 function getRecoverConfig(
@@ -198,8 +201,7 @@ function getRecoverConfig(
 ): CommandTemplates.CommandTemplateConfig {
   const recovered = Array.isArray(config) ? { template: config } : config;
   const normalized = CommandTemplates.normalizeCommandTemplateConfig(recovered);
-  if (normalized.failure !== undefined || normalized.critical !== undefined)
-    return recovered;
+  if (normalized.failure !== undefined) return recovered;
   return { ...normalized, failure: "root" };
 }
 
@@ -246,12 +248,30 @@ function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
+function resolveNumericControlField(
+  value: number | string | undefined,
+  values: Record<string, unknown>,
+  label: string,
+): number | undefined {
+  if (value === undefined) return undefined;
+  const resolved = typeof value === "string"
+    ? CommandTemplates.substituteCommandTemplateToken(value, values, label)
+    : value;
+  if (resolved === "") return undefined;
+  const numeric = Number(resolved);
+  if (!Number.isFinite(numeric) || numeric < 0)
+    throw new Error(`Command template ${label} must be a non-negative number.`);
+  return numeric;
+}
+
 async function applyDelay(
-  delay: number | undefined,
+  delay: number | string | undefined,
+  values: Record<string, unknown>,
   signal: AbortSignal | undefined,
 ): Promise<void> {
-  if (delay === undefined || delay <= 0) return;
-  await sleep(delay, signal);
+  const resolved = resolveNumericControlField(delay, values, "delay");
+  if (resolved === undefined || resolved <= 0) return;
+  await sleep(resolved, signal);
 }
 
 function joinParallelStdout(
@@ -282,7 +302,10 @@ async function executeRetriableTemplateConfig(
   stdin: string | undefined,
   isRoot: boolean,
 ): Promise<TemplateExecution> {
-  const maxAttempts = normalizeRetry(normalized.retry);
+  const maxAttempts = normalizeRetry(normalized.retry, {
+    ...(inherited.defaults ?? {}),
+    ...params,
+  });
   const attemptConfig = {
     ...normalized,
     delay: undefined,
@@ -352,7 +375,6 @@ async function executeTemplateConfig(
   isRoot: boolean,
 ): Promise<TemplateExecution> {
   const normalized = CommandTemplates.normalizeCommandTemplateConfig(config);
-  await applyDelay(normalized.delay, signal);
   const normalizedDefaults = CommandTemplates.resolveInheritedDefaultReferences(
     normalized.defaults,
     inherited.defaults,
@@ -368,6 +390,18 @@ async function executeTemplateConfig(
       ? { defaults: mergeDefaults(inherited.defaults, normalizedDefaults) }
       : {}),
   };
+  const controlValues = { ...(context.defaults ?? {}), ...params };
+  await applyDelay(normalized.delay, controlValues, signal);
+  if (
+    !CommandTemplates.shouldRunCommandTemplateNode(normalized.when, controlValues)
+  ) {
+    return {
+      branches: [],
+      commands: [],
+      failures: [],
+      result: { code: 0, killed: false, stderr: "", stdout: stdin ?? "" },
+    };
+  }
   getFailureScope(normalized);
   if (normalized.repeat !== undefined) {
     const repeat = CommandTemplates.resolveCommandTemplateRepeat(
@@ -388,7 +422,7 @@ async function executeTemplateConfig(
       };
     });
     return executeTemplateConfig(
-      { mode: normalized.mode ?? "sequence", template: repeatedSteps },
+      { parallel: normalized.parallel === true, template: repeatedSteps },
       context,
       params,
       exec,
@@ -441,10 +475,22 @@ async function executeTemplateConfig(
       cwd,
       signal,
       stdin,
-      ...(normalized.timeout !== undefined
-        ? { timeout: normalized.timeout }
+      ...(resolveNumericControlField(
+        normalized.timeout,
+        controlValues,
+        "timeout",
+      ) !== undefined
+        ? {
+            timeout: resolveNumericControlField(
+              normalized.timeout,
+              controlValues,
+              "timeout",
+            ),
+          }
         : {}),
-      ...(normalized.retry !== undefined ? { retry: normalized.retry } : {}),
+      ...(normalized.retry !== undefined
+        ? { retry: normalizeRetry(normalized.retry, controlValues) }
+        : {}),
     });
     return {
       branches: [],
@@ -456,7 +502,7 @@ async function executeTemplateConfig(
   const steps = normalized.template;
   if (steps.length === 0)
     throw new Error(formatToolText("Tool template produced no command steps."));
-  if ((normalized.mode ?? "sequence") === "parallel") {
+  if (normalized.parallel === true) {
     const branchResults = await Promise.all(
       steps.map((step) =>
         executeTemplateConfig(

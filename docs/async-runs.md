@@ -10,6 +10,22 @@ Layer boundary: async-run configuration may inject lifecycle values such as `{ru
 
 ---
 
+## Layer Ownership
+
+Async-run standard owns:
+
+- Detached process lifecycle for one execution instance.
+- Run identity, state directory, pid/process-group tracking, logs, status, list, tail, events, send, cancel, and kill.
+- Injected lifecycle values such as `{run_id}` and `{state_dir}`.
+- Coordinator-scoped observability and script-authored outbox delivery.
+
+Async-run standard does not own:
+
+- Command-template syntax, placeholders, graph semantics, or branch policy.
+- Recipe import resolution, recipe names, or recipe storage format.
+- Domain semantics for subagents, swarms, release readiness, media playback, or project policy.
+- Scheduling, queue daemons, distributed workers, or workflow DSLs.
+
 ## Reading Model
 
 ```text
@@ -243,7 +259,7 @@ Example recipe:
 {
   "name": "collab-{run}",
   "async": true,
-  "mode": "parallel",
+  "parallel": true,
   "timeout": 1800000,
   "template": [
     {
@@ -285,7 +301,7 @@ Before adding an async feature, ask:
 
 - Is this generic for any long-running command template?
 - Can it be represented as state files instead of a daemon?
-- Does it preserve `template` plus `mode` as the only execution language?
+- Does it preserve `template` plus boolean `parallel` as the only execution language?
 - Does failure degrade into observable metadata instead of hidden retries?
 - Can a registered tool own the policy instead of the runtime?
 

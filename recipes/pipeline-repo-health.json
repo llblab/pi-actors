@@ -15,7 +15,7 @@
     "validation_command:string",
     "artifact_path:path",
     "model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "repo": ".",
@@ -23,7 +23,7 @@
     "validation_command": "npm run validate",
     "artifact_path": "./repo-health.md",
     "model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -60,7 +60,7 @@
         "format": "Markdown sections: Branch State, Recent Commits, Docs Surface, Validation, Risks, Next Actions.",
         "model": "{model}",
         "thinking": "off",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -71,7 +71,7 @@
         "artifact_format": "Markdown sections: Branch State, Validation, Risks, Next Actions.",
         "delivery": "log",
         "model": "{model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

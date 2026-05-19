@@ -12,6 +12,22 @@ Extensions may choose their own config files, selectors, placeholder sources, an
 
 Layer boundary: command templates own only the synchronous execution graph. Recipe imports, import-reference expressions, recipe lookup, `async: true`, run ids, state dirs, FIFO controls, and outbox events are host/recipe/async-run configuration layers, not portable command-template syntax.
 
+## Layer Ownership
+
+Command-template standard owns:
+
+- Command string splitting and direct argv execution.
+- Placeholder resolution, typed public args, defaults, `??`, ternary string selection, and array-index placeholders.
+- Synchronous graph shape: sequence, `parallel`, `when`, `repeat`, stdin flow, stdout joins, and output selection.
+- Per-node execution controls: `timeout`, `delay`, `retry`, `failure`, and `recover`.
+
+Command-template standard does not own:
+
+- Where templates are stored or how they are named.
+- Recipe imports, import references, or file lookup.
+- Detached lifecycle, run ids, state dirs, logs, cancellation, FIFO, or outbox events.
+- Registry metadata such as tool descriptions, package install paths, or operator policy.
+
 ## Shape
 
 A command template is either a command-line string or an ordered array of command-template leaves:
@@ -33,14 +49,14 @@ There is no portable `command` field. The command is derived from `template`: af
 Common object fields:
 
 - `label`: Optional human label for diagnostics and parallel branch reports.
-- `mode`: Optional execution mode for array templates. Default is `"sequence"`; `"parallel"` runs children concurrently.
-- `args`: Optional placeholder declarations. Untyped names remain valid; compact typed forms such as `file:path`, `timeout:int`, `speed:number`, `dry_run:bool`, `prompts:array`, and `mode:enum(check,fix)` are valid when the host supports typed tool schemas. Defaults belong in `defaults` or inline placeholder defaults; hosts may normalize interactive shorthand such as `timeout:int=60000` before persistence.
+- `parallel`: Optional boolean for array templates. Default is `false` for sequence; `true` runs children concurrently.
+- `when`: Optional node guard. A false guard skips the node; strings may be `flag`, `!flag`, or `{flag?yes:no}` style expressions.
+- `args`: Optional placeholder declarations. Untyped names remain valid; compact typed forms such as `file:path`, `request_timeout:int`, `speed:number`, `dry_run:bool`, `prompts:array`, and `mode:enum(check,fix)` are valid when the host supports typed tool schemas. Defaults belong in `defaults` or inline placeholder defaults; hosts may normalize interactive shorthand such as `request_timeout:int=60000` before persistence.
 - `defaults`: Placeholder default values by name.
-- `timeout`: Optional execution timeout in milliseconds. Omit it, or set `0`, to leave the command unbounded. Set an explicit positive timeout when a tool must fail closed instead of waiting indefinitely.
-- `delay`: Optional wait in milliseconds before starting this node. Default is no delay.
+- `timeout`: Optional execution timeout in milliseconds. Omit it, or set `0`, to leave the command unbounded. Set an explicit positive timeout when a tool must fail closed instead of waiting indefinitely. Numeric control fields may be literal numbers or placeholders such as `"{timeout_ms}"`.
+- `delay`: Optional wait in milliseconds before starting this node. Default is no delay. It may be a literal number or placeholder.
 - `output`: Optional result selector. Default is `"stdout"`; runtime values such as `"ogg"` are valid.
 - `retry`: Optional max attempts including the first. Default is `1`.
-- `critical`: Optional boolean. Backward-compatible alias for `failure: "root"`.
 - `failure`: Optional failure propagation scope: `continue`, `branch`, or `root`. Default is `continue`.
 - `recover`: Optional command template run between failed retry attempts. Recovery output is ignored; recovery failure stops retries.
 - `template`: Required command string or ordered composition array.
@@ -63,13 +79,15 @@ Implementations may expand `~` in command position and may resolve relative comm
 
 Supported forms:
 
-| Form             | Meaning                                          |
-| ---------------- | ------------------------------------------------ |
-| `{name}`         | Required value from runtime values or `defaults` |
-| `{name=default}` | Inline default when no value is provided         |
-| `{items[index]}` | Array item selected by literal or repeat index   |
+| Form                | Meaning                                          |
+| ------------------- | ------------------------------------------------ |
+| `{name}`            | Required value from runtime values or `defaults` |
+| `{name=default}`    | Inline default when no value is provided         |
+| `{name??fallback}`  | Fallback when value is missing, null, or empty   |
+| `{name?yes:no}`     | Ternary string selected by truthiness of `name`  |
+| `{items[index]}`    | Array item selected by literal or repeat index   |
 
-Resolution order is runtime values → `defaults` → inline default → error. Default values that are themselves a single placeholder, such as `{prompt}` resolving to `{prompts[index]}`, are resolved recursively with a small depth guard. A repeat node may set `repeat` to `{items.length}` when an array arg should determine fanout width.
+Resolution order is runtime values → `defaults` → inline default → error. Nullish coalescing and ternary conditions treat missing, empty, `false`, `0`, and `no` as false. Use `??` for value fallback and ternaries for small string selection such as optional CLI flags; larger policy branches should stay in recipes, scripts, or separate template nodes. Default values that are themselves a single placeholder, such as `{prompt}` resolving to `{prompts[index]}`, are resolved recursively with a small depth guard. A repeat node may set `repeat` to `{items.length}` when an array arg should determine fanout width.
 
 ```json
 {
@@ -85,7 +103,35 @@ With runtime values `{ "text": "hello" }`, argv is:
 
 Use `defaults` for visible configuration data; use inline defaults for compact local literals. Prefer flag-style examples such as `/path/to/tool --file {file} --lang {lang=ru}` for readability, but positional forms such as `/path/to/tool {file} {lang=ru}` are valid when the invoked script defines that CLI contract.
 
-Typed declarations annotate the public tool interface, not the shell command. They may live in `args` or inline placeholders such as `{timeout:int=60000}` and `{mode:enum(check,fix)=check}`. Use metadata-first authoring (`args` plus `defaults`) when long templates should stay visually short; use inline-first authoring when one self-contained `template` property is clearer. They do not sandbox or reinterpret the executable; they only let the host generate narrower input schemas and normalize runtime values before placeholder substitution. Untyped `args` and untyped placeholders continue to work unchanged.
+Fallback values can be selected with nullish coalescing:
+
+```json
+{
+  "template": "deploy --env {env??dev} --region {region??local}"
+}
+```
+
+Optional flags can be mapped from boolean args with a ternary:
+
+```json
+{
+  "args": ["target:path", "all:bool"],
+  "defaults": { "all": "true" },
+  "template": "validate-recipe {target} {all?--all:}"
+}
+```
+
+Typed declarations annotate the public tool interface, not the shell command. They may live in `args` or inline placeholders such as `{request_timeout:int=60000}` and `{mode:enum(check,fix)=check}`. Use metadata-first authoring (`args` plus `defaults`) when long templates should stay visually short; use inline-first authoring when one self-contained `template` property is clearer. They do not sandbox or reinterpret the executable; they only let the host generate narrower input schemas and normalize runtime values before placeholder substitution. Untyped `args` and untyped placeholders continue to work unchanged.
+
+Node control fields can also read public args. Use distinct arg names so execution controls stay visually separate from public inputs:
+
+```json
+{
+  "args": ["timeout_ms:int"],
+  "timeout": "{timeout_ms}",
+  "template": "npm test"
+}
+```
 
 ## Quoting
 
@@ -127,8 +173,8 @@ template="echo 'literal words' {text}"
 
 Composition rules:
 
-- Execute leaves in order when `mode` is omitted or set to `"sequence"`
-- Execute child templates concurrently when `mode` is set to `"parallel"`
+- Execute leaves in order when `parallel` is omitted or `false`
+- Execute child templates concurrently when `parallel` is `true`
 - Parallel composition uses soft-quorum semantics by default: failed children are reported as degraded branches unless failure propagation escalates
 - Non-critical failures are recorded and execution continues, while `failure: "branch"` stops the current branch and `failure: "root"` aborts the root composition
 - Treat the whole composition as one handler for selector matching and fallback
@@ -136,6 +182,7 @@ Composition rules:
 - Leaf `args` replace inherited `args`; leaf `defaults` merge over inherited defaults; `timeout` and `output` are not inherited into leaves
 - Timeout is disabled by default; configure a positive `timeout` for bounded commands that should fail closed
 - Each sequence leaf receives the previous leaf's stdout on stdin by default, while the final leaf stdout remains the default composition result
+- Skipped nodes preserve current stdin/stdout flow and do not execute commands
 - Each parallel child receives the same stdin, and child stdout values are joined in stable array order before flowing to the next sequence leaf
 - Parallel branch joins include branch label and status, and tool details include branch metadata plus coverage summary
 - Each leaf still applies its own inline defaults
@@ -163,7 +210,7 @@ Composition rules:
 
 ```json
 {
-  "mode": "parallel",
+  "parallel": true,
   "repeat": 8,
   "template": "render page{_(index+1)}.html --prev page{_(prev+1)}.html --next page{_(next+1)}.html --zero page{_index}.html"
 }
@@ -198,7 +245,7 @@ Parallel nodes use the same object shape. Flags come first and `template` stays 
   "template": [
     "prepare {out_dir}",
     {
-      "mode": "parallel",
+      "parallel": true,
       "template": [
         {
           "label": "gpt-5.5",
@@ -250,7 +297,7 @@ Use `failure` when a node should stop more aggressively:
 
 ```json
 {
-  "mode": "parallel",
+  "parallel": true,
   "template": [
     {
       "label": "agent-a",
@@ -276,8 +323,6 @@ Use `failure` when a node should stop more aggressively:
 
 If `agent-a-validate` fails, `agent-a-push` is skipped, `agent-b` can still finish, and the parallel join reports degraded branch coverage.
 
-`critical: true` remains a backward-compatible alias for `failure: "root"`. Prefer `failure` for new templates because it names the propagation scope directly.
-
 ## Retry
 
 Set `retry: N` to attempt execution up to `N` times including the first. The first successful attempt stops the retry loop.
@@ -296,7 +341,7 @@ Here the whole group runs again when a validator fails. Without `failure: "branc
 
 ## Recover
 
-Set `recover` on a retried node to run cleanup after a failed attempt and before the next attempt. `recover` is another command template: it can be a string command, sequence, or mode tree. Its output is ignored and the next retry receives the original stdin.
+Set `recover` on a retried node to run cleanup after a failed attempt and before the next attempt. `recover` is another command template: it can be a string command, sequence, or parallel tree. Its output is ignored and the next retry receives the original stdin.
 
 ```json
 {
@@ -308,6 +353,22 @@ Set `recover` on a retried node to run cleanup after a failed attempt and before
 ```
 
 `recover` is not a fallback success path. It is cleanup between attempts. Practical uses include resetting a worktree, removing temp files, clearing generated output, releasing a local lock, or stopping a helper process before trying the node again. If recovery fails, retries stop and the recovery failure is returned. Recovery uses fail-closed semantics by default; set an explicit `failure` inside a recover template only when a softer cleanup failure is intentional.
+
+## Conditional Nodes
+
+Set `when` to skip a node unless a boolean condition is true. This is node-level branching, not placeholder text selection. It is useful for optional validation, artifact, or reporting steps.
+
+```json
+{
+  "template": [
+    "prepare {target}",
+    { "when": "run_tests", "template": "npm test" },
+    { "when": "!run_tests", "template": "echo tests skipped" }
+  ]
+}
+```
+
+Falsy values are missing, empty, `false`, `0`, and `no`. In a sequence, a skipped node preserves the previous stdout for the next step. In a parallel branch, a skipped node succeeds with empty branch output.
 
 ## Delay
 
@@ -334,13 +395,13 @@ The standard uses a single `template` field that grows with the user's needs:
 string           → leaf command
 string[]         → sequential composition
 { template }     → leaf command object
-{ mode, template } → sequence or parallel subtree
-{ mode, args, defaults, delay, retry, failure, recover, output, template } → full node
+{ parallel, template } → sequence or parallel subtree
+{ parallel, when, args, defaults, delay, retry, failure, recover, output, template } → full node
 ```
 
-Start with a string. Add composition when needed. Add `mode: "parallel"` when independent work can run concurrently. Add delay when launch pacing matters. Add retry when flaky. Add `failure` when propagation scope matters. Add `recover` when a retried node needs cleanup before another attempt. Same contract, growing capability, no dead weight.
+Start with a string. Add composition when needed. Add `parallel: true` when independent work can run concurrently. Add `when` when a node is conditional. Add delay when launch pacing matters. Add retry when flaky. Add `failure` when propagation scope matters. Add `recover` when a retried node needs cleanup before another attempt. Same contract, growing capability, no dead weight.
 
-`mode: "parallel"` is the synchronous fanout shape. Saved JSON belongs to the separate [Template Recipe Standard](./template-recipes.md); detached lifecycle, logs, cancellation, and durable state belong to the separate [Async Run Standard](./async-runs.md).
+`parallel: true` is the synchronous fanout shape. Saved JSON belongs to the separate [Template Recipe Standard](./template-recipes.md); detached lifecycle, logs, cancellation, and durable state belong to the separate [Async Run Standard](./async-runs.md).
 
 ## Trust Boundary
 

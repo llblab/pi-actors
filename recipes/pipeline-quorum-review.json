@@ -13,7 +13,7 @@
     "merge_mode:enum(consensus-first,risk-first)",
     "merger_model:string",
     "judge_model:string",
-    "tool_args:string"
+    "tools:string"
   ],
   "defaults": {
     "models": [
@@ -24,7 +24,7 @@
     "merge_mode": "consensus-first",
     "merger_model": "openai-codex/gpt-5.5",
     "judge_model": "openai-codex/gpt-5.5",
-    "tool_args": "--no-tools"
+    "tools": ""
   },
   "template": [
     {
@@ -32,7 +32,7 @@
       "values": {
         "prompt": "{prompt}",
         "models": "{models}",
-        "tool_args": "{tool_args}",
+        "tools": "{tools}",
         "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
       }
     },
@@ -42,7 +42,7 @@
         "inputs": "Use quorum outputs from stdin.",
         "mode": "{merge_mode}",
         "model": "{merger_model}",
-        "tool_args": "{tool_args}",
+        "tools": "{tools}",
         "risk_policy": "Preserve vote shape, minority severe findings, and confidence disagreements."
       }
     },
@@ -52,7 +52,7 @@
         "report": "Use merged quorum report from stdin.",
         "evidence": "Use raw quorum outputs and merged report from stdin.",
         "model": "{judge_model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -61,7 +61,7 @@
         "input": "Use merged and judged quorum output from stdin.",
         "format": "Markdown sections: Verdict, Vote Shape, Consensus, Minority Findings, Confidence, Required Action.",
         "model": "{merger_model}",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

@@ -17,7 +17,7 @@
     "merger_model:string",
     "judge_model:string",
     "thinking:string",
-    "tool_args:string",
+    "tools:string",
     "evidence_policy:string",
     "risk_policy:string",
     "output_format:string"
@@ -34,14 +34,14 @@
     "merger_model": "openai-codex/gpt-5.5",
     "judge_model": "openai-codex/gpt-5.5",
     "thinking": "off",
-    "tool_args": "--no-tools",
+    "tools": "",
     "evidence_policy": "Cite inspected files, command output, or explicit uncertainty for every material claim.",
     "risk_policy": "Preserve minority high-impact risks and separate confirmed issues from hypotheses.",
     "output_format": "Markdown sections: Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
   },
   "template": [
     {
-      "mode": "parallel",
+      "parallel": true,
       "repeat": "{lenses.length}",
       "failure": "branch",
       "template": {
@@ -51,7 +51,7 @@
           "lens": "{lenses[index]}",
           "model": "{reviewer_model}",
           "thinking": "{thinking}",
-          "tool_args": "{tool_args}",
+          "tools": "{tools}",
           "evidence_policy": "{evidence_policy}",
           "risk_policy": "{risk_policy}"
         }
@@ -64,7 +64,7 @@
         "evidence": "Use previous reviewer outputs from stdin and named scope: {scope}.",
         "model": "{verifier_model}",
         "thinking": "{thinking}",
-        "tool_args": "{tool_args}",
+        "tools": "{tools}",
         "evidence_policy": "{evidence_policy}"
       }
     },
@@ -75,7 +75,7 @@
         "mode": "consensus-first",
         "model": "{merger_model}",
         "thinking": "medium",
-        "tool_args": "{tool_args}",
+        "tools": "{tools}",
         "risk_policy": "{risk_policy}"
       }
     },
@@ -86,7 +86,7 @@
         "evidence": "Use previous reviewer, verifier, and merger outputs from stdin.",
         "model": "{judge_model}",
         "thinking": "medium",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     },
     {
@@ -96,7 +96,7 @@
         "format": "{output_format}",
         "model": "{merger_model}",
         "thinking": "off",
-        "tool_args": "{tool_args}"
+        "tools": "{tools}"
       }
     }
   ]

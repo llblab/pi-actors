@@ -66,29 +66,29 @@ test("Registry mutations register typed command-template args progressively", as
   try {
     await executeRegisterTool(
       {
-        args: "file:path,timeout:int=60000,speed:number=1.5,dry_run:bool=true,mode:enum(check,fix)=check",
+        args: "file:path,request_timeout:int=60000,speed:number=1.5,dry_run:bool=true,mode:enum(check,fix)=check",
         description: "Run checker",
         name: "check_tool",
-        template: "check {file} {timeout} {speed} {dry_run} {mode}",
+        template: "check {file} {request_timeout} {speed} {dry_run} {mode}",
       },
       {},
       harness.deps,
     );
     assert.deepEqual(harness.tools.get("check_tool")?.args, [
       "file",
-      "timeout",
+      "request_timeout",
       "speed",
       "dry_run",
       "mode",
     ]);
     assert.deepEqual(harness.tools.get("check_tool")?.storedArgs, [
       "file:path",
-      "timeout:int",
+      "request_timeout:int",
       "speed:number",
       "dry_run:bool",
       "mode:enum(check,fix)",
     ]);
-    assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.timeout, {
+    assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.request_timeout, {
       kind: "int",
     });
     assert.deepEqual(harness.tools.get("check_tool")?.argTypes?.speed, {

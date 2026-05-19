@@ -119,8 +119,8 @@ try {
    */
   const result = await executeRegisteredTool(
     {
-      name: "async_run",
-      description: "Detached command-template async run",
+      name: "run_actor",
+      description: "Detached command-template run actor",
       template: meta.template,
       args: [],
       defaults: {},

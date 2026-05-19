@@ -138,7 +138,7 @@ function resolveRunTemplate(params: AsyncRunStartParams): {
   template: CommandTemplateValue;
 } {
   if (!params.template)
-    throw new Error("async_run action=start requires file or template.");
+    throw new Error("spawn requires file or template.");
   const envelope: Record<string, unknown> = {};
   for (const key of [
     "args",
@@ -572,7 +572,7 @@ export function sendRunMessage(
 ): Record<string, unknown> {
   if (process.platform === "win32") {
     throw new Error(
-      "async_run action=send requires Unix FIFO support; use WSL/Linux/macOS or a recipe-specific Windows transport.",
+      "run actor messages require Unix FIFO support; use WSL/Linux/macOS or a recipe-specific Windows transport.",
     );
   }
   const status = getRunStatus(runOrDir);

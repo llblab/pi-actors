@@ -13,7 +13,6 @@ import type { RegisteredTool } from "../lib/config.ts";
 import { startRun } from "../lib/async-runs.ts";
 import {
   createActorMessageToolDefinition,
-  createAsyncRunToolDefinition,
   createInspectToolDefinition,
   createRegisterToolDefinition,
   createRuntimeToolDefinition,
@@ -310,54 +309,31 @@ test("Inspect tool reads run mailbox metadata", async () => {
   }
 });
 
-test("Async run tool definition exposes action schema", () => {
-  const definition = createAsyncRunToolDefinition();
-  assert.equal(definition.name, "async_run");
-  assert.deepEqual(definition.parameters.required, ["action"]);
-  const properties = definition.parameters.properties as Record<string, any>;
-  assert.equal(properties.action.type, "string");
-  assert.match(properties.action.description, /events/);
-  assert.match(properties.action.description, /send/);
-  assert.match(properties.action.description, /kill/);
-  assert.equal(properties.message.type, "string");
-  assert.equal(Array.isArray(properties.template.anyOf), true);
-  assert.equal(properties.verbose.type, "boolean");
-});
-
-test("Async run tool returns compact text by default and verbose JSON on request", async () => {
-  const definition = createAsyncRunToolDefinition();
-  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-tool-"));
-  const stateDir = join(root, "compact");
+test("Actor tools start, inspect, and stop run actors", async () => {
+  const spawn = createSpawnToolDefinition();
+  const inspect = createInspectToolDefinition();
+  const message = createActorMessageToolDefinition();
+  const runId = `compact-${process.pid}-${Date.now()}`;
+  let stateDir = "";
   const ctx = { cwd: process.cwd() };
   try {
-    const started = await definition.execute(
+    const started = await spawn.execute(
       "call-1",
       {
-        action: "start",
-        run_id: "compact",
-        state_dir: stateDir,
+        as: `run:${runId}`,
         template: `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
       },
       undefined,
       undefined,
       ctx,
     );
-    assert.match(started.content[0].text, /run=compact status=running pid=\d+/);
+    stateDir = String(started.details.state_dir);
+    assert.match(started.content[0].text, new RegExp(`run=${runId} status=running pid=\\d+`));
     assert.doesNotMatch(started.content[0].text, /argv|template|values/);
 
-    const list = await definition.execute(
+    const verbose = await inspect.execute(
       "call-2",
-      { action: "list", state_root: root, status: "running" },
-      undefined,
-      undefined,
-      ctx,
-    );
-    assert.match(list.content[0].text, /run=compact status=running/);
-    assert.doesNotMatch(list.content[0].text, /state_dir|argv/);
-
-    const verbose = await definition.execute(
-      "call-3",
-      { action: "status", run_id: stateDir, verbose: true },
+      { target: `run:${runId}`, view: "status", verbose: true },
       undefined,
       undefined,
       ctx,
@@ -365,17 +341,18 @@ test("Async run tool returns compact text by default and verbose JSON on request
     assert.match(verbose.content[0].text, /"argv"/);
     assert.match(verbose.content[0].text, /"template"/);
 
-    const cancelled = await definition.execute(
-      "call-4",
-      { action: "cancel", run_id: stateDir },
+    const cancelled = await message.execute(
+      "call-3",
+      { to: `run:${runId}`, type: "runtime.cancel" },
       undefined,
       undefined,
       ctx,
     );
-    assert.match(cancelled.content[0].text, /run=.*compact cancel=sent/);
+    assert.match(cancelled.content[0].text, /type=runtime\.cancel/);
+    assert.match(cancelled.content[0].text, /stopped=true/);
     assert.doesNotMatch(cancelled.content[0].text, /state_dir|argv/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }
 });
 

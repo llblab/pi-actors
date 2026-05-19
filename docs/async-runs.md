@@ -43,7 +43,7 @@ Rule of thumb:
 ```text
 short call or pipeline → foreground template/tool
 reusable saved graph   → template recipe
-long or background work → async recipe or async_run start
+long or background work → spawn run actor
 ```
 
 ## Starting Runs
@@ -58,22 +58,21 @@ A recipe with `async: true` starts detached when invoked through its registered 
 }
 ```
 
-A caller can also start any recipe or inline template explicitly through `async_run`:
+A caller can also start any recipe or inline template explicitly through `spawn`:
 
 ```json
 {
-  "action": "start",
+  "as": "run:music",
   "file": "music-player",
-  "run_id": "music",
   "values": {
     "source": "~/Music"
   }
 }
 ```
 
-`async_run action=start` always starts a detached run. Registered recipe tools follow the recipe's `async` flag.
+`spawn` always starts a detached run actor. Registered recipe tools follow the recipe's `async` flag.
 
-Use `run_id` on async recipe tools or the `async_run` action API when the caller wants a stable id for later status or cancellation. Recipe `name` identifies the saved definition; `run_id` identifies one execution instance of that recipe. Async runs inject `{run_id}` and `{state_dir}` into template values so scripts can write run-local status files or control endpoints.
+Use `run_id` on async recipe tools or `as: "run:<id>"` on `spawn` when the caller wants a stable id for later inspection or control. Recipe `name` identifies the saved definition; the run id identifies one execution instance of that recipe. Async runs inject `{run_id}` and `{state_dir}` into template values so scripts can write run-local status files or control endpoints.
 
 ## State Files
 
@@ -173,9 +172,9 @@ Native Windows does not support this Unix FIFO contract. Use WSL/Linux/macOS for
 
 ## Coordinator Notifications
 
-The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` actor messages back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local messages bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Packaged multi-agent fanout recipes bubble these completion messages by default because async branch completion is base coordinator context rather than optional diagnostics. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `cancel`, `kill`, and control messages such as `stop` stay out of follow-up context because the initiating action already returns synchronously. If a follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` or low-level `async_run action=status`, `tail`, or `events` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
+The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` actor messages back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local messages bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Packaged multi-agent fanout recipes bubble these completion messages by default because async branch completion is base coordinator context rather than optional diagnostics. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `runtime.cancel`, `runtime.kill`, and control messages such as `stop` stay out of follow-up context because the initiating message already returns synchronously. If a follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
 
-Ambient status indicators may refresh while work is active, but coordinator attention is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn` or low-level `async_run action=start`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
+Ambient status indicators may refresh while work is active, but coordinator attention is event-driven from state-file changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn`; the run signals back through `events.jsonl`, `result.json`, and `outbox.jsonl`. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
 
 ## Run Actor Messages
 
@@ -200,7 +199,7 @@ Shape:
 
 `level` is `info`, `warning`, or `error`. `delivery` is `log`, `notify`, or `followup`:
 
-- `log`: stored only; read explicitly with `async_run action=events`.
+- `log`: stored only; read explicitly with `inspect view=events`.
 - `notify`: shown as a UI notification to the launching coordinator session.
 - `followup`: notification plus compact follow-up context to the launching coordinator session.
 

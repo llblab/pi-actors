@@ -113,7 +113,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-Low-level `async_run action=start` becomes an adapter for `spawn` when the actor is a detached run. The implementation supports spawning `run:<id>` actors from a recipe file/name or inline command template. Spawn metadata may include explicit `state_dir` and named `artifacts` for terminal follow-ups and inspection.
+`spawn` creates detached `run:<id>` actors from a recipe file/name or inline command template. Spawn metadata may include explicit `state_dir` and named `artifacts` for terminal follow-ups and inspection.
 
 ## Inspect
 
@@ -128,21 +128,17 @@ Low-level `async_run action=start` becomes an adapter for `spawn` when the actor
 
 The implementation supports `status`, `tail`, `events`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, plus `status`/`runs` for `session:<id>` actors. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
 
-## Adapter Direction
+## Runtime Direction
 
-Low-level runtime operations map onto the actor/message vocabulary:
+Runtime operations use the actor/message vocabulary:
 
 ```text
-async_run action=start  -> spawn
-async_run action=send   -> message to run:<id>
-outbox append           -> message to coordinator
-tool execution          -> message to tool:<name>
-async_run action=status -> inspect view=status
-async_run action=tail   -> inspect view=tail
-async_run action=events -> inspect view=events
+create detached work -> spawn
+run-local control    -> message to run:<id>
+coordinator signal   -> message to coordinator
+tool execution       -> message to tool:<name>
+intentional observe  -> inspect
 ```
-
-Compatibility shims are allowed only when they do not obscure the model.
 
 ## Non-goals
 

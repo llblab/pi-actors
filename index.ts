@@ -32,7 +32,6 @@ const RESERVED_TOOL_NAMES = new Set([
   "grep",
   "ls",
   "register_tool",
-  "async_run",
   "message",
   "spawn",
   "inspect",
@@ -127,7 +126,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       });
       runDirWatchers.set(stateDir, watcher);
     } catch {
-      // Watching is best-effort; explicit async_run status/tail remains available.
+      // Watching is best-effort; explicit inspect remains available.
     }
   };
   function refreshRunWatchers(ctx: ExtensionContext): void {
@@ -140,7 +139,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
           stateRootWatcher = undefined;
         });
       } catch {
-        // Watching is best-effort; explicit async_run status/tail remains available.
+        // Watching is best-effort; explicit inspect remains available.
       }
     }
     for (const entry of readdirSync(RUN_STATE_ROOT, { withFileTypes: true })) {
@@ -189,7 +188,6 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
     }),
   );
-  pi.registerTool(Tools.createAsyncRunToolDefinition<ExtensionContext>());
   pi.registerTool(Tools.createSpawnToolDefinition<ExtensionContext>());
   pi.registerTool(
     Tools.createActorMessageToolDefinition<ExtensionContext>({

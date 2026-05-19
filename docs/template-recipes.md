@@ -180,7 +180,7 @@ A registered tool can point at an actor recipe by storing the recipe path or nam
 
 If `shader-ring-8-parallel.json` contains `async: true`, calling `shader_ring` starts a detached run and returns metadata. If `async` is omitted or false, calling `shader_ring` executes the recipe foreground and returns normal tool output.
 
-A registered tool may also co-locate an actor recipe directly in `tools.json`:
+A registered tool may also co-locate an actor recipe directly in `actors-tools.json`:
 
 ```json
 {

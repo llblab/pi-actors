@@ -33,7 +33,7 @@ async function waitForFile(path: string): Promise<void> {
 
 function createRegistryDeps() {
   return {
-    configPath: "/tmp/tools.json",
+    configPath: "/tmp/actors-tools.json",
     getActiveTools: () => [],
     getExternalToolConflict: () => undefined,
     getTools: () => new Map<string, RegisteredTool>(),

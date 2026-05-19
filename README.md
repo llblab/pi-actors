@@ -15,7 +15,7 @@ Actor runtime and persistent local tool registry extension for the pi coding age
 
 - **Local-First Tool Memory**: Lets agents create and persist their own trusted local tools, forming durable operational muscle memory instead of one-off shell commands.
 - **Commands Become Capabilities**: Turns stable local workflows into semantic agent tools, so the agent chooses what it can do instead of reconstructing how to run shell commands.
-- **Persistent Tool Registry**: Stores tool definitions in `~/.pi/agent/tools.json` and registers them automatically on session start.
+- **Actor Tool Registry**: Stores actor-control tool definitions in `~/.pi/agent/actors-tools.json` and registers them automatically on session start.
 - **Compact Semantic Interface**: Exposes short tool names, descriptions, named args, and defaults instead of long paths, positional command-arg order, and repeated command boilerplate.
 - **Safer Local Automation**: Wraps trusted command templates as narrow tools using split-first command-arg construction, placeholder substitution, and no shell evaluation.
 - **Reusable Building Blocks**: Makes skill scripts, sub-agent wrappers, diagnostics, and project workflows available as composable agent capabilities.
@@ -157,7 +157,7 @@ register_tool name=shader_ring \
 
 If the recipe file contains `async: true`, calling `shader_ring` starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
-A recipe can also be co-located in `tools.json` when keeping metadata and the recipe body together is clearer:
+A recipe can also be co-located in `actors-tools.json` when keeping metadata and the recipe body together is clearer:
 
 ```json
 {
@@ -196,7 +196,7 @@ register_tool name=call_subagent template=null
 
 ## Resulting Config
 
-The commands above persist entries like this in `~/.pi/agent/tools.json`; tool names come from the top-level keys. Stored entries keep `template` last so flags and metadata are read before executable content:
+The commands above persist entries like this in `~/.pi/agent/actors-tools.json`; tool names come from the top-level keys. Stored entries keep `template` last so flags and metadata are read before executable content:
 
 ```json
 {
@@ -216,7 +216,7 @@ The commands above persist entries like this in `~/.pi/agent/tools.json`; tool n
 }
 ```
 
-This file is the durable registry. `register_tool` is the interactive API; `tools.json` is the persisted state that is loaded on future sessions.
+This file is the durable actor-tool registry. `register_tool` is the interactive API; `actors-tools.json` is the persisted state that is loaded on future sessions.
 
 ## Manage Run Actors
 

@@ -557,7 +557,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
     name: "message",
     label: "Message",
     description:
-      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator-bound run messages.",
+      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator/session-bound run messages.",
     parameters: objectSchema(
       {
         body: unionSchema([
@@ -621,17 +621,22 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           tool: address.value,
           tool_result: toolResult,
         };
-      } else if (address.kind === "coordinator") {
+      } else if (address.kind === "coordinator" || address.kind === "session") {
         if (!message.from) {
-          throw new Error("message to coordinator requires from=run:<id>.");
+          throw new Error(`message to ${address.kind} requires from=run:<id>.`);
         }
         const sender = ActorMessages.parseActorAddress(message.from);
         if (sender.kind !== "run" || !sender.value) {
-          throw new Error("message to coordinator currently requires from=run:<id>.");
+          throw new Error(`message to ${address.kind} currently requires from=run:<id>.`);
+        }
+        const senderStatus = AsyncRuns.getRunStatus(sender.value);
+        if (address.kind === "session" && senderStatus.ownerId && senderStatus.ownerId !== address.value) {
+          throw new Error(`message to session:${address.value} requires sender run owner ${address.value}; got ${senderStatus.ownerId}.`);
         }
         result = AsyncRuns.appendRunOutboxEvent(sender.value, {
           body: message.body,
           correlation_id: message.correlation_id,
+          delivery: address.kind === "session" ? "followup" : undefined,
           event: message.type,
           from: message.from,
           metadata: message.metadata,
@@ -642,7 +647,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         });
       } else {
         throw new Error(
-          `message currently supports run:<id>, branch:<run>/<branch>, tool:<name>, and coordinator destinations; unsupported destination: ${message.to}`,
+          `message currently supports run:<id>, branch:<run>/<branch>, tool:<name>, coordinator, and session:<id> destinations; unsupported destination: ${message.to}`,
         );
       }
       return {

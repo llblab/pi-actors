@@ -254,6 +254,81 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
   }
 });
 
+test("Actor message tool routes session messages through owned run outboxes", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `session-sender-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "session-target",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    const result = await definition.execute(
+      "call-session-message",
+      {
+        body: { needs: "scope" },
+        from: `run:${runId}`,
+        summary: "Need scope",
+        to: "session:session-target",
+        type: "checkpoint.needs_scope",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /to=session:session-target/);
+    assert.match(result.content[0].text, /outbox=outbox\.jsonl/);
+    const event = JSON.parse(await readFile(join(stateDir, "outbox.jsonl"), "utf8"));
+    assert.equal(event.to, "session:session-target");
+    assert.equal(event.from, `run:${runId}`);
+    assert.equal(event.type, "checkpoint.needs_scope");
+    assert.equal(event.delivery, "followup");
+    assert.deepEqual(event.body, { needs: "scope" });
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects session messages from differently owned runs", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `session-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "session-owner",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-session-message-mismatch",
+        {
+          from: `run:${runId}`,
+          to: "session:other-session",
+          type: "checkpoint.needs_scope",
+        },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /requires sender run owner other-session; got session-owner/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Spawn tool starts run actors with artifact metadata", async () => {
   const definition = createSpawnToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-"));

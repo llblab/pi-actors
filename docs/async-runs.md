@@ -134,7 +134,7 @@ Addressed `message` calls and coordinator follow-ups are the paired control plan
 The actor-level surface is:
 
 - `spawn`: start a detached `run:<id>` actor from `file`, `recipe`, or inline `template`.
-- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, or `coordinator`.
+- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, `coordinator`, or `session:<id>`.
 - `inspect`: intentionally read `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read `coordinator`, `session:<id>`, or `session:all` run inventory with optional status filtering; read `tool:<name>` status or schema for registered tool actors.
 
 Low-level async actions map into the actor surface instead of forming a second public model:
@@ -178,7 +178,7 @@ Ambient status indicators may refresh while work is active, but coordinator atte
 
 ## Run Actor Messages
 
-A recipe or script may append coordinator-bound actor message records to:
+A recipe or script may append coordinator-bound or session-bound actor message records to:
 
 ```text
 <state_dir>/outbox.jsonl
@@ -200,7 +200,7 @@ Shape:
 
 `level` is `info`, `warning`, or `error`. The public message describes sender, receiver, type, summary, and body; it does not choose notification mechanics. Runtime attention policy infers whether a coordinator-bound message stays available for explicit `inspect`, becomes a UI notification, or re-enters the launching coordinator as compact follow-up context.
 
-Use coordinator-bound messages for completion and decision points, not for every progress tick. Packaged multi-agent branch completion is a completion message and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
+Use coordinator/session-bound messages for completion and decision points, not for every progress tick. Packaged multi-agent branch completion is a completion message and should bubble by default. Follow-up path lists use Markdown hierarchy: a section heading, `- Base: ...`, and `- Files: ...`, so repeated run-state prefixes do not flood agent context.
 
 ## Cancellation And Ownership
 

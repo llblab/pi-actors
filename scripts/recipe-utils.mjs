@@ -127,7 +127,7 @@ function tailJsonl(fileValue, linesValue = "80") {
   });
 }
 
-function runOpsSnapshot(rootValue, eventFileValue, linesValue = "80", staleMinutesValue = "60") {
+function runOpsSnapshot(rootValue, messageFileValue, linesValue = "80", staleMinutesValue = "60") {
   const runs = collectRunSummary(rootValue);
   const staleMs = Number(staleMinutesValue) * 60 * 1000;
   const now = Date.now();
@@ -150,7 +150,7 @@ function runOpsSnapshot(rootValue, eventFileValue, linesValue = "80", staleMinut
     }
     return [];
   });
-  console.log(JSON.stringify({ runs, events: tailJsonl(eventFileValue, linesValue), recommendations }, null, 2));
+  console.log(JSON.stringify({ runs, messages: tailJsonl(messageFileValue, linesValue), recommendations }, null, 2));
 }
 
 function playlist(

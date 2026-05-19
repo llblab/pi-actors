@@ -185,6 +185,15 @@ test("Packaged library recipes parse and resolve imports", async () => {
   }
 });
 
+test("Packaged async-run operations recipes expose message file args", () => {
+  const recipeDir = join(__dirname, "..", "recipes");
+  for (const file of ["utility-run-ops-snapshot.json", "pipeline-async-run-ops.json"]) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    assert.ok(config?.args?.includes("message_file:path"), `${file} should expose message_file:path`);
+    assert.ok(!config?.args?.some((arg) => arg.startsWith("event_file")), `${file} should not expose event_file`);
+  }
+});
+
 test("Packaged actor message recipes expose envelope-aligned type args", () => {
   const recipeDir = join(__dirname, "..", "recipes");
   for (const file of ["subagent-message.json", "utility-actor-message.json"]) {

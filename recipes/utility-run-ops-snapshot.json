@@ -3,7 +3,7 @@
   "args": [
     "repo:path",
     "state_root:path",
-    "event_file:path",
+    "message_file:path",
     "lines:int",
     "stale_minutes:int"
   ],
@@ -11,8 +11,9 @@
     "repo": "~/.pi/agent/extensions/pi-actors",
     "state_root": "~/.pi/agent/tmp/pi-actors/runs",
     "event_file": "~/.pi/agent/tmp/pi-actors/runs/music/outbox.jsonl",
+    "message_file": "{event_file}",
     "lines": "80",
     "stale_minutes": "60"
   },
-  "template": "{repo}/scripts/recipe-utils.mjs run-ops-snapshot {state_root} {event_file} {lines} {stale_minutes}"
+  "template": "{repo}/scripts/recipe-utils.mjs run-ops-snapshot {state_root} {message_file} {lines} {stale_minutes}"
 }

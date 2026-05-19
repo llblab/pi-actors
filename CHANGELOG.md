@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.15: Run Operations Message File Vocabulary
+
+- `[Recipe Library]` Renamed async-run operations recipe inputs from `event_file` to `message_file`, with legacy `event_file` retained only as an internal default fallback. Impact: public recipe args align with the actor-message vocabulary while existing value-based launches can still supply the old key.
+- `[Recipe Utilities]` Renamed `run-ops-snapshot` output from `events` to `messages`. Impact: operations reports now describe run outbox records as actor messages instead of runtime events.
+
 ## 0.12.14: Actor Message Inspection Alias
 
 - `[Actor Messages]` Added `inspect view=messages` for run actors, with `events` retained as a compatibility alias for the same outbox-backed actor messages. Impact: the public inspection vocabulary now matches the actor/message model while preserving existing event-oriented diagnostics.

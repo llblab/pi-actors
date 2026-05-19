@@ -185,6 +185,20 @@ test("Packaged library recipes parse and resolve imports", async () => {
   }
 });
 
+test("Packaged async recipes declare mailbox metadata", async () => {
+  const recipeDir = join(__dirname, "..", "recipes");
+  const files = (await readdir(recipeDir)).filter((file) =>
+    file.endsWith(".json"),
+  );
+
+  const missing: string[] = [];
+  for (const file of files) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    if (config?.async === true && !config.mailbox) missing.push(file);
+  }
+  assert.deepEqual(missing, []);
+});
+
 test("Template recipe imports reject cycles", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipes-"));
   try {

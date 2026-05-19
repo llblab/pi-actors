@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, relative, join } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
@@ -25,6 +25,8 @@ export interface RunObservation {
   completed?: number;
   failures?: number;
   ownerId?: string;
+  artifacts?: Record<string, string>;
+  terminalHandled?: boolean;
   run: string;
   stateDir?: string;
   status: RunObservedStatus;
@@ -46,6 +48,9 @@ export interface RunSummary {
 export interface RunTransition {
   from: RunObservedStatus;
   run: string;
+  stateDir?: string;
+  artifacts?: Record<string, string>;
+  terminalHandled?: boolean;
   to: RunObservedStatus;
 }
 
@@ -107,6 +112,10 @@ function observeRun(stateDir: string): RunObservation | undefined {
       ...(typeof status.ownerId === "string"
         ? { ownerId: status.ownerId }
         : {}),
+      ...(status.artifacts && typeof status.artifacts === "object" && !Array.isArray(status.artifacts)
+        ? { artifacts: status.artifacts as Record<string, string> }
+        : {}),
+      ...(status.terminal_handled ? { terminalHandled: true } : {}),
       run,
       stateDir,
       status: status.status as RunObservedStatus,
@@ -140,13 +149,17 @@ export function summarizeRuns(
     .filter((run): run is RunObservation => Boolean(run))
     .filter((run) => ownerId === undefined || run.ownerId === ownerId)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-  const running = runs.filter((run) => run.status === "running").length;
+  const runningRuns = runs.filter((run) => run.status === "running");
+  const running = runningRuns.length;
   const done = runs.filter((run) => run.status === "done").length;
   const exited = runs.filter((run) => run.status === "exited").length;
   const failed = runs.filter((run) => run.status === "failed").length;
   const cancelled = runs.filter((run) => run.status === "cancelled").length;
   const killed = runs.filter((run) => run.status === "killed").length;
-  const runningSubagents = running;
+  const runningSubagents = runningRuns.reduce(
+    (sum, run) => sum + Math.max(1, Math.floor(run.activeSubagents ?? 0)),
+    0,
+  );
   return {
     cancelled,
     done,
@@ -290,7 +303,14 @@ export function detectRunTransitions(
   for (const run of summary.runs) {
     const old = previous.get(run.run);
     if (old && old !== run.status && TERMINAL.has(run.status)) {
-      transitions.push({ from: old, run: run.run, to: run.status });
+      transitions.push({
+        from: old,
+        run: run.run,
+        ...(run.stateDir ? { stateDir: run.stateDir } : {}),
+        ...(run.artifacts ? { artifacts: run.artifacts } : {}),
+        ...(run.terminalHandled ? { terminalHandled: true } : {}),
+        to: run.status,
+      });
     }
     previous.set(run.run, run.status);
   }
@@ -387,8 +407,67 @@ export function shouldSendRunOutboxFollowUp(event: RunOutboxEvent): boolean {
   return event.delivery === "followup";
 }
 
+function commonDirectory(paths: string[]): string | undefined {
+  if (paths.length === 0) return undefined;
+  const split = (path: string): string[] => dirname(path).split("/").filter(Boolean);
+  const first = split(paths[0]);
+  let length = first.length;
+  for (const path of paths.slice(1)) {
+    const parts = split(path);
+    length = Math.min(length, parts.length);
+    for (let index = 0; index < length; index += 1) {
+      if (first[index] !== parts[index]) {
+        length = index;
+        break;
+      }
+    }
+  }
+  if (length === 0) return paths[0].startsWith("/") ? "/" : undefined;
+  return `${paths[0].startsWith("/") ? "/" : ""}${first.slice(0, length).join("/")}`;
+}
+
+function relativeName(base: string | undefined, path: string): string {
+  if (!base) return basename(path) || path;
+  const name = relative(base, path);
+  return name && !name.startsWith("..") ? name : basename(path) || path;
+}
+
+function formatPathGroup(label: string, paths: string[]): string {
+  const unique = [...new Set(paths.filter(Boolean))].slice(0, 8);
+  if (unique.length === 0) return "";
+  const base = commonDirectory(unique);
+  const names = unique.map((path) => `\`${relativeName(base, path)}\``).join(", ");
+  return `\n${label}:\n- Base: ${base ? `\`${base}\`` : "current run"}\n- Files: ${names}`;
+}
+
+function formatRunFileList(files: unknown): string {
+  if (!Array.isArray(files)) return "";
+  return formatPathGroup(
+    "Run files",
+    files.filter((file): file is string => typeof file === "string"),
+  );
+}
+
+function formatNamedArtifacts(artifacts: unknown): string {
+  if (!artifacts || typeof artifacts !== "object" || Array.isArray(artifacts))
+    return "";
+  return formatPathGroup(
+    "Artifacts",
+    Object.values(artifacts as Record<string, unknown>).filter(
+      (path): path is string => typeof path === "string",
+    ),
+  );
+}
+
+function getOutboxField(event: RunOutboxEvent, key: string): unknown {
+  return event.data && typeof event.data === "object" && !Array.isArray(event.data)
+    ? (event.data as Record<string, unknown>)[key]
+    : undefined;
+}
+
 export function formatRunOutboxMessage(event: RunOutboxEvent): string {
-  return `Run ${event.run}: ${event.summary}`;
+  if (event.event === "command.done") return `Run ${event.run}: ${event.summary}`;
+  return `Run ${event.run}: ${event.summary}${formatNamedArtifacts(getOutboxField(event, "artifacts"))}${formatRunFileList(getOutboxField(event, "run_files"))}`;
 }
 
 export function getRunTransitionNotificationType(
@@ -403,7 +482,13 @@ export function getRunTransitionNotificationType(
 export function shouldNotifyRunTransition(
   transition: RunTransition,
 ): boolean {
-  return transition.to === "killed" || transition.to === "exited";
+  if (transition.terminalHandled) return false;
+  return (
+    transition.to === "done" ||
+    transition.to === "failed" ||
+    transition.to === "killed" ||
+    transition.to === "exited"
+  );
 }
 
 export function shouldSendRunTransitionFollowUp(
@@ -412,7 +497,24 @@ export function shouldSendRunTransitionFollowUp(
   return shouldNotifyRunTransition(transition);
 }
 
+function getRunArtifacts(transition: RunTransition): string[] {
+  if (!transition.stateDir) return [];
+  return [
+    join(transition.stateDir, "stdout.log"),
+    join(transition.stateDir, "stderr.log"),
+    join(transition.stateDir, "result.json"),
+    join(transition.stateDir, "events.jsonl"),
+    join(transition.stateDir, "outbox.jsonl"),
+  ];
+}
+
 export function formatRunTransitionMessage(transition: RunTransition): string {
+  const artifacts = formatNamedArtifacts(transition.artifacts);
+  const runFiles = formatRunFileList(getRunArtifacts(transition));
+  if (transition.to === "done")
+    return `Run ${transition.run} completed successfully.${artifacts}${runFiles}\nUse async_run action=status or action=tail if the result needs inspection.`;
+  if (transition.to === "failed")
+    return `Run ${transition.run} failed.${artifacts}${runFiles}\nUse async_run action=status or action=tail for details.`;
   if (transition.to === "cancelled")
     return `Run ${transition.run} was cancelled. Use async_run action=status or action=tail if analysis is needed.`;
   if (transition.to === "killed")

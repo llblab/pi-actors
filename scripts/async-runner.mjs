@@ -26,6 +26,7 @@ const runPath = join(stateDir, "run.json");
 const progressPath = join(stateDir, "progress.json");
 const resultPath = join(stateDir, "result.json");
 const eventsPath = join(stateDir, "events.jsonl");
+const outboxPath = join(stateDir, "outbox.jsonl");
 const stdoutPath = join(stateDir, "stdout.log");
 const stderrPath = join(stateDir, "stderr.log");
 const meta = JSON.parse(readFileSync(runPath, "utf8"));
@@ -40,6 +41,26 @@ function event(name, data = {}) {
   appendFileSync(
     eventsPath,
     `${JSON.stringify({ event: name, ts: new Date().toISOString(), ...data })}\n`,
+  );
+}
+function normalizeDelivery(value) {
+  return value === "notify" || value === "followup" ? value : "log";
+}
+function resolveTemplateString(value) {
+  if (typeof value !== "string") return undefined;
+  return value.replace(/\{([A-Za-z_][A-Za-z0-9_-]*)\}/g, (_match, name) =>
+    meta.values?.[name] === undefined || meta.values?.[name] === null
+      ? ""
+      : String(meta.values[name]),
+  );
+}
+function getEventDelivery(name) {
+  return normalizeDelivery(resolveTemplateString(meta.events?.[name]?.delivery));
+}
+function outbox(name, summary, data = {}, delivery = "log", level = "info") {
+  appendFileSync(
+    outboxPath,
+    `${JSON.stringify({ event: name, summary, delivery, level, data, ts: new Date().toISOString() })}\n`,
   );
 }
 /**
@@ -81,6 +102,20 @@ async function observedExec(command, args, options) {
     command,
     killed: result.killed,
   });
+  outbox(
+    "command.done",
+    `Command ${command} completed with code ${result.code}`,
+    {
+      activeSubagents,
+      ...(meta.artifacts ? { artifacts: meta.artifacts } : {}),
+      run_files: [stdoutPath, stderrPath, resultPath, eventsPath, outboxPath],
+      code: result.code,
+      command,
+      killed: result.killed,
+    },
+    getEventDelivery("command.done"),
+    result.code === 0 ? "info" : "error",
+  );
   progressRunning();
   return result;
 }

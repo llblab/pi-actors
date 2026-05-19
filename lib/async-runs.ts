@@ -25,6 +25,7 @@ import type {
   CommandTemplateFailureScope,
   CommandTemplateValue,
 } from "./command-templates.ts";
+import { substituteCommandTemplateToken } from "./command-templates.ts";
 import { writeJsonAtomic } from "./config.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as Paths from "./paths.ts";
@@ -46,6 +47,8 @@ export interface AsyncRunStartParams {
   timeout?: number | string;
   delay?: number | string;
   output?: string;
+  artifacts?: Record<string, string>;
+  events?: Record<string, { delivery?: string }>;
   retry?: number | string;
   failure?: CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
@@ -90,6 +93,8 @@ export interface AsyncRunMeta {
   tool?: string;
   template: CommandTemplateValue;
   values: Record<string, unknown>;
+  artifacts?: Record<string, string>;
+  events?: Record<string, { delivery?: string }>;
 }
 
 const DEFAULT_STATE_ROOT = Paths.getRunStateRoot();
@@ -104,6 +109,23 @@ function safeRunId(value: string | undefined): string {
       "Run id may contain only letters, numbers, dot, underscore, and dash.",
     );
   return run;
+}
+
+function resolveArtifactPaths(
+  artifacts: Record<string, string> | undefined,
+  values: Record<string, unknown>,
+): Record<string, string> | undefined {
+  if (!artifacts) return undefined;
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(artifacts)) {
+    if (!key.trim()) continue;
+    resolved[key] = substituteCommandTemplateToken(
+      value,
+      values,
+      `recipe artifacts.${key}`,
+    );
+  }
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
 
 function resolveRunTemplate(params: AsyncRunStartParams): {
@@ -263,6 +285,7 @@ function prepareStateDirForStart(stateDir: string): void {
     "result.json",
     "stderr.log",
     "stdout.log",
+    "terminal-handled.json",
   ]) {
     rmSync(join(stateDir, file), { force: true });
   }
@@ -292,6 +315,11 @@ export function startRun(
     run_id: run,
     state_dir: stateDir,
   };
+  const outputValues = {
+    ...(startParams.defaults || {}),
+    ...values,
+  };
+  const artifacts = resolveArtifactPaths(startParams.artifacts, outputValues);
   const meta: AsyncRunMeta = {
     argv: [process.execPath, ...argv],
     createdAt: new Date().toISOString(),
@@ -306,6 +334,8 @@ export function startRun(
     ...(startParams.tool ? { tool: startParams.tool } : {}),
     template: resolved.template,
     values,
+    ...(artifacts ? { artifacts } : {}),
+    ...(startParams.events ? { events: startParams.events } : {}),
   };
   writeJsonAtomic(join(stateDir, "run.json"), meta);
   const child = spawn(process.execPath, argv, {
@@ -407,12 +437,14 @@ export function getRunStatus(runOrDir: string): Record<string, unknown> {
     : isAlive(pid)
       ? "running"
       : (getInterruptedRunStatus(stateDir) ?? "exited");
+  const terminalHandled = readJson(join(stateDir, "terminal-handled.json"));
   return {
     ...meta,
     eventsFile: join(stateDir, "events.jsonl"),
     outboxFile: join(stateDir, "outbox.jsonl"),
     progress: readJson(join(stateDir, "progress.json")) || null,
     result: result || null,
+    ...(terminalHandled ? { terminal_handled: terminalHandled } : {}),
     state_dir: String(meta.state_dir ?? stateDir),
     stderrLog: join(stateDir, "stderr.log"),
     stdoutLog: join(stateDir, "stdout.log"),
@@ -506,11 +538,19 @@ export function sendRunMessage(
   try {
     fd = openSync(controlPath, constants.O_WRONLY | constants.O_NONBLOCK);
     const bytes = writeSync(fd, payload);
+    const trimmedMessage = message.trim().toLowerCase();
+    const terminalMessage = ["stop", "cancel", "quit", "exit"].includes(trimmedMessage);
     writeFileSync(
       join(stateDir, "events.jsonl"),
-      `${JSON.stringify({ bytes, event: "run.message", ts: new Date().toISOString() })}\n`,
+      `${JSON.stringify({ bytes, event: "run.message", terminal: terminalMessage || undefined, ts: new Date().toISOString() })}\n`,
       { flag: "a" },
     );
+    if (terminalMessage) {
+      markTerminalHandled(stateDir, {
+        event: "run.message",
+        message: trimmedMessage,
+      });
+    }
     return {
       bytes,
       control: "control.fifo",
@@ -540,6 +580,16 @@ function signalOwnedRunProcess(
   }
 }
 
+function markTerminalHandled(
+  stateDir: string,
+  details: Record<string, unknown>,
+): void {
+  writeJsonAtomic(join(stateDir, "terminal-handled.json"), {
+    ...details,
+    ts: new Date().toISOString(),
+  });
+}
+
 function stopRun(
   runOrDir: string,
   signal: NodeJS.Signals,
@@ -561,6 +611,7 @@ function stopRun(
     `${JSON.stringify({ event, pid, signal, ...signalResult, ts: new Date().toISOString() })}\n`,
     { flag: "a" },
   );
+  markTerminalHandled(stateDir, { event, signal });
   return { stopped: true, pid, signal, ...signalResult, state_dir: stateDir };
 }
 

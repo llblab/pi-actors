@@ -35,6 +35,8 @@ export interface TemplateRecipeDefinition {
   timeout?: number | string;
   delay?: number | string;
   output?: string;
+  artifacts?: Record<string, string>;
+  events?: Record<string, { delivery?: string }>;
   retry?: number | string;
   failure?: CommandTemplates.CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
@@ -518,6 +520,17 @@ export function readResolvedRecipeConfig(
       : {}),
     ...(typeof substituted.output === "string"
       ? { output: substituted.output }
+      : {}),
+    ...(isRecord(substituted.artifacts)
+      ? {
+          artifacts: Object.fromEntries(
+            Object.entries(substituted.artifacts)
+              .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+          ),
+        }
+      : {}),
+    ...(isRecord(substituted.events)
+      ? { events: substituted.events as Record<string, { delivery?: string }> }
       : {}),
     ...(typeof substituted.retry === "number" || typeof substituted.retry === "string"
       ? { retry: substituted.retry }

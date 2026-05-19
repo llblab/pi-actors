@@ -29,6 +29,7 @@ Template-recipe standard owns:
 - File-backed and co-located recipe shapes.
 - Recipe identity through `name` or filename.
 - Recipe defaults, values, imports, import references, and import-node expansion.
+- Ordered named artifact declarations through `artifacts`.
 - Foreground-vs-detached selection through `async: true` when invoked by a recipe-aware host.
 
 Template-recipe standard does not own:
@@ -67,6 +68,44 @@ Async recipe:
 `name` names the saved definition when an explicit name is needed. File-backed recipes usually omit it because the filename is the canonical recipe id. `template` is the command-template tree. `async: true` selects detached run mode when the recipe is invoked through a registered tool.
 
 For object form, keep `template` last. Recipe metadata comes first; executable content stays last.
+
+## Named Artifacts
+
+Use recipe-level `artifacts` to declare stable artifact names and paths for the whole recipe, ordered from most important to least important:
+
+```json
+{
+  "name": "report-task",
+  "args": ["report_path:path"],
+  "defaults": { "report_path": "artifacts/report.md" },
+  "artifacts": {
+    "report": "{report_path}",
+    "summary": "artifacts/summary.json"
+  },
+  "template": "generate-report --out {report_path}"
+}
+```
+
+`output` and `artifacts` are intentionally different. `output` is the command-template primary result selector and defaults to stdout; it participates in sequence/stdin flow. `artifacts` is recipe metadata: an ordered named artifact manifest for humans, async completion events, and downstream tooling. `stdout` remains the default command result channel and is not renamed by `artifacts`.
+
+## Event Delivery
+
+Use recipe-level `events` to map runtime events to delivery policy explicitly:
+
+```json
+{
+  "args": ["command_event_delivery:enum(log,notify,followup)"],
+  "defaults": { "command_event_delivery": "followup" },
+  "events": {
+    "command.done": {
+      "delivery": "{command_event_delivery}"
+    }
+  },
+  "template": "run-subtask {prompt}"
+}
+```
+
+Supported delivery values are `log`, `notify`, and `followup`. This keeps event bubbling visible in recipe metadata instead of relying on reserved hidden args. For packaged multi-agent fanout recipes, branch completion should default to `followup` so async work completion reaches the launching coordinator; use `log` only when branch completions are intentionally diagnostic noise.
 
 ## Command-Template Flags At Recipe Top Level
 
@@ -231,6 +270,6 @@ Nested object keys are dot-separated. Import references are resolved before norm
 
 ## Compatibility
 
-The 0.8.0 line intentionally tightens terminology before release. Use `name` for an explicit recipe id, rely on the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
+The 0.8 line intentionally tightens terminology before release. Use `name` for an explicit recipe id, rely on the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
 
 If a proposed recipe needs a scheduler, queue daemon, `goto`, or custom workflow syntax, stop. Keep the recipe as saved command-template JSON and put policy in the registered tool, script, or caller.

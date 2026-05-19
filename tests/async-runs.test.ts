@@ -85,6 +85,60 @@ test("Async runs write state files and finish", async () => {
   }
 });
 
+test("Async runs emit command completion outbox events", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
+  const stateDir = join(root, "command-outbox");
+  try {
+    startRun(
+      {
+        run_id: "command-outbox",
+        state_dir: stateDir,
+        defaults: { report_path: "{state_dir}/report.md" },
+        artifacts: {
+          report: "{report_path}",
+          summary: "{state_dir}/result.json",
+        },
+        events: { "command.done": { delivery: "{command_event_delivery}" } },
+        template: `${process.execPath} -e "console.log('artifact')"`,
+        values: { command_event_delivery: "followup" },
+      },
+      process.cwd(),
+    );
+    await waitForResult(stateDir);
+    const outbox = (await readFile(join(stateDir, "outbox.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const status = getRunStatus(stateDir);
+    assert.deepEqual(status.artifacts, {
+      report: `${stateDir}/report.md`,
+      summary: `${stateDir}/result.json`,
+    });
+    assert.equal(outbox[0].event, "command.done");
+    assert.equal(outbox[0].delivery, "followup");
+    assert.match(String(outbox[0].summary), /completed with code 0/);
+    assert.deepEqual(
+      (outbox[0].data as Record<string, unknown>).artifacts,
+      {
+        report: `${stateDir}/report.md`,
+        summary: `${stateDir}/result.json`,
+      },
+    );
+    assert.deepEqual(
+      (outbox[0].data as Record<string, unknown>).run_files,
+      [
+        join(stateDir, "stdout.log"),
+        join(stateDir, "stderr.log"),
+        join(stateDir, "result.json"),
+        join(stateDir, "events.jsonl"),
+        join(stateDir, "outbox.jsonl"),
+      ],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async runs expose failed terminal status", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-runs-"));
   const stateDir = join(root, "failed");
@@ -266,7 +320,9 @@ test("Async runs expose script-authored outbox events", async () => {
       process.cwd(),
     );
     await waitForResult(stateDir);
-    const events = readRunEvents(stateDir);
+    const events = readRunEvents(stateDir).filter(
+      (event) => event.event === "demo.update",
+    );
     assert.equal(events.length, 1);
     assert.equal(events[0].event, "demo.update");
     assert.equal(events[0].summary, "Demo update");
@@ -331,10 +387,14 @@ test("Async run cancel terminates matching running runs", async () => {
     }
     const result = cancelRun(stateDir);
     assert.equal(result.cancelled, true);
-    assert.equal(
-      (await waitForStatus(stateDir, "cancelled")).status,
-      "cancelled",
-    );
+    const status = await waitForStatus(stateDir, "cancelled");
+    assert.equal(status.status, "cancelled");
+    const handled = status.terminal_handled as Record<string, unknown>;
+    assert.deepEqual(handled, {
+      event: "run.cancel",
+      signal: "SIGTERM",
+      ts: handled.ts,
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -393,7 +453,14 @@ test("Async run kill terminates matching stuck runs", async () => {
     const result = killRun(stateDir);
     assert.equal(result.killed, true);
     assert.equal(result.signal, "SIGKILL");
-    assert.equal((await waitForStatus(stateDir, "killed")).status, "killed");
+    const status = await waitForStatus(stateDir, "killed");
+    assert.equal(status.status, "killed");
+    const handled = status.terminal_handled as Record<string, unknown>;
+    assert.deepEqual(handled, {
+      event: "run.kill",
+      signal: "SIGKILL",
+      ts: handled.ts,
+    });
     assert.match(tailRun(stateDir), /run\.kill/);
   } finally {
     await rm(root, { recursive: true, force: true });

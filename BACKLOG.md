@@ -21,14 +21,13 @@ Continue progressive component/pipeline expansion in small validated slices; rea
   - Scope: Continue beyond listing/extraction utilities toward structured transforms for artifact packaging, report normalization, release prep, and machine-readable summaries. Keep helpers generic, parameterized, and justified by repeated recipe needs.
   - Exit: A future utility slice adds another structured transform only when a repeated recipe need appears; otherwise treat the current helper-backed utility surface as sufficient for 0.7.1.
 
-## Blocked Work
+- Clarify artifact-report write and confirmation semantics.
+  - Priority: Medium.
+  - Status: `pipeline-smoke-081` validated the higher-level `pipeline-repo-health` recipe through eight real commands with code 0, but the final artifact-report cell produced a structured `artifact.blocked` response instead of writing the requested file because the recipe intentionally runs model cells without write tools or caller confirmation. This is a recipe-contract follow-up, not an async runtime blocker.
+  - Scope: Decide whether artifact-report pipelines should only prepare content, require explicit write-tool policy, or use a deterministic utility writer for validated artifacts.
+  - Exit: Artifact-report naming/docs and any helper behavior make it obvious whether a path will be written or only proposed.
 
-- Smoke-test higher-level pipelines with real subagents.
-  - Priority: High.
-  - Status: Real `subagent-review-coordinator` smoke passed after fixing nested object template execution for repeated imported component nodes; run `coordinated-multiagent-smoke-2` reached parallel reviewer fanout (`activeSubagents: 3`) and completed verifier, merger, judge, and normalizer stages with code 0. Reload smoke confirmed three concurrently started independent subagent async runs show three simultaneous ambient triangles when held open long enough; this validates one-triangle-per-live-run semantics, not internal branch counts.
-  - Blocked by: Explicit approval to launch an additional higher-level multi-subagent pipeline run against a small scope.
-  - Scope: Start one `recipes/pipeline-*.json` recipe that includes real subagent stages with a narrow harmless scope, inspect status/tail/events, and record whether the component contract needs changes for artifacts, stdin handoff, or event emission.
-  - Exit: One higher-level pipeline run proves the toolkit works end-to-end, or the required adapter/runtime changes are captured as concrete follow-ups.
+## Blocked Work
 
 - Validate branch-local checkpoint semantics with collaborative-runner experiments.
   - Priority: Low.

@@ -252,6 +252,9 @@ export function createAsyncRunToolDefinition<
         message: stringSchema(
           "Line-delimited message for send to a run control FIFO. A trailing newline is added when omitted.",
         ),
+        artifacts: looseObjectSchema(
+          "Optional named recipe artifact paths for start, e.g. { report: 'artifacts/report.md' }. Values may contain placeholders.",
+        ),
         parallel: booleanSchema(
           "Run an inline or recipe-envelope template array concurrently for start.",
         ),

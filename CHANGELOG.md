@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0: Async Observability Polish
+
+- `[Async Observability]` Ambient triangles now reflect active parallel branches inside a running async recipe, while still showing at least one triangle per active run. Impact: multi-agent fanout such as one run with three parallel subagents is visible as three active triangles instead of one.
+- `[Async Observability]` Terminal `done` and `failed` transitions now send compact Markdown follow-up context with compressed artifact/run-file paths to the launching coordinator, while intentional `cancel`, `kill`, and control-stop completions remain synchronous-only. Documentation now centers the reactive control loop where upward outbox/follow-up events pair with explicit `async_run action=send` commands downward. Impact: successful async recipes bubble a top-level completion event back into the initiating agent turn without flooding context with repeated state-dir prefixes or duplicate stop notifications, and coordinators have a clear alternative to sleep-poll loops, and examples avoid sleep-then-status smoke patterns.
+- `[Async Observability]` The generic async runner now emits `command.done` outbox events for leaf commands, with explicit recipe-level `events.command.done.delivery` controlling whether branch completions are stored, notified, or sent as follow-up context; packaged multi-agent fanout recipes default branch completion to `followup`. Impact: parallel subtask completion bubbles through the run outbox for multi-agent recipes without hardcoding transport calls or relying on hidden reserved args.
+- `[Template Recipes]` Added recipe-level named `artifacts` for ordered artifact manifests, distinct from command-template `output` and default stdout. Impact: async completion and bubbled subtask events can report stable paths such as `report` and `summary`, including placeholder-derived artifact paths.
+
 ## 0.8.0: Semantic Recipe API
 
 - `[Release]` Reframed the 0.8 line around semantic recipe inputs instead of leaking CLI fragments or historical node shapes. Impact: current docs focus on `async`, `parallel`, `when`, typed args, and recipe imports as the active API.

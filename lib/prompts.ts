@@ -24,18 +24,18 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-auto-tools quick model:
 - Task = user work; template = execution graph; recipe = saved JSON; run = execution instance.
 - Command templates stay sync: string leaf, array sequence, object flags, parallel: true fanout.
 - Template flags: args/defaults, parallel, when, timeout, delay, retry, failure, recover, repeat, output; placeholders support {value??fallback} and {flag?yes:no}.
-- Recipes live in ~/.pi/agent/recipes/*.json and wrap templates with metadata/defaults/imports.
+- Recipes live in ~/.pi/agent/recipes/*.json and wrap templates with metadata/defaults/imports/artifacts.
 - Recipe imports are local variables: imports.alias -> {"name":"alias"} nodes and {alias.defaults.key} refs.
 - Imported recipes are definitions, not nested async runs; parent async:true creates one run.
 - async:true = detached lifecycle; async_run can also start file/template directly.
 - Async run state lives under ~/.pi/agent/tmp/pi-auto-tools/runs.
 - Use async_run action=start/status/tail/list/events/send/cancel/kill.
-- Run lifecycle = state files, logs, outbox events, FIFO send, cancel/kill, compact status; do not busy-poll runs, rely on event/follow-up notifications and inspect only at decision points.
+- Run lifecycle = state files, logs, outbox events, FIFO send, cancel/kill, compact status; do not busy-poll runs, rely on event/follow-up notifications and use async_run action=send for explicit run-local commands.
 - Tool template may be a command template, recipe path/name, or co-located recipe.
 - register_tool makes compact persistent buttons; args may be typed or derived from placeholders.
 - For single calls or short pipelines, use foreground templates/tools.
 - For subagents, swarms, background music, or long fanout, prefer async recipes/runs.
-- Long async fanout = parent async recipe wrapping template(parallel: true) and imports.
+- Long async fanout = parent async recipe wrapping template(parallel: true) and imports; packaged fanout recipes bubble branch completion follow-ups by default.
 - If asked to explore pi-auto-tools, read README.md, docs/README.md, docs/template-recipes.md, docs/async-runs.md, and recipes/.
 - Ambient triangles show active async commands/subagents for the launching coordinator.
 - After async run finish, inspect status/tail/events before final artifacts.`;

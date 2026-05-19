@@ -202,7 +202,7 @@ Composition rules:
 }
 ```
 
-`output` selects the primary result channel. Omitted `output` means `"stdout"`, and explicitly writing `"output": "stdout"` is valid standard syntax. Artifact-producing handlers may instead name a runtime value or placeholder path, e.g. `"ogg"` or `"{ogg}"`.
+`output` selects the primary result channel. Omitted `output` means `"stdout"`, and explicitly writing `"output": "stdout"` is valid standard syntax. Artifact-producing handlers may instead name a runtime value or placeholder path, e.g. `"ogg"` or `"{ogg}"`. Do not use `artifacts` in command-template nodes; named artifact manifests belong to the template-recipe layer.
 
 ### Repeat
 

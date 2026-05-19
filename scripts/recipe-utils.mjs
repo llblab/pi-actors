@@ -9,6 +9,7 @@ function usage() {
   recipe-utils.mjs changelog-section <file> <version>
   recipe-utils.mjs artifact-manifest <artifact-path> <title> <status> [summary]
   recipe-utils.mjs artifact-write <artifact-path> [create|overwrite|append]
+  recipe-utils.mjs actor-message <type> [delivery] [to] [from] [summary] [metadata-json]
   recipe-utils.mjs package-summary <package-json>`);
 }
 
@@ -131,6 +132,39 @@ function artifactWrite(pathValue, mode = "create") {
   console.log(JSON.stringify({ path, mode, bytes: stat.size, written: true }, null, 2));
 }
 
+function actorMessage(type = "event", delivery = "log", to = "coordinator", from = "run:{run_id}", summary = "", metadataValue = "") {
+  let metadata = {};
+  if (metadataValue) {
+    try {
+      const parsed = JSON.parse(metadataValue);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metadata = parsed;
+      else fail("Actor message metadata must be a JSON object");
+    } catch (error) {
+      fail(`Invalid actor message metadata JSON: ${error.message}`);
+    }
+  }
+  const bodyText = readFileSync(0, "utf8");
+  const trimmed = bodyText.trim();
+  let body = bodyText;
+  if (trimmed) {
+    try {
+      body = JSON.parse(trimmed);
+    } catch {
+      body = bodyText;
+    }
+  }
+  console.log(JSON.stringify({
+    to,
+    from,
+    type,
+    event: type,
+    delivery,
+    summary: summary || type,
+    body,
+    metadata,
+  }, null, 2));
+}
+
 function packageSummary(fileValue = "package.json") {
   const file = resolve(fileValue.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"));
   const pkg = readJson(file);
@@ -195,6 +229,8 @@ else if (command === "artifact-manifest")
   artifactManifest(args[0] ?? "artifact.md", args[1], args[2], args[3]);
 else if (command === "artifact-write")
   artifactWrite(args[0] ?? "artifact.md", args[1] ?? "create");
+else if (command === "actor-message")
+  actorMessage(args[0], args[1], args[2], args[3], args[4], args[5]);
 else if (command === "package-summary")
   packageSummary(args[0] ?? "package.json");
 else {

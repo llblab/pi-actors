@@ -5,7 +5,7 @@
     "normalizer": "subagent-normalize.json",
     "artifact": "subagent-artifact.json",
     "writer": "utility-artifact-write.json",
-    "event": "subagent-event.json"
+    "event": "utility-actor-message.json"
   },
   "args": [
     "input:string",
@@ -61,10 +61,8 @@
       "name": "event",
       "values": {
         "event_type": "artifact.written",
-        "payload": "Artifact written to path {artifact_path} using mode {write_mode}. Use writer JSON from stdin as write evidence.",
-        "delivery": "{delivery}",
-        "model": "{model}",
-        "tools": "{tools}"
+        "summary": "Artifact written to path {artifact_path} using mode {write_mode}.",
+        "delivery": "{delivery}"
       }
     }
   ]

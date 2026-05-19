@@ -4,7 +4,7 @@
   "imports": {
     "normalizer": "subagent-normalize.json",
     "artifact": "subagent-artifact.json",
-    "event": "subagent-event.json"
+    "event": "utility-actor-message.json"
   },
   "args": [
     "input:string",
@@ -47,10 +47,8 @@
       "name": "event",
       "values": {
         "event_type": "artifact.prepared",
-        "payload": "Artifact prepared for path {artifact_path}. Use previous artifact content from stdin.",
-        "delivery": "{delivery}",
-        "model": "{model}",
-        "tools": "{tools}"
+        "summary": "Artifact prepared for path {artifact_path}.",
+        "delivery": "{delivery}"
       }
     }
   ]

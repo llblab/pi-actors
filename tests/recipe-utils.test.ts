@@ -96,6 +96,24 @@ test("recipe-utils artifact-write writes stdin with explicit mode", async () => 
   }
 });
 
+test("recipe-utils actor-message emits deterministic envelopes", () => {
+  const result = spawnSync(
+    script,
+    ["actor-message", "artifact.written", "followup", "coordinator", "run:writer", "Done", '{"path":"report.md"}'],
+    { encoding: "utf8", input: '{"written":true}' },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const envelope = JSON.parse(result.stdout);
+  assert.equal(envelope.to, "coordinator");
+  assert.equal(envelope.from, "run:writer");
+  assert.equal(envelope.type, "artifact.written");
+  assert.equal(envelope.event, "artifact.written");
+  assert.equal(envelope.delivery, "followup");
+  assert.equal(envelope.summary, "Done");
+  assert.deepEqual(envelope.body, { written: true });
+  assert.deepEqual(envelope.metadata, { path: "report.md" });
+});
+
 test("recipe-utils run-summary reads live progress status over static run status", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-auto-tools-recipe-utils-"));
   try {

@@ -38,7 +38,7 @@ Core subagent recipes:
 - `recipes/subagent-merge.json`: Consensus/risk-first synthesis.
 - `recipes/subagent-normalize.json`: Stable output shaping.
 - `recipes/subagent-artifact.json`: Durable artifact-shaped output for a target path. It prepares content and write guidance; it does not write files unless the caller deliberately grants write tools or uses a deterministic writer.
-- `recipes/subagent-event.json`: Actor-message-envelope-shaped coordinator event record.
+- `recipes/subagent-event.json`: Prompted actor-message-envelope-shaped coordinator event record.
 - `recipes/subagent-quorum.json`: Same prompt across a model pool.
 - `recipes/subagent-task-card.json`: Bounded implementation task card.
 - `recipes/subagent-conflict-report.json`: Integrator-oriented conflict report.
@@ -102,6 +102,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.
 - `recipes/utility-artifact-write.json`: Deterministically write prepared artifact content from stdin to `artifact_path` with explicit `create`, `overwrite`, or `append` mode.
+- `recipes/utility-actor-message.json`: Deterministically wrap stdin as an addressed actor-message envelope with `to`, `from`, `type`, `delivery`, `summary`, `body`, and `metadata`.
 - `recipes/utility-package-summary.json`: Use `scripts/recipe-utils.mjs` to emit bounded package metadata such as name, version, files, scripts, and dependency counts.
 - `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 

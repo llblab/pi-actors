@@ -1,0 +1,22 @@
+{
+  "name": "utility-actor-message",
+  "async": false,
+  "args": [
+    "event_type:string",
+    "delivery:enum(log,notify,followup)",
+    "to:string",
+    "from:string",
+    "summary:string",
+    "metadata:string",
+    "repo:path"
+  ],
+  "defaults": {
+    "delivery": "log",
+    "to": "coordinator",
+    "from": "run:{run_id}",
+    "summary": "",
+    "metadata": "{}",
+    "repo": "~/.pi/agent/extensions/pi-auto-tools"
+  },
+  "template": "node {repo}/scripts/recipe-utils.mjs actor-message {event_type} {delivery} {to} {from} {summary} {metadata}"
+}

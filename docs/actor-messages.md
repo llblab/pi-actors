@@ -104,7 +104,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. `events` remains delivery policy, not transport selection. Packaged interactive and event-oriented recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details.
+`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. `events` remains delivery policy, not transport selection. Packaged interactive and event-oriented recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Event-authoring recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `event`, `delivery`, `summary`, `body`, and optional `metadata` fields.
 
 ## Spawn
 

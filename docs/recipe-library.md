@@ -38,7 +38,7 @@ Core subagent recipes:
 - `recipes/subagent-merge.json`: Consensus/risk-first synthesis.
 - `recipes/subagent-normalize.json`: Stable output shaping.
 - `recipes/subagent-artifact.json`: Durable artifact-shaped output for a target path. It prepares content and write guidance; it does not write files unless the caller deliberately grants write tools or uses a deterministic writer.
-- `recipes/subagent-event.json`: Outbox-event-shaped coordinator record.
+- `recipes/subagent-event.json`: Actor-message-envelope-shaped coordinator event record.
 - `recipes/subagent-quorum.json`: Same prompt across a model pool.
 - `recipes/subagent-task-card.json`: Bounded implementation task card.
 - `recipes/subagent-conflict-report.json`: Integrator-oriented conflict report.

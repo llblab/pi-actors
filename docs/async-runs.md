@@ -135,7 +135,7 @@ The actor-level surface is:
 
 - `spawn`: start a detached `run:<id>` actor from `file`, `recipe`, or inline `template`.
 - `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, or `coordinator`.
-- `inspect`: intentionally read `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read `session:<id>` run status.
+- `inspect`: intentionally read `run:<id>` status, tail, events, artifacts, files, or mailbox metadata; read `session:<id>` or `session:all` run inventory with optional status filtering.
 
 Low-level async actions map into the actor surface instead of forming a second public model:
 

@@ -323,7 +323,8 @@ export function createInspectToolDefinition(): any {
     parameters: objectSchema(
       {
         lines: stringSchema("Line count for tail/events views. Default 40."),
-        target: stringSchema("Actor address to inspect, e.g. run:<id> or session:<id>."),
+        status: stringSchema("Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited."),
+        target: stringSchema("Actor address to inspect, e.g. run:<id>, session:<id>, or session:all."),
         verbose: booleanSchema("Return full JSON instead of compact text where available."),
         view: stringSchema("Inspection view: status, tail, events, artifacts, files, or mailbox."),
       },
@@ -344,9 +345,9 @@ export function createInspectToolDefinition(): any {
         if (view !== "status" && view !== "runs") {
           throw new Error("inspect session:<id> supports view=status or view=runs.");
         }
-        const runs = AsyncRuns.listRuns()
+        const runs = AsyncRuns.listRuns(undefined, typeof input.status === "string" ? input.status : undefined)
           .map((run) => AsyncRuns.getRunStatus(String(run.state_dir)))
-          .filter((run) => run.ownerId === address.value);
+          .filter((run) => address.value === "all" || run.ownerId === address.value);
         return {
           content: [
             {

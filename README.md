@@ -246,7 +246,7 @@ Read recent events or logs only after a follow-up asks for inspection, at a real
 { "target": "run:docs-review", "view": "tail", "lines": "80" }
 ```
 
-Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. Use `spawn` for explicit detached starts from a file or inline template, and `inspect target=session:<id> view=runs` for explicit inventory/diagnosis. List output includes `tool` and `recipe` when the launcher recorded that source context.
+Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. Use `spawn` for explicit detached starts from a file or inline template, and `inspect target=session:<id> view=runs status=running` or `inspect target=session:all view=runs` for explicit inventory/diagnosis. List output includes `tool` and `recipe` when the launcher recorded that source context.
 
 ## Recipe Library
 

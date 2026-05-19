@@ -79,6 +79,7 @@ test("Inspect tool definition exposes intentional observation schema", () => {
   assert.equal(properties.target.type, "string");
   assert.equal(properties.view.type, "string");
   assert.equal(properties.lines.type, "string");
+  assert.equal(properties.status.type, "string");
 });
 
 test("Actor message tool definition exposes concentrated message schema", () => {
@@ -254,7 +255,7 @@ test("Inspect tool reads session runs", async () => {
   try {
     const meta = startRun(
       {
-        run_id: "session-inspect",
+        run_id: `session-inspect-${process.pid}-${Date.now()}`,
         ownerId: "session-demo",
         template: `${process.execPath} -e "console.log('ok')"`,
       },
@@ -263,14 +264,23 @@ test("Inspect tool reads session runs", async () => {
     stateDir = meta.state_dir;
     const result = await definition.execute(
       "call-inspect-session",
-      { target: "session:session-demo", view: "status" },
+      { target: "session:session-demo", view: "status", status: "running" },
       undefined,
       undefined,
       undefined,
     );
     assert.match(result.content[0].text, /session=session-demo/);
     assert.equal(result.details.runs.length, 1);
-    assert.equal(result.details.runs[0].run, "session-inspect");
+    assert.equal(result.details.runs[0].run, meta.run);
+
+    const all = await definition.execute(
+      "call-inspect-all",
+      { target: "session:all", view: "runs", status: "running" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.equal(all.details.runs.some((run: { run: string }) => run.run === meta.run), true);
     await waitForFile(join(stateDir, "result.json"));
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });

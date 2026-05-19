@@ -58,7 +58,7 @@ Field rules:
 - `type`: required semantic message type.
 - `summary`: short human-facing line for notifications/follow-ups.
 - `body`: string or JSON payload.
-- routing/delivery is inferred from `to`, actor ownership, and coordinator runtime policy; recipes should not expose delivery knobs.
+- routing/delivery is inferred from `to`, actor ownership, and coordinator runtime policy; recipes should not expose delivery knobs. When a coordinator session is known, addressed run/branch/control messages fail closed before controlling or emitting from runs owned by another session.
 - `reply_to`: optional message id for conversational checkpoints.
 - `correlation_id`: optional task/run/workflow id.
 - `metadata`: optional structured routing or domain hints.

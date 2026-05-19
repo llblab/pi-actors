@@ -127,7 +127,7 @@ The core loop is:
 
 4. Do not inspect just because time passed. Inspect `status`, `tail`, or `events` only when a follow-up asks for inspection, a real decision depends on it, or a suspected stuck run needs diagnosis.
 
-Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-actors owns the safe run-local transport, ownership checks, and coordinator attention policy.
+Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-actors owns the safe run-local transport, coordinator-session ownership checks, and coordinator attention policy.
 
 ## Tool Surface
 

@@ -329,6 +329,74 @@ test("Actor message tool rejects session messages from differently owned runs", 
   }
 });
 
+test("Actor message tool rejects run messages across session ownership", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `run-owner-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "other-session",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-run-message-mismatch",
+        {
+          body: "stop",
+          to: `run:${runId}`,
+          type: "control.stop",
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "current-session" } },
+      ),
+      /owned by session:other-session; current session is current-session/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects coordinator messages across session ownership", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `coordinator-owner-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "other-session",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-coordinator-message-mismatch",
+        {
+          from: `run:${runId}`,
+          to: "coordinator",
+          type: "checkpoint.ready",
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "current-session" } },
+      ),
+      /owned by session:other-session; current session is current-session/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Actor message tool rejects session messages from unowned runs", async () => {
   const definition = createActorMessageToolDefinition();
   const runId = `session-unowned-${process.pid}-${Date.now()}`;

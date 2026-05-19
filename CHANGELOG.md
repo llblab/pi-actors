@@ -10,6 +10,7 @@
 - `[Actor Messages]` Added `inspect target=coordinator` support for current-session run inventory. Impact: the coordinator actor can now be intentionally observed without spelling out the session id.
 - `[Actor Messages]` Added `message to=session:<id>` support for run-owned session-directed follow-ups. Impact: explicit session checkpoints now use the same actor envelope as coordinator follow-ups while preserving run-owner checks.
 - `[Actor Messages]` Hardened `message to=session:<id>` routing to require an owned sender run. Impact: unowned or cross-session runs cannot synthesize session-directed follow-ups.
+- `[Actor Messages]` Applied coordinator-session ownership checks to addressed run, branch, and coordinator message routes when a session context is available. Impact: actor messages now fail closed before controlling or emitting from runs owned by another coordinator session.
 
 ## 0.12.9: Actor Runtime Hotfix
 

@@ -396,6 +396,15 @@ function getContextSessionId(ctx: unknown): string | undefined {
   return (ctx as AsyncRunToolContext | undefined)?.sessionManager?.getSessionId?.();
 }
 
+function assertRunAccessibleToContext(runId: string, ctx: unknown): Record<string, unknown> {
+  const status = AsyncRuns.getRunStatus(runId);
+  const sessionId = getContextSessionId(ctx);
+  if (sessionId && status.ownerId && status.ownerId !== sessionId) {
+    throw new Error(`run:${runId} is owned by session:${status.ownerId}; current session is ${sessionId}.`);
+  }
+  return status;
+}
+
 export function createInspectToolDefinition<TContext = unknown>(
   deps: InspectToolDeps<TContext> = {},
 ): any {
@@ -588,6 +597,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       const address = ActorMessages.parseActorAddress(message.to);
       let result: Record<string, unknown>;
       if (address.kind === "run" && address.value) {
+        assertRunAccessibleToContext(address.value, ctx);
         if (message.type === "control.stop" || message.type === "control.cancel" || message.type === "runtime.cancel") {
           result = AsyncRuns.cancelRun(address.value);
         } else if (message.type === "control.kill" || message.type === "runtime.kill") {
@@ -599,6 +609,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           );
         }
       } else if (address.kind === "branch" && address.value) {
+        assertRunAccessibleToContext(address.value, ctx);
         result = AsyncRuns.sendRunMessage(
           address.value,
           JSON.stringify(message),
@@ -629,7 +640,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         if (sender.kind !== "run" || !sender.value) {
           throw new Error(`message to ${address.kind} currently requires from=run:<id>.`);
         }
-        const senderStatus = AsyncRuns.getRunStatus(sender.value);
+        const senderStatus = assertRunAccessibleToContext(sender.value, ctx);
         if (address.kind === "session") {
           if (!senderStatus.ownerId) {
             throw new Error(`message to session:${address.value} requires sender run owner ${address.value}; got no owner.`);

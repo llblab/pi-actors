@@ -431,6 +431,31 @@ test("Runtime tool definition exposes typed arg schemas", () => {
   ]);
 });
 
+test("Runtime tool argument errors include compact usage hints", async () => {
+  const definition = createRuntimeToolDefinition(
+    {
+      argTypes: { mode: { kind: "enum", values: ["check", "fix"] } },
+      args: ["file", "mode"],
+      defaults: { mode: "check" },
+      description: "Run checker",
+      name: "check_tool",
+      template: "check {file} {mode}",
+    },
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+  );
+  await assert.rejects(
+    () =>
+      definition.execute(
+        "call-1",
+        { file: "README.md", mode: "delete" },
+        undefined,
+        undefined,
+        { cwd: "/work" },
+      ),
+    /Invalid arguments for tool "check_tool": Argument mode must be one of: check, fix\.\n\nExpected call shape for check_tool:\ncheck_tool\(\{\n  "file": "<file>",\n  "mode": "check"\n\}\)\nRequired: file\nOptional: mode/,
+  );
+});
+
 test("Runtime tool definition marks defaulted args optional", () => {
   const definition = createRuntimeToolDefinition(
     {

@@ -4,7 +4,6 @@
   "args": [
     "type:string",
     "payload:string",
-    "delivery:enum(log,notify,followup)",
     "to:string",
     "from:string",
     "event_policy:string",
@@ -15,11 +14,10 @@
   ],
   "defaults": {
     "type": "component.update",
-    "delivery": "log",
     "to": "coordinator",
     "from": "run:{run_id}",
     "event_policy": "Emit an actor-message envelope-shaped JSON object for the coordinator; do not call transport tools directly.",
-    "output_format": "JSON object with to, from, type, event, delivery, summary, body, metadata, confidence, and next_action.",
+    "output_format": "JSON object with to, from, type, event, summary, body, metadata, confidence, and next_action.",
     "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
@@ -27,5 +25,5 @@
   "mailbox": {
     "emits": ["event.*"]
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create an actor-message envelope-shaped event record. To: {to}. From: {from}. Type/event: {type}. Delivery: {delivery}. Event policy: {event_policy}. Payload/body: {payload}. Output format: {output_format}"
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create an actor-message envelope-shaped event record. To: {to}. From: {from}. Type/event: {type}. Event policy: {event_policy}. Payload/body: {payload}. Output format: {output_format}"
 }

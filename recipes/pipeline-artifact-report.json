@@ -10,13 +10,11 @@
     "input:string",
     "artifact_path:path",
     "artifact_format:string",
-    "delivery:enum(log,notify,followup)",
     "model:string",
     "tools:string"
   ],
   "defaults": {
     "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
-    "delivery": "log",
     "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
@@ -47,8 +45,7 @@
       "name": "event",
       "values": {
         "type": "artifact.prepared",
-        "summary": "Artifact prepared for path {artifact_path}.",
-        "delivery": "{delivery}"
+        "summary": "Artifact prepared for path {artifact_path}."
       }
     }
   ]

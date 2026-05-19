@@ -45,7 +45,6 @@ One shape covers upward, downward, lateral, parent-to-branch, and branch-to-pare
   "type": "control.approve",
   "summary": "Approve checkpoint",
   "body": "approve",
-  "delivery": "direct",
   "reply_to": "msg_123",
   "correlation_id": "task_456",
   "metadata": {}
@@ -59,7 +58,7 @@ Field rules:
 - `type`: required semantic message type.
 - `summary`: short human-facing line for notifications/follow-ups.
 - `body`: string or JSON payload.
-- `delivery`: `direct`, `log`, `notify`, or `followup` depending on route. Defaults to `followup` for `coordinator` and `direct` for actor mailboxes.
+- routing/delivery is inferred from `to`, actor ownership, and coordinator runtime policy; recipes should not expose delivery knobs.
 - `reply_to`: optional message id for conversational checkpoints.
 - `correlation_id`: optional task/run/workflow id.
 - `metadata`: optional structured routing or domain hints.
@@ -99,7 +98,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. Packaged interactive and event-oriented recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Event-authoring recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `event`, `delivery`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so event shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
+`mailbox.accepts` is a contract for coordinator-to-actor messages. `mailbox.emits` is a contract for actor-to-coordinator or actor-to-actor messages. Packaged interactive and event-oriented recipes declare mailbox metadata so coordinators can discover semantic message types without reading FIFO details. Event-authoring recipes produce actor-message-envelope-shaped records with `to`, `from`, `type`, `event`, `summary`, `body`, optional `correlation_id`/`reply_to`, and optional `metadata` fields. Deterministic pipelines should prefer `utility-actor-message` for this wrapping so event shape is validated and guaranteed instead of delegated to a prompt; its recipe args intentionally mirror the envelope field names.
 
 ## Spawn
 

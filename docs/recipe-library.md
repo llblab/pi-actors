@@ -80,8 +80,8 @@ Pipeline recipes demonstrate second-order composition:
 - `recipes/pipeline-development-tasking.json`: Plan → task card → critique → integrator handoff.
 - `recipes/pipeline-docs-maintenance.json`: Docs index → documentation review → maintenance plan → artifact report.
 - `recipes/pipeline-media-library.json`: Playlist build → media-library artifact report.
-- `recipes/pipeline-artifact-report.json`: Normalize → artifact-shaped output → event-shaped record. This pipeline prepares a candidate artifact and emits `artifact.prepared`/`artifact.blocked`; the `artifact_path` is a target path, not a guarantee that the file was written.
-- `recipes/pipeline-artifact-write.json`: Normalize → artifact-shaped output → deterministic artifact write → event-shaped record. Use only when the caller explicitly wants filesystem writes; `write_mode` is `create`, `overwrite`, or `append`.
+- `recipes/pipeline-artifact-report.json`: Normalize → artifact-shaped output → actor-message-shaped record. This pipeline prepares a candidate artifact and emits `artifact.prepared`/`artifact.blocked`; the `artifact_path` is a target path, not a guarantee that the file was written.
+- `recipes/pipeline-artifact-write.json`: Normalize → artifact-shaped output → deterministic artifact write → actor-message-shaped record. Use only when the caller explicitly wants filesystem writes; `write_mode` is `create`, `overwrite`, or `append`.
 
 These are examples of library composition, not a workflow DSL. Pipeline recipes declare mailbox metadata for their high-level completion, artifact, and control message surface. The recipe layer owns imports and saved defaults; command templates own execution shape; async runs own lifecycle.
 
@@ -102,7 +102,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.
 - `recipes/utility-artifact-write.json`: Deterministically write prepared artifact content from stdin to `artifact_path` with explicit `create`, `overwrite`, or `append` mode.
-- `recipes/utility-actor-message.json`: Deterministically wrap stdin as a validated addressed actor-message envelope with the same public names as the envelope: `to`, `from`, `type`, `delivery`, `summary`, `body`, optional `correlation_id`/`reply_to`, and `metadata`.
+- `recipes/utility-actor-message.json`: Deterministically wrap stdin as a validated addressed actor-message envelope with the same public names as the envelope: `to`, `from`, `type`, `summary`, `body`, optional `correlation_id`/`reply_to`, and `metadata`.
 - `recipes/utility-package-summary.json`: Use `scripts/recipe-utils.mjs` to emit bounded package metadata such as name, version, files, scripts, and dependency counts.
 - `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 

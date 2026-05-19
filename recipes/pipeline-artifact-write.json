@@ -12,14 +12,12 @@
     "artifact_path:path",
     "artifact_format:string",
     "write_mode:enum(create,overwrite,append)",
-    "delivery:enum(log,notify,followup)",
     "model:string",
     "tools:string"
   ],
   "defaults": {
     "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
     "write_mode": "create",
-    "delivery": "log",
     "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
@@ -61,8 +59,7 @@
       "name": "event",
       "values": {
         "type": "artifact.written",
-        "summary": "Artifact written to path {artifact_path} using mode {write_mode}.",
-        "delivery": "{delivery}"
+        "summary": "Artifact written to path {artifact_path} using mode {write_mode}."
       }
     }
   ]

@@ -9,7 +9,7 @@ function usage() {
   recipe-utils.mjs changelog-section <file> <version>
   recipe-utils.mjs artifact-manifest <artifact-path> <title> <status> [summary]
   recipe-utils.mjs artifact-write <artifact-path> [create|overwrite|append]
-  recipe-utils.mjs actor-message <type> [delivery] [to] [from] [summary] [metadata-json] [correlation-id] [reply-to]
+  recipe-utils.mjs actor-message <type> [to] [from] [summary] [metadata-json] [correlation-id] [reply-to]
   recipe-utils.mjs package-summary <package-json>`);
 }
 
@@ -20,8 +20,6 @@ function fail(message) {
 
 const ADDRESS_PATTERN = /^[A-Za-z0-9_.-]+$/;
 const MESSAGE_TYPE_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]*$/;
-const DELIVERIES = new Set(["direct", "followup", "log", "notify"]);
-
 function assertToken(value, label) {
   const normalized = String(value ?? "").trim();
   if (!normalized) fail(`${label} is required`);
@@ -48,12 +46,6 @@ function validateActorAddress(address, label) {
 function validateMessageType(type) {
   const value = String(type ?? "").trim();
   if (!MESSAGE_TYPE_PATTERN.test(value)) fail(`Invalid actor message type: ${type}`);
-  return value;
-}
-
-function validateDelivery(delivery) {
-  const value = String(delivery ?? "").trim() || "log";
-  if (!DELIVERIES.has(value)) fail(`Invalid actor message delivery: ${delivery}`);
   return value;
 }
 
@@ -171,9 +163,8 @@ function artifactWrite(pathValue, mode = "create") {
   console.log(JSON.stringify({ path, mode, bytes: stat.size, written: true }, null, 2));
 }
 
-function actorMessage(type = "event", delivery = "log", to = "coordinator", from = "run:{run_id}", summary = "", metadataValue = "", correlationId = "", replyTo = "") {
+function actorMessage(type = "event", to = "coordinator", from = "run:{run_id}", summary = "", metadataValue = "", correlationId = "", replyTo = "") {
   const messageType = validateMessageType(type);
-  const messageDelivery = validateDelivery(delivery);
   const messageTo = validateActorAddress(to, "message.to");
   const messageFrom = validateActorAddress(from, "message.from");
   let metadata = {};
@@ -201,7 +192,6 @@ function actorMessage(type = "event", delivery = "log", to = "coordinator", from
     from: messageFrom,
     type: messageType,
     event: messageType,
-    delivery: messageDelivery,
     summary: summary || messageType,
     body,
     ...(correlationId ? { correlation_id: correlationId } : {}),
@@ -275,7 +265,7 @@ else if (command === "artifact-manifest")
 else if (command === "artifact-write")
   artifactWrite(args[0] ?? "artifact.md", args[1] ?? "create");
 else if (command === "actor-message")
-  actorMessage(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+  actorMessage(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
 else if (command === "package-summary")
   packageSummary(args[0] ?? "package.json");
 else {

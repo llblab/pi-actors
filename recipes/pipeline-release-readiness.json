@@ -40,7 +40,7 @@
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
+    "accepts": ["control.stop", "control.cancel", "control.kill"],
     "emits": ["release.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
   },
   "template": [

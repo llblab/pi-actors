@@ -218,18 +218,19 @@ test("Packaged async recipes declare mailbox metadata", async () => {
   assert.deepEqual(missing, []);
 });
 
-test("Packaged interactive async recipes expose actor-native termination controls", () => {
+test("Packaged interactive async recipes expose actor-native termination controls", async () => {
   const recipeDir = join(__dirname, "..", "recipes");
-  const files = [
+  const explicitFiles = [
     "music-player.json",
-    "pipeline-artifact-report.json",
-    "pipeline-artifact-write.json",
     "subagent-artifact.json",
     "subagent-message.json",
     "subagents-prompts.json",
   ];
+  const pipelineFiles = (await readdir(recipeDir)).filter(
+    (file) => file.startsWith("pipeline-") && file.endsWith(".json"),
+  );
 
-  for (const file of files) {
+  for (const file of [...explicitFiles, ...pipelineFiles]) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
     const accepts = config?.mailbox?.accepts ?? [];
     assert.deepEqual(

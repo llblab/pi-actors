@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -85,6 +85,47 @@ test("Inspect tool definition exposes intentional observation schema", () => {
   assert.equal(properties.lines.type, "string");
   assert.equal(properties.status.type, "string");
   assert.match(properties.view.description, /messages/);
+});
+
+test("Inspect tool reads recipe registry summaries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-recipes-"));
+  try {
+    const userRecipes = join(root, "recipes");
+    const packagedRecipes = join(root, "packaged");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(userRecipes, { recursive: true }),
+        fs.mkdir(packagedRecipes, { recursive: true }),
+      ]),
+    );
+    await writeFile(
+      join(userRecipes, "user-tool.json"),
+      JSON.stringify({ description: "User", template: "echo user" }),
+    );
+    await writeFile(join(userRecipes, "broken.json"), JSON.stringify({ tool: true }));
+    await writeFile(
+      join(packagedRecipes, "stdlib.json"),
+      JSON.stringify({ tool: true, description: "Stdlib", template: "echo stdlib" }),
+    );
+
+    const definition = createInspectToolDefinition({
+      packagedRecipeRoot: packagedRecipes,
+      recipeRoot: userRecipes,
+    });
+    const result = await definition.execute(
+      "call-inspect-recipes",
+      { target: "recipes", view: "status" },
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    assert.match(result.content[0].text, /recipes active=3/);
+    assert.match(result.content[0].text, /invalid=1/);
+    assert.equal((result.details.active as unknown[]).length, 3);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Actor message tool definition exposes concentrated message schema", () => {

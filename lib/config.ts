@@ -23,6 +23,7 @@ export interface RegisteredTool {
   template?: CommandTemplateValue;
   storedArgs?: string[];
   storedDefaults?: Record<string, string>;
+  sourcePath?: string;
 }
 
 export interface LoadConfigResult {

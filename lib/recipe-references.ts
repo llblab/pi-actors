@@ -6,7 +6,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 import type {
   CommandTemplateConfig,
@@ -30,6 +30,9 @@ export interface TemplateRecipeMailbox {
 
 export interface TemplateRecipeDefinition {
   name?: string;
+  description?: string;
+  tool?: boolean;
+  disabled?: boolean;
   imports?: Record<string, TemplateRecipeImport>;
   template: CommandTemplateValue;
   args?: string[];
@@ -194,12 +197,14 @@ function readRawRecipeConfig(
       string,
       unknown
     >;
-    return raw && typeof raw === "object" && !Object.hasOwn(raw, "tool")
-      ? raw
-      : undefined;
+    return raw && typeof raw === "object" ? raw : undefined;
   } catch {
     return undefined;
   }
+}
+
+export function getRecipeIdFromPath(file: string): string {
+  return basename(file, ".json");
 }
 
 function readRecipeConfig(value: unknown): TemplateRecipeConfig | undefined {
@@ -489,7 +494,20 @@ export function readResolvedRecipeConfig(
   if (!template) return undefined;
   const expandedTemplate = expandImportNodes(template, imports);
   return {
-    ...(typeof substituted.name === "string" ? { name: substituted.name } : {}),
+    name:
+      typeof substituted.name === "string"
+        ? substituted.name
+        : getRecipeIdFromPath(path),
+    ...(typeof substituted.description === "string" &&
+    substituted.description.trim()
+      ? { description: substituted.description.trim() }
+      : {}),
+    ...(typeof substituted.tool === "boolean"
+      ? { tool: substituted.tool }
+      : {}),
+    ...(typeof substituted.disabled === "boolean"
+      ? { disabled: substituted.disabled }
+      : {}),
     ...(substituted.async === true
       ? { async: true }
       : substituted.async === false
@@ -514,13 +532,16 @@ export function readResolvedRecipeConfig(
     ...(typeof substituted.label === "string"
       ? { label: substituted.label }
       : {}),
-    ...(typeof substituted.when === "string" || typeof substituted.when === "boolean"
+    ...(typeof substituted.when === "string" ||
+    typeof substituted.when === "boolean"
       ? { when: substituted.when }
       : {}),
-    ...(typeof substituted.timeout === "number" || typeof substituted.timeout === "string"
+    ...(typeof substituted.timeout === "number" ||
+    typeof substituted.timeout === "string"
       ? { timeout: substituted.timeout }
       : {}),
-    ...(typeof substituted.delay === "number" || typeof substituted.delay === "string"
+    ...(typeof substituted.delay === "number" ||
+    typeof substituted.delay === "string"
       ? { delay: substituted.delay }
       : {}),
     ...(typeof substituted.output === "string"
@@ -529,8 +550,10 @@ export function readResolvedRecipeConfig(
     ...(isRecord(substituted.artifacts)
       ? {
           artifacts: Object.fromEntries(
-            Object.entries(substituted.artifacts)
-              .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+            Object.entries(substituted.artifacts).filter(
+              (entry): entry is [string, string] =>
+                typeof entry[1] === "string",
+            ),
           ),
         }
       : {}),
@@ -538,15 +561,24 @@ export function readResolvedRecipeConfig(
       ? {
           mailbox: {
             ...(Array.isArray(substituted.mailbox.accepts)
-              ? { accepts: substituted.mailbox.accepts.filter((value): value is string => typeof value === "string") }
+              ? {
+                  accepts: substituted.mailbox.accepts.filter(
+                    (value): value is string => typeof value === "string",
+                  ),
+                }
               : {}),
             ...(Array.isArray(substituted.mailbox.emits)
-              ? { emits: substituted.mailbox.emits.filter((value): value is string => typeof value === "string") }
+              ? {
+                  emits: substituted.mailbox.emits.filter(
+                    (value): value is string => typeof value === "string",
+                  ),
+                }
               : {}),
           },
         }
       : {}),
-    ...(typeof substituted.retry === "number" || typeof substituted.retry === "string"
+    ...(typeof substituted.retry === "number" ||
+    typeof substituted.retry === "string"
       ? { retry: substituted.retry }
       : {}),
     ...(substituted.failure === "continue" ||

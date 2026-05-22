@@ -1,33 +1,43 @@
 # Tool Registry
 
-`pi-actors` stores registered actor-control command-template tools and template-recipe launchers in `~/.pi/agent/actors-tools.json` and registers them automatically on session start.
+`pi-actors` stores persistent agent tools as recipe files under `~/.pi/agent/recipes/*.json` and registers the active tool set automatically on session start.
 
-This document is the local adaptation of the portable [Command Template Standard](./command-templates.md).
+This document is the local adaptation of the portable [Command Template Standard](./command-templates.md) and the recipe-file runtime described in [Template Recipe Standard](./template-recipes.md).
 
-## Rename Migration
+## Registry Model
 
-`pi-actors` reads only `~/.pi/agent/actors-tools.json` as its registry source. When moving from `pi-auto-tools`, copy the previous registry explicitly:
+The 0.16 registry source is file-discovered recipes, not a live tool-only JSON file:
 
-```bash
-cp ~/.pi/agent/auto-tools.json ~/.pi/agent/actors-tools.json
+- `~/.pi/agent/recipes/*.json` is the highest-priority user recipe root and the operator-managed tool set.
+- Recipes in that root are tools by default.
+- `tool: false` keeps a user recipe file recipe-only.
+- Packaged pi-actors recipes are the lower-priority standard library of declarative actor config components.
+- Packaged or ad hoc recipes opt into tool exposure with `tool: true`.
+- Recipe identity is the filename basename; `~/.pi/agent/recipes/docs_review.json` has id/tool name `docs_review`.
+
+`~/.pi/agent/actors-tools.json` is legacy compatibility input. On startup, pi-actors migrates it into recipe files when possible, writes a migration report, and archives the source only when migration has no conflicts or invalid generated recipes.
+
+Because the user recipe directory is sticky agent muscle memory, runtime launches update `usage.calls` and `usage.last_called` on user-owned recipe files. Use that evidence during focused cleanup passes: keep valuable tools, set `tool: false` for useful components that should leave the active tool surface, merge duplicates, or delete/archive low-value files. The extension does not maintain a failure counter and agents should not silently clean tools during unrelated work.
+
+`register_tool` is the preferred agent-facing mutation API. It creates, updates, and deletes recipe files in `~/.pi/agent/recipes`; agents do not need to edit the files directly for normal registration. Direct file edits are still valid for operators and advanced agents. Runtime behavior is reactive: file creation, deletion, or edits in the user recipe root trigger validation and tool-set refresh, with invalid recipes surfaced as diagnostics rather than silently ignored.
+
+Inspect the discovered registry with:
+
+```text
+inspect target=recipes view=status
+inspect target=recipes view=summary verbose=true
 ```
 
-If a short-lived `~/.pi/agent/tools.json` file exists from the early `pi-actors` rename window, copy that file instead:
-
-```bash
-cp ~/.pi/agent/tools.json ~/.pi/agent/actors-tools.json
-```
-
-No automatic rewrite is performed so operators can decide when to retire old config files.
+The summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled.
 
 ## Registering Tools
 
 `register_tool` is the interactive API for listing, creating, updating, or deleting persistent tools. Call it without arguments to list registered tools.
 
 ```text
-register_tool name=transcribe_groq \
-  description="Transcribe audio files using Groq Whisper API" \
-  template="~/.pi/agent/skills/groq-stt/scripts/transcribe.mjs {file} {lang=ru} {model=whisper-large-v3-turbo}"
+register_tool name=transcribe_audio \
+  description="Transcribe an audio file" \
+  template="~/bin/transcribe {file:path} {lang=ru} {model:string}"
 ```
 
 ```text
@@ -47,32 +57,30 @@ Use `update=true` to overwrite an existing tool. Omit `template` and co-located 
 ]
 ```
 
-For reusable actor workflows, register a small tool whose `template` points to an actor recipe instead of embedding the launch graph in the tool itself:
+For reusable actor workflows, register a small tool whose `template` points to an existing actor recipe instead of embedding the launch graph in the tool itself:
 
 ```text
 register_tool name=docs_review \
   description="Start an async docs review actor" \
-  template="docs-review.json" \
+  template="docs-review" \
   args="scope:path,model:string"
 ```
 
-This stores the recipe path in the registry as `template`. If `~/.pi/agent/recipes/docs-review.json` contains `async: true`, calling the tool starts a detached actor run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
+This writes or updates `~/.pi/agent/recipes/docs_review.json` with `tool: true` and a recipe-reference template. If the referenced recipe contains `async: true`, calling the tool starts a detached actor run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
-When co-location is clearer than a separate file, the registry entry may include recipe fields directly beside tool metadata:
+When co-location is clearer than a separate file, `register_tool` writes the recipe fields directly into the user recipe file:
 
 ```json
 {
-  "review_docs": {
-    "description": "Start an async docs review",
-    "name": "review-docs",
-    "async": true,
-    "args": ["scope:path", "model:string"],
-    "template": "pi -p --model {model} --tools read,bash \"Review {scope}\""
-  }
+  "description": "Start an async docs review",
+  "tool": true,
+  "async": true,
+  "args": ["scope:path", "model:string"],
+  "template": "pi -p --model {model} --tools read,bash \"Review {scope}\""
 }
 ```
 
-This is still not a cycle: `name` names the saved definition when it differs from the tool key, `async: true` selects detached run mode, and `template` remains the executable body. Co-located recipe entries must not define `tool`.
+This is still not a cycle: the filename is the saved definition id, `async: true` selects detached run mode, and `template` remains the executable body.
 
 Delete a tool with `template=null`:
 
@@ -82,24 +90,22 @@ register_tool name=call_subagent template=null
 
 ## Stored Shape
 
-Tool names come from the top-level registry keys. Tool entries define `template`; it may be an inline command template, a template recipe JSON path/name, or the body of a co-located template recipe when `async` or entry-local `name` is present. Template entries keep `template` last, matching the command-template readability rule. The commands above persist entries like this:
+Tool names come from recipe filenames in `~/.pi/agent/recipes`. Recipe files define `template`; it may be an inline command template, a command-template sequence, or an async recipe body. Template entries keep `template` last, matching the command-template readability rule. The commands above persist recipe files like this:
 
 ```json
 {
-  "transcribe_groq": {
-    "description": "Transcribe audio files using Groq Whisper API",
-    "template": "~/.pi/agent/skills/groq-stt/scripts/transcribe.mjs {file} {lang=ru} {model=whisper-large-v3-turbo}"
-  },
-  "call_subagent": {
-    "description": "Run pi as a non-interactive sub-agent",
-    "args": ["prompt:string", "model:string"],
-    "template": "pi -p --model {model} --no-tools {prompt}"
-  },
-  "docs_review": {
-    "description": "Start an async docs review actor",
-    "args": ["scope:path", "model:string"],
-    "template": "docs-review.json"
-  }
+  "description": "Transcribe an audio file",
+  "tool": true,
+  "template": "~/bin/transcribe {file:path} {lang=ru} {model:string}"
+}
+```
+
+```json
+{
+  "description": "Run pi as a non-interactive sub-agent",
+  "tool": true,
+  "args": ["prompt:string", "model:string"],
+  "template": "pi -p --model {model} --no-tools {prompt}"
 }
 ```
 
@@ -108,7 +114,7 @@ Tool names come from the top-level registry keys. Tool entries define `template`
 When `args` is omitted, `pi-actors` derives tool parameters from placeholders in `template`:
 
 ```text
-template="~/bin/transcribe {file} {lang=ru} {model=whisper-large-v3-turbo}"
+template="~/bin/transcribe {file:path} {lang=ru} {model:string}"
 ```
 
 The optional `args` field is an explicit placeholder declaration, matching the command-template standard. Untyped declarations remain valid:

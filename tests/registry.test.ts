@@ -4,9 +4,9 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
@@ -54,6 +54,12 @@ test("Registry mutations register template-backed tools", async () => {
       harness.deps,
     );
     assert.equal(harness.tools.get("transcribe")?.defaults.lang, "ru");
+    const stored = JSON.parse(
+      await readFile(join(dirname(harness.deps.configPath), "recipes", "transcribe.json"), "utf8"),
+    );
+    assert.equal(stored.tool, true);
+    assert.equal(stored.description, "Transcribe audio");
+    assert.equal(stored.template, "~/bin/transcribe {file} {lang}");
     assert.deepEqual(harness.runtimeRegistered, ["transcribe"]);
     assert.match(result.content[0].text, /Registered tool "transcribe"/);
   } finally {

@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "private": false,
   "description": "Actor runtime and orchestrator for agent-managed local processes",
   "keywords": [
@@ -40,7 +40,8 @@
     "AGENTS.md",
     "BACKLOG.md",
     "CHANGELOG.md",
-    "docs"
+    "docs",
+    "banner.jpg"
   ],
   "pi": {
     "extensions": [
@@ -49,7 +50,8 @@
     "skills": [
       "./skills/actors/SKILL.md",
       "./skills/swarm/SKILL.md"
-    ]
+    ],
+    "image": "https://github.com/llblab/pi-actors/raw/main/banner.jpg"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

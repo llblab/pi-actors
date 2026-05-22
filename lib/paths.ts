@@ -5,7 +5,8 @@
  */
 
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export function getAgentDir(
   env: Record<string, string | undefined> = process.env,
@@ -32,4 +33,8 @@ export function getRunStateRoot(agentDir = getAgentDir()): string {
 
 export function getRecipeRoot(agentDir = getAgentDir()): string {
   return join(agentDir, "recipes");
+}
+
+export function getPackagedRecipeRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "recipes");
 }

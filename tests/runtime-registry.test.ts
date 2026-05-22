@@ -23,6 +23,45 @@ async function writeRecipe(root: string, name: string, body: Record<string, unkn
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
 }
 
+test("Runtime skips invalid user recipes without aborting load", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-registry-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const packagedRecipeRoot = join(root, "packaged");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(recipeRoot, { recursive: true }),
+        fs.mkdir(packagedRecipeRoot, { recursive: true }),
+      ]),
+    );
+    await writeRecipe(recipeRoot, "bad-repeat", {
+      description: "Bad repeat",
+      template: { repeat: "{count}", template: "echo {item}" },
+    });
+
+    const notifications: string[] = [];
+    const runtime = createAutoToolsRuntime({
+      configPath: join(root, "actors-tools.json"),
+      exec,
+      getAllTools: () => [],
+      packagedRecipeRoot,
+      recipeRoot,
+      registerTool: () => assert.fail("invalid recipe should not register"),
+      reservedToolNames: new Set(),
+    });
+
+    runtime.loadTools({
+      hasUI: true,
+      ui: { notify: (message) => notifications.push(message) },
+    });
+
+    assert.equal(runtime.getTools().has("bad-repeat"), false);
+    assert.match(notifications.join("\n"), /Command template repeat/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Runtime loads tools from discovered user recipes by default", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-registry-"));
   try {

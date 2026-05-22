@@ -98,6 +98,27 @@ export function createAutoToolsRuntime(
     runtimeTools.add(cfg.name);
     runtimeToolFingerprints.set(cfg.name, fingerprint);
   }
+  function formatRecipeToolWarnings(warnings: string[]): string {
+    const shadowed = warnings.filter((warning) => warning.includes(" shadows "));
+    const skipped = warnings.filter((warning) => warning.includes(" could not be exposed as a tool:"));
+    const other = warnings.filter(
+      (warning) => !shadowed.includes(warning) && !skipped.includes(warning),
+    );
+    const lines = ["pi-actors recipe registry warning"];
+    if (shadowed.length > 0) {
+      lines.push("User recipes override packaged recipes:");
+      lines.push(...shadowed.map((warning) => `• ${warning}`));
+    }
+    if (skipped.length > 0) {
+      lines.push("Recipes skipped from tool exposure:");
+      lines.push(...skipped.map((warning) => `• ${warning}`));
+    }
+    if (other.length > 0) {
+      lines.push("Other registry diagnostics:");
+      lines.push(...other.map((warning) => `• ${warning}`));
+    }
+    return `${lines.join("\n")}\n`;
+  }
   function loadTools(ctx: RuntimeContext) {
     const warnings: string[] = [];
     const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
@@ -138,7 +159,7 @@ export function createAutoToolsRuntime(
       registerRuntimeTool(cfg);
     }
     if (warnings.length > 0) {
-      notify(ctx, `Recipe tools: ${warnings.join("; ")}`, "warning");
+      notify(ctx, formatRecipeToolWarnings(warnings), "warning");
     }
   }
   return {

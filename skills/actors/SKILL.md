@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.16.1
+  version: 0.16.2
 ---
 
 # Actors (pi-actors)
@@ -216,7 +216,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 - Review chain: [`subagent-review`](../../recipes/subagent-review.json), [`subagent-verify`](../../recipes/subagent-verify.json), [`subagent-merge`](../../recipes/subagent-merge.json), [`subagent-judge`](../../recipes/subagent-judge.json), [`subagent-normalize`](../../recipes/subagent-normalize.json).
 - Planning/evidence: [`subagent-plan`](../../recipes/subagent-plan.json), [`subagent-task-card`](../../recipes/subagent-task-card.json), [`subagent-evidence-map`](../../recipes/subagent-evidence-map.json), [`subagent-contradiction-map`](../../recipes/subagent-contradiction-map.json), [`subagent-critic`](../../recipes/subagent-critic.json).
 - Handoffs: [`subagent-checkpoint`](../../recipes/subagent-checkpoint.json), [`subagent-followup`](../../recipes/subagent-followup.json), [`subagent-message`](../../recipes/subagent-message.json), [`subagent-artifact`](../../recipes/subagent-artifact.json), [`subagent-conflict-report`](../../recipes/subagent-conflict-report.json).
-- Composition: [`subagent-quorum`](../../recipes/subagent-quorum.json), [`subagent-review-coordinator`](../../recipes/subagent-review-coordinator.json).
+- Composition: [`subagent-quorum`](../../recipes/subagent-quorum.json), [`subagent-review-coordinator`](../../recipes/subagent-review-coordinator.json), [`lens-swarm`](../../recipes/lens-swarm.json).
 
 ### Pipelines
 

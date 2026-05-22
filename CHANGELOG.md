@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.3: Recipe Import Path Placeholders
+
+- `[Template Recipes]` Added static `{repo}` and `{agent}` expansion for recipe paths, including `imports` and `from` bindings. Impact: recipes can import sibling packaged/user recipes without hard-coded absolute paths while keeping imports load-time deterministic.
+- `[Docs]` Documented `{repo}` and `{agent}` import path placeholders in the template recipe standard.
+- `[Package]` Bumped package and packaged skill metadata to `0.16.3` for the hotfix release.
+
 ## 0.16.2: Recipe Registry Diagnostics Hotfix
 
 - `[Schema]` Derived recipe tool arguments without expanding runtime-dependent repeat nodes. Impact: valid recipes using repeat expressions such as `{lenses.length}` can be exposed as tools instead of being skipped during startup schema generation.

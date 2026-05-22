@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.16.2
+  version: 0.16.3
 ---
 
 # Actors (pi-actors)

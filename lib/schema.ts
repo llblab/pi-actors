@@ -261,19 +261,35 @@ function collectWhenDeclarations(
     declarations.push(parseToolArgToken(`${bareCondition[1]}:bool=false`));
 }
 
+function collectCommandTemplateConfigDeclarations(
+  config: CommandTemplates.CommandTemplateConfig | CommandTemplates.CommandTemplateValue,
+  declarations: ParsedToolArgToken[],
+): void {
+  if (typeof config === "string") {
+    collectTemplatePlaceholderDeclarations(config, declarations);
+    return;
+  }
+  if (Array.isArray(config)) {
+    for (const step of config)
+      collectCommandTemplateConfigDeclarations(step, declarations);
+    return;
+  }
+  if (config.template !== undefined)
+    collectCommandTemplateConfigDeclarations(config.template, declarations);
+  if (config.recover !== undefined)
+    collectCommandTemplateConfigDeclarations(config.recover, declarations);
+  for (const field of [config.timeout, config.delay, config.retry, config.repeat]) {
+    if (typeof field === "string")
+      collectTemplatePlaceholderDeclarations(field, declarations);
+  }
+  if (typeof config.when === "string") collectWhenDeclarations(config.when, declarations);
+}
+
 function getTemplatePlaceholderDeclarations(
   config: CommandTemplates.CommandTemplateConfig,
 ): ParsedToolArgToken[] {
   const declarations: ParsedToolArgToken[] = [];
-  for (const step of CommandTemplates.expandCommandTemplateConfigs(config)) {
-    collectTemplatePlaceholderDeclarations(step.template, declarations);
-    for (const field of [step.timeout, step.delay, step.retry]) {
-      if (typeof field === "string")
-        collectTemplatePlaceholderDeclarations(field, declarations);
-    }
-    if (typeof step.when === "string")
-      collectWhenDeclarations(step.when, declarations);
-  }
+  collectCommandTemplateConfigDeclarations(config, declarations);
   return declarations;
 }
 

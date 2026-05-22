@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.2: Recipe Registry Diagnostics Hotfix
+
+- `[Schema]` Derived recipe tool arguments without expanding runtime-dependent repeat nodes. Impact: valid recipes using repeat expressions such as `{lenses.length}` can be exposed as tools instead of being skipped during startup schema generation.
+- `[Runtime]` Replaced the dense semicolon warning with grouped recipe registry diagnostics and explicit spacing. Impact: startup diagnostics are easier to scan and do not visually run into adjacent text.
+- `[Recipes]` Added a packaged `lens-swarm` recipe that composes the review coordinator without concrete model-version defaults. Impact: the standard library includes the general multi-lens review launcher instead of relying only on operator-local copies.
+- `[Package]` Bumped package and packaged skill metadata to `0.16.2` for the hotfix release.
+
 ## 0.16.1: Recipe Registry Hotfix
 
 - `[Runtime]` Prevented invalid user recipe files from aborting extension startup when tool-schema generation fails, surfacing a warning and skipping the offending tool instead. Impact: one bad recipe in `~/.pi/agent/recipes` no longer takes down the pi-actors extension.

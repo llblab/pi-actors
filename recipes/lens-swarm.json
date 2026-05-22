@@ -1,0 +1,68 @@
+{
+  "name": "lens-swarm",
+  "description": "General-purpose multi-lens review swarm. Launches independent reviewers by lens, then verifies, merges, judges, and normalizes the result.",
+  "tool": true,
+  "async": true,
+  "imports": {
+    "coordinator": "subagent-review-coordinator.json"
+  },
+  "args": [
+    "scope:string",
+    "lenses:array",
+    "model:string",
+    "thinking:string",
+    "tools:string",
+    "claim:string",
+    "evidence_policy:string",
+    "risk_policy:string",
+    "output_format:string"
+  ],
+  "defaults": {
+    "lenses": [
+      "correctness",
+      "architecture",
+      "operator UX"
+    ],
+    "thinking": "off",
+    "tools": "",
+    "claim": "The reviewed scope has clear, evidence-based findings, risks, and recommended next actions.",
+    "evidence_policy": "Cite inspected files, command outputs, or explicit uncertainty for every material claim.",
+    "risk_policy": "Preserve minority high-impact risks and ideas; separate confirmed issues from hypotheses.",
+    "output_format": "Markdown sections: Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
+  },
+  "mailbox": {
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "review.completed",
+      "verification.completed",
+      "merge.completed",
+      "judge.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
+  },
+  "template": [
+    {
+      "name": "coordinator",
+      "values": {
+        "scope": "{scope}",
+        "lenses": "{lenses}",
+        "claim": "{claim}",
+        "reviewer_model": "{model}",
+        "verifier_model": "{model}",
+        "merger_model": "{model}",
+        "judge_model": "{model}",
+        "thinking": "{thinking}",
+        "tools": "{tools}",
+        "evidence_policy": "{evidence_policy}",
+        "risk_policy": "{risk_policy}",
+        "output_format": "{output_format}"
+      }
+    }
+  ]
+}

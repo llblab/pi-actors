@@ -41,6 +41,32 @@ export interface RecipeDiscoverySource {
   mutableUsage?: boolean;
 }
 
+function assertToolSafeRepeatConfig(
+  config: unknown,
+  argTypes: Record<string, { kind: string }>,
+  defaults: Record<string, unknown>,
+): void {
+  if (typeof config === "string" || config === undefined || config === null) return;
+  if (Array.isArray(config)) {
+    for (const step of config) assertToolSafeRepeatConfig(step, argTypes, defaults);
+    return;
+  }
+  if (typeof config !== "object") return;
+  const node = config as { repeat?: unknown; template?: unknown; recover?: unknown };
+  if (typeof node.repeat === "string") {
+    const trimmed = node.repeat.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      const match = trimmed.match(/^\{?([A-Za-z_][A-Za-z0-9_-]*)\.length\}?$/);
+      if (!match || (argTypes[match[1]]?.kind !== "array" && !Array.isArray(defaults[match[1]])))
+        throw new Error(
+          "Command template repeat must be a positive integer or {array.length} with an array argument/default.",
+        );
+    }
+  }
+  assertToolSafeRepeatConfig(node.template, argTypes, defaults);
+  assertToolSafeRepeatConfig(node.recover, argTypes, defaults);
+}
+
 function listRecipeFiles(root: string): string[] {
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true })
@@ -207,6 +233,13 @@ export function toRegisteredTool(entry: DiscoveredRecipe): RegisteredTool | unde
           defaults: { ...(argTemplate.defaults ?? {}), ...(cfg.defaults ?? {}) },
         }
       : { args: cfg.args, defaults: cfg.defaults ?? {}, template: argTemplate };
+  const explicitArgTypes = Object.fromEntries(
+    (cfg.args ?? []).map((arg) => {
+      const parsed = Schema.parseToolArgToken(String(arg));
+      return [parsed.arg, parsed.type];
+    }),
+  );
+  assertToolSafeRepeatConfig(argTemplateConfig, explicitArgTypes, cfg.defaults ?? {});
   const argTypes = Schema.getTemplateArgTypes(argTemplateConfig);
   return {
     name: entry.id,

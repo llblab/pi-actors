@@ -1,6 +1,6 @@
 /**
  * Legacy registry migration regressions
- * Covers actors-tools.json migration into file-discovered recipes
+ * Covers legacy tool-registry migration into file-discovered recipes
  */
 
 import assert from "node:assert/strict";
@@ -20,7 +20,7 @@ async function readJson(path: string): Promise<Record<string, unknown>> {
 test("Legacy registry migration writes tool recipes and archives source", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-migration-"));
   try {
-    const configPath = join(root, "actors-tools.json");
+    const configPath = join(root, "legacy-tool-registry.json");
     const recipeRoot = join(root, "recipes");
     await writeFile(
       configPath,
@@ -64,7 +64,7 @@ test("Legacy registry migration writes tool recipes and archives source", async 
 test("Legacy registry migration does not overwrite existing recipe files", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-migration-"));
   try {
-    const configPath = join(root, "actors-tools.json");
+    const configPath = join(root, "legacy-tool-registry.json");
     const recipeRoot = join(root, "recipes");
     await writeFile(
       configPath,

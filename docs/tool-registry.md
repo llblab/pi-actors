@@ -6,18 +6,16 @@ This document is the local adaptation of the portable [Command Template Standard
 
 ## Registry Model
 
-The 0.16 registry source is file-discovered recipes, not a live tool-only JSON file:
+The registry source is location-discovered recipes, not a live tool-only JSON file and not a recipe-owned boolean:
 
 - `~/.pi/agent/recipes/*.json` is the highest-priority user recipe root and the operator-managed tool set.
-- Recipes in that root are tools by default.
-- `tool: false` keeps a user recipe file recipe-only.
-- Packaged pi-actors recipes are the lower-priority standard library of declarative actor config components.
-- Packaged or ad hoc recipes opt into tool exposure with `tool: true`.
+- Recipes in that root are tools by location.
+- Packaged pi-actors recipes are the lower-priority standard library of declarative actor config components, not automatically registered tools.
+- Ad hoc recipe files outside the user recipe root are components unless explicitly registered/copied into `~/.pi/agent/recipes`.
 - Recipe identity is the filename basename; `~/.pi/agent/recipes/docs_review.json` has id/tool name `docs_review`.
 
-`~/.pi/agent/actors-tools.json` is legacy compatibility input. On startup, pi-actors migrates it into recipe files when possible, writes a migration report, and archives the source only when migration has no conflicts or invalid generated recipes.
 
-Because the user recipe directory is sticky agent muscle memory, runtime launches update `usage.calls`, `usage.last_called`, and a content `usage.fingerprint` on user-owned recipe files. If authored recipe content changes, the next launch resets `usage.calls` and records `usage.reset_at` before counting the launch, so usage evidence follows the current recipe meaning rather than an older file history. Use that evidence during focused cleanup passes: keep valuable tools, set `tool: false` for useful components that should leave the active tool surface, merge duplicates, or delete/archive low-value files. The extension does not maintain a failure counter and agents should not silently clean tools during unrelated work.
+Because the user recipe directory is sticky agent muscle memory, runtime launches update `usage.calls`, `usage.last_called`, and a content `usage.fingerprint` on user-owned recipe files. If authored recipe content changes, the next launch resets `usage.calls` and records `usage.reset_at` before counting the launch, so usage evidence follows the current recipe meaning rather than an older file history. `inspect target=recipes view=summary verbose=true` includes usage metadata and operator-gated cleanup recommendations for invalid, shadowed, disabled, component-only, unused, or overriding recipes. Recommended actions stay explicit: keep as a tool/component, enable, merge, fix, delete, or archive. The extension does not maintain a failure counter and agents should not silently clean tools during unrelated work.
 
 `register_tool` is the preferred agent-facing mutation API. It creates, updates, and deletes recipe files in `~/.pi/agent/recipes`; agents do not need to edit the files directly for normal registration. Direct file edits are still valid for operators and advanced agents. Runtime behavior is reactive: file creation, deletion, or edits in the user recipe root trigger validation and tool-set refresh, with invalid recipes surfaced as diagnostics rather than silently ignored.
 
@@ -62,18 +60,17 @@ For reusable actor workflows, register a small tool whose `template` points to a
 ```text
 register_tool name=docs_review \
   description="Start an async docs review actor" \
-  template="docs-review" \
+  template="docs_review" \
   args="scope:path,model:string"
 ```
 
-This writes or updates `~/.pi/agent/recipes/docs_review.json` with `tool: true` and a recipe-reference template. If the referenced recipe contains `async: true`, calling the tool starts a detached actor run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
+This writes or updates `~/.pi/agent/recipes/docs_review.json` with a recipe-reference template. Its location in the user recipe root makes it a tool. If the referenced recipe contains `async: true`, calling the tool starts a detached actor run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
 When co-location is clearer than a separate file, `register_tool` writes the recipe fields directly into the user recipe file:
 
 ```json
 {
   "description": "Start an async docs review",
-  "tool": true,
   "async": true,
   "args": ["scope:path", "model:string"],
   "template": "pi -p --model {model} --tools read,bash \"Review {scope}\""
@@ -95,7 +92,6 @@ Tool names come from recipe filenames in `~/.pi/agent/recipes`. Recipe files def
 ```json
 {
   "description": "Transcribe an audio file",
-  "tool": true,
   "template": "~/bin/transcribe {file:path} {lang=ru} {model:string}"
 }
 ```
@@ -103,7 +99,6 @@ Tool names come from recipe filenames in `~/.pi/agent/recipes`. Recipe files def
 ```json
 {
   "description": "Run pi as a non-interactive sub-agent",
-  "tool": true,
   "args": ["prompt:string", "model:string"],
   "template": "pi -p --model {model} --no-tools {prompt}"
 }

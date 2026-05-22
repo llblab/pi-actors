@@ -33,7 +33,7 @@ async function waitForFile(path: string): Promise<void> {
 
 function createRegistryDeps() {
   return {
-    configPath: "/tmp/actors-tools.json",
+    configPath: "/tmp/legacy-tool-registry.json",
     getActiveTools: () => [],
     getExternalToolConflict: () => undefined,
     getTools: () => new Map<string, RegisteredTool>(),
@@ -166,6 +166,7 @@ test(
         "call-branch-message",
         {
           body: { decision: "approve" },
+          from: "branch:parent/builder-a",
           to: "branch:parent/reviewer-a",
           type: "control.approve",
         },
@@ -177,9 +178,42 @@ test(
       assert.match(result.content[0].text, /message=sent/);
       await waitForFile(messageFile);
       const envelope = JSON.parse(await readFile(messageFile, "utf8"));
+      assert.equal(envelope.from, "branch:parent/builder-a");
       assert.equal(envelope.to, "branch:parent/reviewer-a");
       assert.equal(envelope.type, "control.approve");
       assert.deepEqual(envelope.body, { decision: "approve" });
+      const roster = JSON.parse(
+        await readFile(join(stateDir, "rooms", "main", "roster.json"), "utf8"),
+      );
+      assert.equal(roster["branch:parent/reviewer-a"].role, "branch");
+      assert.equal(roster["branch:parent/reviewer-a"].parent, "run:parent");
+      assert.equal(roster["branch:parent/builder-a"].role, "branch");
+      assert.equal(roster["branch:parent/builder-a"].parent, "run:parent");
+      const snapshot = JSON.parse(
+        await readFile(join(stateDir, "communication.json"), "utf8"),
+      );
+      assert.equal(
+        snapshot.rooms[0].members.some(
+          (member: Record<string, unknown>) =>
+            member.address === "branch:parent/reviewer-a",
+        ),
+        true,
+      );
+      assert.equal(
+        snapshot.rooms[0].members.some(
+          (member: Record<string, unknown>) =>
+            member.address === "branch:parent/builder-a",
+        ),
+        true,
+      );
+      const senderSnapshot = JSON.parse(
+        await readFile(join(stateDir, "branches", "builder-a", "communication.json"), "utf8"),
+      );
+      assert.equal(senderSnapshot.self, "branch:parent/builder-a");
+      const recipientSnapshot = JSON.parse(
+        await readFile(join(stateDir, "branches", "reviewer-a", "communication.json"), "utf8"),
+      );
+      assert.equal(recipientSnapshot.self, "branch:parent/reviewer-a");
       await waitForFile(join(stateDir, "result.json"));
     } finally {
       if (stateDir) await rm(stateDir, { recursive: true, force: true });
@@ -187,6 +221,241 @@ test(
     }
   },
 );
+
+test("Actor message and inspect tools support room timelines and rosters", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-room-"));
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: "room-run",
+        template: "true",
+      },
+      process.cwd(),
+    );
+    const run = String(meta.run);
+    stateDir = meta.state_dir;
+    const messageTool = createActorMessageToolDefinition();
+    const inspectTool = createInspectToolDefinition();
+    const joinResult = await messageTool.execute(
+      "call-room-join",
+      {
+        body: { caps: ["review"], claim: "Check risks", role: "reviewer" },
+        from: `branch:${run}/reviewer`,
+        summary: "Reviewer joined",
+        to: `room:${run}`,
+        type: "actor.join",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(joinResult.content[0].text, new RegExp(`to=room:${run}`));
+    assert.match(joinResult.content[0].text, /message=sent/);
+    assert.match(joinResult.content[0].text, /room=main/);
+    assert.match(joinResult.content[0].text, /roster=1/);
+
+    const rosterResult = await inspectTool.execute(
+      "call-room-roster",
+      { target: `room:${run}`, view: "roster" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(
+      rosterResult.content[0].text,
+      new RegExp(`address=branch:${run}/reviewer`),
+    );
+    assert.match(rosterResult.content[0].text, /role=reviewer/);
+    assert.match(rosterResult.content[0].text, /caps=review/);
+    assert.match(rosterResult.content[0].text, /claim=Check_risks/);
+    assert.equal(
+      rosterResult.details.roster[`branch:${run}/reviewer`].role,
+      "reviewer",
+    );
+
+    const contactsResult = await inspectTool.execute(
+      "call-room-contacts",
+      { target: `room:${run}`, view: "contacts" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(
+      contactsResult.content[0].text,
+      new RegExp(`address=branch:${run}/reviewer`),
+    );
+    assert.equal(contactsResult.details.contacts[0].address, `branch:${run}/reviewer`);
+
+    await messageTool.execute(
+      "call-room-message",
+      {
+        body: "hello",
+        from: `branch:${run}/builder`,
+        to: `room:${run}`,
+        type: "chat.message",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    const updatedRoster = await inspectTool.execute(
+      "call-room-updated-roster",
+      { target: `room:${run}`, view: "roster" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.equal(
+      updatedRoster.details.roster[`branch:${run}/builder`].role,
+      "actor",
+    );
+
+    const leaveResult = await messageTool.execute(
+      "call-room-leave",
+      {
+        from: `branch:${run}/builder`,
+        summary: "Builder left",
+        to: `room:${run}`,
+        type: "actor.leave",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(leaveResult.content[0].text, /roster=1/);
+    const finalRoster = await inspectTool.execute(
+      "call-room-final-roster",
+      { target: `room:${run}`, view: "roster" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.equal(finalRoster.details.roster[`branch:${run}/builder`], undefined);
+
+    const statusResult = await inspectTool.execute(
+      "call-room-status",
+      { target: `room:${run}`, view: "status" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(statusResult.content[0].text, /room=main/);
+    assert.match(statusResult.content[0].text, /roster=1/);
+    assert.match(statusResult.content[0].text, /last_message_at=\d{4}-\d{2}-\d{2}T/);
+    assert.match(statusResult.content[0].text, new RegExp(`last_from=branch:${run}/builder`));
+    assert.match(statusResult.content[0].text, /last_type=actor.leave/);
+    assert.match(statusResult.content[0].text, /last_summary=Builder_left/);
+
+    const communication = await inspectTool.execute(
+      "call-room-branch-communication",
+      { target: `run:${run}`, view: "communication" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.equal(communication.details.communication.self, `run:${run}`);
+    assert.equal(communication.details.communication.parent, undefined);
+    assert.equal(communication.details.communication.contacts[0].address, `branch:${run}/reviewer`);
+
+    const previewsResult = await inspectTool.execute(
+      "call-room-previews",
+      { target: `room:${run}`, view: "previews" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(previewsResult.content[0].text, /ts=\d{4}-\d{2}-\d{2}T/);
+    assert.match(previewsResult.content[0].text, /type=chat.message/);
+    assert.equal(previewsResult.details.previews[1].body_preview, "hello");
+
+    const messagesResult = await inspectTool.execute(
+      "call-room-messages",
+      { target: `room:${run}`, view: "messages" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(messagesResult.content[0].text, /ts=\d{4}-\d{2}-\d{2}T/);
+    assert.match(messagesResult.content[0].text, /type=actor.join/);
+    assert.match(messagesResult.content[0].text, /type=chat.message/);
+    assert.match(messagesResult.content[0].text, /body=hello/);
+    assert.match(messagesResult.content[0].text, /type=actor.leave/);
+    assert.equal(messagesResult.details.messages[0].to, `room:${run}`);
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool allows same-run branch room posts across coordinator sessions", async () => {
+  const definition = createActorMessageToolDefinition();
+  const meta = startRun(
+    {
+      run_id: `room-nested-session-${process.pid}-${Date.now()}`,
+      ownerId: "parent-session",
+      template: "true",
+    },
+    process.cwd(),
+  );
+  try {
+    const result = await definition.execute(
+      "call-room-nested-session",
+      {
+        from: `branch:${meta.run}/implementer`,
+        summary: "Claim first backlog task",
+        to: `room:${meta.run}`,
+        type: "task.claim",
+      },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "nested-subagent-session" } },
+    );
+    assert.match(result.content[0].text, /message=sent/);
+    assert.match(result.content[0].text, /type=task\.claim/);
+  } finally {
+    await rm(meta.state_dir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects anonymous or cross-run room messages", async () => {
+  const definition = createActorMessageToolDefinition();
+  const meta = startRun(
+    {
+      run_id: `room-anon-${process.pid}-${Date.now()}`,
+      template: "true",
+    },
+    process.cwd(),
+  );
+  try {
+    await assert.rejects(
+      definition.execute(
+        "call-room-anonymous",
+        { to: `room:${meta.run}`, type: "chat.message" },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /requires from=<actor address>/,
+    );
+    await assert.rejects(
+      definition.execute(
+        "call-room-cross-run",
+        {
+          from: "run:other",
+          to: `room:${meta.run}`,
+          type: "chat.message",
+        },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      new RegExp(`requires from=run:${meta.run}`),
+    );
+  } finally {
+    await rm(meta.state_dir, { recursive: true, force: true });
+  }
+});
 
 test("Inspect tool reads tool actor contracts", async () => {
   const definition = createInspectToolDefinition({
@@ -495,6 +764,19 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
     );
     assert.match(result.content[0].text, /run=spawned/);
     assert.deepEqual(result.details.artifacts, { report: `${stateDir}/report.md` });
+    const roster = JSON.parse(
+      await readFile(join(stateDir, "rooms", "main", "roster.json"), "utf8"),
+    );
+    assert.equal(roster["run:spawned"].role, "run");
+    const snapshot = JSON.parse(
+      await readFile(join(stateDir, "communication.json"), "utf8"),
+    );
+    assert.equal(snapshot.root, "run:spawned");
+    assert.equal(snapshot.self, "run:spawned");
+    assert.match(snapshot.updated_at, /\d{4}-\d{2}-\d{2}T/);
+    assert.equal(snapshot.rooms[0].address, "room:spawned");
+    assert.equal(snapshot.rooms[0].members[0].address, "run:spawned");
+
     await waitForFile(join(stateDir, "result.json"));
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -713,6 +995,16 @@ test("Actor tools start, inspect, and stop run actors", async () => {
     );
     assert.match(verbose.content[0].text, /"argv"/);
     assert.match(verbose.content[0].text, /"template"/);
+
+    const communication = await inspect.execute(
+      "call-communication",
+      { target: `run:${runId}`, view: "communication" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.match(communication.content[0].text, new RegExp(`self=run:${runId}`));
+    assert.equal(communication.details.communication.root, `run:${runId}`);
 
     const cancelled = await message.execute(
       "call-3",

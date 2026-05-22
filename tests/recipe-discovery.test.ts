@@ -159,6 +159,7 @@ test("Recipe discovery summary exposes active shadowed invalid and disabled entr
     await writeRecipe(high, "same-name", {
       description: "High",
       template: "echo high",
+      usage: { calls: 2, last_called: "2026-01-03T03:04:05.000Z" },
     });
     await writeRecipe(low, "same-name", {
       description: "Low",
@@ -171,6 +172,12 @@ test("Recipe discovery summary exposes active shadowed invalid and disabled entr
 
     assert.equal((summary.active as Array<{ id: string }>).length, 3);
     assert.deepEqual(
+      (summary.active as Array<{ id: string; usage?: { calls?: number } }>).find(
+        (entry) => entry.id === "same-name",
+      )?.usage,
+      { calls: 2, last_called: "2026-01-03T03:04:05.000Z" },
+    );
+    assert.deepEqual(
       (summary.shadowed as Array<{ id: string }>).map((entry) => entry.id),
       ["same-name"],
     );
@@ -181,6 +188,10 @@ test("Recipe discovery summary exposes active shadowed invalid and disabled entr
     assert.deepEqual(
       (summary.disabled as Array<{ id: string }>).map((entry) => entry.id),
       ["disabled-one"],
+    );
+    assert.deepEqual(
+      (summary.recommendations as Array<{ id: string }>).map((entry) => entry.id),
+      ["broken", "disabled-one", "same-name", "same-name"],
     );
   } finally {
     await rm(high, { recursive: true, force: true });

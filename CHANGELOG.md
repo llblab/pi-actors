@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+## 0.17.0: Actor Rooms And Inspector
+
+- `[Actor Messages]` Added the 0.17 actor-room communication slice: `room:<run>` task rooms, append-only room timelines, room rosters, join/leave handling, same-run room/direct provenance checks, branch/run communication snapshots, `inspect room:<run> view=status|messages|previews|roster|contacts`, and `inspect run:<id> view=communication`. Impact: run actors and contacted branches can discover peers, post shared task messages, and inspect communication state through the same `spawn` / `message` / `inspect` actor model.
+- `[TUI]` Added the hidden-by-default actor inspector widget with `/actors-inspector-toggle` and `/actors-inspector-verbosity-toggle`, compact and verbose layouts, current-run scoping, chronological sequence numbers, owner filtering, JSONL-tolerant preview reads, mobile-width and wide-glyph-aware truncation, and transparent/dark row striping. Impact: operators can see the current actor conversation at a glance without flooding the prompt or leaking unrelated session previews.
+- `[Registry]` Added usage metadata and operator-gated cleanup recommendations to recipe registry summaries, removed stale public references to the old tool config filename, removed recipe-owned `tool` properties from repository recipes/docs/fixtures, and fixed the 0.17 registry model around location-derived tool exposure: every recipe in `~/.pi/agent/recipes/*.json` is an agent tool, `register_tool` creates recipe files there under the hood, and packaged/ad hoc recipes outside that root are components. Impact: the sticky agent tool surface is explicit executable muscle memory, maintained like capability state rather than configured through per-recipe tool flags.
+- `[Docs]` Updated README, actor-message docs, async-run docs, recipe-library docs, actors skill, backlog, and project context around the room/roster protocol, inspector behavior, release-artifact hygiene, and the persistent-backlog-implementer protocol. The implementer workflow remains future recipe-composition work around reusable cells such as `coordinator-locker`, not bespoke release scripts.
+- `[Package]` Bumped package and packaged skill metadata to `0.17.0`; validated with `npm run validate` and context validation. PR #42 tracks the squashed `actor-rooms-017` branch as one release commit against `main` with green checks.
+
 ## 0.16.4: Recipe Usage Fingerprints
 
 - `[Recipe Usage]` Added content fingerprints to user recipe usage metadata. Impact: when a recipe file is edited and its authored meaning changes, the next launch resets `usage.calls`, records `usage.reset_at`, and starts counting usage for the current recipe content.
@@ -22,20 +32,20 @@
 ## 0.16.1: Recipe Registry Hotfix
 
 - `[Runtime]` Prevented invalid user recipe files from aborting extension startup when tool-schema generation fails, surfacing a warning and skipping the offending tool instead. Impact: one bad recipe in `~/.pi/agent/recipes` no longer takes down the pi-actors extension.
-- `[Recipe Discovery]` Excluded the legacy migration report file from recipe discovery. Impact: `actors-tools-migration-report.json` no longer appears as a broken recipe/tool candidate after migration.
+- `[Recipe Discovery]` Excluded the legacy migration report file from recipe discovery. Impact: legacy migration reports no longer appear as broken recipe/tool candidates after migration.
 - `[Package]` Bumped package and packaged skill metadata to `0.16.1` for the hotfix release.
 
 ## 0.16.0: File-Discovered Recipe Registry Migration
 
-- `[Version]` Began the `0.16.0` breaking-change cycle and captured the file-discovered recipe registry migration plan in `BACKLOG.md`. Impact: the next release target is now explicit: replace `actors-tools.json` as live registry with validated recipe files, filename identity, `tool` exposure, override/disable semantics, migration reporting, registry inspection, and usage-informed cleanup.
+- `[Version]` Began the `0.16.0` breaking-change cycle and captured the file-discovered recipe registry migration plan in `BACKLOG.md`. Impact: the next release target is now explicit: replace the legacy live registry with validated recipe files, filename identity, `tool` exposure, override/disable semantics, migration reporting, registry inspection, and usage-informed cleanup.
 - `[Recipe References]` Started filename-identity support for recipes by deriving the recipe id from the JSON filename when `name` is omitted, while preserving optional `tool`, `disabled`, and `description` metadata through recipe resolution. Impact: new recipe files can move toward filename-as-identity without losing human-readable descriptions or tool exposure flags.
 - `[Recipe Discovery]` Added an initial file-discovered recipe registry domain with flat root scanning, filename ids, priority shadowing, invalid high-priority recipe blocking, disabled overrides, and `tool: true` exposure detection. Impact: the 0.16 registry migration now has a tested discovery core before wiring it into runtime loading.
-- `[Recipe Migration]` Added a legacy registry migration domain that converts `actors-tools.json` entries into user recipe files with `tool: true`, preserves descriptions/args/defaults/templates, refuses to overwrite existing recipe files, writes a migration report, and archives the source only when migration has no conflicts or invalid entries. Impact: the breaking registry transition now has a tested compatibility path from the old live registry.
+- `[Recipe Migration]` Added a legacy registry migration domain that converts old registry entries into user recipe files with `tool: true`, preserves descriptions/args/defaults/templates, refuses to overwrite existing recipe files, writes a migration report, and archives the source only when migration has no conflicts or invalid entries. Impact: the breaking registry transition now has a tested compatibility path from the old live registry.
 - `[Recipe Discovery]` Captured the priority model that treats packaged pi-actors recipes as a standard library below ad hoc user-selected recipe files and below `~/.pi/agent/recipes/*.json`, with priority applying only to matching filename ids. Impact: override behavior now has a documented lens and a regression for standard-library versus user recipe precedence.
 - `[Recipe Discovery]` Added source-level default tool exposure so the high-priority user recipe root can behave as the operator-managed tool set by default, while packaged/ad hoc recipes stay component-like unless they opt in with `tool: true` and any recipe can opt out with `tool: false`. Impact: 0.16 keeps the discoverability advantage of the old tool-only registry without forcing a separate live tool config.
 - `[Runtime]` Wired session-start tool loading to migrate the legacy registry, discover recipe-file tools from `~/.pi/agent/recipes` and packaged recipes, and register only active exposed recipes as runtime tools. Impact: the new recipe-discovered registry path is now active in runtime loading instead of only existing as standalone discovery/migration helpers.
 - `[Registry]` Changed `register_tool` persistence to write/update/delete user recipe files under the recipe root instead of mutating the legacy JSON registry, while still activating the tool in the current session. Impact: newly registered tools now enter the 0.16 recipe-discovered registry directly.
-- `[Docs]` Reworked tool-registry documentation, README examples, recipe docs, actor skill guidance, and prompt copy around recipe-file persistence, the user recipe directory as the default tool set, packaged recipes as standard-library components, and `actors-tools.json` as legacy migration input. Impact: public guidance now matches the 0.16 runtime path instead of the old live JSON registry.
+- `[Docs]` Reworked tool-registry documentation, README examples, recipe docs, actor skill guidance, and prompt copy around recipe-file persistence, the user recipe directory as the default tool set, packaged recipes as standard-library components, and recipe files as the persistent tool surface. Impact: public guidance now matches the 0.16 runtime path instead of the old live JSON registry.
 - `[Skill]` Added actors-skill guidance for same-name recipe priority, recipe-root-as-muscle-memory, usage counters, and an explicit cleanup rule for stale/default tools without automatic deletion or demotion. Impact: agents get the override model, sticky-tool tradeoff, and cleanup heuristic directly in the compact operational reference.
 - `[Recipe Usage]` Added extension-maintained recipe launch metadata updates for user-owned runtime tools and direct async recipe starts, tracking `usage.calls` and `usage.last_called` without failure counters while leaving packaged standard-library recipes immutable, then documented the cleanup interpretation in recipe and tool-registry docs. Impact: the operator-managed recipe/tool set now accrues cleanup evidence for muscle-memory review from actual extension launches rather than manual agent bookkeeping.
 - `[Runtime]` Added a best-effort user recipe-root watcher that debounces file changes and reloads recipe-backed tools during the active session, plus runtime-tool fingerprinting so repeated reloads do not re-register unchanged tools while changed definitions refresh, and stale recipe tools are removed from the active tool set on reload when their recipe disappears. Impact: newly created or edited valid recipe files can be connected without a full restart, without duplicate registration churn for unchanged recipes, while deleted recipe tools are deactivated even though host-level unregistration is still not available.
@@ -179,11 +189,7 @@
 
 ## 0.12.2: Registry Migration Notes
 
-- `[Docs]` Added explicit rename migration instructions for copying `~/.pi/agent/auto-tools.json` or the short-lived `~/.pi/agent/tools.json` to `~/.pi/agent/actors-tools.json`. Impact: operators keep control of config migration while the package avoids silent rewrites of old registry files.
-
 ## 0.12.1: Actor Tool Registry Name
-
-- `[Registry]` Renamed the new pi-actors registry filename from `tools.json` to `actors-tools.json`. Impact: the persisted config name now clearly describes actor-control tools instead of implying every pi tool belongs to this extension.
 
 ## 0.12.0: Rename to pi-actors
 

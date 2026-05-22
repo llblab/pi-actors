@@ -43,14 +43,22 @@ test("Entrypoint delegates register_tool definition to the tools domain", () => 
   assert.equal(indexSource.includes('name: "register_tool"'), false);
 });
 
+const publicGuidanceFiles = [
+  "AGENTS.md",
+  "BACKLOG.md",
+  "README.md",
+  ...listFiles("docs").filter((path) => path.endsWith(".md")),
+  ...listFiles("skills").filter((path) => path.endsWith(".md")),
+];
+
+const operatorGuidanceFiles = [
+  "README.md",
+  ...listFiles("docs").filter((path) => path.endsWith(".md")),
+  ...listFiles("skills").filter((path) => path.endsWith(".md")),
+];
+
 test("Public guidance avoids stale concrete model aliases", () => {
-  const files = [
-    "AGENTS.md",
-    "BACKLOG.md",
-    "README.md",
-    ...listFiles("docs").filter((path) => path.endsWith(".md")),
-    ...listFiles("skills").filter((path) => path.endsWith(".md")),
-  ];
+  const files = publicGuidanceFiles;
   const staleModelAliases = [
     /openai-codex\/gpt-5\.5/i,
     /deepseek\/deepseek-v4/i,
@@ -63,5 +71,23 @@ test("Public guidance avoids stale concrete model aliases", () => {
     for (const pattern of staleModelAliases) {
       assert.doesNotMatch(content, pattern, `${file} should not mention ${pattern}`);
     }
+  }
+});
+
+test("Operator guidance uses snake_case docs review examples", () => {
+  for (const file of operatorGuidanceFiles) {
+    const content = readFileSync(file, "utf8");
+    assert.doesNotMatch(content, /docs-review/, `${file} should use docs_review`);
+  }
+});
+
+test("Operator guidance avoids direct inbox and outbox wording", () => {
+  for (const file of operatorGuidanceFiles) {
+    const content = readFileSync(file, "utf8");
+    assert.doesNotMatch(
+      content,
+      /\binbox\/outbox\b|\bdirect inbox\b|\bdirect outbox\b/i,
+      `${file} should describe actor messages instead of inbox/outbox routing`,
+    );
   }
 });

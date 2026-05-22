@@ -433,7 +433,7 @@ test("Serialized template recipe launchers keep template path", () => {
 
 test("Config save and load round-trip template-backed tools", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-actors-config-"));
-  const path = join(dir, "actors-tools.json");
+  const path = join(dir, "registered-tools.json");
   try {
     const tool: RegisteredTool = {
       name: "transcribe",
@@ -457,7 +457,7 @@ test("Config save and load round-trip template-backed tools", async () => {
 
 test("Config load keeps last duplicate and reports warning", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-actors-config-"));
-  const path = join(dir, "actors-tools.json");
+  const path = join(dir, "registered-tools.json");
   try {
     await writeFile(
       path,

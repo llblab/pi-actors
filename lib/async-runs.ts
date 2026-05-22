@@ -296,6 +296,7 @@ function prepareStateDirForStart(stateDir: string): void {
   }
   for (const file of [
     "events.jsonl",
+    "inbox.jsonl",
     "outbox.jsonl",
     "progress.json",
     "result.json",
@@ -331,6 +332,9 @@ export function startRun(
   const argv = ["--experimental-strip-types", RUNNER_PATH, stateDir];
   const values = {
     ...(startParams.values || {}),
+    actor_address: `run:${run}`,
+    communication_file: join(stateDir, "communication.json"),
+    default_room: `room:${run}`,
     run_id: run,
     state_dir: stateDir,
   };
@@ -481,6 +485,7 @@ export function getRunStatus(runOrDir: string): Record<string, unknown> {
   return {
     ...meta,
     eventsFile: join(stateDir, "events.jsonl"),
+    inboxFile: join(stateDir, "inbox.jsonl"),
     outboxFile: join(stateDir, "outbox.jsonl"),
     progress: readJson(join(stateDir, "progress.json")) || null,
     result: result || null,
@@ -632,11 +637,22 @@ export function sendRunMessage(
     const terminalMessage = ["stop", "cancel", "quit", "exit"].includes(
       trimmedMessage,
     );
+    const ts = new Date().toISOString();
     writeFileSync(
       join(stateDir, "events.jsonl"),
-      `${JSON.stringify({ bytes, event: "run.message", terminal: terminalMessage || undefined, ts: new Date().toISOString() })}\n`,
+      `${JSON.stringify({ bytes, event: "run.message", terminal: terminalMessage || undefined, ts })}\n`,
       { flag: "a" },
     );
+    try {
+      const envelope = JSON.parse(message) as Record<string, unknown>;
+      writeFileSync(
+        join(stateDir, "inbox.jsonl"),
+        `${JSON.stringify({ ...envelope, received_at: ts })}\n`,
+        { flag: "a" },
+      );
+    } catch {
+      // Plain control lines are already represented in events.jsonl.
+    }
     if (terminalMessage) {
       markTerminalHandled(stateDir, {
         event: "run.message",

@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.16.4
+  version: 0.17.0
 ---
 
 # Actors (pi-actors)
@@ -37,7 +37,8 @@ Trusted local capability
 
 - **Command template**: portable execution graph. String leaf, sequence array, or object node with controls.
 - **Recipe**: saved JSON definition wrapping a template with args, defaults, imports, mailbox, artifacts, metadata, and optional `async: true`.
-- **Run actor**: one detached execution instance addressable as `run:<id>` with status, logs, messages, mailbox metadata, files, and artifacts.
+- **Run actor**: one detached execution instance addressable as `run:<id>` with status, logs, messages, mailbox metadata, files, communication snapshot, and artifacts.
+- **Room actor**: shared timeline + roster endpoint addressable as `room:<run>`; every spawned run gets `room:<run>`.
 - **Tool actor**: registered persistent capability addressable as `tool:<name>` and callable through the generated tool or `message`.
 - **Coordinator/session**: the current pi session endpoint that receives bounded actor follow-ups.
 - **Mailbox**: public interaction contract: message types the actor accepts/emits.
@@ -80,7 +81,8 @@ Envelope fields:
 
 - Required: `to`, `type`.
 - Useful: `summary`, `body`, `from`, `reply_to`, `correlation_id`, `metadata`.
-- Addresses: `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, `coordinator`, `session:<id>`.
+- Addresses: `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `tool:<name>`, `coordinator`, `session:<id>`.
+- Room posts require `from` from the same run (`run:<run>` or `branch:<run>/<branch>`).
 - Standard termination messages: `control.stop`, `control.cancel`, `control.kill`.
 
 Check `inspect view=mailbox` before domain-specific messages.
@@ -91,7 +93,12 @@ Check `inspect view=mailbox` before domain-specific messages.
 { "target": "run:repo-health", "view": "status" }
 { "target": "run:repo-health", "view": "tail", "lines": "80" }
 { "target": "run:repo-health", "view": "messages" }
+{ "target": "run:repo-health", "view": "communication" }
 { "target": "run:repo-health", "view": "artifacts" }
+{ "target": "room:repo-health", "view": "status" }
+{ "target": "room:repo-health", "view": "roster" }
+{ "target": "room:repo-health", "view": "contacts" }
+{ "target": "room:repo-health", "view": "previews" }
 { "target": "tool:music_player", "view": "status" }
 { "target": "recipes", "view": "status" }
 { "target": "coordinator", "view": "status" }
@@ -101,13 +108,49 @@ Views:
 
 - `status`: lifecycle, pid, values, progress, result, compact summary.
 - `tail`: recent stdout/stderr/log tail.
-- `messages`: actor messages emitted by the run.
+- `messages`: actor messages emitted by the run, or room timeline entries for `room:*`.
+- `communication`: run/branch communication snapshot with self/root/default-room/member/contact hints.
+- `roster`: room member list with address, role, parent, caps, claim, status, and last seen.
+- `contacts`: roster-derived direct-message targets without full roster metadata.
+- `previews`: TUI-ready bounded room message previews with timestamp/from/to/type/summary/body_preview.
 - `mailbox`: declared accepts/emits contract.
 - `files`: run state directory file list.
 - `artifacts`: declared artifact paths/status.
 - `recipes` target: registry summary for active, shadowed, invalid, disabled, and diagnostic recipe entries.
 
 Let terminal notifications arrive; avoid sleep-poll loops except during diagnosis.
+
+## Stable Multi-Actor Review Rules
+
+- Prefer independent read-only reviewers for review swarms. Use shared room messages for coordination signals and observability, not for letting reviewers converge early, unless the task explicitly asks for collaborative discussion.
+- Treat inspector-visible communication logs as recipe-quality evidence. Verbose room/direct timelines show whether recipes coordinate clearly, emit useful summaries, over-chat, miss handoffs, choose poor message types, or need better mailbox/artifact conventions. Use `inspect room:<run> view=messages|previews`, `inspect run:<id> view=communication`, and the actor inspector compact/verbose modes to improve recipes after real runs.
+- Smoke-test provider/model availability before launching expensive fanout, or choose a provider known to be configured in this environment. A failed provider fanout creates noisy run transitions without useful review signal.
+- Keep one public communication model: `spawn` creates actors, `message` sends typed envelopes, and `inspect` observes. Avoid adding public side channels or storage nouns when a normal actor address/view can express the operation.
+- Keep route and semantic type separate. Direct, room, coordinator, and session messages may share `type`; delivery behavior comes from `to`.
+- Any UI, summary, or aggregate view that scans run directories must apply coordinator/session ownership filters before exposing summaries or body previews.
+- Treat `communication.json` as visible actor context, not a global mutable truth table. Run-level snapshots should identify the run actor; branch-local snapshots should identify the branch actor.
+- Prefer same-run provenance checks on lateral actor routes. If `from` is accepted for room or branch routes, validate that it belongs to the addressed run.
+
+## Persistent Backlog Implementers
+
+When using actors as backlog implementers, avoid one-shot subagents that exit after one task. Use long-lived branch actors and keep task selection with the coordinator:
+
+1. Coordinator assigns a concrete backlog slice with `task.assign`.
+2. Actor posts `task.claim` to `room:<run>` before editing.
+3. Actor executes and validates the slice.
+4. Actor posts `task.result` and `awaiting_assignment`.
+5. Actor stays alive until the coordinator sends another `task.assign` or an explicit `control.stop`.
+
+Use `front`/`back` actors for opposite backlog ends when reducing overlap. Implementer workflows should be packaged as reusable recipe composition, not bespoke scripts: use `coordinator-locker` for queue/assignment/locking, subagent launcher recipes for execution cells, and actor-message utility recipes for structured handoffs. If the existing recipe library cannot express the scenario, add missing reusable component recipes first, then compose the higher-level workflow from them. Supervisors should route coordinator assignments by `body.actor`, preserve the assignment as an object rather than a JSON string, and keep stopped-worker summaries tied to the original actor list.
+
+Current packaged building blocks:
+
+- `coordinator-locker`: long-lived queue/lock coordinator for assignment and resource ownership.
+- `subagent-prompt`, `subagent-tools`, `subagents-prompts`: execution launchers for one or many agent prompts.
+- `utility-actor-message`: deterministic actor-message envelope construction for handoffs/results.
+- `utility-run-ops-snapshot` and `pipeline-async-run-ops`: inspect live runs/messages before deciding the next assignment.
+
+The missing higher-level persistent backlog-implementer workflow is intentionally future work until it can be expressed from reusable recipe cells.
 
 ## Command Template Standard
 
@@ -180,11 +223,11 @@ Priority for same-name recipes:
 
 Only matching filename ids compete. Higher priority shadows lower priority. An invalid or `disabled: true` higher-priority recipe blocks fallback so the agent does not silently run standard-library behavior when a user override is broken or intentionally disabled.
 
-Muscle-memory lens: every recipe in `~/.pi/agent/recipes/*.json` becomes an easy-to-call tool by default. This is intentionally sticky: successful local patterns can quickly become durable agent muscle memory. The tradeoff is tool-surface clutter; accidental or one-off tools behave like persistent intrusive thoughts until an agent/operator focuses on cleanup.
+Muscle-memory lens: `~/.pi/agent/recipes/*.json` is the agent's capability memory. Every recipe in that directory becomes an easy-to-call tool automatically and survives into later sessions. Agents grow this memory either by calling `register_tool`, which writes recipe files there under the hood, or by deliberately editing those recipe files. Treat this directory like `MEMORY.md` for executable habits: useful local patterns belong there; packaged recipes elsewhere are reusable components, not tools.
 
-Usage lens: user recipes may carry extension-maintained launch metadata such as `usage.calls` and `usage.last_called`. The extension increments the counter when it starts that concrete recipe; agents should not hand-edit counters as part of normal recipe maintenance. Treat usage as evidence for usefulness analysis: heavily used recipes are good candidates for promotion, documentation, or stronger tests; unused recipes are cleanup or `tool: false` candidates. Do not use failure counts as a primary usefulness signal because failures may reflect bad caller judgment rather than bad recipes. Do not delete or demote solely from counters without operator approval.
+Usage lens: user recipes may carry extension-maintained launch metadata such as `usage.calls` and `usage.last_called`. The extension increments the counter when it starts that concrete recipe; agents should not hand-edit counters as part of normal recipe maintenance. Treat usage as evidence for usefulness analysis: heavily used recipes are good candidates for promotion, documentation, or stronger tests; unused recipes are cleanup candidates. Do not use failure counts as a primary usefulness signal because failures may reflect bad caller judgment rather than bad recipes. Do not delete or demote solely from counters without operator approval.
 
-Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memory set. For each stale, duplicate, too-specific, or low-value recipe, choose one explicit action: keep as a tool, set `tool: false` to retain recipe-only memory, merge into a better recipe, or delete/archive the file. Prefer demotion over deletion when the recipe may still be useful as a component. Never silently remove tools during unrelated work.
+Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memory set. For each stale, duplicate, too-specific, or low-value recipe, choose one explicit action: keep as a tool, move it out of the agent recipe root to retain recipe-only memory, merge into a better recipe, or delete/archive the file. Prefer moving over deletion when the recipe may still be useful as a component. Never silently remove tools during unrelated work.
 
 ## Registered Tools
 
@@ -198,7 +241,7 @@ Tool templates may be:
 - A file-backed recipe name/path.
 - A complete recipe body, optionally `async: true`.
 
-The user recipe root is the default tool set; packaged recipes are the lower-priority standard library and opt into tool exposure with `tool: true`. Ideal runtime behavior is reactive: create/edit/delete recipe files, validate them, then connect valid tools or surface diagnostics without requiring agents to hand-maintain a separate registry.
+The user recipe root is the default tool set by location; packaged recipes are lower-priority standard-library components and are not tools unless copied or registered into the agent recipe root. Ideal runtime behavior is reactive: create/edit/delete recipe files, validate them, then connect valid tools or surface diagnostics without requiring agents to hand-maintain a separate registry.
 
 ## Recipe Navigator
 

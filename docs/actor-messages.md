@@ -32,7 +32,19 @@ session:<id>
 tool:<name>
 ```
 
-Future forms may include `chat:<id>` or package-specific endpoints, but the envelope stays the same.
+Cross-branch communication adds one organic endpoint kind:
+
+```text
+room:<run>
+```
+
+A room is the task's single shared discussion channel: an addressable mailbox with an append-only message log and a compact member roster stored under the owning run state. It is not a broker or coordinator: it accepts normal actor-message envelopes, records shared timeline entries, tracks join/leave presence, and lets actors discover peers for direct messages. `room:<run>` is the public address; named subrooms are intentionally not exposed in 0.17.
+
+An alternate implementation shape is a dedicated non-LLM communication actor: a small script-backed service recipe, possibly singleton-scoped, that owns room timelines, rosters, subscriptions, and fanout. This is attractive when communication needs outgrow simple file-backed room state, but it should remain an implementation adapter behind the same `room:<run>` address and message envelope. The public model should not fork into a separate chat API.
+
+That actor-backed shape can also reduce direct file storage. Instead of every protocol feature owning JSON files as primary state, a helper actor can keep live room/roster structures in memory or another local structure and write files only as snapshots, audit logs, artifacts, or recovery checkpoints. The decision boundary is practical: keep files when durability and inspectability are the main value; prefer actor-owned structures when live coordination, subscriptions, fanout, unread state, or mutation consistency becomes the main value.
+
+Package-specific endpoints may still exist, but the envelope stays the same.
 
 ## Message Envelope
 
@@ -73,6 +85,8 @@ run -> coordinator
 run -> run
 parent -> branch
 branch -> parent
+branch -> room
+room -> branch notification
 coordinator -> tool
 ```
 
@@ -81,9 +95,55 @@ Transports differ, but the public contract does not:
 - `to: run:<id>` routes through the run-local control channel selected by that recipe or runtime adapter.
 - `to: coordinator` routes to the runtime attention path when `from` names a run actor. `to: session:<id>` uses the same actor-message path only when the sender run is owned by that session, making explicit session-directed checkpoints possible without exposing runtime delivery knobs. Generic async-runner `command.done` messages and explicit coordinator/session-bound messages include the actor envelope fields alongside runtime metadata.
 - `to: branch:<run>/<branch>` routes through the parent run mailbox with the full envelope preserved so the run can dispatch branch-local control.
+- `to: room:<run>` appends the full envelope to the room timeline and updates room state for room-control types such as `actor.join` and `actor.leave`.
 - `to: tool:<name>` invokes an executable pi tool by name. Object bodies become tool parameters; primitive bodies are passed as `{ "input": body }`.
 
 Transport is not public API unless a recipe explicitly documents a custom endpoint.
+
+## Rooms and Rosters
+
+The task room is the discovery and shared-context layer for actors whose spawn-tree positions do not give them each other's addresses. The spawn tree remains the lifecycle/provenance structure; the task room describes the group communication graph. Direct messages and room messages can share the same semantic `type` such as `chat.message`; the route (`to: branch:*` versus `to: room:*`) determines whether delivery is private or group-wide.
+
+A minimal join message:
+
+```json
+{
+  "to": "room:review",
+  "from": "branch:review/security",
+  "type": "actor.join",
+  "summary": "Security reviewer joined",
+  "body": {
+    "role": "reviewer",
+    "caps": ["security-review", "risk-analysis"],
+    "claim": "Review auth boundary risks"
+  }
+}
+```
+
+A leave message removes that actor from the roster while preserving the timeline entry:
+
+```json
+{
+  "to": "room:review",
+  "from": "branch:review/security",
+  "type": "actor.leave"
+}
+```
+
+Room messages require `from` so roster presence and provenance stay explicit. The sender must belong to the room's run (`run:<run>` or `branch:<run>/<branch>`), which prevents accidental cross-run roster pollution. Other room posts also refresh sender presence, defaulting the role hint to `actor` when no richer role is known.
+
+Roster entries should keep identity axes separate:
+
+- `address`: Stable route for direct messages.
+- `parent`: Spawn-tree parent for provenance and ownership checks.
+- `role`: Current task function; dynamic and prompt-dependent.
+- `caps`: Capabilities the actor can offer.
+- `claim`: Current work claim or focus.
+- `status` / `last_seen`: Presence and staleness hints.
+
+Compact roster inspection includes these hints when present so agents can discover direct-message targets without verbose JSON.
+
+Actors should receive a compact visible communication snapshot rather than a full global tree: self, parent/root, joined rooms, relevant sibling/member addresses, and role/capability hints. Current run actors get `communication.json` in their state dir, and async templates receive `{communication_file}`, `{actor_address}`, and `{default_room}` values. The snapshot includes `self`, `root`, optional `parent`, the default room, current default-room members, direct-message `contacts` derived from the room roster, and `updated_at`. Branch-local snapshots are refreshed when a branch joins or posts in the default room, so actors can discover peers without reading full timelines. Full timelines and rosters remain intentional inspection surfaces. For TUI and compact operator display, `view=previews` returns bounded message preview records with `timestamp`, `from`, `to`, `type`, optional `summary`, and optional `body_preview`.
 
 ## Mailbox Declaration
 
@@ -131,7 +191,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-The implementation supports `status`, `tail`, `messages`, `artifacts`, `files`, and `mailbox` for `run:<id>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. Use `messages` for actor-envelope inspection. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
+The implementation supports `status`, `tail`, `messages`, `artifacts`, `files`, `mailbox`, and `communication` for `run:<id>` actors, `status`, `messages`, `previews`, `roster`, and `contacts` for `room:<run>` actors, `status`/`runs` for `coordinator`, `session:<id>`, and `session:all` actors with optional status filtering, and `status`/`schema` for registered `tool:<name>` actors. Room `status` returns compact message/roster counts plus `last_message_at`, `last_message_from`, `last_message_type`, and `last_message_summary` when available. Use `messages` for actor-envelope inspection. `inspect target=coordinator` requires a current coordinator session; use `session:<id>` or `session:all` when the session is intentionally explicit. Direct `run:<id>` and `room:<run>` inspection respects coordinator-session ownership when the current session is known. `inspect` is for decision points and diagnosis only; examples must not teach sleep-then-inspect polling.
 
 ## Runtime Direction
 
@@ -152,4 +212,5 @@ intentional observe  -> inspect
 - No public transport-path vocabulary in recipe args.
 - No polling-first examples.
 - No separate upward and downward message schemas.
+- No heavyweight chat/broker subsystem when an addressable room mailbox is enough.
 - No broad facade that hides artifacts, logs, or ownership checks.

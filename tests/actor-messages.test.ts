@@ -18,9 +18,18 @@ test("Actor addresses parse and format supported endpoint kinds", () => {
     kind: "branch",
     value: "review",
   });
+  assert.deepEqual(parseActorAddress("room:review"), {
+    kind: "room",
+    room: "main",
+    value: "review",
+  });
   assert.equal(
     formatActorAddress({ branch: "2", kind: "branch", value: "review" }),
     "branch:review/2",
+  );
+  assert.equal(
+    formatActorAddress({ kind: "room", room: "main", value: "review" }),
+    "room:review",
   );
 });
 
@@ -28,6 +37,10 @@ test("Actor addresses reject transport-shaped or ambiguous values", () => {
   assert.throws(() => parseActorAddress("review"), /must include kind/);
   assert.throws(() => parseActorAddress("run:"), /run address is required/);
   assert.throws(() => parseActorAddress("branch:review"), /branch id is required/);
+  assert.throws(
+    () => parseActorAddress("room:review/side"),
+    /Task rooms do not support named subrooms/,
+  );
   assert.throws(() => parseActorAddress("file:/tmp/outbox.jsonl"), /Unsupported actor address kind/);
 });
 
@@ -71,5 +84,9 @@ test("Actor messages leave delivery to routing policy", () => {
   assert.deepEqual(
     normalizeActorMessage({ to: "run:review", type: "control.approve" }),
     { to: "run:review", type: "control.approve" },
+  );
+  assert.deepEqual(
+    normalizeActorMessage({ to: "room:review", type: "actor.join" }),
+    { to: "room:review", type: "actor.join" },
   );
 });

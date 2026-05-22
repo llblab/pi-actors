@@ -59,9 +59,9 @@ register_tool name=subagent_prompt \
 Start it:
 
 ```text
-subagent_prompt prompt="Review docs/async-runs.md for unclear wording." run_id=docs-review
-inspect target=run:docs-review view=status
-inspect target=run:docs-review view=tail
+subagent_prompt prompt="Review docs/async-runs.md for unclear wording." run_id=docs_review
+inspect target=run:docs_review view=status
+inspect target=run:docs_review view=tail
 ```
 
 ## Composed Pipelines

@@ -74,7 +74,7 @@ function listRecipeFiles(root: string): string[] {
       (entry) =>
         entry.isFile() &&
         entry.name.endsWith(".json") &&
-        entry.name !== "actors-tools-migration-report.json",
+        entry.name !== "legacy-tool-registry-migration-report.json",
     )
     .map((entry) => join(root, entry.name))
     .sort();
@@ -192,7 +192,87 @@ export function discoverRecipes(roots: string[]): RecipeDiscoveryResult {
   return discoverRecipeSources(roots.map((root) => ({ root })));
 }
 
+function recipeUsage(config: TemplateRecipeConfig | undefined): Record<string, unknown> | undefined {
+  const usage = (config as { usage?: unknown } | undefined)?.usage;
+  return usage && typeof usage === "object" && !Array.isArray(usage)
+    ? (usage as Record<string, unknown>)
+    : undefined;
+}
+
+function cleanupRecommendation(entry: DiscoveredRecipe): Record<string, unknown> | undefined {
+  if (entry.invalid) {
+    return {
+      id: entry.id,
+      path: entry.path,
+      reason: "invalid recipe blocks lower-priority entries with the same id",
+      actions: ["fix", "delete", "archive"],
+    };
+  }
+  if (entry.shadowed) {
+    return {
+      id: entry.id,
+      path: entry.path,
+      reason: "shadowed by a higher-priority recipe",
+      actions: ["merge", "delete", "archive"],
+    };
+  }
+  if (entry.disabled) {
+    return {
+      id: entry.id,
+      path: entry.path,
+      reason: "disabled recipe is retained but not exposed as a tool",
+      actions: ["keep disabled", "delete", "archive"],
+    };
+  }
+  const usage = recipeUsage(entry.config);
+  const calls = Number(usage?.calls ?? 0);
+  if (entry.mutableUsage && entry.tool && calls === 0) {
+    return {
+      id: entry.id,
+      path: entry.path,
+      reason: "active user tool has no recorded launches",
+      actions: ["keep as tool", "set tool false", "delete", "archive"],
+    };
+  }
+  if (entry.mutableUsage && !entry.tool) {
+    return {
+      id: entry.id,
+      path: entry.path,
+      reason: "user recipe is a component, not an active tool",
+      actions: ["keep component", "enable tool", "merge", "delete", "archive"],
+    };
+  }
+  if (entry.shadows.length > 0) {
+    return {
+      id: entry.id,
+      path: entry.path,
+      reason: `overrides ${entry.shadows.length} lower-priority recipe(s)`,
+      actions: ["keep override", "merge", "delete", "archive"],
+    };
+  }
+  return undefined;
+}
+
+function recommendationForEntry(
+  entry: DiscoveredRecipe,
+  activePath: string | undefined,
+): Record<string, unknown> | undefined {
+  const recommendation = cleanupRecommendation(entry);
+  if (!recommendation) return undefined;
+  if (entry.shadowed && activePath) {
+    return {
+      ...recommendation,
+      reason: `shadowed by ${activePath}`,
+    };
+  }
+  return recommendation;
+}
+
 export function summarizeDiscovery(result: RecipeDiscoveryResult): Record<string, unknown> {
+  const recommendations = result.entries
+    .map((entry) => recommendationForEntry(entry, result.active.get(entry.id)?.path))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)) || String(a.path).localeCompare(String(b.path)));
   return {
     active: [...result.active.values()].map((entry) => ({
       id: entry.id,
@@ -202,6 +282,7 @@ export function summarizeDiscovery(result: RecipeDiscoveryResult): Record<string
       disabled: entry.disabled,
       invalid: entry.invalid,
       shadows: entry.shadows,
+      ...(recipeUsage(entry.config) ? { usage: recipeUsage(entry.config) } : {}),
     })).sort((a, b) => a.id.localeCompare(b.id)),
     shadowed: result.entries
       .filter((entry) => entry.shadowed)
@@ -215,6 +296,7 @@ export function summarizeDiscovery(result: RecipeDiscoveryResult): Record<string
       .filter((entry) => entry.disabled)
       .map((entry) => ({ id: entry.id, path: entry.path }))
       .sort((a, b) => a.id.localeCompare(b.id)),
+    recommendations,
     diagnostics: result.diagnostics,
   };
 }

@@ -7,6 +7,7 @@
 export type ActorAddressKind =
   | "branch"
   | "coordinator"
+  | "room"
   | "run"
   | "session"
   | "tool";
@@ -15,6 +16,7 @@ export interface ActorAddress {
   kind: ActorAddressKind;
   value?: string;
   branch?: string;
+  room?: string;
 }
 
 export interface ActorMessage {
@@ -59,6 +61,19 @@ export function parseActorAddress(address: string): ActorAddress {
         branch: assertToken(branch || "", "branch id"),
       };
     }
+    case "room": {
+      const [run, room, ...extra] = rest.split("/");
+      if (extra.length > 0)
+        throw new Error(`Room address has too many parts: ${address}`);
+      if (room && room !== "main") {
+        throw new Error("Task rooms do not support named subrooms; use room:<run>.");
+      }
+      return {
+        kind,
+        value: assertToken(run || "", "room run"),
+        room: "main",
+      };
+    }
     case "run":
     case "session":
     case "tool":
@@ -72,6 +87,9 @@ export function formatActorAddress(address: ActorAddress): string {
   if (address.kind === "coordinator") return "coordinator";
   if (address.kind === "branch") {
     return `branch:${assertToken(address.value || "", "branch run")}/${assertToken(address.branch || "", "branch id")}`;
+  }
+  if (address.kind === "room") {
+    return `room:${assertToken(address.value || "", "room run")}`;
   }
   return `${address.kind}:${assertToken(address.value || "", `${address.kind} address`)}`;
 }

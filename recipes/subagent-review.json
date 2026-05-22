@@ -18,13 +18,21 @@
     "evidence_policy": "Cite inspected files, command output, or explicit uncertainty for every material claim.",
     "risk_policy": "Preserve minority high-impact risks and separate confirmed issues from hypotheses.",
     "output_format": "Markdown sections: Findings, Evidence, Risks, Next Actions.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["review.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "review.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Review {scope} through this lens: {lens}. Instructions: {instructions}. Evidence policy: {evidence_policy}. Risk policy: {risk_policy}. Output format: {output_format}"
 }

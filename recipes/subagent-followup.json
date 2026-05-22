@@ -15,13 +15,20 @@
     "mode": "degraded-new-branch",
     "continuity_policy": "If mode is degraded-new-branch, explicitly state what context continuity was lost and what was reconstructed from the checkpoint.",
     "output_format": "Markdown sections: Continuation Mode, Applied Reply, Lost Context, Continued Work, Next Actions.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.reply", "control.revise", "control.stop"],
-    "emits": ["checkpoint.continued"]
+    "accepts": [
+      "control.reply",
+      "control.revise",
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "checkpoint.continued"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Continue from checkpoint using mode {mode}. Checkpoint: {checkpoint}. Coordinator reply: {reply}. Continuity policy: {continuity_policy}. Output format: {output_format}"
 }

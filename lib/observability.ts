@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, relative, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
@@ -114,7 +114,9 @@ function observeRun(stateDir: string): RunObservation | undefined {
       ...(typeof status.ownerId === "string"
         ? { ownerId: status.ownerId }
         : {}),
-      ...(status.artifacts && typeof status.artifacts === "object" && !Array.isArray(status.artifacts)
+      ...(status.artifacts &&
+      typeof status.artifacts === "object" &&
+      !Array.isArray(status.artifacts)
         ? { artifacts: status.artifacts as Record<string, string> }
         : {}),
       ...(status.terminal_handled ? { terminalHandled: true } : {}),
@@ -359,7 +361,11 @@ function parseOutboxLine(
       event,
       id,
       level: normalizeOutboxLevel(raw.level),
-      ...(raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { metadata: raw.metadata as Record<string, unknown> } : {}),
+      ...(raw.metadata &&
+      typeof raw.metadata === "object" &&
+      !Array.isArray(raw.metadata)
+        ? { metadata: raw.metadata as Record<string, unknown> }
+        : {}),
       run: run.run,
       stateDir: run.stateDir,
       summary,
@@ -413,7 +419,8 @@ export function shouldSendRunOutboxFollowUp(event: RunOutboxEvent): boolean {
 
 function commonDirectory(paths: string[]): string | undefined {
   if (paths.length === 0) return undefined;
-  const split = (path: string): string[] => dirname(path).split("/").filter(Boolean);
+  const split = (path: string): string[] =>
+    dirname(path).split("/").filter(Boolean);
   const first = split(paths[0]);
   let length = first.length;
   for (const path of paths.slice(1)) {
@@ -440,7 +447,9 @@ function formatPathGroup(label: string, paths: string[]): string {
   const unique = [...new Set(paths.filter(Boolean))].slice(0, 8);
   if (unique.length === 0) return "";
   const base = commonDirectory(unique);
-  const names = unique.map((path) => `\`${relativeName(base, path)}\``).join(", ");
+  const names = unique
+    .map((path) => `\`${relativeName(base, path)}\``)
+    .join(", ");
   return `\n${label}:\n- Base: ${base ? `\`${base}\`` : "current run"}\n- Files: ${names}`;
 }
 
@@ -464,7 +473,9 @@ function formatNamedArtifacts(artifacts: unknown): string {
 }
 
 function getOutboxField(event: RunOutboxEvent, key: string): unknown {
-  return event.data && typeof event.data === "object" && !Array.isArray(event.data)
+  return event.data &&
+    typeof event.data === "object" &&
+    !Array.isArray(event.data)
     ? (event.data as Record<string, unknown>)[key]
     : undefined;
 }
@@ -478,7 +489,8 @@ function formatBodyPreview(body: unknown): string {
 }
 
 export function formatRunOutboxMessage(event: RunOutboxEvent): string {
-  if (event.event === "command.done") return `Run ${event.run}: ${event.summary}`;
+  if (event.event === "command.done")
+    return `Run ${event.run}: ${event.summary}`;
   return `Run ${event.run}: ${event.summary}${formatBodyPreview(event.body)}${formatNamedArtifacts(getOutboxField(event, "artifacts"))}${formatRunFileList(getOutboxField(event, "run_files"))}`;
 }
 
@@ -491,9 +503,7 @@ export function getRunTransitionNotificationType(
   return "error";
 }
 
-export function shouldNotifyRunTransition(
-  transition: RunTransition,
-): boolean {
+export function shouldNotifyRunTransition(transition: RunTransition): boolean {
   if (transition.terminalHandled) return false;
   return (
     transition.to === "done" ||

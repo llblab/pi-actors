@@ -2,38 +2,24 @@
 
 ## Open Work
 
-Continue progressive component/pipeline expansion in small validated slices; real smoke runs remain gated. Prefer task-first design for new high-level recipe families: start from operator/coordinator work patterns, then derive missing component cells.
+No open release-blocking work remains for `0.15.0`.
 
-- Plan organic universal communication primitives.
-  - Priority: High.
-  - Status: The actor-like model is empirically useful: async runs can emit follow-up messages upward, coordinators can send run-local commands downward, multiple parallel runs can progress independently, and recipes no longer need sleep-poll coordination. The design is captured in `docs/actor-messages.md`: `spawn`, `message`, and `inspect` as concentrated verbs; addressed actors; one symmetric message envelope; mailbox `accepts`/`emits`; and adapter mappings from runtime async actions. Initial implementation landed pure actor address/message normalization plus public `spawn`, `message`, and `inspect` tools for `run:<id>` actors; `spawn` accepts state/artifact metadata, `message` routes `run:<id>` → `coordinator` and `run:<id>` → `session:<id>` envelopes into the runtime attention path, `message` can invoke `tool:<name>` actors, `inspect target=tool:<name>` exposes registered tool actor contracts, `inspect target=coordinator` exposes current-session run inventory, all packaged async recipes declare mailbox metadata, `inspect view=mailbox` exposes recipe mailbox contracts from run metadata, recipe-authored messages now use envelope-aligned `type` fields with deterministic validated wrapping available through `utility-actor-message`, run termination now uses actor-native `control.stop`/`control.cancel`/`control.kill` without runtime-prefixed control aliases, async command events preserve full argv details while keeping coordinator summaries bounded, async-run operations recommendations now emit structured `message`/`inspect` objects instead of shell-like suggestion strings, `inspect view=messages` exposes run actor messages and `inspect view=events` has been removed as a compatibility alias, async-run operations recipes now expose `message_file`/`messages` terminology instead of public event-file args, and operator-facing docs now describe coordination with actor-message terminology before transport details, async-run docs separate public actor behavior from storage/transport mechanics more clearly, public actor-message/template guidance avoids transport-specific wording, and async-run operations recipes now use only `message_file` for actor-message inputs, interactive and high-level pipeline recipe mailboxes now advertise the full actor-native termination controls where the runtime already supports them, task-first/library docs now describe operations snapshots in terms of actor-message tails instead of event tails, and `inspect view=events` has been removed from the public inspect surface in favor of `inspect view=messages`. Remaining work is to absorb remaining runtime async action surfaces into the actor vocabulary instead of preserving a parallel public API.
-  - Scope: Design and implement a small semantic layer around addressed messages and actors while preserving low-level primitives as adapters where useful. Candidate top-level concepts are `spawn` for creating an actor/run from a recipe or template, `message` for sending typed messages to any address, and `inspect` for intentional observation/debugging. Candidate addresses include `run:<id>`, `branch:<run>/<branch>`, `coordinator`, `session:<id>`, `tool:<name>`, and future chat/session endpoints. Candidate message fields include `to`, `from`, `type`, `summary`, `body`, `reply_to`, `correlation_id`, and `metadata`.
-  - Contract direction: Unify “send down” and “messages up” as one message model. `to: run:<id>` routes to a run mailbox, `to: coordinator` routes to the coordinator attention path, and branch/tool/session addresses can be layered over the same semantic envelope. Recipes should declare mailbox capability (`accepts`, `emits`) without exposing FIFO/outbox mechanics or delivery policy as their public interface.
-  - Design gates: Breaking changes are allowed in this phase, so compress concepts instead of preserving accidental surfaces. Consolidate duplicated lifecycle/message/event APIs into a concentrated protocol with the fewest durable nouns and verbs that still explain the system. Duplex communication should be symmetric where the domain is symmetric: the same message envelope should represent run→coordinator, coordinator→run, run→run, branch→parent, and parent→branch traffic, with routing/transport hidden below it. Keep command templates as the portable synchronous execution graph; keep recipe files as semantic definitions; avoid leaking transports into public args; make polling an explicit diagnostic operation, not an example path; replace runtime action names with the actor API rather than preserving parallel concepts.
-  - Exit: The project exposes documented high-level universal communication primitives for starting work, sending messages, and inspecting state; packaged recipes/examples use the organic interface; async send/outbox behavior is intentionally migrated into actor-message coverage; all recipes validate and docs describe the actor/message model clearly.
+The former active tracks are now release-ready:
 
-- Progressively increase component parameterization and higher-level recipe composition.
-  - Priority: High.
-  - Status: `subagent-tools` and `subagents-prompts` now align with the common subagent policy knobs for thinking, tools, model, and output format.
-  - Scope: Iteratively strengthen atom/component recipes with public policy knobs such as model pools, stage-specific models, thinking, tool policy, output format, evidence policy, risk policy, source policy, artifact paths, mailbox contract, handoff format, resume/continuity policy, and validation gates; add higher-level component recipes that compose existing atoms into reusable coordinator patterns.
-  - Exit: Each iteration adds or refines at least one atom-level parameterization surface and at least one composed recipe/pipeline, with packaged recipe import validation passing and docs/changelog updated.
+- Universal actor communication: public guidance centers `spawn`, `message`, `inspect`, actor messages, mailbox contracts, and artifacts; low-level lifecycle/storage wording is confined to implementation/diagnostic docs.
+- Component parameterization and composition: packaged recipes are policy-light, require caller-provided model/model-pool policy, expose reusable knobs, validate imports/mailboxes, and are covered by the actors Recipe Navigator.
+- Structured utility transforms: current utility surface is sufficient for shipped pipelines; add future utilities only when a repeated packaged-pipeline need appears.
 
-- Add another task-first high-level pipeline candidate from the design map.
-  - Priority: Medium.
-  - Status: `pipeline-release-readiness`, `pipeline-repo-health`, `pipeline-async-run-ops`, `pipeline-docs-maintenance`, `pipeline-media-library`, and `pipeline-artifact-bundle` landed. `pipeline-release-readiness` now includes package-summary evidence before validation/review. `pipeline-media-library` required playlist output-mode parameterization, then reused playlist and artifact-report cells. `pipeline-artifact-bundle` reused artifact-write, artifact-manifest, validation, manifest-write, and actor-message cells.
-  - Scope: Reassess `docs/task-first-recipes.md` for the next high-value task cell, then implement only the minimum missing cells needed for that task.
-  - Exit: Another task-first pipeline lands with docs, package validation, and a note about which missing atoms/utilities it required.
+## Future Work
 
-- Grow the standard recipe library with safer structured utility transforms.
-  - Priority: Low.
-  - Status: `utility-artifact-manifest` landed for machine-readable artifact metadata; `utility-artifact-write` landed for deterministic writes of accepted prepared artifacts; `utility-package-summary` landed for bounded package metadata used by release/repo-health flows; `utility-validate-recipe` landed with a dedicated recipe validator script; `utility-run-ops-snapshot` landed for async-run summaries, actor-message tails, and operator-gated cleanup recommendations.
-  - Scope: Continue beyond listing/extraction utilities toward structured transforms for artifact packaging, report normalization, release prep, and machine-readable summaries. Keep helpers generic, parameterized, and justified by repeated recipe needs.
-  - Exit: A future utility slice adds another structured transform only when a repeated recipe need appears; otherwise treat the current helper-backed utility surface as sufficient.
+- Add new utilities or pipelines only when a concrete repeated task pattern justifies them.
+- Continue opportunistic actor-vocabulary cleanup when touching implementation docs or diagnostics.
 
 ## Blocked Work
 
-- Validate branch-local checkpoint semantics with collaborative-runner experiments.
-  - Priority: Low.
-  - Blocked by: At least one real collaborative branch-runner async-run experiment.
-  - Scope: Use real collaborative branch-runner async runs to validate whether `failure: "branch"`, node-level `retry`, and `recover` cleanup are sufficient for branch-local validation and bounded reattempts.
-  - Exit: Decision recorded as sufficient, documentation-only refinement needed, or propose a further minimal command-template extension with tests.
+### Branch-Local Checkpoint Semantics
+
+- Priority: Low.
+- Blocked by: At least one real collaborative branch-runner async-run experiment.
+- Scope: Validate whether `failure: "branch"`, node-level `retry`, and `recover` cleanup are enough for branch-local validation and bounded reattempts.
+- Exit: Record one decision: sufficient, documentation-only refinement needed, or propose one minimal command-template extension with tests.

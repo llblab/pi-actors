@@ -33,7 +33,7 @@ register_tool name=transcribe_groq \
 ```text
 register_tool name=call_subagent \
   description="Run pi as a non-interactive sub-agent" \
-  template="pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
+  template="pi -p --model {model} --no-tools {prompt}" args="prompt:string,model:string"
 ```
 
 Use `update=true` to overwrite an existing tool. Omit `template` and co-located recipe fields during update to keep the previous execution binding.
@@ -53,7 +53,7 @@ For reusable actor workflows, register a small tool whose `template` points to a
 register_tool name=docs_review \
   description="Start an async docs review actor" \
   template="docs-review.json" \
-  args="scope:path,model:string=openai-codex/gpt-5.5"
+  args="scope:path,model:string"
 ```
 
 This stores the recipe path in the registry as `template`. If `~/.pi/agent/recipes/docs-review.json` contains `async: true`, calling the tool starts a detached actor run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
@@ -66,7 +66,8 @@ When co-location is clearer than a separate file, the registry entry may include
     "description": "Start an async docs review",
     "name": "review-docs",
     "async": true,
-    "template": "pi -p --model openai-codex/gpt-5.5 --tools read,bash \"Review {scope}\""
+    "args": ["scope:path", "model:string"],
+    "template": "pi -p --model {model} --tools read,bash \"Review {scope}\""
   }
 }
 ```
@@ -91,11 +92,12 @@ Tool names come from the top-level registry keys. Tool entries define `template`
   },
   "call_subagent": {
     "description": "Run pi as a non-interactive sub-agent",
-    "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
+    "args": ["prompt:string", "model:string"],
+    "template": "pi -p --model {model} --no-tools {prompt}"
   },
   "docs_review": {
     "description": "Start an async docs review actor",
-    "args": ["scope:path", "model:string=openai-codex/gpt-5.5"],
+    "args": ["scope:path", "model:string"],
     "template": "docs-review.json"
   }
 }

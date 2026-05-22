@@ -185,11 +185,12 @@ test("Packaged library recipes parse and resolve imports", async () => {
   }
 });
 
-test("Packaged async-run operations recipes expose message file args", () => {
+test("Packaged async-run operations recipes expose actor run args", () => {
   const recipeDir = join(__dirname, "..", "recipes");
   for (const file of ["utility-run-ops-snapshot.json", "pipeline-async-run-ops.json"]) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
-    assert.ok(config?.args?.includes("message_file:path"), `${file} should expose message_file:path`);
+    assert.ok(config?.args?.includes("run_id:string"), `${file} should expose run_id:string`);
+    assert.ok(!config?.args?.some((arg) => arg.startsWith("message_file")), `${file} should not expose message_file`);
     assert.ok(!config?.args?.some((arg) => arg.startsWith("event_file")), `${file} should not expose event_file`);
   }
 });
@@ -218,19 +219,39 @@ test("Packaged async recipes declare mailbox metadata", async () => {
   assert.deepEqual(missing, []);
 });
 
-test("Packaged interactive async recipes expose actor-native termination controls", async () => {
+test("Packaged recipes do not ship concrete model-version defaults", async () => {
   const recipeDir = join(__dirname, "..", "recipes");
-  const explicitFiles = [
-    "music-player.json",
-    "subagent-artifact.json",
-    "subagent-message.json",
-    "subagents-prompts.json",
-  ];
-  const pipelineFiles = (await readdir(recipeDir)).filter(
-    (file) => file.startsWith("pipeline-") && file.endsWith(".json"),
+  const files = (await readdir(recipeDir)).filter((file) =>
+    file.endsWith(".json"),
   );
+  const modelLikeKey = /(^|_)models?$/;
+  const concreteModelValue = /\b(openai|gpt|claude|deepseek|gemini|mistral|codex)\b/i;
 
-  for (const file of [...explicitFiles, ...pipelineFiles]) {
+  for (const file of files) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    const defaults = config?.defaults ?? {};
+    for (const [key, value] of Object.entries(defaults)) {
+      assert.ok(
+        !modelLikeKey.test(key),
+        `${file} should expose ${key} as a required caller-provided arg, not a packaged default`,
+      );
+      assert.ok(
+        !concreteModelValue.test(JSON.stringify(value)),
+        `${file} should not ship concrete model provider/version defaults in ${key}`,
+      );
+    }
+  }
+});
+
+test("Packaged async recipes expose actor-native termination controls", async () => {
+  const recipeDir = join(__dirname, "..", "recipes");
+  const asyncFiles = (await readdir(recipeDir)).filter((file) => {
+    if (!file.endsWith(".json")) return false;
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    return config?.async === true;
+  });
+
+  for (const file of asyncFiles) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
     const accepts = config?.mailbox?.accepts ?? [];
     assert.deepEqual(

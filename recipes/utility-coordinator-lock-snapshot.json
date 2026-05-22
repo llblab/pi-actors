@@ -1,0 +1,14 @@
+{
+  "name": "utility-coordinator-lock-snapshot",
+  "args": [
+    "repo:path",
+    "state_dir:path",
+    "lines:int"
+  ],
+  "defaults": {
+    "repo": "~/.pi/agent/extensions/pi-actors",
+    "state_dir": "~/.pi/agent/tmp/pi-actors/runs/coordinator-locker",
+    "lines": "20"
+  },
+  "template": "{repo}/scripts/coordinator-locker.mjs snapshot --state-dir {state_dir} --lines {lines}"
+}

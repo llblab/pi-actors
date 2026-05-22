@@ -15,13 +15,21 @@
     "acceptance": "Separate proven, disproven, unknown, and missing evidence.",
     "evidence_policy": "Do not infer beyond provided evidence or inspected artifacts.",
     "output_format": "Markdown sections: Verdict, Evidence, Gaps, Confidence.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["verification.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "verification.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Verify this claim against the provided evidence. Claim: {claim}. Evidence or artifact paths: {evidence}. Acceptance: {acceptance}. Evidence policy: {evidence_policy}. Output format: {output_format}"
 }

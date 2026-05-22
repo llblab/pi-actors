@@ -14,13 +14,21 @@
     "sources": "Use only provided source notes, inspected artifacts, or explicit uncertainty.",
     "source_policy": "Separate direct evidence, weak evidence, contradictions, and missing evidence.",
     "output_format": "Markdown sections: Question, Evidence Map, Contradictions, Missing Evidence, Confidence.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["evidence.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "evidence.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Build an evidence map for question: {question}. Sources: {sources}. Source policy: {source_policy}. Output format: {output_format}"
 }

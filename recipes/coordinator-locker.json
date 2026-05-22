@@ -1,0 +1,46 @@
+{
+  "name": "coordinator-locker",
+  "async": true,
+  "args": [
+    "repo:path",
+    "lease_ms:int"
+  ],
+  "defaults": {
+    "repo": "~/.pi/agent/extensions/pi-actors",
+    "lease_ms": "600000"
+  },
+  "mailbox": {
+    "accepts": [
+      "coord.enqueue",
+      "coord.claim",
+      "coord.complete",
+      "coord.fail",
+      "lock.acquire",
+      "lock.renew",
+      "lock.release",
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "coord.started",
+      "coord.enqueued",
+      "coord.assigned",
+      "coord.empty",
+      "coord.completed",
+      "coord.failed",
+      "lock.granted",
+      "lock.denied",
+      "lock.renewed",
+      "lock.released",
+      "run.done",
+      "run.failed"
+    ]
+  },
+  "artifacts": {
+    "queue": "{state_dir}/queue.json",
+    "locks": "{state_dir}/locks.json",
+    "journal": "{state_dir}/journal.jsonl"
+  },
+  "template": "{repo}/scripts/coordinator-locker.mjs serve --state-dir {state_dir} --lease-ms {lease_ms}"
+}

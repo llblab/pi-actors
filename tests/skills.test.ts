@@ -1,0 +1,117 @@
+/**
+ * Packaged skill metadata regressions
+ * Ensures extension-owned skills stay version-aligned with package metadata
+ */
+
+import assert from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, normalize } from "node:path";
+import test from "node:test";
+
+import packageJson from "../package.json" with { type: "json" };
+
+const packagedSkillPaths = readdirSync("skills", { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => join("skills", entry.name, "SKILL.md"))
+  .sort();
+
+function listMarkdownFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return listMarkdownFiles(path);
+    return entry.isFile() && entry.name.endsWith(".md") ? [path] : [];
+  });
+}
+
+function readSkillFrontmatter(path: string): string {
+  const content = readFileSync(path, "utf8");
+  return content.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+}
+
+function readSkillMetadataVersion(path: string): string | undefined {
+  const frontmatter = readSkillFrontmatter(path);
+  return frontmatter.match(/^\s*version:\s*([^\n]+)\s*$/m)?.[1]?.trim();
+}
+
+test("Packaged skills metadata versions match package version", () => {
+  assert.deepEqual(packagedSkillPaths, [
+    "skills/actors/SKILL.md",
+    "skills/swarm/SKILL.md",
+  ]);
+  for (const skillPath of packagedSkillPaths) {
+    assert.equal(readSkillMetadataVersion(skillPath), packageJson.version, skillPath);
+  }
+});
+
+test("Packaged skills are registered in package metadata", () => {
+  assert.deepEqual(
+    packageJson.pi.skills.map((path) => path.replace(/^\.\//, "")).sort(),
+    packagedSkillPaths,
+  );
+});
+
+test("Packaged skill frontmatter scalar lines avoid extra colons", () => {
+  for (const skillPath of packagedSkillPaths) {
+    const frontmatter = readSkillFrontmatter(skillPath);
+    const scalarLines = frontmatter
+      .split("\n")
+      .filter((line) => /^\w+:\s*\S/.test(line));
+    for (const line of scalarLines) {
+      assert.equal(
+        (line.match(/:/g) ?? []).length,
+        1,
+        `${skillPath} frontmatter line should contain only the key separator colon: ${line}`,
+      );
+    }
+  }
+});
+
+test("Packaged swarm skill stays independent of pi-actors concrete runtime", () => {
+  const forbiddenPatterns = [
+    /pi-actors/i,
+    /coordinator-locker/i,
+    /\brun:/,
+    /\btool:/,
+    /\boutbox\b/i,
+    /\bFIFO\b/i,
+  ];
+  for (const path of listMarkdownFiles("skills/swarm")) {
+    const content = readFileSync(path, "utf8");
+    for (const pattern of forbiddenPatterns) {
+      assert.doesNotMatch(content, pattern, `${path} should not mention ${pattern}`);
+    }
+  }
+});
+
+test("Packaged skill markdown links resolve inside package", () => {
+  const localMarkdownLink = /\[[^\]]+\]\((?!https?:|mailto:|#)([^)]+)\)/g;
+  for (const path of listMarkdownFiles("skills")) {
+    const content = readFileSync(path, "utf8");
+    for (const match of content.matchAll(localMarkdownLink)) {
+      const href = match[1].split("#")[0];
+      if (!href) continue;
+      const target = normalize(join(dirname(path), href));
+      assert.ok(existsSync(target), `${path} link should resolve: ${match[1]}`);
+    }
+  }
+});
+
+test("Packaged actors skill recipe navigator links every bundled recipe", () => {
+  const actorSkill = readFileSync("skills/actors/SKILL.md", "utf8");
+  const navigator = actorSkill.match(
+    /## Recipe Navigator\n(?<body>[\s\S]*?)\n## Operating Patterns/,
+  )?.groups?.body;
+  assert.ok(navigator, "actors skill should contain a Recipe Navigator section");
+
+  const recipeFiles = readdirSync("recipes")
+    .filter((name) => name.endsWith(".json"))
+    .sort();
+  const linkedRecipes = [...navigator.matchAll(/\.\.\/\.\.\/recipes\/([^\)]+\.json)/g)]
+    .map((match) => match[1])
+    .sort();
+
+  assert.deepEqual(linkedRecipes, recipeFiles);
+  for (const recipeFile of linkedRecipes) {
+    assert.ok(existsSync(join("recipes", recipeFile)), `${recipeFile} should exist`);
+  }
+});

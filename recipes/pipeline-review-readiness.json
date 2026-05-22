@@ -22,15 +22,21 @@
       "operator UX"
     ],
     "release_gate": "The scope is safe to ship or hand to the next release step.",
-    "reviewer_model": "openai-codex/gpt-5.5",
-    "verifier_model": "openai-codex/gpt-5.5",
-    "merger_model": "openai-codex/gpt-5.5",
-    "judge_model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["review.completed", "pipeline.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "review.completed",
+      "pipeline.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": {
     "name": "coordinator",

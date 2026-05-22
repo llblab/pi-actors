@@ -95,7 +95,12 @@ Use recipe-level `mailbox` to document the semantic messages a recipe actor acce
 ```json
 {
   "mailbox": {
-    "accepts": ["control.continue", "control.revise", "control.approve", "control.stop"],
+    "accepts": [
+      "control.continue",
+      "control.revise",
+      "control.approve",
+      "control.stop"
+    ],
     "emits": ["checkpoint.needs_scope", "branch.done", "run.done"]
   }
 }
@@ -172,7 +177,7 @@ A registered tool can point at an actor recipe by storing the recipe path or nam
 {
   "docs_review": {
     "description": "Start an async docs review actor",
-    "args": ["scope:path", "model:string=openai-codex/gpt-5.5"],
+    "args": ["scope:path", "model:string"],
     "template": "docs-review.json"
   }
 }

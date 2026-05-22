@@ -1,0 +1,14 @@
+{
+  "name": "utility-skill-summary",
+  "args": [
+    "skill:path",
+    "package_json:path",
+    "repo:path"
+  ],
+  "defaults": {
+    "skill": "skills/actors/SKILL.md",
+    "package_json": "package.json",
+    "repo": "~/.pi/agent/extensions/pi-actors"
+  },
+  "template": "{repo}/scripts/recipe-utils.mjs skill-summary {skill} {package_json}"
+}

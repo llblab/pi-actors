@@ -244,7 +244,7 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
       undefined,
     );
     assert.match(result.content[0].text, /to=coordinator/);
-    assert.match(result.content[0].text, /outbox=outbox\.jsonl/);
+    assert.match(result.content[0].text, /messages=outbox\.jsonl/);
     const event = JSON.parse(await readFile(join(stateDir, "outbox.jsonl"), "utf8"));
     assert.equal(event.to, "coordinator");
     assert.equal(event.from, "run:sender");
@@ -287,7 +287,7 @@ test("Actor message tool routes session messages through owned run outboxes", as
       undefined,
     );
     assert.match(result.content[0].text, /to=session:session-target/);
-    assert.match(result.content[0].text, /outbox=outbox\.jsonl/);
+    assert.match(result.content[0].text, /messages=outbox\.jsonl/);
     const event = JSON.parse(await readFile(join(stateDir, "outbox.jsonl"), "utf8"));
     assert.equal(event.to, "session:session-target");
     assert.equal(event.from, `run:${runId}`);

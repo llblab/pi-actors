@@ -8,7 +8,7 @@
   },
   "args": [
     "state_root:path",
-    "message_file:path",
+    "run_id:string",
     "lines:int",
     "stale_minutes:int",
     "artifact_path:path",
@@ -17,23 +17,32 @@
   ],
   "defaults": {
     "state_root": "~/.pi/agent/tmp/pi-actors/runs",
-    "message_file": "~/.pi/agent/tmp/pi-actors/runs/music/outbox.jsonl",
+    "run_id": "music",
     "lines": "80",
     "stale_minutes": "60",
     "artifact_path": "./async-run-ops.md",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["operations.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "operations.completed",
+      "artifact.prepared",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {
       "name": "snapshot",
       "values": {
         "state_root": "{state_root}",
-        "message_file": "{message_file}",
+        "run_id": "{run_id}",
         "lines": "{lines}",
         "stale_minutes": "{stale_minutes}"
       }
@@ -41,8 +50,8 @@
     {
       "name": "normalizer",
       "values": {
-        "input": "Use async run operations snapshot JSON from stdin. State root: {state_root}. Message file: {message_file}.",
-        "format": "Markdown sections: Active Runs, Terminal Runs, Recent Events, Stale/Risky Runs, Recommended Controls, Follow-up Needed.",
+        "input": "Use actor run operations snapshot JSON from stdin. State root: {state_root}. Inspected run: {run_id}.",
+        "format": "Markdown sections: Active Runs, Terminal Runs, Recent Actor Messages, Stale/Risky Runs, Recommended Controls, Follow-up Needed.",
         "model": "{model}",
         "thinking": "off",
         "tools": "{tools}"
@@ -53,7 +62,7 @@
       "values": {
         "input": "Use normalized async-run operations report from stdin.",
         "artifact_path": "{artifact_path}",
-        "artifact_format": "Markdown sections: Status, Events, Risks, Recommended Actions.",
+        "artifact_format": "Markdown sections: Status, Actor Messages, Risks, Recommended Actions.",
         "model": "{model}",
         "tools": "{tools}"
       }

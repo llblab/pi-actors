@@ -13,7 +13,9 @@ Validates one template recipe file, or all *.json files in a directory when --al
 }
 
 function expandPath(value) {
-  return resolve(String(value).replace(/^~(?=\/|$)/, process.env.HOME ?? homedir()));
+  return resolve(
+    String(value).replace(/^~(?=\/|$)/, process.env.HOME ?? homedir()),
+  );
 }
 
 function templateKind(template) {
@@ -21,7 +23,8 @@ function templateKind(template) {
   if (Array.isArray(template)) return "sequence";
   if (template && typeof template === "object") {
     if (typeof template.template === "string") return "leaf";
-    if (Array.isArray(template.template)) return template.parallel === true ? "parallel" : "sequence";
+    if (Array.isArray(template.template))
+      return template.parallel === true ? "parallel" : "sequence";
     if (template.parallel === true) return "parallel";
     return "object";
   }
@@ -32,7 +35,8 @@ function recipeFiles(target, all) {
   if (!existsSync(target)) throw new Error(`Recipe path not found: ${target}`);
   const stat = statSync(target);
   if (stat.isFile()) return [target];
-  if (!stat.isDirectory()) throw new Error(`Recipe path is not a file or directory: ${target}`);
+  if (!stat.isDirectory())
+    throw new Error(`Recipe path is not a file or directory: ${target}`);
   if (!all) throw new Error("Directory validation requires --all.");
   return readdirSync(target)
     .filter((file) => file.endsWith(".json"))
@@ -43,19 +47,33 @@ function recipeFiles(target, all) {
 function validateFile(file) {
   try {
     const config = readResolvedRecipeConfig(file);
-    if (!config?.template) throw new Error("Recipe must define a non-empty template.");
+    if (!config?.template)
+      throw new Error("Recipe must define a non-empty template.");
     return {
       file,
       ok: true,
       name: config.name ?? "",
       async: Boolean(config.async),
       args: Array.isArray(config.args) ? config.args : [],
-      defaults: config.defaults && typeof config.defaults === "object" ? Object.keys(config.defaults).sort() : [],
-      imports: config.imports && typeof config.imports === "object" ? Object.keys(config.imports).sort() : [],
-      mailbox: config.mailbox && typeof config.mailbox === "object" ? {
-        accepts: Array.isArray(config.mailbox.accepts) ? config.mailbox.accepts : [],
-        emits: Array.isArray(config.mailbox.emits) ? config.mailbox.emits : [],
-      } : undefined,
+      defaults:
+        config.defaults && typeof config.defaults === "object"
+          ? Object.keys(config.defaults).sort()
+          : [],
+      imports:
+        config.imports && typeof config.imports === "object"
+          ? Object.keys(config.imports).sort()
+          : [],
+      mailbox:
+        config.mailbox && typeof config.mailbox === "object"
+          ? {
+              accepts: Array.isArray(config.mailbox.accepts)
+                ? config.mailbox.accepts
+                : [],
+              emits: Array.isArray(config.mailbox.emits)
+                ? config.mailbox.emits
+                : [],
+            }
+          : undefined,
       template: templateKind(config.template),
     };
   } catch (error) {

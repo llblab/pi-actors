@@ -29,10 +29,6 @@
       "operator UX"
     ],
     "claim": "The reviewed scope is ready for the next implementation or release step.",
-    "reviewer_model": "openai-codex/gpt-5.5",
-    "verifier_model": "openai-codex/gpt-5.5",
-    "merger_model": "openai-codex/gpt-5.5",
-    "judge_model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": "",
     "evidence_policy": "Cite inspected files, command output, or explicit uncertainty for every material claim.",
@@ -40,8 +36,20 @@
     "output_format": "Markdown sections: Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["review.completed", "verification.completed", "merge.completed", "judge.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "review.completed",
+      "verification.completed",
+      "merge.completed",
+      "judge.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

@@ -17,12 +17,23 @@
   "defaults": {
     "reply": "No coordinator reply provided yet; produce a checkpoint artifact only.",
     "mode": "degraded-new-branch",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.reply", "control.revise", "control.stop", "control.cancel", "control.kill"],
-    "emits": ["checkpoint.needs_input", "checkpoint.continued", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.reply",
+      "control.revise",
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "checkpoint.needs_input",
+      "checkpoint.continued",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

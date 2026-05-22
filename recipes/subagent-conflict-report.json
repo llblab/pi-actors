@@ -13,13 +13,21 @@
   "defaults": {
     "preserve_policy": "Describe what must be preserved, what can be discarded, and suggested resolver action.",
     "output_format": "Markdown sections: Conflict, My Changes, Other Changes, Preserve, Discard, Suggested Resolution, Risks.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["conflict_report.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "conflict_report.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Write a bounded conflict report. My change: {change}. Conflict: {conflict}. Preserve policy: {preserve_policy}. Output format: {output_format}"
 }

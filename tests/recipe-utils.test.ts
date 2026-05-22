@@ -70,6 +70,28 @@ test("recipe-utils package-summary emits bounded package metadata", async () => 
   }
 });
 
+test("recipe-utils skill-summary emits packaged skill metadata evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
+  try {
+    const packageFile = join(root, "package.json");
+    const skillFile = join(root, "SKILL.md");
+    await writeFile(packageFile, JSON.stringify({ version: "1.2.3" }));
+    await writeFile(
+      skillFile,
+      `---\nname: demo\ndescription: Demo skill guide\nmetadata:\n  version: 1.2.3\n---\n\n# Demo\n\n## Use\n`,
+    );
+    const { stdout } = await execFileAsync(script, ["skill-summary", skillFile, packageFile]);
+    const summary = JSON.parse(stdout);
+    assert.equal(summary.name, "demo");
+    assert.equal(summary.version, "1.2.3");
+    assert.equal(summary.versionMatchesPackage, true);
+    assert.deepEqual(summary.frontmatterExtraColonLines, []);
+    assert.deepEqual(summary.headings, ["# Demo", "## Use"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("recipe-utils artifact-write writes stdin with explicit mode", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
@@ -131,9 +153,10 @@ test("recipe-utils run-ops-snapshot combines runs, messages, and recommendations
     await writeRun(root, "failed", "failed");
     const eventFile = join(root, "active", "outbox.jsonl");
     await writeFile(eventFile, `${JSON.stringify({ event: "demo", summary: "Demo" })}\n`);
-    const { stdout } = await execFileAsync(script, ["run-ops-snapshot", root, eventFile, "5", "1"]);
+    const { stdout } = await execFileAsync(script, ["run-ops-snapshot", root, "active", "5", "1"]);
     const snapshot = JSON.parse(stdout);
     assert.equal(snapshot.runs.length, 2);
+    assert.equal(snapshot.inspectedRun, "active");
     assert.equal(snapshot.messages[0].event, "demo");
     assert.equal(
       snapshot.recommendations.some(

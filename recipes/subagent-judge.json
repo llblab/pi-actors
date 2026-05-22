@@ -14,13 +14,21 @@
     "rubric": "Judge evidence preservation, severity calibration, consensus purity, internal consistency, and merge bias.",
     "evidence": "Use the provided raw outputs or artifact paths; mark any missing evidence.",
     "output_format": "Markdown sections: Verdict, Issues, Evidence Preservation, Bias Risks, Required Fixes.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["judge.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "judge.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Judge this report: {report}. Rubric: {rubric}. Evidence: {evidence}. Output format: {output_format}"
 }

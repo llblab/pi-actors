@@ -20,12 +20,21 @@
     "readme": "README.md",
     "change_summary": "Recent project changes require documentation/index consistency review.",
     "artifact_path": "./docs-maintenance.md",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["docs.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "docs.completed",
+      "artifact.prepared",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

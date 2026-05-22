@@ -30,13 +30,13 @@ scope snapshot → changelog/package check → release lens reviews → risk ver
 
 Likely needed cells:
 
-- package metadata reader
-- changelog section extractor
-- package contents summarizer
-- validation command wrapper
-- release-risk reviewer
-- readiness merger/judge
-- release checklist artifact writer
+- Package metadata reader
+- Changelog section extractor
+- Package contents summarizer
+- Validation command wrapper
+- Release-risk reviewer
+- Readiness merger/judge
+- Release checklist artifact writer
 
 Existing seeds:
 
@@ -49,7 +49,7 @@ Existing seeds:
 
 Implemented seed:
 
-- `pipeline-release-readiness`: changelog section → package summary → validation wrapper → release review coordinator → artifact report.
+- `pipeline-release-readiness`: changelog section → package summary → packaged skill summary → validation wrapper → release review coordinator → artifact report.
 
 ### Repository Health Cell
 
@@ -63,12 +63,12 @@ git status/log → package/docs/backlog snapshot → validation summary → heal
 
 Likely needed cells:
 
-- git status/log utility
-- package version reader
-- backlog open/blocked extractor
-- docs index checker
-- validation summary normalizer
-- next-action recommender
+- Git status/log utility
+- Package version reader
+- Backlog open/blocked extractor
+- Docs index checker
+- Validation summary normalizer
+- Next-action recommender
 
 Existing seeds:
 
@@ -93,11 +93,11 @@ run-state summary → actor-message tail → stale/active classification → rec
 
 Likely needed cells:
 
-- run summary helper
+- Run summary helper
 - JSONL actor-message tailer
-- stale-run classifier
-- control-message recommender
-- run report artifact
+- Stale-run classifier
+- Control-message recommender
+- Run report artifact
 
 Existing seeds:
 
@@ -122,13 +122,13 @@ question framing → evidence map → contradiction map → claim verification �
 
 Likely needed cells:
 
-- question framer
-- source inventory utility
-- evidence mapper
-- contradiction mapper
-- verifier
-- synthesis merger
-- limitations normalizer
+- Question framer
+- Source inventory utility
+- Evidence mapper
+- Contradiction mapper
+- Verifier
+- Synthesis merger
+- Limitations normalizer
 
 Existing seeds:
 
@@ -149,11 +149,11 @@ goal → mutation zones → task cards → validation gates → conflict risks �
 
 Likely needed cells:
 
-- mutation-zone planner
-- task-card generator
-- ownership/conflict checker
-- validation-gate normalizer
-- integrator handoff artifact
+- Mutation-zone planner
+- Task-card generator
+- Ownership/conflict checker
+- Validation-gate normalizer
+- Integrator handoff artifact
 
 Existing seeds:
 
@@ -173,11 +173,11 @@ doc file inventory → index diff → stale link/routing review → rewrite sugg
 
 Likely needed cells:
 
-- markdown index utility
-- link checker wrapper
-- docs consistency reviewer
-- docs update planner
-- docs artifact writer
+- Markdown index utility
+- Link checker wrapper
+- Docs consistency reviewer
+- Docs update planner
+- Docs artifact writer
 
 Existing seeds:
 
@@ -202,10 +202,10 @@ media scan → playlist build → playback start → message summary → control
 
 Likely needed cells:
 
-- playlist builder
-- music player
-- run/message summary
-- control recommender
+- Playlist builder
+- Music player
+- Run/message summary
+- Control recommender
 
 Existing seeds:
 
@@ -226,8 +226,9 @@ Prefer adding a high-level recipe when at least three cells already exist and th
 
 Good next candidates for the standard library after the first task-first wave:
 
-1. Package/release metadata enrichment: implemented in `pipeline-release-readiness` by adding `utility-package-summary` between changelog extraction and validation, making release-readiness reports more evidence-rich without adding publish automation.
-2. Artifact packaging and manifesting: implemented as `pipeline-artifact-bundle`, which composes optional validation, `pipeline-artifact-write`, `utility-artifact-manifest`, deterministic manifest writing, and an actor-message handoff when the caller explicitly requests filesystem writes.
-3. Async run cleanup planning: extend async-run operations with stale-run classification and recommended `message`, `cancel`, or `kill` controls, keeping actual control execution operator-gated.
+1. Package/release metadata enrichment: implemented in `pipeline-release-readiness` by adding `utility-package-summary` and `utility-skill-summary` between changelog extraction and validation, making release-readiness reports more evidence-rich without adding publish automation.
+2. Evidence-only release summary: implemented as `pipeline-release-summary`, which composes changelog/package/skill/validation evidence into a release summary, risk checklist, and PR body draft artifact while leaving commit, PR, merge, tag, and publish actions to explicit release gates.
+3. Artifact packaging and manifesting: implemented as `pipeline-artifact-bundle`, which composes optional validation, `pipeline-artifact-write`, `utility-artifact-manifest`, deterministic manifest writing, and an actor-message handoff when the caller explicitly requests filesystem writes.
+4. Async run cleanup planning: extend async-run operations with stale-run classification and recommended `message`, `cancel`, or `kill` controls, keeping actual control execution operator-gated.
 
-Each candidate should land with the minimum missing cells rather than a broad one-shot framework. Already implemented task-first seeds include `pipeline-release-readiness`, `pipeline-repo-health`, `pipeline-async-run-ops`, `pipeline-docs-maintenance`, `pipeline-media-library`, and `pipeline-artifact-bundle`.
+Each candidate should land with the minimum missing cells rather than a broad one-shot framework. Already implemented task-first seeds include `pipeline-release-readiness`, `pipeline-release-summary`, `pipeline-repo-health`, `pipeline-async-run-ops`, `pipeline-docs-maintenance`, `pipeline-media-library`, and `pipeline-artifact-bundle`.

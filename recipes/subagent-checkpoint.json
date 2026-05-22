@@ -15,13 +15,20 @@
     "options": "List options considered, recommendation, and risk if the coordinator does not answer.",
     "resume_policy": "Do not claim same-context resume unless the adapter provides a resumable session id; otherwise emit degraded artifact state.",
     "output_format": "Markdown sections: Preserved State, Question, Options, Recommendation, Risk If Guessed, Resume Mode.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.continue", "control.revise", "control.stop"],
-    "emits": ["checkpoint.needs_input"]
+    "accepts": [
+      "control.continue",
+      "control.revise",
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "checkpoint.needs_input"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create a bounded coordinator checkpoint. State to preserve: {state}. Question: {question}. Options/risk format: {options}. Resume policy: {resume_policy}. Output format: {output_format}"
 }

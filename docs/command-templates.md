@@ -79,13 +79,13 @@ Implementations may expand `~` in command position and may resolve relative comm
 
 Supported forms:
 
-| Form                | Meaning                                          |
-| ------------------- | ------------------------------------------------ |
-| `{name}`            | Required value from runtime values or `defaults` |
-| `{name=default}`    | Inline default when no value is provided         |
-| `{name??fallback}`  | Fallback when value is missing, null, or empty   |
-| `{name?yes:no}`     | Ternary string selected by truthiness of `name`  |
-| `{items[index]}`    | Array item selected by literal or repeat index   |
+| Form               | Meaning                                          |
+| ------------------ | ------------------------------------------------ |
+| `{name}`           | Required value from runtime values or `defaults` |
+| `{name=default}`   | Inline default when no value is provided         |
+| `{name??fallback}` | Fallback when value is missing, null, or empty   |
+| `{name?yes:no}`    | Ternary string selected by truthiness of `name`  |
+| `{items[index]}`   | Array item selected by literal or repeat index   |
 
 Resolution order is runtime values → `defaults` → inline default → error. Nullish coalescing and ternary conditions treat missing, empty, `false`, `0`, and `no` as false. Use `??` for value fallback and ternaries for small string selection such as optional CLI flags; larger policy branches should stay in recipes, scripts, or separate template nodes. Default values that are themselves a single placeholder, such as `{prompt}` resolving to `{prompts[index]}`, are resolved recursively with a small depth guard. A repeat node may set `repeat` to `{items.length}` when an array arg should determine fanout width.
 
@@ -248,12 +248,12 @@ Parallel nodes use the same object shape. Flags come first and `template` stays 
       "parallel": true,
       "template": [
         {
-          "label": "gpt-5.5",
+          "label": "reviewer-a",
           "timeout": 300000,
           "template": "review-gpt {scope}"
         },
         {
-          "label": "deepseek-pro",
+          "label": "reviewer-b",
           "timeout": 300000,
           "template": "review-deepseek {scope}"
         },
@@ -272,9 +272,9 @@ Parallel nodes use the same object shape. Flags come first and `template` stays 
 A degraded parallel join is still usable when at least one branch succeeds:
 
 ```text
---- branch: gpt-5.5 status: done ---
+--- branch: reviewer-a status: done ---
 review text
---- branch: deepseek-pro status: failed ---
+--- branch: reviewer-b status: failed ---
 exit: 1
 stderr: provider balance exhausted
 ```

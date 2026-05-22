@@ -23,12 +23,20 @@
       "failure modes"
     ],
     "constraints": "Prefer small composable pieces, explicit contracts, and no broad workflow DSL.",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["pipeline.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "pipeline.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

@@ -104,7 +104,7 @@ test("Registry mutations register template recipe paths through template", async
   try {
     const result = await executeRegisterTool(
       {
-        args: "scope:path,model:string=openai-codex/gpt-5.5",
+        args: "scope:path,model:string=selected-model",
         description: "Start docs review actor",
         name: "docs_review",
         template: "docs-review.json",

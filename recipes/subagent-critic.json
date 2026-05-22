@@ -16,13 +16,21 @@
     "constraints": "Stay bounded to the target; do not redesign unrelated systems.",
     "risk_policy": "Prefer falsifiable objections and separate blockers from caveats.",
     "output_format": "Markdown sections: Assumptions, Failure Modes, Counterarguments, Tests, Recommendation.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["critique.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "critique.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Critique this target through lens {lens}: {target}. Constraints: {constraints}. Risk policy: {risk_policy}. Output format: {output_format}"
 }

@@ -22,12 +22,21 @@
     "docs_dir": "docs",
     "validation_command": "npm run validate",
     "artifact_path": "./repo-health.md",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["repo_health.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "repo_health.completed",
+      "artifact.prepared",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

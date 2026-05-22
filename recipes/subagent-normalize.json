@@ -12,13 +12,21 @@
   "defaults": {
     "format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
     "preservation_policy": "Do not change meaning, severity, evidence, or uncertainty while normalizing.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["normalize.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "normalize.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Normalize this subagent output. Target format: {format}. Preservation policy: {preservation_policy}. Input: {input}"
 }

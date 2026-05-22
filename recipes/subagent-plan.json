@@ -14,13 +14,21 @@
     "constraints": "Prefer small reversible slices, explicit validation gates, and no broad speculative rewrites.",
     "scope": "Use the provided problem statement and any named artifact paths.",
     "output_format": "Markdown sections: Goal, Constraints, Plan Slices, Risks, Validation Gates, Stop Conditions.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["plan.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "plan.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Plan how to reach this goal: {goal}. Scope: {scope}. Constraints: {constraints}. Output format: {output_format}"
 }

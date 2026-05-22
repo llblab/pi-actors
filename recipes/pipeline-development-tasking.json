@@ -21,12 +21,21 @@
     "avoided": "Avoid unrelated files, public contracts, generated artifacts, and broad refactors unless explicitly allowed.",
     "checks": "Smallest validation that proves the task card is complete.",
     "constraints": "Split into bounded mutation zones and preserve integrator ownership of shared contracts.",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["task_card.completed", "pipeline.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "task_card.completed",
+      "pipeline.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

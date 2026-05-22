@@ -12,6 +12,9 @@ The persistent tool registry is still useful: it lets agents keep durable operat
 - [Open Backlog](./BACKLOG.md)
 - [Changelog](./CHANGELOG.md)
 - [Documentation](./docs/README.md)
+- [Actors skill](./skills/actors/SKILL.md) — dense agent-facing reference for operating the extension
+- [Swarm skill](./skills/swarm/SKILL.md) — multi-agent methodology, strategies, standards, and portable examples for actor-backed swarms
+- [Swarm MAWP notes](./skills/swarm/references/development-swarm.md) — optional small-team development swarm reference
 
 ## What It Is
 
@@ -129,9 +132,7 @@ Move to actor recipes when work is long-running, parallel, service-like, or agen
   "name": "docs-review",
   "async": true,
   "args": ["scope:path", "model:string"],
-  "defaults": {
-    "model": "openai-codex/gpt-5.5"
-  },
+  "defaults": {},
   "mailbox": {
     "accepts": ["control.stop"],
     "emits": ["review.completed", "run.failed"]
@@ -143,14 +144,14 @@ Move to actor recipes when work is long-running, parallel, service-like, or agen
 Expose a reusable actor recipe as a normal capability:
 
 ```text
-register_tool name=docs_review description="Start an async docs review actor" template="docs-review.json" args="scope:path,model:string=openai-codex/gpt-5.5"
+register_tool name=docs_review description="Start an async docs review actor" template="docs-review.json" args="scope:path,model:string"
 ```
 
 `Task` is the user's work item. `Template` is the execution graph. `Actor recipe` is saved JSON. `Run` is one actor instance with status, logs, messages, cancellation, artifacts, and ambient triangles.
 
 ## Compose Recipes With Imports
 
-Recipes can import other recipe files and reuse them as named nodes. This keeps reusable steps small while letting a parent recipe decide whether the combined graph runs foreground or as one async run.
+Recipes can import other recipe files and reuse them as named nodes. This keeps reusable steps small while letting a parent recipe decide whether the combined graph runs foreground or as one detached run actor.
 
 `review-one.json`:
 
@@ -158,7 +159,7 @@ Recipes can import other recipe files and reuse them as named nodes. This keeps 
 {
   "name": "review-one",
   "args": ["scope:string", "model:string"],
-  "defaults": { "model": "openai-codex/gpt-5.5" },
+  "defaults": {},
   "template": "pi -p --model {model} --no-tools \"Review {scope}\""
 }
 ```
@@ -189,7 +190,7 @@ register_tool name=review_pair \
   template="review-pair.json"
 ```
 
-Imported recipes are recipe definitions, not nested async runs. The parent recipe's `async: true` creates one run with one state dir; imported recipes contribute command-template graph, args, defaults, and values.
+Imported recipes are recipe definitions, not nested run actors. The parent recipe's `async: true` creates one run actor with one state dir; imported recipes contribute command-template graph, args, defaults, and values.
 
 ## Register Actor-Control Tools
 
@@ -213,7 +214,7 @@ For reusable actor workflows, keep the large template and mailbox contract in a 
 register_tool name=docs_review \
   description="Start an async docs review actor" \
   template="docs-review.json" \
-  args="scope:path,model:string=openai-codex/gpt-5.5"
+  args="scope:path,model:string"
 ```
 
 If the recipe file contains `async: true`, calling `docs_review` starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
@@ -226,7 +227,8 @@ A recipe can also be co-located in `actors-tools.json` when keeping metadata and
     "description": "Start an async docs review",
     "name": "review-docs",
     "async": true,
-    "template": "pi -p --model openai-codex/gpt-5.5 --tools read,bash \"Review {scope}\""
+    "args": ["scope:path", "model:string"],
+    "template": "pi -p --model {model} --tools read,bash \"Review {scope}\""
   }
 }
 ```
@@ -238,7 +240,7 @@ A co-located recipe entry still cannot define `tool`; it must own `template` dir
 ```text
 register_tool name=call_subagent \
   description="Run pi as a non-interactive sub-agent" \
-  template="pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
+  template="pi -p --model {model} --no-tools {prompt}" args="prompt:string,model:string"
 ```
 
 Use `update=true` to overwrite an existing tool. Omit `template` during update to keep the previous template:
@@ -267,11 +269,12 @@ The commands above persist entries like this in `~/.pi/agent/actors-tools.json`;
   },
   "call_subagent": {
     "description": "Run pi as a non-interactive sub-agent",
-    "template": "pi -p --model {model=openai-codex/gpt-5.5} --no-tools {prompt}"
+    "args": ["prompt:string", "model:string"],
+    "template": "pi -p --model {model} --no-tools {prompt}"
   },
   "docs_review": {
     "description": "Start an async docs review actor",
-    "args": ["scope:path", "model:string=openai-codex/gpt-5.5"],
+    "args": ["scope:path", "model:string"],
     "template": "docs-review.json"
   }
 }
@@ -288,9 +291,10 @@ Start from an inline template as an addressable run actor:
 ```json
 {
   "as": "run:docs-review",
-  "template": "pi -p --model openai-codex/gpt-5.5 --no-tools {prompt}",
+  "template": "pi -p --model {model} --no-tools {prompt}",
   "values": {
-    "prompt": "Review docs/spec.md for contradictions."
+    "prompt": "Review docs/spec.md for contradictions.",
+    "model": "current-review-model"
   }
 }
 ```
@@ -313,7 +317,7 @@ Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor 
 
 Packaged standard recipes live under root `recipes/` with helper scripts under root `scripts/`. They are reusable library definitions, not automatically installed operator policy.
 
-The subagent component recipes start non-interactive pi subagents as async runs or compose component recipes into higher-level coordinator pipelines. Use the no-tools recipe for the safest default, the explicit-tool variant when a bounded tool allowlist is needed, or the prompts fanout parent recipe to see imported subagent recipe nodes composed into one async run:
+The subagent component recipes start non-interactive pi subagents as detached run actors or compose component recipes into higher-level coordinator pipelines. Use the no-tools recipe for the safest default, the explicit-tool variant when a bounded tool allowlist is needed, or the prompts fanout parent recipe to see imported subagent recipe nodes composed into one run actor:
 
 ```text
 register_tool name=subagent_prompt \
@@ -325,7 +329,7 @@ register_tool name=subagent_tools \
   template="subagent-tools.json"
 
 register_tool name=subagents_prompts \
-  description="Start parallel no-tools subagents from a prompt array as one async run" \
+  description="Start parallel no-tools subagents from a prompt array as one run actor" \
   template="subagents-prompts.json"
 
 subagent_prompt prompt="Review docs/async-runs.md for unclear wording." run_id=docs-review
@@ -336,7 +340,7 @@ subagents_prompts \
 inspect target=run:review-prompts view=tail
 ```
 
-The music player recipe starts a local file, URL, directory, or playlist as an async run, keeps the agent unblocked, shows the ambient triangle indicator in the launching coordinator, and can be controlled with addressed `message` calls. The standard library ships one Node.js wrapper recipe:
+The music player recipe starts a local file, URL, directory, or playlist as a run actor, keeps the agent unblocked, shows the ambient triangle indicator in the launching coordinator, and can be controlled with addressed `message` calls. The standard library ships one Node.js wrapper recipe:
 
 ```text
 register_tool name=music_player \
@@ -374,8 +378,8 @@ See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and r
 - `recover` runs a cleanup command template between failed retry attempts and stops retries if cleanup fails.
 - Commands execute directly without shell evaluation, but trusted executables still run with the same permissions as pi.
 - Obvious high-risk templates such as shells, interpreter eval modes, and broad filesystem mutation surface lightweight warnings without blocking existing tools.
-- `async: true` on a recipe selects detached run lifecycle; omitted or false async runs the recipe foreground through registered tools.
-- Layer boundaries stay explicit: command templates define synchronous execution graphs; template recipes add saved JSON metadata/import resolution and named `artifacts`; async runs add detached lifecycle, state, IPC, and observability.
+- `async: true` on a recipe selects detached run-actor lifecycle; omitted or false runs the recipe foreground through registered tools.
+- Layer boundaries stay explicit: command templates define synchronous execution graphs; template recipes add saved JSON metadata/import resolution and named `artifacts`; run actors add detached lifecycle, state, IPC, and observability.
 - `spawn`, `message`, and `inspect` are high-level actor adapters. `spawn` creates `run:<id>` actors from recipes or inline templates with optional state/artifact metadata, `message` sends one typed envelope to `run:<id>` mailboxes, `branch:<run>/<branch>` mailboxes, `tool:<name>` calls, or coordinator/session attention paths, and `inspect` intentionally reads `run:<id>` status/tail/messages/mailbox metadata, coordinator/session run status, or registered `tool:<name>` contracts while the broader actor/message protocol is refined.
 - `spawn`, `message`, and `inspect` are the public async coordination vocabulary. Low-level async actions map to this actor API: start belongs to `spawn`; send/control/stop/kill belongs to `message`; status/tail/messages/list belongs to `inspect`. Use `inspect view=messages` for actor-envelope streams. Use `control.stop`, `control.cancel`, and `control.kill` for run termination; runtime-prefixed control aliases are no longer part of the public surface.
 - Actor management returns compact text by default; pass `verbose: true` to `inspect` when full JSON state is needed.
@@ -384,7 +388,7 @@ See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and r
 - Native Windows should use WSL or a recipe-specific transport for run-local message-controlled recipes; Linux uses stricter `/proc` runner ownership checks for stale PID protection.
 - Registered tools may set `template` to a recipe JSON path/name; calling them follows that recipe's `async` mode.
 - File-backed recipes may declare `imports` and embed imported recipes with `{ "name": "alias" }` nodes, or read `{alias.defaults.key}`, `{alias.defaults.key=fallback}`, and `{alias.values.key?yes:no}` references before command-template execution.
-- Interactive sessions show ambient async activity as stable `▷` triangles aggregated across runs started by the current agent session. Each running async run contributes at least one triangle; parallel active branches can contribute more. One `▶` wave moves over the active set; terminal `done`/`failed`/unhandled `killed`/`exited` messages are delivered as compact follow-up context only to the launching coordinator agent, while intentional `cancel`, `kill`, and `stop` actions stay silent because the action already reports synchronously. Failed commands and in-flight parallel branch completions can bubble through `command.done`; successful final leaf completions remain diagnostic to avoid sequential pipeline noise.
+- Interactive sessions show ambient actor activity as stable `▷` triangles aggregated across runs started by the current agent session. Each running run actor contributes at least one triangle; parallel active branches can contribute more. One `▶` wave moves over the active set; terminal `done`/`failed`/unhandled `killed`/`exited` messages are delivered as compact follow-up context only to the launching coordinator agent, while intentional `cancel`, `kill`, and `stop` actions stay silent because the action already reports synchronously. Failed commands and in-flight parallel branch completions can bubble through `command.done`; successful final leaf completions remain diagnostic to avoid sequential pipeline noise.
 - Use `{file}` as the canonical local file path arg.
 - Stored `script` entries are rejected with migration guidance.
 

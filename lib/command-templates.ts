@@ -541,7 +541,12 @@ function shouldResolveEmbeddedCommandTemplateToken(
 function isFalsyCommandTemplateValue(value: unknown): boolean {
   if (value === undefined || value === null || value === false) return true;
   const normalized = String(value).trim().toLowerCase();
-  return normalized === "" || normalized === "0" || normalized === "false" || normalized === "no";
+  return (
+    normalized === "" ||
+    normalized === "0" ||
+    normalized === "false" ||
+    normalized === "no"
+  );
 }
 
 function resolveCommandTemplateCondition(

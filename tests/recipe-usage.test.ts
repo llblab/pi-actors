@@ -31,11 +31,39 @@ test("Recipe usage launch counter increments inline metadata", async () => {
     assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-03T03:04:05.000Z")), true);
 
     const updated = await readJson(recipe);
-    assert.deepEqual(updated.usage, {
-      calls: 2,
-      last_called: "2026-01-03T03:04:05.000Z",
-    });
+    assert.equal((updated.usage as Record<string, unknown>).calls, 2);
+    assert.equal((updated.usage as Record<string, unknown>).last_called, "2026-01-03T03:04:05.000Z");
+    assert.equal(typeof (updated.usage as Record<string, unknown>).fingerprint, "string");
     assert.equal(updated.template, "echo ok");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipe usage counter resets after recipe content changes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-usage-"));
+  try {
+    const recipe = join(root, "memory.json");
+    await writeFile(recipe, JSON.stringify({ template: "echo one" }));
+
+    assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-02T03:04:05.000Z")), true);
+    const before = await readJson(recipe);
+    const beforeUsage = before.usage as Record<string, unknown>;
+    await writeFile(
+      recipe,
+      JSON.stringify({
+        template: "echo two",
+        usage: beforeUsage,
+      }),
+    );
+
+    assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-03T03:04:05.000Z")), true);
+    const updated = await readJson(recipe);
+    const usage = updated.usage as Record<string, unknown>;
+    assert.equal(usage.calls, 1);
+    assert.equal(usage.last_called, "2026-01-03T03:04:05.000Z");
+    assert.equal(usage.reset_at, "2026-01-03T03:04:05.000Z");
+    assert.notEqual(usage.fingerprint, beforeUsage.fingerprint);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

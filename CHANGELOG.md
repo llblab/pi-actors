@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.4: Recipe Usage Fingerprints
+
+- `[Recipe Usage]` Added content fingerprints to user recipe usage metadata. Impact: when a recipe file is edited and its authored meaning changes, the next launch resets `usage.calls`, records `usage.reset_at`, and starts counting usage for the current recipe content.
+- `[Docs]` Documented fingerprint-backed usage reset semantics in the template recipe and tool registry docs.
+- `[Package]` Bumped package and packaged skill metadata to `0.16.4` for the hotfix release.
+
 ## 0.16.3: Recipe Import Path Placeholders
 
 - `[Template Recipes]` Added static `{repo}` and `{agent}` expansion for recipe paths, including `imports` and `from` bindings. Impact: recipes can import sibling packaged/user recipes without hard-coded absolute paths while keeping imports load-time deterministic.

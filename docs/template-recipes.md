@@ -95,7 +95,7 @@ User-owned recipes may accumulate extension-maintained usage metadata:
 }
 ```
 
-The extension increments `usage.calls` and updates `usage.last_called` when it starts that concrete recipe, either through a recipe-backed tool call or a direct async recipe-file run. Agents should treat these fields as cleanup evidence, not as authored recipe contract. Packaged standard-library recipes are not mutated for usage metadata.
+The extension increments `usage.calls` and updates `usage.last_called` when it starts that concrete recipe, either through a recipe-backed tool call or a direct async recipe-file run. It also stores a content `usage.fingerprint`; if the authored recipe content changes, the next launch resets `usage.calls` before counting the new launch and records `usage.reset_at`. Agents should treat these fields as cleanup evidence, not as authored recipe contract. Packaged standard-library recipes are not mutated for usage metadata.
 
 There is intentionally no failure counter in the recipe contract. A failed launch can reflect caller misuse, missing runtime values, or an environmental problem rather than recipe uselessness. Cleanup decisions should be explicit operator work: keep as a tool, set `tool: false`, merge, delete, or archive.
 

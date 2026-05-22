@@ -119,8 +119,14 @@ export function createAutoToolsRuntime(
     warnings.push(...discovered.diagnostics);
     tools.clear();
     for (const entry of discovered.active.values()) {
-      const cfg = RecipeDiscovery.toRegisteredTool(entry);
-      if (cfg) tools.set(cfg.name, cfg);
+      try {
+        const cfg = RecipeDiscovery.toRegisteredTool(entry);
+        if (cfg) tools.set(cfg.name, cfg);
+      } catch (error) {
+        warnings.push(
+          `Recipe ${entry.id} could not be exposed as a tool: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     deactivateMissingRuntimeTools(new Set(tools.keys()));
     for (const cfg of tools.values()) {

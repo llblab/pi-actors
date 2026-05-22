@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.1: Recipe Registry Hotfix
+
+- `[Runtime]` Prevented invalid user recipe files from aborting extension startup when tool-schema generation fails, surfacing a warning and skipping the offending tool instead. Impact: one bad recipe in `~/.pi/agent/recipes` no longer takes down the pi-actors extension.
+- `[Recipe Discovery]` Excluded the legacy migration report file from recipe discovery. Impact: `actors-tools-migration-report.json` no longer appears as a broken recipe/tool candidate after migration.
+- `[Package]` Bumped package and packaged skill metadata to `0.16.1` for the hotfix release.
+
 ## 0.16.0: File-Discovered Recipe Registry Migration
 
 - `[Version]` Began the `0.16.0` breaking-change cycle and captured the file-discovered recipe registry migration plan in `BACKLOG.md`. Impact: the next release target is now explicit: replace `actors-tools.json` as live registry with validated recipe files, filename identity, `tool` exposure, override/disable semantics, migration reporting, registry inspection, and usage-informed cleanup.

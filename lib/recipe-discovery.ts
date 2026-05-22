@@ -44,7 +44,12 @@ export interface RecipeDiscoverySource {
 function listRecipeFiles(root: string): string[] {
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.endsWith(".json") &&
+        entry.name !== "actors-tools-migration-report.json",
+    )
     .map((entry) => join(root, entry.name))
     .sort();
 }

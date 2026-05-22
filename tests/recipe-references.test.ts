@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { getRecipeIdFromPath, readResolvedRecipeConfig } from "../lib/recipe-references.ts";
+import { getRecipeIdFromPath, readResolvedRecipeConfig, resolveRecipePath } from "../lib/recipe-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -51,6 +51,39 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
       },
       "wc -c",
     ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipe paths expand repo and agent placeholders", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    assert.equal(resolveRecipePath("{repo}/recipes/base.json", recipeRoot), join(root, "recipes", "base.json"));
+    assert.equal(resolveRecipePath("{agent}/recipes/base.json", recipeRoot), join(process.env.PI_CODING_AGENT_DIR ?? join(process.env.HOME!, ".pi", "agent"), "recipes", "base.json"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template recipe imports expand repo placeholders", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const child = join(recipeRoot, "child.json");
+    const parent = join(recipeRoot, "parent.json");
+    await import("node:fs/promises").then((fs) => fs.mkdir(recipeRoot, { recursive: true }));
+    await writeFile(child, JSON.stringify({ template: "echo {word}" }));
+    await writeFile(
+      parent,
+      JSON.stringify({
+        imports: { child: "{repo}/recipes/child.json" },
+        template: { name: "child", values: { word: "ok" } },
+      }),
+    );
+    const config = readResolvedRecipeConfig(parent)!;
+    assert.deepEqual(config.template, { defaults: { word: "ok" }, template: "echo {word}" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

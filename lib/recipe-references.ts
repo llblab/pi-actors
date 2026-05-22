@@ -75,11 +75,15 @@ export function resolveRecipePath(
   recipeRoot = Paths.getRecipeRoot(),
 ): string {
   const trimmed = value.trim();
-  if (trimmed.startsWith("~/")) return resolve(homedir(), trimmed.slice(2));
-  if (trimmed.includes("/")) return resolve(trimmed);
+  const repoRoot = resolve(recipeRoot, "..");
+  const expanded = trimmed
+    .replaceAll("{repo}", repoRoot)
+    .replaceAll("{agent}", Paths.getAgentDir());
+  if (expanded.startsWith("~/")) return resolve(homedir(), expanded.slice(2));
+  if (expanded.includes("/")) return resolve(expanded);
   return resolve(
     recipeRoot,
-    trimmed.endsWith(".json") ? trimmed : `${trimmed}.json`,
+    expanded.endsWith(".json") ? expanded : `${expanded}.json`,
   );
 }
 

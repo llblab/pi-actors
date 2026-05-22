@@ -245,7 +245,7 @@ File-backed recipes may import other file-backed recipes at the recipe layer. Im
 
 An import binding may be either a string recipe path/name or an object with:
 
-- `from`: recipe path or bare name.
+- `from`: recipe path or bare name. Import paths support static load-time placeholders: `{repo}` expands to the directory above the active recipe root, and `{agent}` expands to the pi agent directory. For a packaged recipe in `<repo>/recipes/name.json`, `{repo}/recipes/other.json` resolves to a sibling packaged recipe. For a user recipe in `~/.pi/agent/recipes/name.json`, `{repo}` and `{agent}` both resolve to `~/.pi/agent`.
 - `defaults`: extra default values exposed through the import.
 - `values`: explicit values for embedding that imported recipe.
 

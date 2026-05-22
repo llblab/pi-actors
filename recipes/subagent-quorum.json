@@ -12,18 +12,21 @@
     "output_format:string"
   ],
   "defaults": {
-    "models": [
-      "openai-codex/gpt-5.5",
-      "openai-codex/gpt-5.4",
-      "deepseek/deepseek-v4-flash"
-    ],
     "thinking": "off",
     "tools": "",
     "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "repeat": "{models.length}",
   "parallel": true,

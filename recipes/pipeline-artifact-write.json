@@ -18,12 +18,18 @@
   "defaults": {
     "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
     "write_mode": "create",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["artifact.written", "artifact.blocked"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "artifact.written",
+      "artifact.blocked"
+    ]
   },
   "artifacts": {
     "artifact": "{artifact_path}"

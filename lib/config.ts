@@ -6,12 +6,12 @@
 
 import { existsSync, readFileSync } from "node:fs";
 
+import type { CommandTemplateValue } from "./command-templates.ts";
+import * as CommandTemplates from "./command-templates.ts";
 import { writeJsonAtomic } from "./file-state.ts";
 import { normalizeToolName } from "./identity.ts";
-import * as CommandTemplates from "./command-templates.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as Schema from "./schema.ts";
-import type { CommandTemplateValue } from "./command-templates.ts";
 
 export interface RegisteredTool {
   name: string;

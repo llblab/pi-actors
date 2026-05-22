@@ -1,12 +1,11 @@
 {
-  "name": "pipeline-release-readiness",
+  "name": "pipeline-release-summary",
   "async": true,
   "imports": {
     "changelog": "utility-changelog-section.json",
     "package": "utility-package-summary.json",
     "skill": "utility-skill-summary.json",
     "validation": "utility-validation-wrapper.json",
-    "review": "subagent-review-coordinator.json",
     "artifact": "pipeline-artifact-report.json"
   },
   "args": [
@@ -16,27 +15,17 @@
     "skill:path",
     "validation_command:string",
     "artifact_path:path",
-    "lenses:array",
-    "reviewer_model:string",
-    "verifier_model:string",
-    "merger_model:string",
-    "judge_model:string",
+    "risk_notes:string",
+    "model:string",
     "tools:string"
   ],
   "defaults": {
     "scope": ".",
-    "version": "0.15.0",
     "package_json": "{scope}/package.json",
     "skill": "{scope}/skills/actors/SKILL.md",
     "validation_command": "npm run validate",
-    "artifact_path": "./release-readiness.md",
-    "lenses": [
-      "release",
-      "package contents",
-      "operator UX",
-      "documentation",
-      "packaged skills"
-    ],
+    "artifact_path": "./release-summary.md",
+    "risk_notes": "No extra risk notes supplied.",
     "tools": ""
   },
   "mailbox": {
@@ -46,12 +35,15 @@
       "control.kill"
     ],
     "emits": [
-      "release.completed",
+      "release.summary_ready",
       "artifact.prepared",
       "command.done",
       "run.done",
       "run.failed"
     ]
+  },
+  "artifacts": {
+    "summary": "{artifact_path}"
   },
   "template": [
     {
@@ -84,26 +76,12 @@
       }
     },
     {
-      "name": "review",
-      "values": {
-        "scope": "Release scope {scope} for version {version}. Use changelog, package summary, packaged skill summary, and validation output from stdin.",
-        "lenses": "{lenses}",
-        "claim": "Version {version} is ready for release or the remaining blockers are explicitly identified.",
-        "reviewer_model": "{reviewer_model}",
-        "verifier_model": "{verifier_model}",
-        "merger_model": "{merger_model}",
-        "judge_model": "{judge_model}",
-        "tools": "{tools}",
-        "output_format": "Markdown sections: Release Verdict, Blocking Issues, Package/Docs Risks, Validation Evidence, Publish Notes, Required Follow-up."
-      }
-    },
-    {
       "name": "artifact",
       "values": {
-        "input": "Use release readiness review from stdin.",
+        "input": "Prepare an evidence-only release summary for version {version}. Use changelog, package summary, packaged skill summary, validation output, and these risk notes: {risk_notes}. Do not propose or perform commit, PR, merge, tag, publish, or any external release side effect.",
         "artifact_path": "{artifact_path}",
-        "artifact_format": "Markdown sections: Release Verdict, Evidence, Risks, Checklist, Next Actions.",
-        "model": "{merger_model}",
+        "artifact_format": "Markdown sections: Release Summary, Validation Evidence, Package And Skill Evidence, Risks, PR Body Draft, Operator-Gated Next Steps. The PR Body Draft must be suitable for copy/paste and must not claim that release side effects already happened.",
+        "model": "{model}",
         "tools": "{tools}"
       }
     }

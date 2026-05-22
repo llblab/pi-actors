@@ -20,25 +20,18 @@ export const REGISTER_TOOL_GUIDELINES = [
 ];
 
 export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
-- Local-first cybernetic tool memory: agents persist trusted local capabilities instead of repeating shell recipes.
-- Task = user work; template = execution graph; recipe = saved JSON; run = execution instance.
-- Command templates stay sync: string leaf, array sequence, object flags, parallel: true fanout.
-- Template flags: args/defaults, parallel, when, timeout, delay, retry, failure, recover, repeat, output; placeholders support {value??fallback} and {flag?yes:no}.
-- Recipes live in ~/.pi/agent/recipes/*.json and wrap templates with metadata/defaults/imports/artifacts.
-- Recipe imports are local variables: imports.alias -> {"name":"alias"} nodes and {alias.defaults.key} refs.
-- Imported recipes are definitions, not nested async runs; parent async:true creates one run.
-- async:true = detached lifecycle; spawn creates run actors from recipes/templates.
-- Actor run state lives under ~/.pi/agent/tmp/pi-actors/runs.
-- Use spawn/message/inspect for actor-level start/send/observe; runtime action internals are absorbed into the actor API.
-- Run lifecycle = state files, logs, actor messages, mailbox send, cancel/kill, compact status; do not busy-poll runs, rely on message/follow-up notifications and use message for explicit run-local commands.
-- Tool template may be a command template, recipe path/name, or co-located recipe.
-- register_tool makes compact persistent buttons; args may be typed or derived from placeholders.
-- For single calls or short pipelines, use foreground templates/tools.
-- For subagents, swarms, background music, or long fanout, prefer async recipes/runs.
-- Long async fanout = parent async recipe wrapping template(parallel: true) and imports; packaged fanout recipes bubble branch completion follow-ups by default.
-- If asked to explore pi-actors, read README.md, docs/README.md, docs/template-recipes.md, docs/async-runs.md, and recipes/.
-- Ambient triangles show active async commands/subagents for the launching coordinator.
-- After async run finish, inspect status/tail/messages before final artifacts.`;
+- Local-first actor memory: persist trusted local capabilities instead of rebuilding shell recipes.
+- Layers: task -> command template -> recipe/tool -> spawn -> run:<id>; tool:<name> wraps registered capabilities.
+- Command templates stay sync: string leaf, array sequence, object node; flags include args/defaults, parallel, when, timeout, delay, retry, failure, recover, repeat, output.
+- Placeholders support typed/default args plus {value??fallback} and {flag?yes:no}.
+- Recipes live in ~/.pi/agent/recipes/*.json, own template directly, and may declare metadata/defaults/imports/mailbox/artifacts.
+- Recipe imports are local variables; imported recipes are definitions, not nested async runs; parent async:true creates one run.
+- Use spawn/message/inspect for actor-level start/send/observe; avoid runtime/FIFO/outbox vocabulary in public guidance.
+- Run state lives under ~/.pi/agent/tmp/pi-actors/runs; inspect status/tail/messages/mailbox/files/artifacts intentionally and avoid busy-polling.
+- Register_tool makes persistent tools from command templates, recipe names/paths, or co-located recipes; args may be typed or placeholder-derived.
+- Foreground tools/templates fit short work; async recipes/runs fit subagents, services, fanout, media, and long pipelines.
+- Long fanout = parent async recipe wrapping template(parallel:true) and imports; packaged fanout recipes bubble branch completion messages.
+- For deeper pi-actors guidance, inspect installed extension sources/docs/recipes; README and docs are not automatically in context.`;
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",
@@ -53,7 +46,7 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   templateArray:
     "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/failure/recover.",
   templateNull: "Delete the tool when template is null.",
-  args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,model=openai-codex/gpt-5.5",
+  args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,mode=fast",
   update: "Set to true to overwrite an existing tool registration.",
   values:
     "Optional default runtime placeholder values for a co-located template recipe.",

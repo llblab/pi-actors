@@ -15,13 +15,19 @@
     "artifact_format": "Markdown with stable headings and preserved evidence.",
     "write_policy": "Prepare content for the artifact path and state whether the caller should write, append, or review before writing.",
     "validation_policy": "List checks the caller should run before accepting the artifact; distinguish required checks from optional review.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["artifact.prepared", "artifact.blocked"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "artifact.prepared",
+      "artifact.blocked"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Prepare a durable artifact. Target path: {artifact_path}. Format: {artifact_format}. Write policy: {write_policy}. Validation policy: {validation_policy}. Input: {input}"
 }

@@ -16,19 +16,22 @@
     "tools:string"
   ],
   "defaults": {
-    "models": [
-      "openai-codex/gpt-5.5",
-      "openai-codex/gpt-5.4",
-      "deepseek/deepseek-v4-flash"
-    ],
     "merge_mode": "consensus-first",
-    "merger_model": "openai-codex/gpt-5.5",
-    "judge_model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["quorum.completed", "review.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "quorum.completed",
+      "review.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

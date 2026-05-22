@@ -1,8 +1,16 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.14.3",
+  "version": "0.15.0",
   "private": false,
   "description": "Actor runtime and orchestrator for agent-managed local processes",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "actors",
+    "orchestration",
+    "automation",
+    "tools"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -13,14 +21,9 @@
   "bugs": {
     "url": "https://github.com/llblab/pi-actors/issues"
   },
-  "keywords": [
-    "pi-package",
-    "pi-extension",
-    "actors",
-    "orchestration",
-    "automation",
-    "tools"
-  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "check": "node --experimental-strip-types -e \"await import('./index.ts'); console.log('pi-actors: extension import ok')\"",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
@@ -32,6 +35,7 @@
     "lib",
     "scripts",
     "recipes",
+    "skills",
     "README.md",
     "AGENTS.md",
     "BACKLOG.md",
@@ -41,6 +45,10 @@
   "pi": {
     "extensions": [
       "./index.ts"
+    ],
+    "skills": [
+      "./skills/actors/SKILL.md",
+      "./skills/swarm/SKILL.md"
     ]
   },
   "peerDependencies": {

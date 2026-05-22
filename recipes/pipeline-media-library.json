@@ -20,12 +20,21 @@
     "max_depth": "2",
     "output_mode": "m3u",
     "artifact_path": "./media-library.md",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["media.completed", "artifact.prepared", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "media.completed",
+      "artifact.prepared",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

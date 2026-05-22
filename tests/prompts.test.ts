@@ -30,11 +30,8 @@ test("Register tool parameter descriptions cover public input fields", () => {
 
 test("Onboarding system prompt explains recipe and async run model compactly", () => {
   const lines = Prompts.ONBOARDING_SYSTEM_PROMPT.split("\n");
-  assert.equal(lines.length <= 20, true);
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /Local-first cybernetic tool memory/,
-  );
+  assert.equal(lines.length <= 14, true);
+  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Local-first actor memory/);
   assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Command templates stay sync/);
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
@@ -46,7 +43,11 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /If asked to explore pi-actors/,
+    /README and docs are not automatically in context/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /avoid runtime\/FIFO\/outbox vocabulary/,
   );
 });
 

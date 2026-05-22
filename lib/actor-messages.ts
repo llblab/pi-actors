@@ -44,13 +44,15 @@ export function parseActorAddress(address: string): ActorAddress {
   const value = address.trim();
   if (value === "coordinator") return { kind: "coordinator" };
   const separator = value.indexOf(":");
-  if (separator < 0) throw new Error(`Actor address must include kind: ${address}`);
+  if (separator < 0)
+    throw new Error(`Actor address must include kind: ${address}`);
   const kind = value.slice(0, separator) as ActorAddressKind;
   const rest = value.slice(separator + 1);
   switch (kind) {
     case "branch": {
       const [run, branch, ...extra] = rest.split("/");
-      if (extra.length > 0) throw new Error(`Branch address has too many parts: ${address}`);
+      if (extra.length > 0)
+        throw new Error(`Branch address has too many parts: ${address}`);
       return {
         kind,
         value: assertToken(run || "", "branch run"),
@@ -74,14 +76,19 @@ export function formatActorAddress(address: ActorAddress): string {
   return `${address.kind}:${assertToken(address.value || "", `${address.kind} address`)}`;
 }
 
-function normalizeOptionalString(value: unknown, label: string): string | undefined {
+function normalizeOptionalString(
+  value: unknown,
+  label: string,
+): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") throw new Error(`${label} must be a string`);
   const normalized = value.trim();
   return normalized || undefined;
 }
 
-function normalizeMetadata(value: unknown): Record<string, unknown> | undefined {
+function normalizeMetadata(
+  value: unknown,
+): Record<string, unknown> | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "object" || Array.isArray(value)) {
     throw new Error("message metadata must be an object");
@@ -113,8 +120,14 @@ export function normalizeActorMessage(input: unknown): ActorMessage {
       ? { correlation_id: String(record.correlation_id) }
       : {}),
     ...(from ? { from: formatActorAddress(parseActorAddress(from)) } : {}),
-    ...(record.metadata !== undefined ? { metadata: normalizeMetadata(record.metadata) } : {}),
-    ...(record.reply_to !== undefined ? { reply_to: String(record.reply_to) } : {}),
-    ...(record.summary !== undefined ? { summary: String(record.summary) } : {}),
+    ...(record.metadata !== undefined
+      ? { metadata: normalizeMetadata(record.metadata) }
+      : {}),
+    ...(record.reply_to !== undefined
+      ? { reply_to: String(record.reply_to) }
+      : {}),
+    ...(record.summary !== undefined
+      ? { summary: String(record.summary) }
+      : {}),
   };
 }

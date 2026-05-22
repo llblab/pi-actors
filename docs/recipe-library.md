@@ -46,7 +46,7 @@ Core subagent recipes:
 - `recipes/subagent-followup.json`: Same-context or degraded continuation.
 - `recipes/subagent-judge.json`: Post-merge/report quality judge.
 
-Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. The generic prompt launchers, including `subagent-tools` and `subagents-prompts`, expose the same core model/thinking/tool/output knobs so callers do not need separate recipe families for policy tuning. Interactive async atoms also declare mailbox metadata for their basic control, completion, and domain-result message surface. Higher-level recipes pass these knobs through instead of hard-coding local policy.
+Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Packaged recipes intentionally do not ship concrete model-version defaults: callers must pass current model policy at launch, which keeps reusable recipe components from aging around old provider aliases. The generic prompt launchers, including `subagent-tools` and `subagents-prompts`, expose the same core model/thinking/tool/output knobs so callers do not need separate recipe families for policy tuning. Interactive async atoms also declare mailbox metadata for their basic control, completion, and domain-result message surface. Higher-level recipes pass these knobs through instead of hard-coding local policy.
 
 Register one atom:
 
@@ -68,8 +68,10 @@ inspect target=run:docs-review view=tail
 
 Pipeline recipes demonstrate second-order composition:
 
+- `recipes/coordinator-locker.json`: Long-lived coordinator cell with queue, acquire/renew/release lease locks, journal, and actor messages for worker coordination.
 - `recipes/subagent-review-coordinator.json`: Lens reviewers → verifier → merger → judge → normalizer.
-- `recipes/pipeline-release-readiness.json`: Task-first release cell: changelog section → package summary → validation → release review → artifact report.
+- `recipes/pipeline-release-readiness.json`: Task-first release cell: changelog section → package summary → packaged skill summary → validation → release review → artifact report.
+- `recipes/pipeline-release-summary.json`: Evidence-only release summary cell: changelog section → package summary → packaged skill summary → validation → release summary / risks / PR body draft artifact. It does not commit, open a PR, merge, tag, publish, or perform external release side effects.
 - `recipes/pipeline-repo-health.json`: Task-first repository-health cell: git status/log → docs index → validation → normalized artifact report.
 - `recipes/pipeline-async-run-ops.json`: Task-first async-run operations cell: run summary → actor-message tail → normalized operations report → artifact report.
 - `recipes/pipeline-review-readiness.json`: Release/readiness gate over selected lenses.
@@ -96,16 +98,18 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-git-status.json`: Read concise branch/worktree state for a repo.
 - `recipes/utility-git-log.json`: Read recent decorated commit history for a repo.
 - `recipes/utility-run-state-files.json`: List run-state files such as `run.json` under an async run state root.
+- `recipes/utility-coordinator-lock-snapshot.json`: Summarize a coordinator-locker actor state directory with queue depth, locks, and recent journal entries.
 - `recipes/utility-changelog-head.json`: Read the top slice of a changelog for release summary prep.
 - `recipes/utility-playlist-scan.json`: List local media files as playlist-building input.
 - `recipes/utility-run-summary.json`: Use `scripts/recipe-utils.mjs` to summarize async run state files as JSON.
-- `recipes/utility-run-ops-snapshot.json`: Combine async run summaries, actor-message JSONL tails, and stale/terminal recommendations into one structured operations snapshot.
+- `recipes/utility-run-ops-snapshot.json`: Combine async run summaries, recent actor messages for a selected `run_id`, and stale/terminal recommendations into one structured operations snapshot.
 - `recipes/utility-playlist-build.json`: Use `scripts/recipe-utils.mjs` to build a filtered playlist listing as newline paths, M3U, or inline `|`-separated source.
 - `recipes/utility-changelog-section.json`: Use `scripts/recipe-utils.mjs` to extract one changelog release section.
 - `recipes/utility-artifact-manifest.json`: Use `scripts/recipe-utils.mjs` to emit a machine-readable JSON manifest for an artifact path.
 - `recipes/utility-artifact-write.json`: Deterministically write prepared artifact content from stdin to `artifact_path` with explicit `create`, `overwrite`, or `append` mode.
 - `recipes/utility-actor-message.json`: Deterministically wrap stdin as a validated addressed actor-message envelope with the same public names as the envelope: `to`, `from`, `type`, `summary`, `body`, optional `correlation_id`/`reply_to`, and `metadata`.
 - `recipes/utility-package-summary.json`: Use `scripts/recipe-utils.mjs` to emit bounded package metadata such as name, version, files, scripts, and dependency counts.
+- `recipes/utility-skill-summary.json`: Use `scripts/recipe-utils.mjs` to summarize packaged skill frontmatter, body shape, formatter-safe scalar lines, and package-version alignment.
 - `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 
 These recipes are intentionally small. Register them only for trusted local commands and prefer narrow scopes. The helper-backed utilities share `scripts/recipe-utils.mjs` so repeated parsing/listing logic stays out of recipe strings.

@@ -4,9 +4,9 @@
  * Owns command-template invocation execution and pi tool-result payload formatting
  */
 
+import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
 import { formatFailureOutput, formatOutput, formatToolText } from "./output.ts";
-import * as CommandTemplates from "./command-templates.ts";
 import * as Schema from "./schema.ts";
 
 export interface ToolExecOptions {
@@ -268,9 +268,10 @@ function resolveNumericControlField(
   label: string,
 ): number | undefined {
   if (value === undefined) return undefined;
-  const resolved = typeof value === "string"
-    ? CommandTemplates.substituteCommandTemplateToken(value, values, label)
-    : value;
+  const resolved =
+    typeof value === "string"
+      ? CommandTemplates.substituteCommandTemplateToken(value, values, label)
+      : value;
   if (resolved === "") return undefined;
   const numeric = Number(resolved);
   if (!Number.isFinite(numeric) || numeric < 0)
@@ -407,7 +408,10 @@ async function executeTemplateConfig(
   const controlValues = { ...(context.defaults ?? {}), ...params };
   await applyDelay(normalized.delay, controlValues, signal);
   if (
-    !CommandTemplates.shouldRunCommandTemplateNode(normalized.when, controlValues)
+    !CommandTemplates.shouldRunCommandTemplateNode(
+      normalized.when,
+      controlValues,
+    )
   ) {
     return {
       branches: [],

@@ -14,7 +14,6 @@
     "summary_path:path"
   ],
   "defaults": {
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": "",
     "output_format": "Concise Markdown with assumptions and next actions.",
@@ -26,8 +25,16 @@
     "summary": "{summary_path}"
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "repeat": "{prompts.length}",
   "parallel": true,

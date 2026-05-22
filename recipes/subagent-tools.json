@@ -9,13 +9,20 @@
     "output_format:string"
   ],
   "defaults": {
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "output_format": "Concise Markdown with assumptions and next actions."
   },
   "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} --tools {tools} {prompt}. Output format: {output_format}"
 }

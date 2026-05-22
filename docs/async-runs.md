@@ -139,10 +139,10 @@ The actor-level surface is:
 
 Low-level async actions map into the actor surface instead of forming a second public model:
 
-- start → `spawn`
-- send/control → `message`
-- status/tail/messages/list → `inspect`
-- stop/kill → `message` with `control.stop` or `control.kill`, with synchronous results
+- Start → `spawn`
+- Send/control → `message`
+- Status/tail/messages/list → `inspect`
+- Stop/kill → `message` with `control.stop` or `control.kill`, with synchronous results
 
 Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
 

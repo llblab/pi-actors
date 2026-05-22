@@ -125,7 +125,7 @@ test("Stored tool normalization accepts template recipe paths in template", () =
   const result = normalizeStoredTool(
     "docs_review",
     {
-      args: ["scope:path", "model:string=openai-codex/gpt-5.5"],
+      args: ["scope:path", "model:string=selected-model"],
       description: "Start docs review actor",
       template: "docs-review.json",
     },
@@ -137,11 +137,11 @@ test("Stored tool normalization accepts template recipe paths in template", () =
     name: "docs_review",
     description: "Start docs review actor",
     args: ["scope", "model"],
-    defaults: { model: "openai-codex/gpt-5.5" },
+    defaults: { model: "selected-model" },
     argTypes: { scope: { kind: "path" } },
     template: "docs-review.json",
     storedArgs: ["scope:path", "model"],
-    storedDefaults: { model: "openai-codex/gpt-5.5" },
+    storedDefaults: { model: "selected-model" },
   });
 });
 

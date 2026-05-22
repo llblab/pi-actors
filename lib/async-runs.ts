@@ -19,8 +19,8 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
 import { platform } from "node:os";
+import { basename, extname, join, resolve } from "node:path";
 
 import type {
   CommandTemplateFailureScope,
@@ -28,8 +28,8 @@ import type {
 } from "./command-templates.ts";
 import { substituteCommandTemplateToken } from "./command-templates.ts";
 import { writeJsonAtomic } from "./file-state.ts";
-import * as RecipeReferences from "./recipe-references.ts";
 import * as Paths from "./paths.ts";
+import * as RecipeReferences from "./recipe-references.ts";
 
 export interface AsyncRunStartParams {
   async?: boolean;
@@ -139,8 +139,7 @@ function resolveArtifactPaths(
 function resolveRunTemplate(params: AsyncRunStartParams): {
   template: CommandTemplateValue;
 } {
-  if (!params.template)
-    throw new Error("spawn requires file or template.");
+  if (!params.template) throw new Error("spawn requires file or template.");
   const envelope: Record<string, unknown> = {};
   for (const key of [
     "args",
@@ -227,7 +226,8 @@ function isAlive(pid: number): boolean {
 }
 
 function pidMatchesRun(pid: number, cwd: string, stateDir: string): boolean {
-  if (platform() !== "linux" || !existsSync(`/proc/${pid}`)) return isAlive(pid);
+  if (platform() !== "linux" || !existsSync(`/proc/${pid}`))
+    return isAlive(pid);
   try {
     const procCwd = readlinkSync(`/proc/${pid}/cwd`);
     const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
@@ -405,15 +405,23 @@ function normalizeRunOutboxEvent(
       : `${run}:${index}`;
   return {
     ...(record.body !== undefined ? { body: record.body } : {}),
-    ...(typeof record.correlation_id === "string" ? { correlation_id: record.correlation_id } : {}),
+    ...(typeof record.correlation_id === "string"
+      ? { correlation_id: record.correlation_id }
+      : {}),
     ...(record.data !== undefined ? { data: record.data } : {}),
     delivery: normalizeRunOutboxDelivery(record.delivery),
-    ...(record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata) ? { metadata: record.metadata as Record<string, unknown> } : {}),
+    ...(record.metadata &&
+    typeof record.metadata === "object" &&
+    !Array.isArray(record.metadata)
+      ? { metadata: record.metadata as Record<string, unknown> }
+      : {}),
     event,
     ...(typeof record.from === "string" ? { from: record.from } : {}),
     id,
     level: normalizeRunOutboxLevel(record.level),
-    ...(typeof record.reply_to === "string" ? { reply_to: record.reply_to } : {}),
+    ...(typeof record.reply_to === "string"
+      ? { reply_to: record.reply_to }
+      : {}),
     run,
     state_dir: stateDir,
     summary,
@@ -448,8 +456,9 @@ export function getRunStatus(runOrDir: string): Record<string, unknown> {
   const pid = Number(meta.pid || 0);
   const aliveOwnedRunner = Boolean(
     pid &&
-      isAlive(pid) &&
-      (!Array.isArray(meta.argv) || pidMatchesRun(pid, String(meta.cwd ?? ""), stateDir)),
+    isAlive(pid) &&
+    (!Array.isArray(meta.argv) ||
+      pidMatchesRun(pid, String(meta.cwd ?? ""), stateDir)),
   );
   const status: AsyncRunStatus = result
     ? Number(result.code ?? 0) === 0
@@ -555,7 +564,9 @@ export function appendRunOutboxEvent(
     ...(event.body !== undefined ? { body: event.body } : {}),
     ...(event.correlation_id ? { correlation_id: event.correlation_id } : {}),
     ...(event.data !== undefined ? { data: event.data } : {}),
-    delivery: normalizeRunOutboxDelivery(event.delivery ?? (to === "coordinator" ? "followup" : "log")),
+    delivery: normalizeRunOutboxDelivery(
+      event.delivery ?? (to === "coordinator" ? "followup" : "log"),
+    ),
     event: type,
     from: event.from || `run:${run}`,
     level: normalizeRunOutboxLevel(event.level),
@@ -608,7 +619,9 @@ export function sendRunMessage(
     fd = openSync(controlPath, constants.O_WRONLY | constants.O_NONBLOCK);
     const bytes = writeSync(fd, payload);
     const trimmedMessage = message.trim().toLowerCase();
-    const terminalMessage = ["stop", "cancel", "quit", "exit"].includes(trimmedMessage);
+    const terminalMessage = ["stop", "cancel", "quit", "exit"].includes(
+      trimmedMessage,
+    );
     writeFileSync(
       join(stateDir, "events.jsonl"),
       `${JSON.stringify({ bytes, event: "run.message", terminal: terminalMessage || undefined, ts: new Date().toISOString() })}\n`,

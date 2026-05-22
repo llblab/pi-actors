@@ -227,7 +227,8 @@ function loadPlaylist(source) {
   } else {
     fail(`source not found: ${sourceArg}`, 66);
   }
-  if (tracks.length === 0) fail(`source has no playable tracks: ${sourceArg}`, 66);
+  if (tracks.length === 0)
+    fail(`source has no playable tracks: ${sourceArg}`, 66);
   return tracks;
 }
 

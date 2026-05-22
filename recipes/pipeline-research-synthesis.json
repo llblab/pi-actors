@@ -19,12 +19,20 @@
   "defaults": {
     "sources": "Use provided source notes or artifact paths only; mark missing evidence.",
     "constraints": "Bound the question, preserve contradictions, and avoid publication-style certainty when evidence is weak.",
-    "model": "openai-codex/gpt-5.5",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["research.completed", "command.done", "run.done", "run.failed"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "research.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
   },
   "template": [
     {

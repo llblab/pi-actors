@@ -18,13 +18,18 @@
     "from": "run:{run_id}",
     "message_policy": "Emit an actor-message envelope-shaped JSON object for the coordinator; do not call transport tools directly.",
     "output_format": "JSON object with to, from, type, summary, body, metadata, confidence, and next_action.",
-    "model": "openai-codex/gpt-5.5",
     "thinking": "off",
     "tools": ""
   },
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
-    "emits": ["component.*"]
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "component.*"
+    ]
   },
   "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create an actor-message envelope-shaped record. To: {to}. From: {from}. Type: {type}. Message policy: {message_policy}. Payload/body: {payload}. Output format: {output_format}"
 }

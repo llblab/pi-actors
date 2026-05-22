@@ -1,6 +1,8 @@
 # pi-actors
 
-Actor runtime and orchestrator for agent-managed local processes.
+> Actor runtime and orchestrator for agent-managed local processes.
+
+[<img alt="Actors*" src="banner.jpg" />](https://github.com/llblab/pi-actors "pi-actors")
 
 `pi-actors` turns local programs, scripts, services, recipes, and long-running processes into addressable actors that agents can start, message, inspect, and compose. A music player, a sub-agent fanout, a repo-health pipeline, or any trusted local process can become an actor when it has a template-backed launch path, a mailbox contract, and observable runtime state.
 
@@ -44,7 +46,7 @@ The key move is not just “register a command.” It is to wrap a process in an
 - **Control**: `message` sends typed envelopes to runs, branches, tools, or the coordinator.
 - **Observation**: `inspect` reads status, logs, messages, mailbox metadata, files, and artifacts intentionally.
 - **Persistence**: `artifacts` and state files make outcomes durable.
-- **Memory**: `actors-tools.json` stores reusable actor-control wrappers across sessions.
+- **Memory**: `~/.pi/agent/recipes/*.json` stores reusable actor-control wrappers across sessions.
 
 ## Key Features
 
@@ -52,7 +54,7 @@ The key move is not just “register a command.” It is to wrap a process in an
 - **Agent-Managed Processes**: Wraps sub-agents, media players, pipelines, diagnostics, and other local programs as controllable entities instead of one-off commands.
 - **Message-Oriented Control**: Uses `spawn`, `message`, and `inspect` as the public coordination vocabulary for start, control, and observation.
 - **Mailbox Contracts**: Lets recipes declare what messages they accept and emit, so agents can discover how to interact with an actor.
-- **Actor Tool Registry**: Stores persistent actor-control tool definitions in `~/.pi/agent/actors-tools.json` and registers them automatically on session start.
+- **Actor Tool Registry**: Stores persistent actor-control tools as recipe files in `~/.pi/agent/recipes/*.json` and registers them automatically on session start.
 - **Command Template Substrate**: Keeps process launch portable with named placeholders, typed args, defaults, sequences, guarded nodes, retries, failure policy, and `parallel: true` fanout.
 - **Composable Actor Recipes**: Stores reusable recipe JSON under `~/.pi/agent/recipes/*.json`; recipes can import other recipes, reuse defaults, declare artifacts, and opt into detached actor lifecycle with `async: true`.
 - **Coordinator-Scoped Observability**: Shows ambient triangles for active actor runs and sends compact completion or request-for-attention follow-ups only to the launching coordinator.
@@ -73,27 +75,17 @@ From git:
 pi install git:github.com/llblab/pi-actors
 ```
 
-## Rename Migration
+## Registry Migration
 
-`pi-actors` reads persistent actor-control tools from:
+`pi-actors` now reads persistent actor-control tools from:
 
 ```text
-~/.pi/agent/actors-tools.json
+~/.pi/agent/recipes/*.json
 ```
 
-If you previously used `pi-auto-tools`, copy the old registry intentionally:
+That directory is the operator-managed tool set: user recipe files there become tools by default unless they set `tool: false`. Packaged recipes are the lower-priority standard library of declarative actor components and opt into tools with `tool: true`.
 
-```bash
-cp ~/.pi/agent/auto-tools.json ~/.pi/agent/actors-tools.json
-```
-
-If you installed the brief `0.12.0`/`0.12.1` line and created `tools.json`, copy that file instead:
-
-```bash
-cp ~/.pi/agent/tools.json ~/.pi/agent/actors-tools.json
-```
-
-The extension does not silently rewrite old registry files; keep or delete the old file after confirming the new registry loads as expected.
+If `~/.pi/agent/actors-tools.json` exists from an older release, pi-actors treats it as legacy compatibility input, migrates entries into recipe files when possible, writes a migration report, and archives the legacy file only when migration is clean.
 
 ## Mental Model
 
@@ -129,7 +121,7 @@ Move to actor recipes when work is long-running, parallel, service-like, or agen
 
 ```json
 {
-  "name": "docs-review",
+  "name": "docs_review",
   "async": true,
   "args": ["scope:path", "model:string"],
   "defaults": {},
@@ -144,7 +136,7 @@ Move to actor recipes when work is long-running, parallel, service-like, or agen
 Expose a reusable actor recipe as a normal capability:
 
 ```text
-register_tool name=docs_review description="Start an async docs review actor" template="docs-review.json" args="scope:path,model:string"
+register_tool name=docs_review description="Start an async docs review actor" template="docs_review" args="scope:path,model:string"
 ```
 
 `Task` is the user's work item. `Template` is the execution graph. `Actor recipe` is saved JSON. `Run` is one actor instance with status, logs, messages, cancellation, artifacts, and ambient triangles.
@@ -213,27 +205,25 @@ For reusable actor workflows, keep the large template and mailbox contract in a 
 ```text
 register_tool name=docs_review \
   description="Start an async docs review actor" \
-  template="docs-review.json" \
+  template="docs_review" \
   args="scope:path,model:string"
 ```
 
 If the recipe file contains `async: true`, calling `docs_review` starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
 
-A recipe can also be co-located in `actors-tools.json` when keeping metadata and the recipe body together is clearer:
+When keeping metadata and the recipe body together is clearer, `register_tool` writes a complete user recipe file:
 
 ```json
 {
-  "review_docs": {
-    "description": "Start an async docs review",
-    "name": "review-docs",
-    "async": true,
-    "args": ["scope:path", "model:string"],
-    "template": "pi -p --model {model} --tools read,bash \"Review {scope}\""
-  }
+  "description": "Start an async docs review",
+  "tool": true,
+  "async": true,
+  "args": ["scope:path", "model:string"],
+  "template": "pi -p --model {model} --tools read,bash \"Review {scope}\""
 }
 ```
 
-A co-located recipe entry still cannot define `tool`; it must own `template` directly.
+The filename is the recipe id/tool name, `async: true` selects detached run mode, and `template` remains the executable body.
 
 ### Sub-agent
 
@@ -257,30 +247,28 @@ Delete a tool:
 register_tool name=call_subagent template=null
 ```
 
-## Resulting Config
+## Resulting Recipe Files
 
-The commands above persist entries like this in `~/.pi/agent/actors-tools.json`; tool names come from the top-level keys. Stored entries keep `template` last so flags and metadata are read before executable content:
+The commands above persist files under `~/.pi/agent/recipes/`. Tool names come from recipe filenames. Stored recipes keep `template` last so flags and metadata are read before executable content:
 
 ```json
 {
-  "transcribe": {
-    "description": "Transcribe a local audio file",
-    "template": "/path/to/stt --file {file} --lang {lang=ru}"
-  },
-  "call_subagent": {
-    "description": "Run pi as a non-interactive sub-agent",
-    "args": ["prompt:string", "model:string"],
-    "template": "pi -p --model {model} --no-tools {prompt}"
-  },
-  "docs_review": {
-    "description": "Start an async docs review actor",
-    "args": ["scope:path", "model:string"],
-    "template": "docs-review.json"
-  }
+  "description": "Transcribe a local audio file",
+  "tool": true,
+  "template": "/path/to/stt --file {file} --lang {lang=ru}"
 }
 ```
 
-This file is the durable actor-tool registry. `register_tool` is the interactive API; `actors-tools.json` is the persisted state that is loaded on future sessions.
+```json
+{
+  "description": "Run pi as a non-interactive sub-agent",
+  "tool": true,
+  "args": ["prompt:string", "model:string"],
+  "template": "pi -p --model {model} --no-tools {prompt}"
+}
+```
+
+The recipe directory is the durable actor-tool registry. `register_tool` is the interactive API; recipe files are the persisted state loaded on future sessions.
 
 ## Manage Actors
 

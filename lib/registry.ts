@@ -4,10 +4,15 @@
  * Owns register/update/delete validation, persistence, runtime side effects, and result payloads
  */
 
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 import * as Config from "./config.ts";
 import * as Identity from "./identity.ts";
 import * as Output from "./output.ts";
 import * as CommandTemplates from "./command-templates.ts";
+import { writeJsonAtomic } from "./file-state.ts";
+import * as Paths from "./paths.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as Schema from "./schema.ts";
 
@@ -41,6 +46,7 @@ export interface RegisterToolResult {
 
 export interface RegisterToolRuntimeDeps<TContext> {
   configPath: string;
+  recipeRoot?: string;
   getExternalToolConflict: (name: string) => string | undefined;
   getTools: () => Map<string, Config.RegisteredTool>;
   getActiveTools: () => string[];
@@ -76,6 +82,38 @@ function listTools<TContext>(
   };
 }
 
+function getRecipeRoot<TContext>(
+  deps: RegisterToolRuntimeDeps<TContext>,
+): string {
+  return deps.recipeRoot ?? Paths.getRecipeRoot(dirname(deps.configPath));
+}
+
+function getToolRecipePath<TContext>(
+  deps: RegisterToolRuntimeDeps<TContext>,
+  name: string,
+): string {
+  return join(getRecipeRoot(deps), `${name}.json`);
+}
+
+function persistToolRecipe<TContext>(
+  deps: RegisterToolRuntimeDeps<TContext>,
+  cfg: Config.RegisteredTool,
+): string {
+  const path = getToolRecipePath(deps, cfg.name);
+  mkdirSync(dirname(path), { recursive: true });
+  writeJsonAtomic(path, {
+    description: cfg.description,
+    tool: true,
+    ...(cfg.recipe?.async !== undefined ? { async: cfg.recipe.async } : {}),
+    ...(cfg.recipe?.state_dir ? { state_dir: cfg.recipe.state_dir } : {}),
+    ...(cfg.storedArgs ? { args: cfg.storedArgs } : {}),
+    ...(cfg.storedDefaults ? { defaults: cfg.storedDefaults } : {}),
+    ...(cfg.recipe?.values ? { values: cfg.recipe.values } : {}),
+    template: cfg.template,
+  });
+  return path;
+}
+
 function deleteTool<TContext>(
   name: string,
   ctx: TContext,
@@ -90,14 +128,8 @@ function deleteTool<TContext>(
       details: { tool: name },
     };
   }
-  const nextTools = new Map(tools);
-  nextTools.delete(name);
-  const saveError = Config.saveTools(deps.configPath, nextTools);
-  if (saveError) {
-    throw new Error(
-      Output.formatToolText(`Failed to persist tool deletion: ${saveError}`),
-    );
-  }
+  const recipePath = getToolRecipePath(deps, name);
+  if (existsSync(recipePath)) unlinkSync(recipePath);
   tools.delete(name);
   deps.setActiveTools(
     deps.getActiveTools().filter((toolName) => toolName !== name),
@@ -111,7 +143,7 @@ function deleteTool<TContext>(
         ),
       ),
     ],
-    details: { config: deps.configPath, tool: name },
+    details: { config: recipePath, tool: name },
   };
 }
 
@@ -257,16 +289,17 @@ export async function executeRegisterTool<TContext>(
     );
   }
   const cfg = buildConfig(name, input, existing);
-  const nextTools = new Map(tools);
-  nextTools.set(name, cfg);
-  const saveError = Config.saveTools(deps.configPath, nextTools);
-  if (saveError) {
+  let recipePath: string;
+  try {
+    recipePath = persistToolRecipe(deps, cfg);
+  } catch (error) {
     throw new Error(
       Output.formatToolText(
-        `Failed to persist tool registration: ${saveError}`,
+        `Failed to persist tool recipe: ${error instanceof Error ? error.message : String(error)}`,
       ),
     );
   }
+  cfg.sourcePath = recipePath;
   tools.set(name, cfg);
   deps.registerRuntimeTool(cfg);
   deps.notify(ctx, `Tool persisted: ${name}`, "info");
@@ -289,7 +322,7 @@ export async function executeRegisterTool<TContext>(
     ],
     details: {
       args: cfg.args,
-      config: deps.configPath,
+      config: recipePath,
       defaults: cfg.defaults,
       ...(cfg.recipe?.async !== undefined ? { async: cfg.recipe.async } : {}),
       ...(cfg.recipe?.name ? { recipeName: cfg.recipe.name } : {}),

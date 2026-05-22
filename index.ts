@@ -40,6 +40,8 @@ const RESERVED_TOOL_NAMES = new Set([
 export default function toolRegistryExtension(pi: ExtensionAPI) {
   let runsAnimationInterval: NodeJS.Timeout | undefined;
   let runsNotifyTimeout: NodeJS.Timeout | undefined;
+  let recipeReloadTimeout: NodeJS.Timeout | undefined;
+  let recipeRootWatcher: FSWatcher | undefined;
   let stateRootWatcher: FSWatcher | undefined;
   const runDirWatchers = new Map<string, FSWatcher>();
   const observedRuns = new Map<string, Observability.RunObservedStatus>();
@@ -147,23 +149,54 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       watchRunDir(ctx, `${RUN_STATE_ROOT}/${entry.name}`);
     }
   }
+  const closeRecipeWatcher = (): void => {
+    recipeRootWatcher?.close();
+    recipeRootWatcher = undefined;
+    if (recipeReloadTimeout) clearTimeout(recipeReloadTimeout);
+    recipeReloadTimeout = undefined;
+  };
+  const scheduleRecipeReload = (ctx: ExtensionContext): void => {
+    if (recipeReloadTimeout) clearTimeout(recipeReloadTimeout);
+    recipeReloadTimeout = setTimeout(() => {
+      runtime.loadTools(ctx);
+      ctx.ui.notify("Recipe tools refreshed from ~/.pi/agent/recipes", "info");
+    }, 150);
+    recipeReloadTimeout.unref?.();
+  };
+  const watchRecipeRoot = (ctx: ExtensionContext): void => {
+    const recipeRoot = Paths.getRecipeRoot();
+    if (recipeRootWatcher || !existsSync(recipeRoot)) return;
+    try {
+      recipeRootWatcher = watch(recipeRoot, () => scheduleRecipeReload(ctx));
+      recipeRootWatcher.on("error", () => {
+        recipeRootWatcher?.close();
+        recipeRootWatcher = undefined;
+      });
+    } catch {
+      // Watching is best-effort; restarting the session reloads recipe tools.
+    }
+  };
   const actorToolDefinitions = new Map<string, any>();
   const runtime = Runtime.createAutoToolsRuntime({
     configPath: CONFIG_PATH,
     exec: CommandTemplates.execCommandTemplate,
+    getActiveTools: () => pi.getActiveTools(),
     getAllTools: () => pi.getAllTools(),
     registerTool: (definition) => {
       actorToolDefinitions.set(definition.name, definition);
       pi.registerTool(definition);
     },
     reservedToolNames: RESERVED_TOOL_NAMES,
+    setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
   });
   pi.on("session_start", async (_event, ctx) => {
     await Temp.prepareExtensionTempDir(TEMP_DIR);
     runtime.loadTools(ctx);
     updateRunUi(ctx);
     closeRunWatchers();
+    closeRecipeWatcher();
     refreshRunWatchers(ctx);
+    watchRecipeRoot(ctx);
     if (runsAnimationInterval) clearInterval(runsAnimationInterval);
     runsAnimationInterval = setInterval(() => updateRunUi(ctx, false), 1000);
     runsAnimationInterval.unref?.();
@@ -172,6 +205,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     if (runsAnimationInterval) clearInterval(runsAnimationInterval);
     runsAnimationInterval = undefined;
     closeRunWatchers();
+    closeRecipeWatcher();
   });
   pi.on("before_agent_start", async (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,

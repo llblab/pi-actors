@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.15.0
+  version: 0.16.0
 ---
 
 # Actors (pi-actors)
@@ -93,6 +93,7 @@ Check `inspect view=mailbox` before domain-specific messages.
 { "target": "run:repo-health", "view": "messages" }
 { "target": "run:repo-health", "view": "artifacts" }
 { "target": "tool:music_player", "view": "status" }
+{ "target": "recipes", "view": "status" }
 { "target": "coordinator", "view": "status" }
 ```
 
@@ -104,6 +105,7 @@ Views:
 - `mailbox`: declared accepts/emits contract.
 - `files`: run state directory file list.
 - `artifacts`: declared artifact paths/status.
+- `recipes` target: registry summary for active, shadowed, invalid, disabled, and diagnostic recipe entries.
 
 Let terminal notifications arrive; avoid sleep-poll loops except during diagnosis.
 
@@ -165,22 +167,38 @@ Rules:
 4. Use `imports` to compose recipes; imported recipes are definitions, not nested async runs.
 5. Declare `mailbox` for actors that accept or emit meaningful messages.
 6. Declare `artifacts` for durable outputs the coordinator should inspect.
-7. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
-8. Do not ship concrete model-version defaults in packaged recipes; expose `model`, `models`, and stage-specific model args so the caller must choose current policy at launch.
+7. Recipe identity comes from the filename basename when `name` is omitted.
+8. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
+9. Do not ship concrete model-version defaults in packaged recipes; expose `model`, `models`, and stage-specific model args so the caller must choose current policy at launch.
+
+Priority for same-name recipes:
+
+1. No recipe: no capability.
+2. Packaged pi-actors recipe: standard-library declarative actor component.
+3. Explicit ad hoc user recipe file outside `~/.pi/agent/recipes`.
+4. User recipe in `~/.pi/agent/recipes/*.json`: highest-priority operator tool surface.
+
+Only matching filename ids compete. Higher priority shadows lower priority. An invalid or `disabled: true` higher-priority recipe blocks fallback so the agent does not silently run standard-library behavior when a user override is broken or intentionally disabled.
+
+Muscle-memory lens: every recipe in `~/.pi/agent/recipes/*.json` becomes an easy-to-call tool by default. This is intentionally sticky: successful local patterns can quickly become durable agent muscle memory. The tradeoff is tool-surface clutter; accidental or one-off tools behave like persistent intrusive thoughts until an agent/operator focuses on cleanup.
+
+Usage lens: user recipes may carry extension-maintained launch metadata such as `usage.calls` and `usage.last_called`. The extension increments the counter when it starts that concrete recipe; agents should not hand-edit counters as part of normal recipe maintenance. Treat usage as evidence for usefulness analysis: heavily used recipes are good candidates for promotion, documentation, or stronger tests; unused recipes are cleanup or `tool: false` candidates. Do not use failure counts as a primary usefulness signal because failures may reflect bad caller judgment rather than bad recipes. Do not delete or demote solely from counters without operator approval.
+
+Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memory set. For each stale, duplicate, too-specific, or low-value recipe, choose one explicit action: keep as a tool, set `tool: false` to retain recipe-only memory, merge into a better recipe, or delete/archive the file. Prefer demotion over deletion when the recipe may still be useful as a component. Never silently remove tools during unrelated work.
 
 ## Registered Tools
 
-`register_tool` persists trusted local capabilities in `~/.pi/agent/actors-tools.json`.
+`register_tool` persists trusted local capabilities as recipe files in `~/.pi/agent/recipes/*.json`.
 
-Use it when a command/template/recipe should become durable agent muscle memory. Prefer typed args or placeholder-derived args; use `update=true` for replacement and `template=null` or `template=""` for deletion.
+Use it when a command/template/recipe should become durable agent muscle memory. Prefer typed args or placeholder-derived args; use `update=true` for replacement and `template=null` or `template=""` for deletion. `register_tool` should create/update/delete recipe files in the user recipe root; direct file editing is allowed but is the lower-level path.
 
 Tool templates may be:
 
 - A foreground command template.
 - A file-backed recipe name/path.
-- A co-located recipe, optionally `async: true`.
+- A complete recipe body, optionally `async: true`.
 
-Registered tools are convenient buttons; recipes are the reusable semantic definitions behind them.
+The user recipe root is the default tool set; packaged recipes are the lower-priority standard library and opt into tool exposure with `tool: true`. Ideal runtime behavior is reactive: create/edit/delete recipe files, validate them, then connect valid tools or surface diagnostics without requiring agents to hand-maintain a separate registry.
 
 ## Recipe Navigator
 

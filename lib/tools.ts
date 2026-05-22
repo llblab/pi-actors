@@ -9,8 +9,11 @@ import * as AsyncRuns from "./async-runs.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
 import * as Execution from "./execution.ts";
+import * as Paths from "./paths.ts";
 import * as Prompts from "./prompts.ts";
+import * as RecipeDiscovery from "./recipe-discovery.ts";
 import * as RecipeReferences from "./recipe-references.ts";
+import * as RecipeUsage from "./recipe-usage.ts";
 import * as Registry from "./registry.ts";
 import * as Schema from "./schema.ts";
 
@@ -229,6 +232,17 @@ function compactToolActor(name: string, tool: Record<string, unknown>): string {
   return `\ntool=${name} description=${String(tool.description ?? "").replaceAll(/\s+/g, "_")} args=${Object.keys(properties).join(",")} required=${required}`;
 }
 
+function compactRecipeRegistry(summary: Record<string, unknown>): string {
+  const active = Array.isArray(summary.active) ? summary.active.length : 0;
+  const shadowed = Array.isArray(summary.shadowed) ? summary.shadowed.length : 0;
+  const invalid = Array.isArray(summary.invalid) ? summary.invalid.length : 0;
+  const disabled = Array.isArray(summary.disabled) ? summary.disabled.length : 0;
+  const diagnostics = Array.isArray(summary.diagnostics)
+    ? summary.diagnostics.length
+    : 0;
+  return `\nrecipes active=${active} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} diagnostics=${diagnostics}`;
+}
+
 function compactActorMessageResult(
   message: ActorMessages.ActorMessage,
   result: Record<string, unknown>,
@@ -427,6 +441,8 @@ export function createSpawnToolDefinition<
 
 export interface InspectToolDeps<TContext = unknown> {
   getTool?: (name: string) => any | undefined;
+  packagedRecipeRoot?: string;
+  recipeRoot?: string;
 }
 
 function getContextSessionId(ctx: unknown): string | undefined {
@@ -494,8 +510,31 @@ export function createInspectToolDefinition<TContext = unknown>(
     ) {
       const input = asRecord(params);
       const target = String(input.target ?? "");
-      const address = ActorMessages.parseActorAddress(target);
       const view = String(input.view ?? "");
+      if (target === "recipes" || target === "recipe-registry") {
+        if (view !== "status" && view !== "summary") {
+          throw new Error("inspect recipes supports view=status or view=summary.");
+        }
+        const discovered = RecipeDiscovery.discoverRecipeSources([
+          { root: deps.recipeRoot ?? Paths.getRecipeRoot(), defaultTool: true, mutableUsage: true },
+          { root: deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot() },
+        ]);
+        const summary = RecipeDiscovery.summarizeDiscovery(discovered);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: maybeJsonText(
+                summary,
+                input.verbose === true,
+                compactRecipeRegistry(summary),
+              ),
+            },
+          ],
+          details: summary,
+        };
+      }
+      const address = ActorMessages.parseActorAddress(target);
       if (address.kind === "coordinator") {
         if (view !== "status" && view !== "runs") {
           throw new Error(
@@ -881,6 +920,7 @@ export function createRuntimeToolDefinition(
       ctx: AsyncRunToolContext,
     ) {
       try {
+        if (cfg.sourcePath) RecipeUsage.recordRecipeLaunch(cfg.sourcePath);
         if (isAsyncRecipe) {
           const input = params as Record<string, unknown>;
           const { run_id, ...values } = input;

@@ -21,6 +21,8 @@ A recipe wraps one command-template tree. The wrapped `template` keeps the norma
 
 Layer boundary: `imports`, `{ "name": "alias" }` imported-recipe nodes, `{alias.defaults.key}` references, fallback expressions, and recipe-local ternaries are recipe-loading features. They resolve before the command-template graph runs and do not extend the portable Command Template Standard. Typed imports are recipe definitions: they expose the imported recipe's command-template-shaped metadata (`template`, `args`, `defaults`, flags, and `values`), while async-run launch fields such as `async` and `state_dir` remain lifecycle configuration for starting a run, not part of the imported execution graph.
 
+Packaged recipes are the pi-actors recipe standard library: declarative actor config components that can be imported, launched, inspected, overridden, or composed by user recipes. Treat them as stable building blocks rather than user-local policy.
+
 ## Layer Ownership
 
 Template-recipe standard owns:
@@ -66,6 +68,36 @@ Async recipe:
 ```
 
 `name` names the saved definition when an explicit name is needed. File-backed recipes usually omit it because the filename is the canonical recipe id. `template` is the command-template tree. `async: true` selects detached run mode when the recipe is invoked through a registered tool.
+
+## Discovery Priority
+
+Recipe priority only matters when two discovered recipes have the same filename id. The conceptual ladder from lowest to highest priority is:
+
+1. No recipe for that id.
+2. Packaged pi-actors recipe components, acting as the standard library.
+3. Explicitly referenced ad hoc user recipe files located outside `~/.pi/agent/recipes`.
+4. User recipe files under `~/.pi/agent/recipes/*.json`.
+
+The high-priority user recipe directory is also the default tool set: recipes placed there are agent tools unless they explicitly set `tool: false`. This preserves the old advantage of a tool-only registry because listing `~/.pi/agent/recipes` shows the operator-managed tool surface. Packaged and ad hoc recipes are recipe components by default; they opt into agent-tool exposure with `tool: true`.
+
+Higher-priority files shadow lower-priority files with the same basename. A highest-priority invalid recipe is still visible and blocks fallback so operators do not accidentally run packaged behavior when a user override is broken. A highest-priority recipe with `disabled: true` also blocks fallback and intentionally disables that id.
+
+## Usage Metadata
+
+User-owned recipes may accumulate extension-maintained usage metadata:
+
+```json
+{
+  "usage": {
+    "calls": 12,
+    "last_called": "2026-05-22T10:30:00.000Z"
+  }
+}
+```
+
+The extension increments `usage.calls` and updates `usage.last_called` when it starts that concrete recipe, either through a recipe-backed tool call or a direct async recipe-file run. Agents should treat these fields as cleanup evidence, not as authored recipe contract. Packaged standard-library recipes are not mutated for usage metadata.
+
+There is intentionally no failure counter in the recipe contract. A failed launch can reflect caller misuse, missing runtime values, or an environmental problem rather than recipe uselessness. Cleanup decisions should be explicit operator work: keep as a tool, set `tool: false`, merge, delete, or archive.
 
 For object form, keep `template` last. Recipe metadata comes first; executable content stays last.
 
@@ -171,34 +203,19 @@ Call-time params override file params. `values` are merged with file values; cal
 
 ## Registered Recipe Tools
 
-A registered tool can point at an actor recipe by storing the recipe path or name in `template`:
+A registered tool is a recipe file exposed as an agent tool. User recipes under `~/.pi/agent/recipes/*.json` are tools by default; packaged/ad hoc recipes opt in with `tool: true`:
 
 ```json
 {
-  "docs_review": {
-    "description": "Start an async docs review actor",
-    "args": ["scope:path", "model:string"],
-    "template": "docs-review.json"
-  }
+  "description": "Start an async docs review actor",
+  "tool": true,
+  "async": true,
+  "args": ["scope:path", "model:string"],
+  "template": "review {scope} --model {model}"
 }
 ```
 
-If `docs-review.json` contains `async: true`, calling `docs_review` starts a detached actor run and returns metadata. If `async` is omitted or false, calling `docs_review` executes the recipe foreground and returns normal tool output.
-
-A registered tool may also co-locate an actor recipe directly in `actors-tools.json`:
-
-```json
-{
-  "review_docs": {
-    "description": "Start an async docs review",
-    "name": "review-docs",
-    "async": true,
-    "template": "review {scope}"
-  }
-}
-```
-
-The co-located entry must still own `template` directly and must not define `tool`.
+If a tool recipe contains `async: true`, calling the tool starts a detached actor run and returns metadata. If `async` is omitted or false, calling the tool executes the recipe foreground and returns normal tool output.
 
 ## Values And Public Args
 

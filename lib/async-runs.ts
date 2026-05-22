@@ -30,6 +30,7 @@ import { substituteCommandTemplateToken } from "./command-templates.ts";
 import { writeJsonAtomic } from "./file-state.ts";
 import * as Paths from "./paths.ts";
 import * as RecipeReferences from "./recipe-references.ts";
+import * as RecipeUsage from "./recipe-usage.ts";
 
 export interface AsyncRunStartParams {
   async?: boolean;
@@ -170,6 +171,12 @@ function resolveStateDir(params: AsyncRunStartParams, run: string): string {
 
 function resolveRecipeFile(file: string): string {
   return RecipeReferences.resolveRecipePath(file, DEFAULT_RECIPE_ROOT);
+}
+
+function isMutableUsageRecipeFile(file: string): boolean {
+  const userRoot = resolve(DEFAULT_RECIPE_ROOT);
+  const resolved = resolve(file);
+  return resolved.startsWith(`${userRoot}/`);
 }
 
 function readRecipeFile(file: string): AsyncRunStartParams {
@@ -316,6 +323,9 @@ export function startRun(
     ? resolveRecipeFile(startParams.file)
     : undefined;
   const recipe = startParams.name || getRunIdFromFile(recipeFile);
+  if (recipeFile && isMutableUsageRecipeFile(recipeFile)) {
+    RecipeUsage.recordRecipeLaunch(recipeFile);
+  }
   const outFd = openSync(stdout, "a");
   const errFd = openSync(stderr, "a");
   const argv = ["--experimental-strip-types", RUNNER_PATH, stateDir];

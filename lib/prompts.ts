@@ -6,7 +6,7 @@
 
 export const REGISTER_TOOL_DESCRIPTION =
   "Register a persistent custom tool from a command template, template recipe path, or co-located template recipe. " +
-  "Definitions are stored in actors-tools.json across reloads. " +
+  "Definitions are stored as recipe files under ~/.pi/agent/recipes across reloads. " +
   "Use update=true to overwrite an existing tool, template=null/empty to delete.";
 
 export const REGISTER_TOOL_PROMPT_SNIPPET =
@@ -28,7 +28,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Recipe imports are local variables; imported recipes are definitions, not nested async runs; parent async:true creates one run.
 - Use spawn/message/inspect for actor-level start/send/observe; avoid runtime/FIFO/outbox vocabulary in public guidance.
 - Run state lives under ~/.pi/agent/tmp/pi-actors/runs; inspect status/tail/messages/mailbox/files/artifacts intentionally and avoid busy-polling.
-- Register_tool makes persistent tools from command templates, recipe names/paths, or co-located recipes; args may be typed or placeholder-derived.
+- Register_tool writes user recipe files in ~/.pi/agent/recipes; that root is the default tool set, while packaged recipes are the lower-priority standard library.
 - Foreground tools/templates fit short work; async recipes/runs fit subagents, services, fanout, media, and long pipelines.
 - Long fanout = parent async recipe wrapping template(parallel:true) and imports; packaged fanout recipes bubble branch completion messages.
 - For deeper pi-actors guidance, inspect installed extension sources/docs/recipes; README and docs are not automatically in context.`;

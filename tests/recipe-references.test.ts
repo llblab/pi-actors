@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { readResolvedRecipeConfig } from "../lib/recipe-references.ts";
+import { getRecipeIdFromPath, readResolvedRecipeConfig } from "../lib/recipe-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -51,6 +51,29 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
       },
       "wc -c",
     ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template recipes derive recipe identity from filename when name is omitted", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
+  try {
+    const recipe = join(root, "file-identity.json");
+    await writeFile(
+      recipe,
+      JSON.stringify({
+        tool: true,
+        description: "File identity recipe",
+        template: "echo ok",
+      }),
+    );
+
+    const config = readResolvedRecipeConfig(recipe)!;
+    assert.equal(getRecipeIdFromPath(recipe), "file-identity");
+    assert.equal(config.name, "file-identity");
+    assert.equal(config.tool, true);
+    assert.equal(config.description, "File identity recipe");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

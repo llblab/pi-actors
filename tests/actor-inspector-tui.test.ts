@@ -4,8 +4,11 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { visibleWidth } from "@earendil-works/pi-tui";
+
 import {
   readActorInspectorPreviews,
+  renderInspectorItemView,
   renderInspectorWidget,
 } from "../lib/actor-inspector-tui.ts";
 
@@ -56,8 +59,44 @@ test("Actor inspector TUI reads room and direct previews", async () => {
     const lines = renderInspectorWidget(previews, 80);
     assert.ok(lines);
     assert.notEqual(lines?.[0], "actors comms");
-    assert.match(lines?.join("\n") ?? "", / 1  a # all\s+hello room\s*\n\s+chat\.message\s+hello room/);
-    assert.match(lines?.join("\n") ?? "", / 3  demo → a\s+\{"ok":true\}\s*\n\s+checkpoint\.ready\s+\{"ok":true\}/);
+    assert.match(lines?.join("\n") ?? "", / a # all\s+chat\.message\s+hello room/);
+    assert.match(lines?.join("\n") ?? "", / demo → a\s+checkpoint\.ready\s+\{"ok":true\}/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Actor inspector TUI renders room display glyphs from roster", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-glyph-"));
+  try {
+    const stateDir = join(root, "demo");
+    await mkdir(join(stateDir, "rooms", "main"), { recursive: true });
+    await writeFile(
+      join(stateDir, "rooms", "main", "roster.json"),
+      JSON.stringify({
+        "branch:demo/mapper": {
+          address: "branch:demo/mapper",
+          display: "🗺️ mapper",
+          glyph: "🗺️",
+          joined_at: "2026-01-01T00:00:00.000Z",
+          last_seen: "2026-01-01T00:00:00.000Z",
+          role: "systems mapper",
+          status: "present",
+        },
+      }),
+    );
+    await writeFile(
+      join(stateDir, "rooms", "main", "messages.jsonl"),
+      `${JSON.stringify({
+        body: "mapped",
+        from: "branch:demo/mapper",
+        received_at: "2026-01-01T00:00:00.000Z",
+        to: "room:demo",
+        type: "chat.message",
+      })}\n`,
+    );
+    const lines = renderInspectorWidget(readActorInspectorPreviews(root, 10), 80);
+    assert.match(lines?.join("\n") ?? "", /🗺️ mapper # all\s+chat\.message\s+mapped/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -191,7 +230,7 @@ test("Actor inspector TUI can scope previews to the current run and reset number
   }
 });
 
-test("Actor inspector TUI renders compact two-line items", () => {
+test("Actor inspector TUI renders default one-line items", () => {
   const lines = renderInspectorWidget(
     [
       {
@@ -216,11 +255,9 @@ test("Actor inspector TUI renders compact two-line items", () => {
     100,
   );
   assert.ok(lines);
-  assert.equal(lines?.length, 4);
-  assert.match(lines?.[0] ?? "", /^ 1  a → b\s+one\s+$/);
-  assert.match(lines?.[1] ?? "", /^    chat\.message\s+one\s+$/);
-  assert.match(lines?.[2] ?? "", /^ 2  reviewer # all  two\s+$/);
-  assert.match(lines?.[3] ?? "", /^    actor\.join\s+two\s+$/);
+  assert.equal(lines?.length, 2);
+  assert.match(lines?.[0] ?? "", /^ 1  a → b\s+chat\.message\s+one\s+$/);
+  assert.match(lines?.[1] ?? "", /^ 2  reviewer # all\s+actor\.join\s+two\s+$/);
   assert.equal(lines?.some((line) => line.includes("|")), false);
 });
 
@@ -256,12 +293,10 @@ test("Actor inspector TUI can stripe entries by historical order", () => {
   );
   assert.ok(lines);
   assert.match(lines?.[0] ?? "", /^<transparent>/);
-  assert.match(lines?.[1] ?? "", /^<transparent>/);
-  assert.match(lines?.[2] ?? "", /^<dark>/);
-  assert.match(lines?.[3] ?? "", /^<dark>/);
+  assert.match(lines?.[1] ?? "", /^<dark>/);
 });
 
-test("Actor inspector TUI renders compact verbosity as twelve minimally aligned one-line items", () => {
+test("Actor inspector TUI renders all supplied minimally aligned one-line items", () => {
   const previews = Array.from({ length: 14 }, (_, index) => ({
     body_preview: `body ${index}`,
     channel: "direct" as const,
@@ -272,11 +307,11 @@ test("Actor inspector TUI renders compact verbosity as twelve minimally aligned 
     to: "branch:demo/reviewer",
     type: "chat.message",
   }));
-  const lines = renderInspectorWidget(previews, 80, {}, { verbosity: "compact" });
+  const lines = renderInspectorWidget(previews, 80);
   assert.ok(lines);
-  assert.equal(lines?.length, 12);
-  assert.match(lines?.[0] ?? "", /a2 → reviewer   chat\.message  summary 2/);
-  assert.match(lines?.[11] ?? "", /a13 → reviewer  chat\.message  summary 13/);
+  assert.equal(lines?.length, 14);
+  assert.match(lines?.[0] ?? "", /a0 → reviewer\s+chat\.message\s+summary 0\s+body 0/);
+  assert.match(lines?.[13] ?? "", /a13 → reviewer\s+chat\.message\s+summary 13\s+body 13/);
 });
 
 test("Actor inspector TUI can style semantic segments", () => {
@@ -300,8 +335,7 @@ test("Actor inspector TUI can style semantic segments", () => {
       type: (text) => `<y>${text}</y>`,
     },
   );
-  assert.match(lines?.join("\n") ?? "", / <t>a → b<\/t>\s+Human summary/);
-  assert.match(lines?.join("\n") ?? "", /<y>chat\.message<\/y>  hello/);
+  assert.match(lines?.join("\n") ?? "", / <t>a → b<\/t>\s+<y>chat\.message<\/y>\s+Human summary\s+hello/);
   assert.match(lines?.join("\n") ?? "", /Human summary/);
 });
 
@@ -336,11 +370,11 @@ test("Actor inspector TUI uses available width for long body previews", () => {
   );
   assert.ok(narrow);
   assert.ok(wide);
-  assert.ok((wide?.[1].match(/x/g)?.length ?? 0) > (narrow?.[1].match(/x/g)?.length ?? 0));
-  assert.equal(wide?.[1].length, 120);
+  assert.ok((wide?.[0].match(/x/g)?.length ?? 0) > (narrow?.[0].match(/x/g)?.length ?? 0));
+  assert.equal(wide?.[0].length, 120);
 });
 
-test("Actor inspector TUI renders requested route summary type body layout", () => {
+test("Actor inspector TUI renders requested route summary body layout", () => {
   const lines = renderInspectorWidget(
     [
       {
@@ -356,14 +390,13 @@ test("Actor inspector TUI renders requested route summary type body layout", () 
     ],
     140,
   );
-  assert.equal(lines?.[0].trimEnd(), " 1  implementer → reviewer  No immediate patch needed");
-  assert.equal(
-    lines?.[1].trimEnd(),
-    "    fix.response            No code patch needed from this drill unless narrow terminal truncation reveals a new problem.",
+  assert.match(
+    lines?.[0].trimEnd() ?? "",
+    /^ 1  implementer → reviewer  fix\.response  No immediate patch needed  No code patch needed from this drill unless narrow terminal truncati\.\.\.$/,
   );
 });
 
-test("Actor inspector TUI keeps type body separator muted when truncated", () => {
+test("Actor inspector TUI keeps summary body separator when truncated", () => {
   const lines = renderInspectorWidget(
     [
       {
@@ -384,7 +417,8 @@ test("Actor inspector TUI keeps type body separator muted when truncated", () =>
       type: (text) => `<y>${text}</y>`,
     },
   );
-  assert.match(lines?.[1] ?? "", /<y>chat\.message<\/y>  <p>/);
+  assert.match(lines?.[0] ?? "", /<p>ssss/);
+  assert.match(lines?.[0] ?? "", /<p>bbbb/);
 });
 
 test("Actor inspector TUI bounds wide glyph display width", () => {
@@ -403,12 +437,35 @@ test("Actor inspector TUI bounds wide glyph display width", () => {
     30,
     { preview: (text) => `\u001b[33m${text}\u001b[0m` },
   );
-  const cellWidth = (value: string) => Array.from(
-    value.replaceAll(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""),
-  ).reduce((sum, char) => sum + ((char.codePointAt(0) ?? 0) >= 0x1f300 ? 2 : 1), 0);
   assert.ok(lines);
-  assert.equal(lines?.every((line) => cellWidth(line) <= 30), true);
-  assert.equal(lines?.some((line) => line.includes("…")), true);
+  assert.equal(lines?.every((line) => visibleWidth(line) <= 30), true);
+  assert.equal(lines?.some((line) => line.includes("...")), true);
+});
+
+test("Actor inspector TUI keeps styled emoji lines within terminal width", () => {
+  const lines = renderInspectorWidget(
+    [
+      {
+        body_preview: "Cinder здесь. Раунд 1/4 — моя искра уже в общем костре. Жду ваших образов, рой! 🔥✨",
+        channel: "room",
+        from: "branch:deepseek-swarm/cinder",
+        run: "deepseek-swarm",
+        timestamp: "2026-05-23T01:08:14.000Z",
+        to: "room:deepseek-swarm",
+        type: "chat.message",
+      },
+    ],
+    134,
+    {
+      muted: (text) => `\u001b[38;2;146;131;116m${text}\u001b[39m`,
+      preview: (text) => `\u001b[38;2;235;219;178m${text}\u001b[39m`,
+      stripe: (text) => `\u001b[48;2;60;56;54m${text}\u001b[49m`,
+      target: (text) => `\u001b[38;2;184;187;38m${text}\u001b[39m`,
+      type: (text) => `\u001b[38;2;250;189;47m${text}\u001b[39m`,
+    },
+  );
+  assert.ok(lines);
+  assert.equal(lines?.every((line) => visibleWidth(line) <= 134), true);
 });
 
 test("Actor inspector TUI respects render widths below 32 columns", () => {
@@ -447,6 +504,35 @@ test("Actor inspector TUI keeps widget lines bounded", () => {
   );
   assert.ok(lines);
   for (const line of lines ?? []) assert.ok(line.length <= 48);
+});
+
+test("Actor inspector TUI renders selected item view", () => {
+  const lines = renderInspectorItemView(
+    [
+      {
+        body_preview: "full-ish selected body",
+        channel: "room",
+        from: "branch:demo/mapper",
+        run: "demo",
+        sequence: 7,
+        summary: "Selected summary",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        to: "room:demo",
+        type: "chat.message",
+      },
+    ],
+    80,
+    {},
+    { sequence: 7 },
+  );
+  assert.ok(lines);
+  assert.equal(lines?.[1], "");
+  assert.match(lines?.[0] ?? "", /^7\s{13}mapper # all/);
+  assert.doesNotMatch(lines?.join("\n") ?? "", /sequence\s+7/);
+  assert.match(lines?.join("\n") ?? "", /type\s+chat\.message/);
+  assert.match(lines?.join("\n") ?? "", /summary\s+Selected summary/);
+  assert.match(lines?.join("\n") ?? "", /body_preview\s+full-ish selected body/);
+  assert.match(lines?.join("\n") ?? "", /timestamp\s+2026-01-01T00:00:00\.000Z/);
 });
 
 test("Actor inspector TUI hides empty widgets", () => {

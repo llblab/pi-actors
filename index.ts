@@ -49,7 +49,8 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   const observedRunEventLines = new Map<string, number>();
   let runStatusFrame = 0;
   let communicationWidgetVisible = false;
-  let inspectorVerbosity: ActorInspectorTui.ActorInspectorVerbosity = "verbose";
+  let actorInspectorRows = 12;
+  let selectedInspectorSequence: number | undefined;
   const getRunOwnerId = (ctx: ExtensionContext): string =>
     ctx.sessionManager.getSessionId();
   const updateRunUi = (ctx: ExtensionContext, notify = false): void => {
@@ -66,25 +67,34 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
         ? () => ({
             invalidate() {},
             render(width: number) {
+              const previews = ActorInspectorTui.readActorInspectorPreviews(
+                RUN_STATE_ROOT,
+                actorInspectorRows,
+                { ownerId, currentRunOnly: true },
+              );
+              const style = {
+                actor: (text: string) => ctx.ui.theme.fg("accent", text),
+                muted: (text: string) => ctx.ui.theme.fg("dim", text),
+                preview: (text: string) => ctx.ui.theme.fg("text", text),
+                stripe: (text: string) => text,
+                stripeAlt: (text: string) =>
+                  ctx.ui.theme.bg("customMessageBg", text),
+                target: (text: string) => ctx.ui.theme.fg("success", text),
+                type: (text: string) => ctx.ui.theme.fg("warning", text),
+              };
               return (
-                ActorInspectorTui.renderInspectorWidget(
-                  ActorInspectorTui.readActorInspectorPreviews(
-                    RUN_STATE_ROOT,
-                    14,
-                    { ownerId, currentRunOnly: true },
-                  ),
-                  width,
-                  {
-                    actor: (text) => ctx.ui.theme.fg("accent", text),
-                    muted: (text) => ctx.ui.theme.fg("dim", text),
-                    preview: (text) => ctx.ui.theme.fg("text", text),
-                    stripe: (text) => text,
-                    stripeAlt: (text) => ctx.ui.theme.bg("customMessageBg", text),
-                    target: (text) => ctx.ui.theme.fg("success", text),
-                    type: (text) => ctx.ui.theme.fg("warning", text),
-                  },
-                  { verbosity: inspectorVerbosity },
-                ) ?? []
+                (selectedInspectorSequence !== undefined
+                  ? ActorInspectorTui.renderInspectorItemView(
+                      previews,
+                      width,
+                      style,
+                      { sequence: selectedInspectorSequence },
+                    )
+                  : ActorInspectorTui.renderInspectorWidget(
+                      previews,
+                      width,
+                      style,
+                    )) ?? []
               );
             },
           })
@@ -243,9 +253,38 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     closeRecipeWatcher();
   });
   pi.registerCommand("actors-inspector-toggle", {
-    description: "Toggle actor inspector widget",
-    handler: async (_args, ctx) => {
-      communicationWidgetVisible = !communicationWidgetVisible;
+    description: "Toggle actor inspector widget; optional row count",
+    handler: async (args, ctx) => {
+      const raw = Array.isArray(args) ? args[0] : String(args ?? "");
+      if (String(raw).trim()) {
+        const rows = Number.parseInt(String(raw), 10);
+        if (!Number.isFinite(rows) || rows <= 0) {
+          ctx.ui.notify(
+            "Usage: /actors-inspector-toggle [rows] where rows > 0",
+            "warning",
+          );
+          return;
+        }
+        actorInspectorRows = rows;
+        selectedInspectorSequence = undefined;
+        communicationWidgetVisible = true;
+        updateRunUi(ctx);
+        ctx.ui.notify(`Actor inspector rows ${rows}`, "info");
+        return;
+      }
+      if (selectedInspectorSequence !== undefined) {
+        selectedInspectorSequence = undefined;
+        communicationWidgetVisible = true;
+        updateRunUi(ctx);
+        ctx.ui.notify("Actor inspector table", "info");
+        return;
+      }
+      if (communicationWidgetVisible) {
+        communicationWidgetVisible = false;
+      } else {
+        actorInspectorRows = 12;
+        communicationWidgetVisible = true;
+      }
       updateRunUi(ctx);
       ctx.ui.notify(
         `Actor inspector ${communicationWidgetVisible ? "shown" : "hidden"}`,
@@ -253,13 +292,19 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       );
     },
   });
-  pi.registerCommand("actors-inspector-verbosity", {
-    description: "Toggle actor inspector verbosity",
-    handler: async (_args, ctx) => {
-      inspectorVerbosity =
-        inspectorVerbosity === "verbose" ? "compact" : "verbose";
+  pi.registerCommand("actors-inspect", {
+    description: "Inspect actor message by visible number",
+    handler: async (args, ctx) => {
+      const raw = Array.isArray(args) ? args[0] : String(args ?? "");
+      const sequence = Number.parseInt(String(raw), 10);
+      if (!Number.isFinite(sequence) || sequence <= 0) {
+        ctx.ui.notify("Usage: /actors-inspect <number>", "warning");
+        return;
+      }
+      selectedInspectorSequence = sequence;
+      communicationWidgetVisible = true;
       updateRunUi(ctx);
-      ctx.ui.notify(`Actor inspector ${inspectorVerbosity} mode`, "info");
+      ctx.ui.notify(`Actor inspect item ${sequence}`, "info");
     },
   });
   pi.on("before_agent_start", async (event) => ({

@@ -10,13 +10,14 @@
   - Evaluate whether room storage/routing should remain built into the tool adapter or move behind a dedicated non-LLM communication actor recipe/script, possibly singleton-scoped. Preserve the same public `room:<run>` address and envelope either way.
   - Consider reducing direct file-backed state where it improves coherence: model room/roster state as actor-owned data structures served by helper scripts/actors, with files retained only for durable snapshots, recovery, artifacts, or audit logs.
   - Add selected-recipient multicast for a subset of actors without creating subrooms.
+  - Clarify which worker protocols consume direct `branch:<run>/<branch>` envelopes and which swarm scenarios should stay room-visible.
 - Exit:
   - Any backend/storage change preserves existing `spawn` / `message` / `inspect` semantics and room address compatibility.
   - Selected-recipient multicast remains route-based and does not introduce named subrooms.
 
 ### Actor Communication TUI Preview
 
-- Priority: Medium.
+- Priority: High.
 - Goal: Make actor-to-actor communication more navigable in the terminal UI without exposing large payloads by default.
 - Direction:
   - Add explicit filters for current branch, room, direct messages, unread messages, and mentions.
@@ -50,6 +51,14 @@
 - Exit:
   - Docs, validators, packaged recipes, discovery, and migration behavior all agree on filename-derived identity and location-derived tool exposure.
 
+### Branch-Local Checkpoint Semantics
+
+- Priority: Low.
+- Blocked by: At least one real collaborative branch-runner async-run experiment.
+- Goal: Validate whether `failure: "branch"`, node-level `retry`, and `recover` cleanup are enough for branch-local validation and bounded reattempts.
+- Exit:
+  - Record one decision: sufficient, documentation-only refinement needed, or propose one minimal command-template extension with tests.
+
 ### Host-Level Tool Unregistration
 
 - Priority: Low.
@@ -65,6 +74,7 @@
 ### Recipe Discovery Expansion
 
 - Priority: Low.
+- Goal: Support larger recipe libraries without confusing recipe identity or priority.
 - Direction:
   - Add nested recipe directories only after flat `recipes/*.json` discovery semantics are stable.
   - Keep same-id priority and invalid-blocking behavior explicit if nested ids are introduced.
@@ -72,6 +82,7 @@
 ### Recipe Usage Telemetry Evolution
 
 - Priority: Low.
+- Goal: Improve long-term operator insight into recipe usefulness without making telemetry noisy.
 - Direction:
   - Consider sidecar stats sync/backup policy after inline user-owned `usage.calls` / `usage.last_called` proves useful.
   - Do not add failure counters as primary usefulness evidence unless there is a strong operator-facing need.
@@ -79,14 +90,7 @@
 ### Opportunistic Recipe Library Growth
 
 - Priority: Low.
+- Goal: Expand packaged recipes only when concrete repeated task patterns justify them.
 - Direction:
-  - Add new utilities or pipelines only when a concrete repeated task pattern justifies them.
-
-## Blocked Work
-
-### Branch-Local Checkpoint Semantics
-
-- Priority: Low.
-- Blocked by: At least one real collaborative branch-runner async-run experiment.
-- Scope: Validate whether `failure: "branch"`, node-level `retry`, and `recover` cleanup are enough for branch-local validation and bounded reattempts.
-- Exit: Record one decision: sufficient, documentation-only refinement needed, or propose one minimal command-template extension with tests.
+  - Add new utilities or pipelines when they can be expressed as reusable recipe composition.
+  - Avoid scenario-specific scripts when existing component recipes can be composed.

@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.17.0
+  version: 0.17.1
 ---
 
 # Actors (pi-actors)
@@ -270,7 +270,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 - [`pipeline-docs-maintenance`](../../recipes/pipeline-docs-maintenance.json): docs index/review/planning → maintenance artifact.
 - Artifacts: [`pipeline-artifact-report`](../../recipes/pipeline-artifact-report.json), [`pipeline-artifact-write`](../../recipes/pipeline-artifact-write.json), [`pipeline-artifact-bundle`](../../recipes/pipeline-artifact-bundle.json).
 - Review gates: [`pipeline-quorum-review`](../../recipes/pipeline-quorum-review.json), [`pipeline-review-readiness`](../../recipes/pipeline-review-readiness.json).
-- Task-first workflows: [`pipeline-architect-coordinator`](../../recipes/pipeline-architect-coordinator.json), [`pipeline-research-synthesis`](../../recipes/pipeline-research-synthesis.json), [`pipeline-development-tasking`](../../recipes/pipeline-development-tasking.json), [`pipeline-checkpoint-continuation`](../../recipes/pipeline-checkpoint-continuation.json), [`pipeline-media-library`](../../recipes/pipeline-media-library.json).
+- Task-first workflows: [`pipeline-architect-coordinator`](../../recipes/pipeline-architect-coordinator.json), [`pipeline-research-synthesis`](../../recipes/pipeline-research-synthesis.json), [`pipeline-development-tasking`](../../recipes/pipeline-development-tasking.json), [`pipeline-checkpoint-continuation`](../../recipes/pipeline-checkpoint-continuation.json), [`pipeline-media-library`](../../recipes/pipeline-media-library.json), [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json). For room swarms, prefer `roles_path` for custom role JSON; keep role `name` ASCII-safe for branch addresses and use optional `glyph` only as display identity. Use `locker=true` when the swarm needs a coordinator-locker-backed artifact lock and journal.
 
 ### Utilities
 

@@ -13,6 +13,8 @@ export interface RoomMember {
   address: string;
   caps?: unknown;
   claim?: unknown;
+  display?: unknown;
+  glyph?: unknown;
   joined_at: string;
   last_seen: string;
   parent?: unknown;
@@ -164,6 +166,8 @@ function updateRosterForMessage(
     last_seen: receivedAt,
     ...(body.caps !== undefined ? { caps: body.caps } : current?.caps !== undefined ? { caps: current.caps } : {}),
     ...(body.claim !== undefined ? { claim: body.claim } : current?.claim !== undefined ? { claim: current.claim } : {}),
+    ...(body.display !== undefined ? { display: body.display } : current?.display !== undefined ? { display: current.display } : {}),
+    ...(body.glyph !== undefined ? { glyph: body.glyph } : current?.glyph !== undefined ? { glyph: current.glyph } : {}),
     ...(body.parent !== undefined ? { parent: body.parent } : current?.parent !== undefined ? { parent: current.parent } : {}),
     ...(body.role !== undefined ? { role: body.role } : current?.role !== undefined ? { role: current.role } : { role: "actor" }),
     status: String(body.status ?? current?.status ?? "present"),

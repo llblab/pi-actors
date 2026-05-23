@@ -5,12 +5,13 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 const script = new URL("../scripts/coordinator-locker.mjs", import.meta.url).pathname;
+const roomSwarmScript = new URL("../scripts/room-swarm.mjs", import.meta.url).pathname;
 
 async function waitForPath(path: string): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -36,6 +37,50 @@ async function sendLine(path: string, value: unknown): Promise<void> {
   }
   throw new Error(`Timed out sending to ${path}`);
 }
+
+test("room-swarm optional locker records artifact coordination", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-room-swarm-locker-"));
+  try {
+    const fakeBin = join(root, "bin");
+    await mkdir(fakeBin, { recursive: true });
+    const fakePi = join(fakeBin, "pi");
+    await writeFile(fakePi, "#!/usr/bin/env bash\necho '# Fake synthesis'\necho\necho 'locker smoke'\n", "utf8");
+    await chmod(fakePi, 0o755);
+    const artifact = join(root, "artifact.md");
+    const runId = "room-swarm-locker-test";
+    const result = spawnSync(roomSwarmScript, [
+      `--run-id=${runId}`,
+      "--mission=locker smoke",
+      "--model=fake-model",
+      "--thinking=off",
+      "--rounds=0",
+      "--delay=0",
+      "--locker=true",
+      "--locker-lease-ms=1000",
+      `--artifact-path=${artifact}`,
+    ], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        PI_CODING_AGENT_DIR: root,
+      },
+      timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(await readFile(artifact, "utf8"), /Fake synthesis/);
+    const lockerDir = join(root, "tmp", "pi-actors", "runs", runId, "locker");
+    const queue = JSON.parse(await readFile(join(lockerDir, "queue.json"), "utf8"));
+    const locks = JSON.parse(await readFile(join(lockerDir, "locks.json"), "utf8"));
+    const journal = await readFile(join(lockerDir, "journal.jsonl"), "utf8");
+    assert.deepEqual(queue.items, []);
+    assert.deepEqual(locks, {});
+    assert.match(journal, /coord\.assigned/);
+    assert.match(journal, /coord\.complete/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("coordinator-locker queues, assigns, locks, and stops", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-locker-"));

@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.17.1: Inspector Hotfix And Room Swarm Hardening
+
+- `[TUI]` Fixed actor inspector line bounding to use `visibleWidth()` for direction/type/summary/body width math, replaced the verbose two-line preview with a hidden-by-default numbered table, made bare `/actors-inspector-toggle` open 12 rows from closed state, removed the verbosity toggle, made `/actors-inspector-toggle <rows>` update the live row count, upgraded `/actors-inspect <number>` to show a separated two-column header plus all preview-object properties as aligned two-space key/value columns, and added a styled emoji regression. Impact: room previews with wide glyphs no longer crash Pi, actor logs stay dense while preserving message type visibility, operators can tune visible row count without persistent inspector settings, and they can drill into one visible row then toggle back to the table.
+- `[Recipe Library]` Added `pipeline-room-swarm` backed by `scripts/room-swarm.mjs`: repeated room-aware participants join `room:<run>`, coordinate over multiple room-visible rounds, leave cleanly, and synthesize the room transcript into a Markdown artifact. Roles can be supplied via `roles_path` to avoid raw JSON placeholders, default roles include display glyphs while keeping branch addresses ASCII-safe, room rosters preserve display/glyph metadata, the inspector table renders glyph display names, and `locker=true` composes a local coordinator-locker cell for artifact locks and decision journaling with regression coverage. Direct branch delivery remains available for worker protocols that consume parent-run branch envelopes, but the packaged swarm no longer relies on it for peer coordination. Impact: the DeepSeek room-swarm experiment is now represented as a policy-light packaged scenario while concrete model choice remains caller/operator policy.
+- `[Docs]` Reconciled `BACKLOG.md` back to future-only open work, removing completed hotfix implementation notes and version-scoped backlog language now captured in this changelog. Refreshed README and project context around the packaged room-swarm/coordinator-locker library surface and actor-inspector TUI ownership.
+- `[Package]` Bumped package and packaged skill metadata to `0.17.1` for the hotfix release.
 
 ## 0.17.0: Actor Rooms And Inspector
 

@@ -94,7 +94,7 @@ Transports differ, but the public contract does not:
 
 - `to: run:<id>` routes through the run-local control channel selected by that recipe or runtime adapter.
 - `to: coordinator` routes to the runtime attention path when `from` names a run actor. `to: session:<id>` uses the same actor-message path only when the sender run is owned by that session, making explicit session-directed checkpoints possible without exposing runtime delivery knobs. Generic async-runner `command.done` messages and explicit coordinator/session-bound messages include the actor envelope fields alongside runtime metadata.
-- `to: branch:<run>/<branch>` routes through the parent run mailbox with the full envelope preserved so the run can dispatch branch-local control.
+- `to: branch:<run>/<branch>` routes through the parent run mailbox with the full envelope preserved so the run or recipe-specific worker protocol can dispatch branch-local control. It is not a broadcast room and it does not make an arbitrary prompt process consume the message automatically.
 - `to: room:<run>` appends the full envelope to the room timeline and updates room state for room-control types such as `actor.join` and `actor.leave`.
 - `to: tool:<name>` invokes an executable pi tool by name. Object bodies become tool parameters; primitive bodies are passed as `{ "input": body }`.
 
@@ -103,6 +103,8 @@ Transport is not public API unless a recipe explicitly documents a custom endpoi
 ## Rooms and Rosters
 
 The task room is the discovery and shared-context layer for actors whose spawn-tree positions do not give them each other's addresses. The spawn tree remains the lifecycle/provenance structure; the task room describes the group communication graph. Direct messages and room messages can share the same semantic `type` such as `chat.message`; the route (`to: branch:*` versus `to: room:*`) determines whether delivery is private or group-wide.
+
+Use direct branch messages only when the receiving branch is backed by a worker or recipe that reads the parent run mailbox and dispatches branch-targeted envelopes. Room roster contacts are discovery hints, not a guarantee that an independent prompt process is subscribed to its branch address. For ad hoc or transcript-driven swarms, prefer room-visible replies and mentions so every participant can inspect the shared timeline.
 
 A minimal join message:
 

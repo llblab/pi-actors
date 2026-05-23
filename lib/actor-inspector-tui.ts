@@ -6,6 +6,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { visibleWidth } from "@earendil-works/pi-tui";
+
 import type { ActorMessage } from "./actor-messages.ts";
 import * as Paths from "./paths.ts";
 
@@ -13,6 +15,7 @@ export interface ActorInspectorPreview {
   body_preview?: string;
   channel: "broadcast" | "direct" | "room";
   from?: string;
+  from_display?: string;
   run: string;
   sequence?: number;
   summary?: string;
@@ -32,10 +35,10 @@ export interface ActorInspectorWidgetStyle {
   type?: (text: string) => string;
 }
 
-export type ActorInspectorVerbosity = "compact" | "verbose";
+export interface ActorInspectorRenderOptions {}
 
-export interface ActorInspectorRenderOptions {
-  verbosity?: ActorInspectorVerbosity;
+export interface ActorInspectorItemViewOptions {
+  sequence: number;
 }
 
 export interface ActorInspectorPreviewReadOptions {
@@ -78,9 +81,12 @@ function previewValue(value: unknown, maxLength = 320): string | undefined {
     : compact;
 }
 
-function channelFor(message: Pick<ActorMessage, "to">): ActorInspectorPreview["channel"] {
+function channelFor(
+  message: Pick<ActorMessage, "to">,
+): ActorInspectorPreview["channel"] {
   if (message.to.startsWith("room:")) return "room";
-  if (message.to === "coordinator" || message.to.startsWith("session:")) return "broadcast";
+  if (message.to === "coordinator" || message.to.startsWith("session:"))
+    return "broadcast";
   return "direct";
 }
 
@@ -88,16 +94,27 @@ function previewFromMessage(
   run: string,
   message: Record<string, unknown>,
   timestamp: string,
+  displayNames: Record<string, string> = {},
 ): ActorInspectorPreview | undefined {
   const to = typeof message.to === "string" ? message.to : undefined;
   const type = typeof message.type === "string" ? message.type : undefined;
   if (!to || !type) return undefined;
   const from = typeof message.from === "string" ? message.from : undefined;
-  const summary = typeof message.summary === "string" ? message.summary : undefined;
+  const summary =
+    typeof message.summary === "string" ? message.summary : undefined;
+  const body = asRecord(message.body);
+  const display = from
+    ? typeof body.display === "string" && body.display.trim()
+      ? body.display.trim()
+      : displayNames[from]
+    : undefined;
   return {
-    ...(previewValue(message.body) ? { body_preview: previewValue(message.body) } : {}),
+    ...(previewValue(message.body)
+      ? { body_preview: previewValue(message.body) }
+      : {}),
     channel: channelFor({ to }),
     ...(from ? { from } : {}),
+    ...(display ? { from_display: display } : {}),
     run,
     ...(summary ? { summary } : {}),
     timestamp,
@@ -106,30 +123,59 @@ function previewFromMessage(
   };
 }
 
-function readRoomPreviews(run: string, stateDir: string): ActorInspectorPreview[] {
+function readRoomDisplayNames(stateDir: string, room: string): Record<string, string> {
+  try {
+    const roster = JSON.parse(
+      fs.readFileSync(path.join(stateDir, "rooms", room, "roster.json"), "utf8"),
+    ) as Record<string, Record<string, unknown>>;
+    return Object.fromEntries(
+      Object.entries(roster).flatMap(([address, member]) => {
+        const glyph = typeof member.glyph === "string" ? member.glyph.trim() : "";
+        const display = typeof member.display === "string" ? member.display.trim() : "";
+        if (display) return [[address, display]];
+        if (!glyph) return [];
+        return [[address, `${glyph} ${actorName(address)}`]];
+      }),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function readRoomPreviews(
+  run: string,
+  stateDir: string,
+): ActorInspectorPreview[] {
   const roomsDir = path.join(stateDir, "rooms");
   try {
     return fs
       .readdirSync(roomsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .flatMap((entry) =>
-        readJsonLines(path.join(roomsDir, entry.name, "messages.jsonl"))
+      .flatMap((entry) => {
+        const displayNames = readRoomDisplayNames(stateDir, entry.name);
+        return readJsonLines(path.join(roomsDir, entry.name, "messages.jsonl"))
           .map((message) =>
             previewFromMessage(
               run,
               message,
               String(message.received_at ?? message.timestamp ?? ""),
+              displayNames,
             ),
           )
-          .filter((preview): preview is ActorInspectorPreview => Boolean(preview)),
-      );
+          .filter((preview): preview is ActorInspectorPreview =>
+            Boolean(preview),
+          );
+      });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     return [];
   }
 }
 
-function readInboxPreviews(run: string, stateDir: string): ActorInspectorPreview[] {
+function readInboxPreviews(
+  run: string,
+  stateDir: string,
+): ActorInspectorPreview[] {
   return readJsonLines(path.join(stateDir, "inbox.jsonl"))
     .map((message) =>
       previewFromMessage(
@@ -141,7 +187,10 @@ function readInboxPreviews(run: string, stateDir: string): ActorInspectorPreview
     .filter((preview): preview is ActorInspectorPreview => Boolean(preview));
 }
 
-function readOutboxPreviews(run: string, stateDir: string): ActorInspectorPreview[] {
+function readOutboxPreviews(
+  run: string,
+  stateDir: string,
+): ActorInspectorPreview[] {
   return readJsonLines(path.join(stateDir, "outbox.jsonl"))
     .map((event) => {
       const message = asRecord(event.message ?? event);
@@ -189,7 +238,9 @@ export function readActorInspectorPreviews(
       })
       .filter((preview) => preview.timestamp)
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    const currentRun = options.currentRunOnly ? previews.at(-1)?.run : undefined;
+    const currentRun = options.currentRunOnly
+      ? previews.at(-1)?.run
+      : undefined;
     return previews
       .filter((preview) => !currentRun || preview.run === currentRun)
       .map((preview, index) => ({
@@ -210,9 +261,10 @@ function shorten(
   options: { preserveSpaces?: boolean } = { preserveSpaces: true },
 ): string {
   if (!value) return "-";
-  const compact = options.preserveSpaces === false
-    ? value.replaceAll(/\s+/g, "_")
-    : value.replaceAll(/\s+/g, " ").trim();
+  const compact =
+    options.preserveSpaces === false
+      ? value.replaceAll(/\s+/g, "_")
+      : value.replaceAll(/\s+/g, " ").trim();
   if (maxLength <= 1) return compact.slice(0, Math.max(0, maxLength));
   return compact.length > maxLength
     ? `${compact.slice(0, Math.max(0, maxLength - 1))}…`
@@ -234,13 +286,16 @@ function roomName(address: string): string | undefined {
 }
 
 function routeText(preview: ActorInspectorPreview): string {
-  const actor = actorName(preview.from);
+  const actor = preview.from_display || actorName(preview.from);
   if (preview.channel === "room") return `${actor} # all`;
   if (preview.channel === "broadcast") return `${actor} ⇢ ${preview.to}`;
   return `${actor} → ${actorName(preview.to)}`;
 }
 
-function style(styleFn: ((text: string) => string) | undefined, text: string): string {
+function style(
+  styleFn: ((text: string) => string) | undefined,
+  text: string,
+): string {
   return styleFn ? styleFn(text) : text;
 }
 
@@ -248,57 +303,46 @@ function previewText(preview: ActorInspectorPreview): string {
   return preview.summary || preview.body_preview || "-";
 }
 
-function detailText(preview: ActorInspectorPreview): string {
-  return preview.body_preview || preview.summary || "-";
-}
-
-function stripAnsi(value: string): string {
-  return value.replaceAll(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-}
-
-function charDisplayWidth(char: string): number {
-  const code = char.codePointAt(0) ?? 0;
-  if (code === 0) return 0;
-  if (code < 32 || (code >= 0x7f && code < 0xa0)) return 0;
-  if (
-    code >= 0x1100 &&
-    (code <= 0x115f ||
-      code === 0x2329 ||
-      code === 0x232a ||
-      (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
-      (code >= 0xac00 && code <= 0xd7a3) ||
-      (code >= 0xf900 && code <= 0xfaff) ||
-      (code >= 0xfe10 && code <= 0xfe19) ||
-      (code >= 0xfe30 && code <= 0xfe6f) ||
-      (code >= 0xff00 && code <= 0xff60) ||
-      (code >= 0xffe0 && code <= 0xffe6) ||
-      (code >= 0x1f300 && code <= 0x1faff))
-  ) return 2;
-  return 1;
+function propertyValue(value: unknown): string {
+  if (value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
 }
 
 function displayWidth(value: string): number {
-  return Array.from(stripAnsi(value)).reduce((sum, char) => sum + charDisplayWidth(char), 0);
+  return visibleWidth(value);
 }
 
 function boundedLine(value: string, width: number): string {
-  if (displayWidth(value) <= width) return value;
-  if (width <= 1) return "";
+  if (width <= 0) return "";
+  if (visibleWidth(value) <= width) return value;
+  const ellipsis = "...";
+  const ellipsisWidth = visibleWidth(ellipsis);
+  if (width <= ellipsisWidth) return ellipsis.slice(0, width);
   let output = "";
   let used = 0;
-  for (const char of Array.from(value)) {
-    const charWidth = charDisplayWidth(char);
-    if (used + charWidth > width - 2) break;
-    output += char;
-    used += charWidth;
+  const maxTextWidth = width - ellipsisWidth;
+  const segmenter = new Intl.Segmenter();
+  for (const { segment } of segmenter.segment(value)) {
+    const segmentWidth = visibleWidth(segment);
+    if (used + segmentWidth > maxTextWidth) break;
+    output += segment;
+    used += segmentWidth;
   }
-  return `${output}… `;
+  return `${output}${ellipsis}`;
 }
 
-function padLine(plain: string, rendered: string, width: number, styles: ActorInspectorWidgetStyle): string {
+function padLine(
+  plain: string,
+  rendered: string,
+  width: number,
+  styles: ActorInspectorWidgetStyle,
+): string {
   const boundedPlain = boundedLine(plain, width);
-  const visible = boundedPlain === plain ? rendered : style(styles.preview, boundedPlain);
-  const padding = Math.max(0, width - displayWidth(boundedPlain));
+  const visible =
+    boundedPlain === plain ? rendered : style(styles.preview, boundedPlain);
+  const padding = Math.max(0, width - visibleWidth(boundedPlain));
   return `${visible}${" ".repeat(padding)}`;
 }
 
@@ -317,11 +361,18 @@ function renderCompactInspectorEntry(
   const sequence = String(preview.sequence ?? 0).padStart(sequenceWidth, " ");
   const sequencePrefix = `${sequence}  `;
   const route = routeText(preview);
-  const routePadding = " ".repeat(Math.max(0, routeWidth - route.length));
-  const typePadding = " ".repeat(Math.max(0, typeWidth - preview.type.length));
+  const routePadding = " ".repeat(
+    Math.max(0, routeWidth - displayWidth(route)),
+  );
+  const typePadding = " ".repeat(
+    Math.max(0, typeWidth - displayWidth(preview.type)),
+  );
   const headline = previewText(preview);
   const lead = `${sequencePrefix}${route}${routePadding}${separator}${preview.type}${typePadding}${separator}`;
-  const visibleHeadline = boundedLine(headline, Math.max(0, contentWidth - lead.length));
+  const visibleHeadline = boundedLine(
+    headline,
+    Math.max(0, contentWidth - displayWidth(lead)),
+  );
   const plain = `${lead}${visibleHeadline}`;
   const rendered = [
     style(styles.muted, sequencePrefix),
@@ -339,11 +390,13 @@ function renderCompactInspectorEntry(
   return [line];
 }
 
-function renderVerboseInspectorEntry(
+function renderInspectorEntry(
   preview: ActorInspectorPreview,
   width: number,
   sequenceWidth: number,
-  labelWidth: number,
+  routeWidth: number,
+  typeWidth: number,
+  summaryWidth: number,
   styles: ActorInspectorWidgetStyle,
   stripe: boolean,
 ): string[] {
@@ -351,39 +404,84 @@ function renderVerboseInspectorEntry(
   const prefix = " ";
   const contentWidth = Math.max(8, width - prefix.length);
   const sequence = String(preview.sequence ?? 0).padStart(sequenceWidth, " ");
-  const sequencePrefix = `${sequence}  `;
-  const detailSequencePrefix = `${" ".repeat(sequenceWidth)}  `;
+  const sequencePrefix = `${sequence}${separator}`;
   const route = routeText(preview);
-  const routePadding = " ".repeat(Math.max(0, labelWidth - route.length));
-  const typePadding = " ".repeat(Math.max(0, labelWidth - preview.type.length));
-  const headline = previewText(preview);
-  const detail = detailText(preview);
-  const headerLead = `${sequencePrefix}${route}${routePadding}${separator}`;
-  const detailLead = `${detailSequencePrefix}${preview.type}${typePadding}${separator}`;
-  const visibleHeadline = boundedLine(headline, Math.max(0, contentWidth - headerLead.length));
-  const visibleDetail = boundedLine(detail, Math.max(0, contentWidth - detailLead.length));
-  const headerPlain = `${headerLead}${visibleHeadline}`;
-  const detailPlain = `${detailLead}${visibleDetail}`;
-  const header = [
+  const type = preview.type;
+  const summary = preview.summary?.trim() ?? "";
+  const body = preview.body_preview?.trim() || (!summary ? previewText(preview) : "-");
+  const routePadding = " ".repeat(Math.max(0, routeWidth - displayWidth(route)));
+  const typePadding = " ".repeat(Math.max(0, typeWidth - displayWidth(type)));
+  const visibleSummary = boundedLine(summary, summaryWidth);
+  const summaryPadding = " ".repeat(Math.max(0, summaryWidth - displayWidth(visibleSummary)));
+  const lead = `${sequencePrefix}${route}${routePadding}${separator}${type}${typePadding}${separator}${visibleSummary}${summaryPadding}${separator}`;
+  const renderedLead = [
     style(styles.muted, sequencePrefix),
     style(styles.target, route),
     routePadding,
     separator,
-    style(styles.preview, visibleHeadline),
-  ].join("");
-  const detailLine = [
-    style(styles.muted, detailSequencePrefix),
-    style(styles.type, preview.type),
+    style(styles.type, type),
     typePadding,
     separator,
-    style(styles.preview, visibleDetail),
+    style(styles.preview, visibleSummary),
+    summaryPadding,
+    separator,
   ].join("");
-  const lines = [
-    `${prefix}${padLine(headerPlain, header, contentWidth, styles)}`,
-    `${prefix}${padLine(detailPlain, detailLine, contentWidth, styles)}`,
-  ];
-  if (stripe && styles.stripe) return lines.map((line) => styles.stripe?.(line) ?? line);
-  if (!stripe && styles.stripeAlt) return lines.map((line) => styles.stripeAlt?.(line) ?? line);
+  const visibleBody = boundedLine(body, Math.max(0, contentWidth - displayWidth(lead)));
+  const plain = `${lead}${visibleBody}`;
+  const rendered = `${renderedLead}${style(styles.preview, visibleBody)}`;
+  const line = `${prefix}${padLine(plain, rendered, contentWidth, styles)}`;
+  if (stripe && styles.stripe) return [styles.stripe(line)];
+  if (!stripe && styles.stripeAlt) return [styles.stripeAlt(line)];
+  return [line];
+}
+
+export function renderInspectorItemView(
+  previews: ActorInspectorPreview[],
+  width = 80,
+  styles: ActorInspectorWidgetStyle = {},
+  options: ActorInspectorItemViewOptions,
+): string[] | undefined {
+  const preview = previews.find((item) => item.sequence === options.sequence);
+  if (!preview) return undefined;
+  const safeWidth = Math.max(1, width);
+  const orderedKeys = [
+    "channel",
+    "run",
+    "from",
+    "from_display",
+    "to",
+    "type",
+    "summary",
+    "body_preview",
+    "timestamp",
+    "stripe",
+  ] as const;
+  const entries = orderedKeys
+    .filter((key) => preview[key] !== undefined)
+    .map((key) => [key, propertyValue(preview[key])] as const);
+  const keyWidth = Math.max(1, ...entries.map(([key]) => displayWidth(key)));
+  const sequenceText = String(preview.sequence ?? options.sequence);
+  const sequencePadding = " ".repeat(Math.max(0, keyWidth - displayWidth(sequenceText)));
+  const headerSeparator = "  ";
+  const route = routeText(preview);
+  const visibleRoute = boundedLine(
+    route,
+    Math.max(0, safeWidth - keyWidth - headerSeparator.length),
+  );
+  const headerPlain = `${sequenceText}${sequencePadding}${headerSeparator}${visibleRoute}`;
+  const header = `${style(styles.muted, sequenceText)}${sequencePadding}${headerSeparator}${style(styles.target, visibleRoute)}`;
+  const headerPadding = Math.max(0, safeWidth - visibleWidth(headerPlain));
+  const lines = [`${header}${" ".repeat(headerPadding)}`, ""];
+  for (const [key, value] of entries) {
+    const keyPadding = " ".repeat(Math.max(0, keyWidth - displayWidth(key)));
+    const separator = "  ";
+    const valueWidth = Math.max(0, safeWidth - keyWidth - separator.length);
+    const visibleValue = boundedLine(value, valueWidth);
+    const plain = `${key}${keyPadding}${separator}${visibleValue}`;
+    const rendered = `${style(styles.muted, key)}${keyPadding}${separator}${style(styles.preview, visibleValue)}`;
+    const padding = Math.max(0, safeWidth - visibleWidth(plain));
+    lines.push(`${rendered}${" ".repeat(padding)}`);
+  }
   return lines;
 }
 
@@ -395,32 +493,40 @@ export function renderInspectorWidget(
 ): string[] | undefined {
   if (previews.length === 0) return undefined;
   const safeWidth = Math.max(1, width);
-  const verbosity = options.verbosity ?? "verbose";
-  const visibleLimit = verbosity === "compact" ? 12 : 6;
-  const visible = previews
-    .map((preview, index) => ({
-      preview: { ...preview, sequence: preview.sequence ?? index + 1 },
-      stripe: preview.stripe ?? index % 2 === 0,
-    }))
-    .slice(-visibleLimit);
+  void options;
+  const visible = previews.map((preview, index) => ({
+    preview: { ...preview, sequence: preview.sequence ?? index + 1 },
+    stripe: preview.stripe ?? index % 2 === 0,
+  }));
   const sequenceWidth = Math.max(
     1,
     ...visible.map(({ preview }) => String(preview.sequence ?? 0).length),
   );
   const lines: string[] = [];
-  if (verbosity === "compact") {
-    const routeWidth = Math.max(...visible.map(({ preview }) => routeText(preview).length));
-    const typeWidth = Math.max(...visible.map(({ preview }) => preview.type.length));
-    for (const { preview, stripe } of visible) {
-      lines.push(...renderCompactInspectorEntry(preview, safeWidth, sequenceWidth, routeWidth, typeWidth, styles, stripe));
-    }
-    return lines;
-  }
-  const labelWidth = Math.max(
-    ...visible.flatMap(({ preview }) => [routeText(preview).length, preview.type.length]),
+  const routeWidth = Math.max(
+    ...visible.map(({ preview }) => displayWidth(routeText(preview))),
   );
+  const typeWidth = Math.max(
+    ...visible.map(({ preview }) => displayWidth(preview.type)),
+  );
+  const summaryWidths = visible
+    .map(({ preview }) => preview.summary?.trim())
+    .filter((summary): summary is string => Boolean(summary))
+    .map((summary) => displayWidth(summary));
+  const summaryWidth = summaryWidths.length ? Math.max(...summaryWidths) : 0;
   for (const { preview, stripe } of visible) {
-    lines.push(...renderVerboseInspectorEntry(preview, safeWidth, sequenceWidth, labelWidth, styles, stripe));
+    lines.push(
+      ...renderInspectorEntry(
+        preview,
+        safeWidth,
+        sequenceWidth,
+        routeWidth,
+        typeWidth,
+        summaryWidth,
+        styles,
+        stripe,
+      ),
+    );
   }
   return lines;
 }

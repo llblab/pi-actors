@@ -1,236 +1,178 @@
 # pi-actors
 
-> Actor runtime and orchestrator for agent-managed local processes.
+> Local Actor Kernel for Pi
 
-[<img alt="Actors*" src="banner.jpg" />](https://github.com/llblab/pi-actors "pi-actors")
+![Actors](./banner.jpg)
 
-`pi-actors` turns local programs, scripts, services, recipes, and long-running processes into addressable actors that agents can start, message, inspect, and compose. A music player, a sub-agent fanout, a repo-health pipeline, or any trusted local process can become an actor when it has a template-backed launch path, a mailbox contract, and observable runtime state.
+`pi-actors` turns trusted local programs, scripts, recipes, services, pipelines, and sub-agents into addressable actors that agents can spawn, message, inspect, and compose.
 
-The persistent tool registry is still useful: it lets agents keep durable operational muscle memory for trusted local commands and wrappers. But the project lens is broader than stored tools. `pi-actors` is a local-first orchestration runtime for wrapping capabilities as agent-managed entities with explicit interfaces.
-
-## Start Here
-
-- [Project Context](./AGENTS.md)
-- [Open Backlog](./BACKLOG.md)
-- [Changelog](./CHANGELOG.md)
-- [Documentation](./docs/README.md)
-- [Actors skill](./skills/actors/SKILL.md) — dense agent-facing reference for operating the extension
-- [Swarm skill](./skills/swarm/SKILL.md) — multi-agent methodology, strategies, standards, and portable examples for actor-backed swarms
-- [Swarm MAWP notes](./skills/swarm/references/development-swarm.md) — optional small-team development swarm reference
-
-## What It Is
-
-`pi-actors` is the runtime layer that lets a pi agent turn a local capability into a controllable actor:
+It is not just a command registry. A tool is a verb. An actor is a noun with time: address, lifecycle, state, logs, mailbox, artifacts, and an interaction contract.
 
 ```text
-program/process/service
+program / process / service
 → command template
 → actor recipe
 → spawn
-→ addressable actor
+→ run:<id>
 → message / inspect / artifacts
 ```
 
-An actor can be:
+## Core Contract
 
-- A sub-agent running `pi -p` in a clean context.
-- A background music player controlled by `player.next` or `player.pause` messages.
-- A validation or repo-health pipeline that reports completion and artifacts.
-- A parallel quorum review with branch-level progress.
-- Any trusted local process with a launch template and a useful control surface.
+`pi-actors` compresses local agent orchestration to three durable verbs:
 
-The key move is not just “register a command.” It is to wrap a process in an agent-readable contract:
+```text
+spawn    create an addressable actor
+message  send one typed envelope to one address
+inspect  intentionally read state, logs, messages, contracts, or artifacts
+```
 
-- **Launch**: `spawn` starts the actor from a template or recipe.
-- **Interface**: `mailbox` declares accepted and emitted message types.
-- **Control**: `message` sends typed envelopes to runs, branches, tools, or the coordinator.
-- **Observation**: `inspect` reads status, logs, messages, mailbox metadata, files, and artifacts intentionally.
-- **Persistence**: `artifacts` and state files make outcomes durable.
-- **Memory**: `~/.pi/agent/recipes/*.json` stores reusable actor-control wrappers across sessions.
+Everything else is an adapter until proven otherwise.
 
-## Key Features
-
-- **Actor Runtime**: Starts local templates and recipes as addressable `run:<id>` actors with state, logs, message mailboxes, cancellation, and artifacts.
-- **Agent-Managed Processes**: Wraps sub-agents, media players, pipelines, diagnostics, and other local programs as controllable entities instead of one-off commands.
-- **Message-Oriented Control**: Uses `spawn`, `message`, and `inspect` as the public coordination vocabulary for start, control, and observation.
-- **Actor Rooms**: Lets actors post shared messages to `room:<run>`, update join/leave rosters, inspect room timelines or members, read compact run communication snapshots, and see recent actor communication previews in the terminal without adding a heavyweight broker.
-- **Mailbox Contracts**: Lets recipes declare what messages they accept and emit, so agents can discover how to interact with an actor.
-- **Actor Tool Registry**: Stores persistent actor-control tools as recipe files in `~/.pi/agent/recipes/*.json` and registers them automatically on session start.
-- **Command Template Substrate**: Keeps process launch portable with named placeholders, typed args, defaults, sequences, guarded nodes, retries, failure policy, and `parallel: true` fanout.
-- **Composable Actor Recipes**: Stores reusable recipe JSON under `~/.pi/agent/recipes/*.json`; recipes can import other recipes, reuse defaults, declare artifacts, and opt into detached actor lifecycle with `async: true`.
-- **Coordinator-Scoped Observability**: Shows ambient triangles for active actor runs and sends compact completion or request-for-attention follow-ups only to the launching coordinator.
-- **Bounded Context Impact**: Returns compact output by default, truncates oversized stdout, and keeps full logs/artifacts in files for intentional inspection.
-- **Local-First Tool Memory**: Still lets agents create durable semantic tools from trusted commands so they do not repeatedly reconstruct shell invocations.
+Use `spawn` when work may outlive the current turn. Use `message` when the actor should be steered rather than restarted. Use `inspect` at decision points, after actor follow-ups, or during diagnosis. Do not build polling loops as the default coordination pattern.
 
 ## Install
-
-From npm:
 
 ```bash
 pi install npm:@llblab/pi-actors
 ```
 
-From git:
+Or from git:
 
 ```bash
 pi install git:github.com/llblab/pi-actors
 ```
 
-## Registry Migration
+## Address Surface
 
-`pi-actors` now reads persistent actor-control tools from:
+Actors and coordination endpoints are addressed with compact route strings:
+
+```text
+run:<id>                 one detached actor run
+branch:<run>/<branch>    branch-local actor endpoint
+room:<run>               shared run-local task room
+coordinator              launching coordinator attention path
+session:                 current session actor surface
+session:all              cross-session inventory surface
+tool:<name>              executable registered tool
+```
+
+Actor messages use one envelope shape:
+
+```json
+{
+  "to": "run:review",
+  "from": "coordinator",
+  "type": "control.continue",
+  "summary": "Continue after checkpoint",
+  "body": "continue",
+  "reply_to": "msg_123",
+  "correlation_id": "task_456",
+  "metadata": {}
+}
+```
+
+Routing is inferred from `to`, actor ownership, and runtime policy. Recipes should expose semantic message types, not transport knobs.
+
+## Golden Path
+
+Create a reusable async actor recipe in the user recipe root:
+
+```bash
+mkdir -p ~/.pi/agent/recipes
+
+cat > ~/.pi/agent/recipes/docs_review.json <<'JSON'
+{
+  "description": "Start an async docs review actor",
+  "async": true,
+  "args": ["scope:path", "model:string"],
+  "mailbox": {
+    "accepts": ["control.stop", "control.continue"],
+    "emits": ["review.completed", "run.failed"]
+  },
+  "template": "pi -p --model {model} --no-tools \"Review {scope} for unclear actor-runtime onboarding. Return concise findings.\""
+}
+JSON
+```
+
+Because it lives under `~/.pi/agent/recipes/`, the file becomes a persistent agent tool by location. The filename is the tool id.
+
+Start it:
+
+```text
+docs_review scope="README.md" model="current-review-model" run_id=docs_review
+```
+
+Inspect only when there is a reason:
+
+```text
+inspect target=run:docs_review view=status
+inspect target=run:docs_review view=tail lines=80
+inspect target=run:docs_review view=messages
+inspect target=run:docs_review view=mailbox
+```
+
+Steer it through messages:
+
+```text
+message to=run:docs_review type=control.continue body=continue
+message to=run:docs_review type=control.stop body=stop
+```
+
+## Actor Rooms
+
+Every spawned run can have a shared room at `room:<run>`. A room is not a broker and not a chat app. It is a run-local coordination surface: append-only timeline, compact roster, member discovery, and previews.
+
+Actors can join, post, leave, and discover peers:
+
+```text
+message \
+  to=room:review \
+  from=branch:review/security \
+  type=actor.join \
+  summary="Security reviewer joined" \
+  body='{"role":"reviewer","caps":["security-review"],"claim":"Review auth boundary risks"}'
+```
+
+Inspect the room intentionally:
+
+```text
+inspect target=room:review view=status
+inspect target=room:review view=previews
+inspect target=room:review view=roster
+inspect target=room:review view=contacts
+inspect target=room:review view=messages
+```
+
+Room posts require a same-run sender, so unrelated runs do not pollute the roster. Direct messages and room messages use the same envelope; only the address changes.
+
+## Registry Model
+
+The persistent tool surface is file-discovered:
 
 ```text
 ~/.pi/agent/recipes/*.json
 ```
 
-That directory is the operator-managed executable memory: user recipe files there become tools by location and survive across sessions. `register_tool` writes recipes there under the hood. Packaged recipes are the lower-priority standard library of declarative actor components; they are not tools unless copied or registered into the agent recipe root.
+That directory is operator-managed executable memory.
 
-## Mental Model
+Rules:
 
-`pi-actors` separates launch mechanics from actor semantics:
+- User recipes in `~/.pi/agent/recipes/` are tools by location;
+- Recipe filenames define tool ids;
+- User recipes override same-name lower-priority recipes;
+- Packaged recipes are standard-library components, not automatically installed operator policy;
+- `register_tool` creates, updates, lists, or deletes user recipe files through the normal agent interface.
 
-```text
-command template = how to start work
-actor recipe     = saved actor definition
-spawn            = create actor instance
-message          = connect/control actors
-room             = shared actor timeline + roster
-inspect          = observe intentionally
-artifacts        = persist outcomes
-mailbox          = declare interaction contract
-```
-
-- A **command** is one concrete local process.
-- A **command template** is the reusable launch shape for that process, with named placeholders.
-- An **actor recipe** is saved JSON containing a template, defaults, imports, mailbox metadata, artifacts, and optional detached lifecycle.
-- A **registered tool** gives a template or actor recipe a stable agent-facing name.
-- A **run actor** is one execution instance with state, logs, actor messages, mailbox metadata, status, cancellation, and kill control.
-
-The template remains the execution substrate. The recipe is the actor definition. `async: true` opts into detached actor lifecycle. `spawn` creates actors, `message` connects or controls them, and `inspect` observes them without teaching agents to poll blindly. Async run templates receive lifecycle and communication values such as `{run_id}`, `{state_dir}`, `{actor_address}`, `{default_room}`, and `{communication_file}`. Use `inspect run:<id> view=communication` to read the compact visible communication snapshot.
-
-## Actor Rooms
-
-Each spawned run gets a default room at `room:<run>`. Actors can post shared messages there, discover peers through the roster, and still send private messages directly to `run:<id>` or `branch:<run>/<branch>` addresses.
-
-```json
-{
-  "to": "room:review",
-  "from": "branch:review/security",
-  "type": "actor.join",
-  "body": {
-    "role": "reviewer",
-    "caps": ["security-review"],
-    "claim": "Review auth boundary risks"
-  }
-}
-```
-
-Inspect the communication surface intentionally:
+Example foreground tool:
 
 ```text
-inspect target=run:review view=communication
-inspect target=room:review view=status
-inspect target=room:review view=roster
-inspect target=room:review view=contacts
-inspect target=room:review view=previews
-inspect target=room:review view=messages
-```
-
-Room posts require `from` to belong to the same run, so room rosters stay provenance-safe and do not mix actors from unrelated runs. `view=contacts` returns roster-derived direct-message targets without forcing agents to parse the full roster JSON. The extension also shows a small default terminal widget with recent room, direct actor-message, and coordinator/session broadcast previews. Full bodies remain an intentional `inspect` action.
-
-## Operator Onboarding
-
-Start with foreground templates when the work is short and deterministic:
-
-```text
-register_tool name=lint_docs description="Lint docs" template="npm run lint:docs"
-```
-
-Move to actor recipes when work is long-running, parallel, service-like, or agentic:
-
-```json
-{
-  "name": "docs_review",
-  "async": true,
-  "args": ["scope:path", "model:string"],
-  "defaults": {},
-  "mailbox": {
-    "accepts": ["control.stop"],
-    "emits": ["review.completed", "run.failed"]
-  },
-  "template": "pi -p --model {model} --no-tools \"Review {scope} for unclear actor-runtime onboarding. Return concise findings.\""
-}
-```
-
-Expose a reusable actor recipe as a normal capability:
-
-```text
-register_tool name=docs_review description="Start an async docs review actor" template="docs_review" args="scope:path,model:string"
-```
-
-`Task` is the user's work item. `Template` is the execution graph. `Actor recipe` is saved JSON. `Run` is one actor instance with status, logs, messages, cancellation, artifacts, and ambient triangles.
-
-## Compose Recipes With Imports
-
-Recipes can import other recipe files and reuse them as named nodes. This keeps reusable steps small while letting a parent recipe decide whether the combined graph runs foreground or as one detached run actor.
-
-`review-one.json`:
-
-```json
-{
-  "name": "review-one",
-  "args": ["scope:string", "model:string"],
-  "defaults": {},
-  "template": "pi -p --model {model} --no-tools \"Review {scope}\""
-}
-```
-
-`review-pair.json`:
-
-```json
-{
-  "name": "review-pair",
-  "async": true,
-  "imports": {
-    "review": "review-one.json"
-  },
-  "parallel": true,
-  "failure": "branch",
-  "template": [
-    { "name": "review", "values": { "scope": "README.md" } },
-    { "name": "review", "values": { "scope": "docs/template-recipes.md" } }
-  ]
-}
-```
-
-Register only the parent when that is the operator-facing capability:
-
-```text
-register_tool name=review_pair \
-  description="Start a parallel async docs review" \
-  template="review-pair.json"
-```
-
-Imported recipes are recipe definitions, not nested run actors. The parent recipe's `async: true` creates one run actor with one state dir; imported recipes contribute command-template graph, args, defaults, and values.
-
-## Register Actor-Control Tools
-
-`register_tool` lists, registers, updates, or deletes persistent actor-control tools. Call it without arguments to list the current registry. These tools are convenient handles for creating or invoking actors, not the whole runtime model.
-
-### Local command: transcription
-
-`pi-actors` is also useful for exposing stable local commands as normal tools. For example, register an STT command:
-
-```text
-register_tool name=transcribe \
+register_tool name=transcribe_audio \
   description="Transcribe a local audio file" \
-  template="/path/to/stt --file {file} --lang {lang=ru}"
+  template="~/bin/transcribe {file:path} {lang=ru} {model:string}"
 ```
 
-### Template recipe
-
-For reusable actor workflows, keep the large template and mailbox contract in a recipe file and register a small tool:
+Example recipe-backed tool:
 
 ```text
 register_tool name=docs_review \
@@ -239,180 +181,107 @@ register_tool name=docs_review \
   args="scope:path,model:string"
 ```
 
-If the recipe file contains `async: true`, calling `docs_review` starts a detached run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
-
-When keeping metadata and the recipe body together is clearer, `register_tool` writes a complete user recipe file:
-
-```json
-{
-  "description": "Start an async docs review",
-  "async": true,
-  "args": ["scope:path", "model:string"],
-  "template": "pi -p --model {model} --tools read,bash \"Review {scope}\""
-}
-```
-
-The filename is the recipe id/tool name, `async: true` selects detached run mode, and `template` remains the executable body.
-
-### Sub-agent
+Inspect the discovered registry:
 
 ```text
-register_tool name=call_subagent \
-  description="Run pi as a non-interactive sub-agent" \
-  template="pi -p --model {model} --no-tools {prompt}" args="prompt:string,model:string"
+inspect target=recipes view=status
+inspect target=recipes view=summary verbose=true
 ```
 
-Use `update=true` to overwrite an existing tool. Omit `template` during update to keep the previous template:
+## Command Templates
 
-```text
-register_tool name=call_subagent \
-  description="Run a focused pi sub-agent without tools" \
-  update=true
-```
+A command template is the portable launch substrate. It can be a string, a sequence, or a composed graph.
 
-Delete a tool:
+Templates support:
 
-```text
-register_tool name=call_subagent template=null
-```
+- Named placeholders: `{file}`, `{model}`, `{prompt}`;
+- Compact types: `string`, `path`, `int`, `number`, `bool`, `enum(a,b)`;
+- Defaults: `{lang=ru}`, `{dry_run:bool=true}`;
+- Fallback and small ternary forms;
+- Sequences with stdin flow;
+- Parallel nodes;
+- Retries, recovery, failure policy, delays, and guarded execution;
+- Async run values such as `{run_id}`, `{state_dir}`, `{actor_address}`, `{default_room}`, and `{communication_file}`.
 
-## Resulting Recipe Files
-
-The commands above persist files under `~/.pi/agent/recipes/`. Tool names come from recipe filenames. Stored recipes keep `template` last so flags and metadata are read before executable content:
-
-```json
-{
-  "description": "Transcribe a local audio file",
-  "template": "/path/to/stt --file {file} --lang {lang=ru}"
-}
-```
-
-```json
-{
-  "description": "Run pi as a non-interactive sub-agent",
-  "args": ["prompt:string", "model:string"],
-  "template": "pi -p --model {model} --no-tools {prompt}"
-}
-```
-
-The recipe directory is the durable actor-tool registry. `register_tool` is the interactive API; recipe files are the persisted state loaded on future sessions.
-
-## Manage Actors
-
-Use `spawn` when a command template, service, pipeline, or recipe may outlive the current turn. It starts the work now as an addressable actor, returns immediately with state metadata, and keeps ordinary files under `~/.pi/agent/tmp/pi-actors/runs/<run>` for later inspection.
-
-Start from an inline template as an addressable run actor:
-
-```json
-{
-  "as": "run:docs_review",
-  "template": "pi -p --model {model} --no-tools {prompt}",
-  "values": {
-    "prompt": "Review docs/spec.md for contradictions.",
-    "model": "current-review-model"
-  }
-}
-```
-
-Do not check it on a timer. Let follow-up actor messages arrive from the run, then react to a run-local request or redirect a long-lived recipe without polling/restarting it:
-
-```json
-{ "to": "run:docs_review", "type": "control.continue", "body": "continue" }
-```
-
-Read recent actor messages or logs only after a follow-up asks for inspection, at a real decision point, or during diagnosis:
-
-```json
-{ "target": "run:docs_review", "view": "tail", "lines": "80" }
-```
-
-Reusable local recipes live in `~/.pi/agent/recipes/*.json`; recipe tools honor each file's `async` flag. Use `spawn` for explicit detached starts from a file or inline template, and `inspect target=coordinator view=runs status=running`, `inspect target=session:<id> view=runs status=running`, or `inspect target=session:all view=runs` for explicit inventory/diagnosis. List output includes `tool` and `recipe` when the launcher recorded that source context.
+The template owns execution shape. The recipe owns saved metadata, defaults, imports, mailbox, and artifacts. The run actor owns detached lifecycle, state, messages, cancellation, and inspection.
 
 ## Recipe Library
 
-Packaged standard recipes live under root `recipes/` with helper scripts under root `scripts/`. They are reusable library definitions, not automatically installed operator policy.
+Packaged recipes live under `recipes/` and helper scripts live under `scripts/`.
 
-The subagent component recipes start non-interactive pi subagents as detached run actors or compose component recipes into higher-level coordinator pipelines. Use the no-tools recipe for the safest default, the explicit-tool variant when a bounded tool allowlist is needed, or the prompts fanout parent recipe to see imported subagent recipe nodes composed into one run actor:
+The library includes:
 
-```text
-register_tool name=subagent_prompt \
-  description="Start an async no-tools pi subagent" \
-  template="subagent-prompt.json"
+- Sub-agent launchers;
+- Review, critic, planner, verifier, merger, judge, normalizer, and artifact atoms;
+- Quorum and lens-style pipelines;
+- Repo-health, release-summary, research-synthesis, development-tasking, docs-maintenance, and room-swarm pipelines;
+- Coordinator-locker and actor-message utilities;
+- Local music-player actor recipe.
 
-register_tool name=subagent_tools \
-  description="Start an async pi subagent with an explicit tool allowlist" \
-  template="subagent-tools.json"
+Packaged recipes are building blocks. Copy them into `~/.pi/agent/recipes/` or register tools that point at them when they should become durable operator-facing capabilities.
 
-register_tool name=subagents_prompts \
-  description="Start parallel no-tools subagents from a prompt array as one run actor" \
-  template="subagents-prompts.json"
+## When To Use What
 
-subagent_prompt prompt="Review docs/async-runs.md for unclear wording." run_id=docs_review
-subagent_tools prompt="Inspect package metadata and report risks." tools="read,bash" run_id=package-review
-subagents_prompts \
-  prompts='["Review README.md for unclear release-onboarding wording. Return concise findings.","Review docs/template-recipes.md for unclear recipe-import wording. Return concise findings."]' \
-  run_id=review-prompts
-inspect target=run:review-prompts view=tail
-```
+Use a foreground registered tool when the work is short, bounded, and does not need lifecycle.
 
-The music player recipe starts a local file, URL, directory, or playlist as a run actor, keeps the agent unblocked, shows the ambient triangle indicator in the launching coordinator, and can be controlled with addressed `message` calls. The standard library ships one Node.js wrapper recipe:
+Use an async recipe or `spawn` when the work is long-running, service-like, parallel, agentic, artifact-producing, or needs later control.
 
-```text
-register_tool name=music_player \
-  description="Start async music player playback through the Node.js wrapper" \
-  template="music-player.json" \
-  args="source:string,loop:bool=true,volume:int=70,player:enum(auto,mpv,ffplay,cvlc,play)=auto"
+Use `room:<run>` when multiple actors in the same run need shared context, roster discovery, or group-visible progress.
 
-music_player source="~/Music" volume=55 run_id=music
-message to=run:music type=player.next body=next
-message to=run:music type=player.pause body=pause
-message to=run:music type=player.play body=play
-message to=run:music type=player.stop body=stop
-```
+Use artifacts when outputs should survive context compression.
 
-See [`docs/recipe-library.md`](./docs/recipe-library.md) for install notes and recipe requirements.
+Use mailbox declarations when an actor has a stable conversational surface.
 
-## Runtime Contract
+## Safety Boundary
 
-- Actor-control tool names are normalized to snake_case.
-- Reserved built-in names are blocked.
-- Templates are split into shell-like words first, then placeholders are substituted per command arg.
-- Tool args are derived from placeholders when `args` is omitted.
-- Typed arg declarations are progressive: `file:path`, `request_timeout:int=60000`, `speed:number=1.5`, `dry_run:bool=true`, `prompts:array`, and `mode:enum(check,fix)=check` can live in `args` or inline placeholders such as `{request_timeout:int=60000}`. They generate narrower tool schemas and runtime validation while existing untyped `args` and placeholders keep working.
-- `{arg=default}` inline defaults resolve after runtime values and stored `defaults`; `{arg??fallback}` handles empty/null fallback values; `{flag?--flag:}` ternaries map small truthy/falsy values to strings such as optional CLI flags.
-- Runtime actor-tool argument errors include a compact usage hint when typed normalization or template value resolution fails, including example call shape plus required and optional fields.
-- `template: [...]` sequences execute left to right; each successful step passes stdout to the next step on stdin.
-- Object nodes may set `parallel: true`; children receive the same stdin and joined stdout flows to the next sequence step.
-- Parallel nodes use soft-quorum semantics: failed branches are reported as degraded coverage unless failure propagation escalates to the root.
-- For long-running work or agentic fanout, prefer `async: true` recipes or `spawn` so lifecycle and ambient activity status remain visible.
-- Timeout is disabled by default; set a positive `timeout` on bounded commands that should fail closed. Numeric node fields may read placeholders such as `timeout: "{timeout_ms}"`.
-- Nodes may set `when` to skip conditional work and `delay` in milliseconds to wait before launch; delay is not inherited.
-- Failed steps default to `failure: "continue"`, which records the failure and continues with empty stdin.
-- `failure: "branch"` stops the current sequence/subtree without cancelling sibling parallel branches; `failure: "root"` aborts the composition.
-- `retry` retries a leaf or whole node on non-zero exit; default attempts is `1`.
-- `recover` runs a cleanup command template between failed retry attempts and stops retries if cleanup fails.
-- Commands execute directly without shell evaluation, but trusted executables still run with the same permissions as pi.
-- Obvious high-risk templates such as shells, interpreter eval modes, and broad filesystem mutation surface lightweight warnings without blocking existing tools.
-- `async: true` on a recipe selects detached run-actor lifecycle; omitted or false runs the recipe foreground through registered tools.
-- Layer boundaries stay explicit: command templates define synchronous execution graphs; template recipes add saved JSON metadata/import resolution and named `artifacts`; run actors add detached lifecycle, state, IPC, and observability.
-- `spawn`, `message`, and `inspect` are high-level actor adapters. `spawn` creates `run:<id>` actors from recipes or inline templates with optional state/artifact metadata, `message` sends one typed envelope to `run:<id>` mailboxes, `branch:<run>/<branch>` mailboxes, `room:<run>` task rooms, `tool:<name>` calls, or coordinator/session attention paths, and `inspect` intentionally reads `run:<id>` status/tail/messages/mailbox metadata, `room:<run>` status/messages/previews/roster/contacts, coordinator/session run status, or registered `tool:<name>` contracts while the broader actor/message protocol is refined.
-- `spawn`, `message`, and `inspect` are the public async coordination vocabulary. Low-level async actions map to this actor API: start belongs to `spawn`; send/control/stop/kill belongs to `message`; status/tail/messages/list belongs to `inspect`. Use `inspect view=messages` for actor-envelope streams. Use `control.stop`, `control.cancel`, and `control.kill` for run termination; runtime-prefixed control aliases are no longer part of the public surface.
-- Actor management returns compact text by default; pass `verbose: true` to `inspect` when full JSON state is needed.
-- Detached runs inject `{run_id}` and `{state_dir}` into template values for run-local artifacts or recipe-specific control endpoints.
-- Runtime actor messages are persisted in the run state dir; coordinator attention is inferred by the runtime, not exposed as recipe or message-envelope input. Follow-ups preserve bounded body previews and metadata for decision messages.
-- Native Windows should use WSL or a recipe-specific transport for run-local message-controlled recipes; Linux uses stricter `/proc` runner ownership checks for stale PID protection.
-- Registered tools may set `template` to a recipe JSON path/name; calling them follows that recipe's `async` mode.
-- File-backed recipes may declare `imports` and embed imported recipes with `{ "name": "alias" }` nodes, or read `{alias.defaults.key}`, `{alias.defaults.key=fallback}`, and `{alias.values.key?yes:no}` references before command-template execution.
-- Interactive sessions show ambient actor activity as stable `▷` triangles aggregated across runs started by the current agent session. Each running run actor contributes at least one triangle; parallel active branches can contribute more. One `▶` wave moves over the active set; terminal `done`/`failed`/unhandled `killed`/`exited` messages are delivered as compact follow-up context only to the launching coordinator agent, while intentional `cancel`, `kill`, and `stop` actions stay silent because the action already reports synchronously. Failed commands and in-flight parallel branch completions can bubble through `command.done`; successful final leaf completions remain diagnostic to avoid sequential pipeline noise.
-- Use `{file}` as the canonical local file path arg.
-- Stored `script` entries are rejected with migration guidance.
+`pi-actors` is local-first, not sandbox-first.
 
-See [`docs/command-templates.md`](./docs/command-templates.md) for the portable synchronous command-template contract; [`docs/template-recipes.md`](./docs/template-recipes.md) for saved recipe JSON; [`docs/async-runs.md`](./docs/async-runs.md) for detached lifecycle, state files, cancellation, and observability; [`docs/tool-registry.md`](./docs/tool-registry.md) for registry storage; and [`docs/recipe-library.md`](./docs/recipe-library.md) for the packaged standard recipe library.
+Commands execute directly without shell evaluation where possible, but trusted executables still run with the same system permissions as Pi. Only register commands, scripts, recipes, and paths you trust.
 
-## Notes
+High-risk templates such as shells, interpreter eval modes, and broad filesystem mutation may surface warnings, but the runtime is not a security boundary.
 
-- Only register trusted local commands. Registered tools run with the same system permissions as pi.
-- `index.ts` is a small composition root; reusable behavior lives in flat `/lib` domains covered by focused tests.
+Prefer:
+
+- Narrow commands;
+- Explicit paths;
+- Typed args;
+- Bounded timeouts for bounded work;
+- Explicit tool allowlists for sub-agents;
+- Deterministic utility recipes for filesystem writes;
+- Human approval for destructive or external side effects.
+
+## Non-Goals
+
+`pi-actors` is NOT:
+
+- A generic workflow DSL;
+- A remote agent interoperability protocol;
+- A heavyweight broker or chat subsystem;
+- A sandbox;
+- A facade that hides logs, artifacts, ownership, or local side effects;
+- A polling-first async runner.
+
+Its job is narrower: make trusted local capabilities addressable, messageable, inspectable, and reusable by agents.
+
+## Documentation
+
+Start here:
+
+- [Project context](./AGENTS.md)
+- [Changelog](./CHANGELOG.md)
+- [Open backlog](./BACKLOG.md)
+- [Documentation index](./docs/README.md)
+- [Actors skill](./skills/actors/SKILL.md)
+- [Swarm skill](./skills/swarm/SKILL.md)
+
+Core docs:
+
+- [Command templates](./docs/command-templates.md)
+- [Template recipes](./docs/template-recipes.md)
+- [Async runs](./docs/async-runs.md)
+- [Actor messages](./docs/actor-messages.md)
+- [Tool registry](./docs/tool-registry.md)
+- [Recipe library](./docs/recipe-library.md)
 
 ## License
 

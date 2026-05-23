@@ -1,0 +1,49 @@
+{
+  "name": "pipeline-room-swarm",
+  "async": true,
+  "args": [
+    "mission:string",
+    "model:string",
+    "thinking:string",
+    "roles:string",
+    "roles_path:path",
+    "rounds:int",
+    "delay:int",
+    "locker:bool",
+    "locker_lease_ms:int",
+    "artifact_path:path",
+    "repo:path"
+  ],
+  "defaults": {
+    "thinking": "off",
+    "roles": "",
+    "roles_path": "",
+    "rounds": "4",
+    "delay": "10",
+    "locker": "false",
+    "locker_lease_ms": "600000",
+    "artifact_path": "{state_dir}/room-swarm-artifact.md",
+    "repo": "~/.pi/agent/extensions/pi-actors"
+  },
+  "artifacts": {
+    "artifact": "{artifact_path}",
+    "locker_journal": "{state_dir}/locker/journal.jsonl",
+    "locker_locks": "{state_dir}/locker/locks.json",
+    "locker_queue": "{state_dir}/locker/queue.json"
+  },
+  "mailbox": {
+    "accepts": [
+      "control.stop",
+      "control.cancel",
+      "control.kill"
+    ],
+    "emits": [
+      "chat.message",
+      "actor.join",
+      "actor.leave",
+      "run.done",
+      "run.failed"
+    ]
+  },
+  "template": "{repo}/scripts/room-swarm.mjs --run-id={run_id} --mission={mission} --model={model} --thinking={thinking} --roles={roles} --roles-path={roles_path} --rounds={rounds} --delay={delay} --locker={locker} --locker-lease-ms={locker_lease_ms} --artifact-path={artifact_path}"
+}

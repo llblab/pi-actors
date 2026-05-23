@@ -50,6 +50,7 @@ export interface TemplateRecipeDefinition {
   recover?: CommandTemplateValue;
   repeat?: number;
   values?: Record<string, unknown>;
+  usage?: Record<string, unknown>;
 }
 
 export interface TemplateRecipeConfig extends TemplateRecipeDefinition {
@@ -597,6 +598,7 @@ export function readResolvedRecipeConfig(
       ? { repeat: substituted.repeat }
       : {}),
     ...(isRecord(substituted.values) ? { values: substituted.values } : {}),
+    ...(isRecord(substituted.usage) ? { usage: substituted.usage } : {}),
   };
 }
 

@@ -71,6 +71,9 @@ test("Async runs write state files and finish", async () => {
     );
     assert.equal(meta.run, "hello");
     assert.equal(meta.ownerId, undefined);
+    assert.equal(meta.values.actor_address, "run:hello");
+    assert.equal(meta.values.communication_file, join(stateDir, "communication.json"));
+    assert.equal(meta.values.default_room, "room:hello");
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
     const status = getRunStatus(stateDir);
@@ -472,6 +475,53 @@ test(
       assert.equal(await readFile(messageFile, "utf8"), "next");
       assert.equal((await waitForResult(stateDir)).code, 0);
       assert.match(tailRun(stateDir), /run\.message/);
+
+      const status = getRunStatus(stateDir);
+      assert.equal(status.inboxFile, join(stateDir, "inbox.jsonl"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "Async runs mirror actor envelopes sent to control FIFO into inbox",
+  { skip: process.platform === "win32" },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
+    const stateDir = join(root, "controlled-envelope");
+    const readyFile = join(root, "ready");
+    const messageFile = join(root, "message");
+    const script =
+      'mkfifo "$1/control.fifo"; printf ready >"$2"; IFS= read -r message <"$1/control.fifo"; printf %s "$message" >"$3"';
+    try {
+      startRun(
+        {
+          run_id: "controlled-envelope",
+          state_dir: stateDir,
+          template:
+            "bash -lc {script} -- {state_dir} {readyFile} {messageFile}",
+          values: { messageFile, readyFile, script },
+        },
+        process.cwd(),
+      );
+      await waitForFile(readyFile);
+      sendRunMessage(
+        stateDir,
+        JSON.stringify({
+          body: "private hello",
+          from: "branch:controlled-envelope/a",
+          to: "branch:controlled-envelope/b",
+          type: "chat.message",
+        }),
+      );
+      await waitForFile(messageFile);
+      const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
+      assert.equal(inbox.from, "branch:controlled-envelope/a");
+      assert.equal(inbox.to, "branch:controlled-envelope/b");
+      assert.equal(inbox.body, "private hello");
+      assert.match(inbox.received_at, /\d{4}-\d{2}-\d{2}T/);
+      assert.equal((await waitForResult(stateDir)).code, 0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

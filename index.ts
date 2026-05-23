@@ -2,7 +2,7 @@
  * pi-actors — actor runtime and persistent local tool registry for pi.
  * Zones: composition root, pi agent, actor runtime
  *
- * Wraps command templates as callable pi tools, stores their definitions in actors-tools.json, and exposes actor orchestration across reloads and sessions.
+ * Wraps command templates as callable pi tools, stores durable user tools as recipe files, and exposes actor orchestration across reloads and sessions.
  */
 
 import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
@@ -12,6 +12,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+import * as ActorInspectorTui from "./lib/actor-inspector-tui.ts";
 import * as CommandTemplates from "./lib/command-templates.ts";
 import * as Observability from "./lib/observability.ts";
 import * as Paths from "./lib/paths.ts";
@@ -47,6 +48,8 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   const observedRuns = new Map<string, Observability.RunObservedStatus>();
   const observedRunEventLines = new Map<string, number>();
   let runStatusFrame = 0;
+  let communicationWidgetVisible = false;
+  let inspectorVerbosity: ActorInspectorTui.ActorInspectorVerbosity = "verbose";
   const getRunOwnerId = (ctx: ExtensionContext): string =>
     ctx.sessionManager.getSessionId();
   const updateRunUi = (ctx: ExtensionContext, notify = false): void => {
@@ -57,7 +60,37 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       "zz-pi-actors-runs",
       status ? ctx.ui.theme.fg("dim", status) : undefined,
     );
-    ctx.ui.setWidget("zz-pi-actors-runs", undefined);
+    ctx.ui.setWidget(
+      "zz-pi-actors-comms",
+      communicationWidgetVisible
+        ? () => ({
+            invalidate() {},
+            render(width: number) {
+              return (
+                ActorInspectorTui.renderInspectorWidget(
+                  ActorInspectorTui.readActorInspectorPreviews(
+                    RUN_STATE_ROOT,
+                    14,
+                    { ownerId, currentRunOnly: true },
+                  ),
+                  width,
+                  {
+                    actor: (text) => ctx.ui.theme.fg("accent", text),
+                    muted: (text) => ctx.ui.theme.fg("dim", text),
+                    preview: (text) => ctx.ui.theme.fg("text", text),
+                    stripe: (text) => text,
+                    stripeAlt: (text) => ctx.ui.theme.bg("customMessageBg", text),
+                    target: (text) => ctx.ui.theme.fg("success", text),
+                    type: (text) => ctx.ui.theme.fg("warning", text),
+                  },
+                  { verbosity: inspectorVerbosity },
+                ) ?? []
+              );
+            },
+          })
+        : undefined,
+      { placement: "belowEditor" },
+    );
     const transitions = Observability.detectRunTransitions(
       observedRuns,
       summary,
@@ -135,7 +168,9 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     if (!existsSync(RUN_STATE_ROOT)) return;
     if (!stateRootWatcher) {
       try {
-        stateRootWatcher = watch(RUN_STATE_ROOT, () => scheduleRunEventUpdate(ctx));
+        stateRootWatcher = watch(RUN_STATE_ROOT, () =>
+          scheduleRunEventUpdate(ctx),
+        );
         stateRootWatcher.on("error", () => {
           stateRootWatcher?.close();
           stateRootWatcher = undefined;
@@ -206,6 +241,26 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     runsAnimationInterval = undefined;
     closeRunWatchers();
     closeRecipeWatcher();
+  });
+  pi.registerCommand("actors-inspector-toggle", {
+    description: "Toggle actor inspector widget",
+    handler: async (_args, ctx) => {
+      communicationWidgetVisible = !communicationWidgetVisible;
+      updateRunUi(ctx);
+      ctx.ui.notify(
+        `Actor inspector ${communicationWidgetVisible ? "shown" : "hidden"}`,
+        "info",
+      );
+    },
+  });
+  pi.registerCommand("actors-inspector-verbosity", {
+    description: "Toggle actor inspector verbosity",
+    handler: async (_args, ctx) => {
+      inspectorVerbosity =
+        inspectorVerbosity === "verbose" ? "compact" : "verbose";
+      updateRunUi(ctx);
+      ctx.ui.notify(`Actor inspector ${inspectorVerbosity} mode`, "info");
+    },
   });
   pi.on("before_agent_start", async (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,

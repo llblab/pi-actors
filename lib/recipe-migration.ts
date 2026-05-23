@@ -1,5 +1,5 @@
 /**
- * Legacy actors-tools.json to recipe-file migration helpers
+ * Legacy tool-registry to recipe-file migration helpers
  * Zones: registry migration, recipe persistence, compatibility diagnostics
  * Owns one-way migration from legacy tool registry entries into user recipe files
  */
@@ -98,7 +98,7 @@ export function migrateLegacyToolRegistry(
 
   if (loaded.tools.size === 0) result.skipped.push(basename(configPath));
 
-  const reportPath = join(recipeRoot, "actors-tools-migration-report.json");
+  const reportPath = join(recipeRoot, "legacy-tool-registry-migration-report.json");
   writeJsonAtomic(reportPath, {
     source: configPath,
     migrated: result.migrated,

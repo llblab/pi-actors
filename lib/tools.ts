@@ -5,6 +5,7 @@
  */
 
 import * as ActorMessages from "./actor-messages.ts";
+import * as ActorRooms from "./actor-rooms.ts";
 import * as AsyncRuns from "./async-runs.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
@@ -192,6 +193,99 @@ function compactRunMessages(messages: AsyncRuns.RunOutboxEvent[]): string {
     .join("\n")}`;
 }
 
+function compactPreview(value: unknown, maxLength = 80): string | undefined {
+  if (value === undefined) return undefined;
+  const text =
+    typeof value === "string" ? value : JSON.stringify(value, undefined, 0);
+  const compact = text.replaceAll(/\s+/g, "_");
+  return compact.length > maxLength
+    ? `${compact.slice(0, Math.max(0, maxLength - 1))}…`
+    : compact;
+}
+
+function compactRoomPreviews(previews: ActorRooms.RoomMessagePreview[]): string {
+  if (previews.length === 0) return "\n(no room message previews)";
+  return `\n${previews
+    .map((preview) =>
+      [
+        `ts=${preview.timestamp}`,
+        preview.from ? `from=${preview.from}` : "",
+        `to=${preview.to}`,
+        `type=${preview.type}`,
+        preview.summary ? `summary=${compactPreview(preview.summary)}` : "",
+        preview.body_preview ? `body=${compactPreview(preview.body_preview)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    )
+    .join("\n")}`;
+}
+
+function compactRoomMessages(messages: ActorRooms.RoomTimelineEntry[]): string {
+  if (messages.length === 0) return "\n(no room messages)";
+  return `\n${messages
+    .map((message) =>
+      [
+        `ts=${message.received_at}`,
+        `from=${String(message.from ?? "<unknown>")}`,
+        `to=${message.to}`,
+        `type=${message.type}`,
+        `summary=${String(message.summary ?? "").replaceAll(/\s+/g, "_")}`,
+        compactPreview(message.body) ? `body=${compactPreview(message.body)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    )
+    .join("\n")}`;
+}
+
+function compactRoomContacts(contacts: ActorRooms.RoomContact[]): string {
+  if (contacts.length === 0) return "\n(no room contacts)";
+  return `\n${contacts
+    .map((contact) =>
+      [
+        `address=${contact.address}`,
+        contact.role !== undefined ? `role=${String(contact.role)}` : "",
+        contact.parent !== undefined ? `parent=${String(contact.parent)}` : "",
+        contact.caps !== undefined ? `caps=${Array.isArray(contact.caps) ? contact.caps.join(",") : String(contact.caps)}` : "",
+        contact.claim !== undefined ? `claim=${String(contact.claim).replaceAll(/\s+/g, "_")}` : "",
+        contact.status !== undefined ? `status=${String(contact.status)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    )
+    .join("\n")}`;
+}
+
+function compactRoomRoster(roster: Record<string, ActorRooms.RoomMember>): string {
+  const members = Object.values(roster);
+  if (members.length === 0) return "\n(no room members)";
+  return `\n${members
+    .map((member) =>
+      [
+        `address=${member.address}`,
+        `role=${String(member.role ?? "")}`,
+        member.parent !== undefined ? `parent=${String(member.parent)}` : "",
+        member.caps !== undefined ? `caps=${Array.isArray(member.caps) ? member.caps.join(",") : String(member.caps)}` : "",
+        member.claim !== undefined ? `claim=${String(member.claim).replaceAll(/\s+/g, "_")}` : "",
+        `status=${String(member.status ?? "")}`,
+        `last_seen=${member.last_seen}`,
+      ].join(" "),
+    )
+    .join("\n")}`;
+}
+
+function compactRoomStatus(status: ActorRooms.RoomStatus): string {
+  return `\nroom=${status.room} messages=${status.message_count} roster=${status.roster_count}${status.last_message_at ? ` last_message_at=${status.last_message_at}` : ""}${status.last_message_from ? ` last_from=${status.last_message_from}` : ""}${status.last_message_type ? ` last_type=${status.last_message_type}` : ""}${status.last_message_summary ? ` last_summary=${compactPreview(status.last_message_summary)}` : ""}`;
+}
+
+function compactCommunicationSnapshot(
+  snapshot: ActorRooms.ActorCommunicationSnapshot | undefined,
+): string {
+  if (!snapshot) return "\n(no communication snapshot)";
+  return `\nself=${snapshot.self} root=${snapshot.root} rooms=${snapshot.rooms.length} updated_at=${snapshot.updated_at}`;
+}
+
 function compactActorFiles(status: Record<string, unknown>): string {
   const run = String(status.run ?? "<unknown>");
   const artifacts = asRecord(status.artifacts);
@@ -200,6 +294,7 @@ function compactActorFiles(status: Record<string, unknown>): string {
     status.stderrLog,
     status.eventsFile,
     status.outboxFile,
+    status.state_dir ? `${String(status.state_dir)}/communication.json` : undefined,
     status.state_dir ? `${String(status.state_dir)}/result.json` : undefined,
   ].filter((file): file is string => typeof file === "string");
   const artifactText = Object.keys(artifacts).length
@@ -240,7 +335,10 @@ function compactRecipeRegistry(summary: Record<string, unknown>): string {
   const diagnostics = Array.isArray(summary.diagnostics)
     ? summary.diagnostics.length
     : 0;
-  return `\nrecipes active=${active} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} diagnostics=${diagnostics}`;
+  const recommendations = Array.isArray(summary.recommendations)
+    ? summary.recommendations.length
+    : 0;
+  return `\nrecipes active=${active} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} recommendations=${recommendations} diagnostics=${diagnostics}`;
 }
 
 function compactActorMessageResult(
@@ -255,6 +353,11 @@ function compactActorMessageResult(
   if (result.bytes !== undefined) tokens.push(`bytes=${String(result.bytes)}`);
   if (result.control) tokens.push(`control=${String(result.control)}`);
   if (result.outbox) tokens.push(`messages=${String(result.outbox)}`);
+  if (result.message_count !== undefined)
+    tokens.push(`messages=${String(result.message_count)}`);
+  if (result.roster_count !== undefined)
+    tokens.push(`roster=${String(result.roster_count)}`);
+  if (result.room) tokens.push(`room=${String(result.room)}`);
   if (result.tool) tokens.push(`tool=${String(result.tool)}`);
   if (result.stopped === true) tokens.push("stopped=true");
   if (result.signal) tokens.push(`signal=${String(result.signal)}`);
@@ -352,6 +455,25 @@ function runIdFromActorAddress(
   return parsed.value;
 }
 
+function assertMessageSenderBelongsToRun(
+  message: ActorMessages.ActorMessage,
+  run: string,
+  routeLabel: string,
+): void {
+  if (!message.from) {
+    throw new Error(`message to ${message.to} requires from=<actor address>.`);
+  }
+  const sender = ActorMessages.parseActorAddress(message.from);
+  if (
+    (sender.kind !== "run" && sender.kind !== "branch") ||
+    sender.value !== run
+  ) {
+    throw new Error(
+      `message to ${routeLabel} requires from=run:${run} or branch:${run}/<branch>; got ${message.from}.`,
+    );
+  }
+}
+
 export function createSpawnToolDefinition<
   TContext extends AsyncRunToolContext,
 >(): any {
@@ -422,6 +544,8 @@ export function createSpawnToolDefinition<
         },
         ctx.cwd,
       );
+      ActorRooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
+      ActorRooms.writeCommunicationSnapshot(meta.state_dir, String(meta.run));
       return {
         content: [
           {
@@ -475,6 +599,10 @@ function assertRunAccessibleToContext(
   return status;
 }
 
+function assertRunExistsForActorMessage(runId: string): Record<string, unknown> {
+  return AsyncRuns.getRunStatus(runId);
+}
+
 export function createInspectToolDefinition<TContext = unknown>(
   deps: InspectToolDeps<TContext> = {},
 ): any {
@@ -482,7 +610,7 @@ export function createInspectToolDefinition<TContext = unknown>(
     name: "inspect",
     label: "Inspect",
     description:
-      "Intentionally inspect an actor. Supports run:<id> views: status, tail, messages, artifacts, files, mailbox; coordinator/session status; and tool:<name> status/schema.",
+      "Intentionally inspect an actor. Supports run:<id> views: status, tail, messages, artifacts, files, mailbox, communication; room:<run> status/messages/previews/roster/contacts; coordinator/session status; and tool:<name> status/schema.",
     parameters: objectSchema(
       {
         lines: stringSchema("Line count for tail/messages views. Default 40."),
@@ -490,13 +618,13 @@ export function createInspectToolDefinition<TContext = unknown>(
           "Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited.",
         ),
         target: stringSchema(
-          "Actor address to inspect, e.g. run:<id>, coordinator, session:<id>, session:all, or tool:<name>.",
+          "Actor address to inspect, e.g. run:<id>, room:<run>, coordinator, session:<id>, session:all, or tool:<name>.",
         ),
         verbose: booleanSchema(
           "Return full JSON instead of compact text where available.",
         ),
         view: stringSchema(
-          "Inspection view: status, tail, messages, artifacts, files, or mailbox.",
+          "Inspection view: status, tail, messages, artifacts, files, mailbox, communication, roster, or contacts.",
         ),
       },
       ["target", "view"],
@@ -618,6 +746,100 @@ export function createInspectToolDefinition<TContext = unknown>(
           details,
         };
       }
+      if (address.kind === "room" && address.value && address.room) {
+        const status = assertRunAccessibleToContext(address.value, ctx);
+        const stateDir = String(status.state_dir ?? "");
+        if (!stateDir) throw new Error(`room:${address.value} has no run state directory.`);
+        if (view === "status") {
+          const status = ActorRooms.getRoomStatus(stateDir, address.room);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  status,
+                  input.verbose === true,
+                  compactRoomStatus(status),
+                ),
+              },
+            ],
+            details: status,
+          };
+        }
+        if (view === "previews") {
+          const previews = ActorRooms.readRoomMessagePreviews(
+            stateDir,
+            address.room,
+            Number(input.lines || 40),
+          );
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  previews,
+                  input.verbose === true,
+                  compactRoomPreviews(previews),
+                ),
+              },
+            ],
+            details: { previews },
+          };
+        }
+        if (view === "messages") {
+          const messages = ActorRooms.readRoomMessages(
+            stateDir,
+            address.room,
+            Number(input.lines || 40),
+          );
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  messages,
+                  input.verbose === true,
+                  compactRoomMessages(messages),
+                ),
+              },
+            ],
+            details: { messages },
+          };
+        }
+        if (view === "contacts") {
+          const contacts = ActorRooms.readRoomContacts(stateDir, address.room);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  contacts,
+                  input.verbose === true,
+                  compactRoomContacts(contacts),
+                ),
+              },
+            ],
+            details: { contacts },
+          };
+        }
+        if (view === "roster") {
+          const roster = ActorRooms.readRoomRoster(stateDir, address.room);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  roster,
+                  input.verbose === true,
+                  compactRoomRoster(roster),
+                ),
+              },
+            ],
+            details: { roster },
+          };
+        }
+        throw new Error("inspect room:<run> supports view=status, view=messages, view=previews, view=roster, or view=contacts.");
+      }
       const runId = address.kind === "run" ? address.value : undefined;
       if (!runId)
         throw new Error(
@@ -702,9 +924,28 @@ export function createInspectToolDefinition<TContext = unknown>(
             details: { mailbox },
           };
         }
+        case "communication": {
+          const status = assertRunAccessibleToContext(runId, ctx);
+          const snapshot = ActorRooms.readCommunicationSnapshot(
+            String(status.state_dir ?? ""),
+          );
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  snapshot ?? {},
+                  input.verbose === true,
+                  compactCommunicationSnapshot(snapshot),
+                ),
+              },
+            ],
+            details: { communication: snapshot },
+          };
+        }
         default:
           throw new Error(
-            "inspect view must be one of: status, tail, messages, artifacts, files, mailbox.",
+            "inspect view must be one of: status, tail, messages, artifacts, files, mailbox, communication.",
           );
       }
     },
@@ -722,7 +963,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
     name: "message",
     label: "Message",
     description:
-      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, tool:<name> calls, and coordinator/session-bound run messages.",
+      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, room:<run> timelines/rosters, tool:<name> calls, and coordinator/session-bound run messages.",
     parameters: objectSchema(
       {
         body: unionSchema([
@@ -744,7 +985,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         reply_to: stringSchema("Optional message id this message replies to."),
         summary: stringSchema("Optional short human-facing summary."),
         to: stringSchema(
-          "Destination actor address, e.g. run:<id>, branch:<run>/<branch>, coordinator, session:<id>, or tool:<name>.",
+          "Destination actor address, e.g. run:<id>, branch:<run>/<branch>, room:<run>, coordinator, session:<id>, or tool:<name>.",
         ),
         type: stringSchema(
           "Semantic message type, e.g. control.approve or checkpoint.needs_scope.",
@@ -780,11 +1021,51 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           );
         }
       } else if (address.kind === "branch" && address.value) {
-        assertRunAccessibleToContext(address.value, ctx);
+        const runId = address.value;
+        if (message.from) assertMessageSenderBelongsToRun(message, runId, `branch:${runId}/<branch>`);
+        const status = message.from
+          ? assertRunExistsForActorMessage(runId)
+          : assertRunAccessibleToContext(runId, ctx);
+        const stateDir = String(status.state_dir ?? "");
+        if (stateDir && address.branch) {
+          const ensureBranchMember = (actorAddress: string) => {
+            ActorRooms.ensureRoomMember(
+              stateDir,
+              runId,
+              "main",
+              actorAddress,
+              {
+                parent: `run:${runId}`,
+                role: "branch",
+                status: "present",
+              },
+              "Branch joined default room",
+            );
+            ActorRooms.writeBranchCommunicationSnapshot(
+              stateDir,
+              runId,
+              actorAddress,
+            );
+          };
+          ensureBranchMember(message.to);
+          if (message.from) {
+            const sender = ActorMessages.parseActorAddress(message.from);
+            if (sender.kind === "branch" && sender.value === runId) {
+              ensureBranchMember(message.from);
+            }
+          }
+          ActorRooms.writeCommunicationSnapshot(stateDir, runId);
+        }
         result = AsyncRuns.sendRunMessage(
           address.value,
           JSON.stringify(message),
         );
+      } else if (address.kind === "room" && address.value && address.room) {
+        assertMessageSenderBelongsToRun(message, address.value, `room:${address.value}`);
+        const status = assertRunExistsForActorMessage(address.value);
+        const stateDir = String(status.state_dir ?? "");
+        if (!stateDir) throw new Error(`${message.to} has no run state directory.`);
+        result = { ...ActorRooms.appendRoomMessage(stateDir, address.room, message) };
       } else if (address.kind === "tool" && address.value) {
         const tool = deps.getTool?.(address.value);
         if (!tool || typeof tool.execute !== "function") {
@@ -842,7 +1123,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         });
       } else {
         throw new Error(
-          `message currently supports run:<id>, branch:<run>/<branch>, tool:<name>, coordinator, and session:<id> destinations; unsupported destination: ${message.to}`,
+          `message currently supports run:<id>, branch:<run>/<branch>, room:<run>, tool:<name>, coordinator, and session:<id> destinations; unsupported destination: ${message.to}`,
         );
       }
       return {
@@ -942,6 +1223,8 @@ export function createRuntimeToolDefinition(
             },
             ctx.cwd,
           );
+          ActorRooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
+          ActorRooms.writeCommunicationSnapshot(meta.state_dir, String(meta.run));
           return {
             content: [
               { type: "text" as const, text: compactAsyncRunStatus(meta) },

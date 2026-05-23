@@ -17,7 +17,7 @@ export function getAgentDir(
 }
 
 export function getConfigPath(agentDir = getAgentDir()): string {
-  return join(agentDir, "actors-tools.json");
+  return join(agentDir, "legacy-tool-registry.json");
 }
 
 export function getExtensionTmpDir(

@@ -72,13 +72,20 @@ A caller can also start any recipe or inline template explicitly through `spawn`
 
 `spawn` always starts a detached run actor. Registered recipe tools follow the recipe's `async` flag.
 
-Use `run_id` on async recipe tools or `as: "run:<id>"` on `spawn` when the caller wants a stable id for later inspection or control. Recipe `name` identifies the saved definition; the run id identifies one execution instance of that recipe. Async runs inject `{run_id}` and `{state_dir}` into template values so scripts can write run-local status files or control endpoints.
+Use `run_id` on async recipe tools or `as: "run:<id>"` on `spawn` when the caller wants a stable id for later inspection or control. Recipe `name` identifies the saved definition; the run id identifies one execution instance of that recipe. Async runs inject lifecycle and communication values into template values so scripts can write run-local status files, control endpoints, or room-aware coordination messages:
+
+- `{run_id}`: stable run id.
+- `{state_dir}`: run-local state directory.
+- `{actor_address}`: run actor address, e.g. `run:review`.
+- `{default_room}`: default room address, e.g. `room:review`.
+- `{communication_file}`: compact communication snapshot path.
 
 ## State Files
 
 Use ordinary files under the extension temp directory so status tools stay simple and inspectable:
 
 - `run.json`: pid, optional source metadata (`tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, mailbox metadata, created time, and state dir.
+- `communication.json`: compact actor communication snapshot with self/root/parent, default-room, member, and contact hints for room-aware scripts and agents.
 - `progress.json`: phase, active command count, completed count, failures, and updated time.
 - `events.jsonl`: append-only implementation lifecycle log.
 - `outbox.jsonl`: implementation storage for actor-message envelopes used by `inspect view=messages`, coordinator notifications, or follow-up context. Coordinator follow-ups preserve bounded `body` previews plus message metadata for decision points.
@@ -95,6 +102,7 @@ State files use this shape:
 
 ```text
 ~/.pi/agent/tmp/pi-actors/runs/<run>/run.json
+~/.pi/agent/tmp/pi-actors/runs/<run>/communication.json
 ~/.pi/agent/tmp/pi-actors/runs/<run>/progress.json
 ~/.pi/agent/tmp/pi-actors/runs/<run>/events.jsonl
 ~/.pi/agent/tmp/pi-actors/runs/<run>/outbox.jsonl
@@ -129,13 +137,27 @@ The core loop is:
 
 Addressed `message` calls and coordinator follow-ups are the paired control plane: run-to-coordinator actor messages flow upward, while coordinator-to-run actor messages flow downward. Recipe scripts own the message vocabulary (`next`, `pause`, `approve`, `revise`, `continue`, and so on); pi-actors owns the safe run-local transport, coordinator-session ownership checks, and coordinator attention policy.
 
+### Persistent backlog implementers
+
+Backlog implementer actors should be long-lived workers, not one-shot prompts, when the coordinator wants continuous branch work. A typical run starts two actors, such as `branch:<run>/front` and `branch:<run>/back`, that claim from opposite ends of the canonical backlog and share `room:<run>` for visibility.
+
+The stable loop is:
+
+1. Coordinator sends `task.assign` to an idle branch actor with the exact backlog slice and validation boundary.
+2. Actor posts `task.claim` to `room:<run>` before editing.
+3. Actor completes the slice, validates, and posts `task.result` plus `awaiting_assignment`.
+4. Actor remains alive and waits for the next coordinator message.
+5. Coordinator either sends another `task.assign` or sends `control.stop` after confirming no actionable work remains.
+
+Implementer recipes should declare this contract in `mailbox.accepts` and `mailbox.emits`. They should not self-terminate after a successful slice, and they should not silently self-select a new task unless the coordinator deliberately configured that policy for the run. This keeps task choice centralized while preserving actor-local execution autonomy.
+
 ## Tool Surface
 
 The actor-level surface is:
 
 - `spawn`: start a detached `run:<id>` actor from `file`, `recipe`, or inline `template`.
-- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `tool:<name>`, `coordinator`, or `session:<id>`.
-- `inspect`: intentionally read owned `run:<id>` status, tail, messages, artifacts, files, or mailbox metadata; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
+- `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `tool:<name>`, `coordinator`, or `session:<id>`.
+- `inspect`: intentionally read owned `run:<id>` status, tail, messages, artifacts, files, mailbox metadata, or communication snapshot; read `room:<run>` status, messages, previews, roster, or contacts; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
 
 Low-level async actions map into the actor surface instead of forming a second public model:
 

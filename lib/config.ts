@@ -1,7 +1,7 @@
 /**
  * Persistent tool registry config helpers
  * Zones: registry config, persistence, migration boundary
- * Owns actors-tools.json loading, normalization, unsupported-shape rejection, and serialization
+ * Owns registered-tool config loading, normalization, unsupported-shape rejection, and serialization
  */
 
 import { existsSync, readFileSync } from "node:fs";

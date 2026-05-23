@@ -22,7 +22,7 @@ async function createHarness() {
     activeTools: () => activeTools,
     cleanup: () => rm(dir, { recursive: true, force: true }),
     deps: {
-      configPath: join(dir, "actors-tools.json"),
+      configPath: join(dir, "legacy-tool-registry.json"),
       getActiveTools: () => activeTools,
       getExternalToolConflict: () => undefined,
       getTools: () => tools,

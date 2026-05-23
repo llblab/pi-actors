@@ -27,8 +27,8 @@ test("Agent dir honors PI_CODING_AGENT_DIR", () => {
   );
 });
 
-test("Config path points to actors-tools.json under the agent dir", () => {
-  assert.equal(getConfigPath("/agent"), "/agent/actors-tools.json");
+test("Config path points to the legacy tool registry under the agent dir", () => {
+  assert.equal(getConfigPath("/agent"), "/agent/legacy-tool-registry.json");
 });
 
 test("Extension tmp dir lives under the pi agent tmp tree", () => {

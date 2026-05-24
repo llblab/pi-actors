@@ -191,6 +191,13 @@ function snapshotMinIntervalMs(): number {
   );
 }
 
+function rosterMinIntervalMs(): number {
+  return positiveEnvInt(
+    "PI_ACTORS_ROOM_ROSTER_MIN_MS",
+    DEFAULT_SNAPSHOT_MIN_INTERVAL_MS,
+  );
+}
+
 function compactRoomMessages(stateDir: string, room: string): void {
   const maxMessages = roomMaxMessages();
   const file = messagesFile(stateDir, room);
@@ -250,13 +257,36 @@ function writeRoomRoster(
   writeJsonFile(rosterFile(stateDir, room), roster);
 }
 
-function shouldDebounceSnapshot(file: string): boolean {
+function shouldDebounceFile(file: string, minIntervalMs: number): boolean {
   try {
-    return Date.now() - fs.statSync(file).mtimeMs < snapshotMinIntervalMs();
+    return Date.now() - fs.statSync(file).mtimeMs < minIntervalMs;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
+}
+
+function shouldDebounceSnapshot(file: string): boolean {
+  return shouldDebounceFile(file, snapshotMinIntervalMs());
+}
+
+function comparableRosterMember(member: RoomMember | undefined): string {
+  if (!member) return "";
+  const { last_seen: _lastSeen, ...semantic } = member;
+  return JSON.stringify(semantic);
+}
+
+function shouldWriteRoomRosterMember(
+  stateDir: string,
+  room: string,
+  before: RoomMember | undefined,
+  after: RoomMember,
+): boolean {
+  if (!before) return true;
+  if (comparableRosterMember(before) !== comparableRosterMember(after)) {
+    return true;
+  }
+  return !shouldDebounceFile(rosterFile(stateDir, room), rosterMinIntervalMs());
 }
 
 function updateRosterForMessage(
@@ -269,33 +299,33 @@ function updateRosterForMessage(
   if (!message.from) return roster;
   const body = asRecord(message.body);
   const current = roster[message.from];
-  if (message.type === "actor.leave") {
-    roster[message.from] = {
-      address: message.from,
-      joined_at: current?.joined_at ?? receivedAt,
-      last_seen: receivedAt,
-      ...(current?.caps !== undefined ? { caps: current.caps } : {}),
-      ...(current?.claim !== undefined ? { claim: current.claim } : {}),
-      ...(current?.display !== undefined ? { display: current.display } : {}),
-      ...(current?.parent !== undefined ? { parent: current.parent } : {}),
-      ...(current?.role !== undefined ? { role: current.role } : { role: "actor" }),
-      status: String(body.status ?? "left"),
-    };
+  const next = message.type === "actor.leave"
+    ? {
+        address: message.from,
+        joined_at: current?.joined_at ?? receivedAt,
+        last_seen: receivedAt,
+        ...(current?.caps !== undefined ? { caps: current.caps } : {}),
+        ...(current?.claim !== undefined ? { claim: current.claim } : {}),
+        ...(current?.display !== undefined ? { display: current.display } : {}),
+        ...(current?.parent !== undefined ? { parent: current.parent } : {}),
+        ...(current?.role !== undefined ? { role: current.role } : { role: "actor" }),
+        status: String(body.status ?? "left"),
+      }
+    : {
+        address: message.from,
+        joined_at: current?.joined_at ?? receivedAt,
+        last_seen: receivedAt,
+        ...(body.caps !== undefined ? { caps: body.caps } : current?.caps !== undefined ? { caps: current.caps } : {}),
+        ...(body.claim !== undefined ? { claim: body.claim } : current?.claim !== undefined ? { claim: current.claim } : {}),
+        ...(body.display !== undefined ? { display: body.display } : current?.display !== undefined ? { display: current.display } : {}),
+        ...(body.parent !== undefined ? { parent: body.parent } : current?.parent !== undefined ? { parent: current.parent } : {}),
+        ...(body.role !== undefined ? { role: body.role } : current?.role !== undefined ? { role: current.role } : { role: "actor" }),
+        status: String(body.status ?? current?.status ?? "present"),
+      };
+  roster[message.from] = next;
+  if (shouldWriteRoomRosterMember(stateDir, room, current, next)) {
     writeRoomRoster(stateDir, room, roster);
-    return roster;
   }
-  roster[message.from] = {
-    address: message.from,
-    joined_at: current?.joined_at ?? receivedAt,
-    last_seen: receivedAt,
-    ...(body.caps !== undefined ? { caps: body.caps } : current?.caps !== undefined ? { caps: current.caps } : {}),
-    ...(body.claim !== undefined ? { claim: body.claim } : current?.claim !== undefined ? { claim: current.claim } : {}),
-    ...(body.display !== undefined ? { display: body.display } : current?.display !== undefined ? { display: current.display } : {}),
-    ...(body.parent !== undefined ? { parent: body.parent } : current?.parent !== undefined ? { parent: current.parent } : {}),
-    ...(body.role !== undefined ? { role: body.role } : current?.role !== undefined ? { role: current.role } : { role: "actor" }),
-    status: String(body.status ?? current?.status ?? "present"),
-  };
-  writeRoomRoster(stateDir, room, roster);
   return roster;
 }
 

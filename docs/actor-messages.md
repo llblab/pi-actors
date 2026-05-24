@@ -182,7 +182,7 @@ Recipes can declare their conversational surface:
 }
 ```
 
-`spawn` creates detached `run:<id>` actors from a recipe file/name or inline command template. Spawn metadata may include explicit `state_dir` and named `artifacts` for terminal follow-ups and inspection.
+`spawn` creates detached `run:<id>` actors from a recipe file/name or inline command template. Spawn metadata may include explicit `state_dir` and named `artifacts` for terminal follow-ups and inspection. Room rosters are durable but burst-safe: repeated messages that only update `last_seen` may be coalesced briefly, while semantic roster changes such as role/status/display still write immediately.
 
 ## Inspect
 

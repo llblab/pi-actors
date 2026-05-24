@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.7: Burst-Safe Roster Writes
+
+- `[Rooms]` Debounced room roster rewrites when a burst only changes a member's `last_seen`, while still writing semantic roster changes such as role, status, display, caps, claim, or parent immediately.
+- `[Runtime IO]` Added `PI_ACTORS_ROOM_ROSTER_MIN_MS` as the roster-only debounce interval, mirroring the existing communication snapshot debounce approach without changing public `room:<run>` message or inspect semantics.
+- `[Docs/Context]` Updated actor-message docs, project context, and the remaining rooms backlog scope to preserve the new burst-safe roster invariant during future storage/backend changes.
+- `[Tests]` Added regression coverage for roster rewrite debounce and immediate semantic roster updates.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.7` for the hotfix release.
+
 ## 0.19.6: Conservative Retirement Candidates
 
 - `[Observability]` Added per-run descendant `pi -p` worker counting and exposes `descendantSubagents` on run observations. Ambient run status still counts active descendant workers, but now retains the per-run attribution needed for supervisor lifecycle decisions.

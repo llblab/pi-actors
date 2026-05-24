@@ -125,6 +125,40 @@ test("Actor rooms track branch inbox handling state", async () => {
   }
 });
 
+test("Actor rooms debounce roster rewrites when only last_seen changes", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
+  const previous = process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS;
+  process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS = "10000";
+  try {
+    appendRoomMessage(stateDir, "main", {
+      body: { role: "reviewer" },
+      from: "branch:demo/a",
+      to: "room:demo",
+      type: "chat.message",
+    });
+    const rosterFile = join(stateDir, "rooms", "main", "roster.json");
+    const firstMtime = (await stat(rosterFile)).mtimeMs;
+    appendRoomMessage(stateDir, "main", {
+      from: "branch:demo/a",
+      to: "room:demo",
+      type: "chat.message",
+    });
+    assert.equal((await stat(rosterFile)).mtimeMs, firstMtime);
+    appendRoomMessage(stateDir, "main", {
+      body: { role: "implementer" },
+      from: "branch:demo/a",
+      to: "room:demo",
+      type: "chat.message",
+    });
+    assert.notEqual((await stat(rosterFile)).mtimeMs, firstMtime);
+    assert.equal(readRoomRoster(stateDir, "main")["branch:demo/a"].role, "implementer");
+  } finally {
+    if (previous === undefined) delete process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS;
+    else process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS = previous;
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Actor rooms debounce bursty communication snapshot writes", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
   const previous = process.env.PI_ACTORS_COMMUNICATION_SNAPSHOT_MIN_MS;

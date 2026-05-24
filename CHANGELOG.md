@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.10: Legacy Branch Message Claim IDs
+
+- `[Branch Messages]` Coordinator claim handling now assigns IDs to older/manual queued branch inbox entries that lack `id`, so injected direct messages can still transition to `handled` or `failed` and do not repeat forever.
+- `[Tests]` Extended direct branch inbox coordinator coverage to include a legacy no-ID message and assert both claimed/handled timestamps are recorded.
+- `[Docs/Context]` Updated actor-message docs, durable project context, package metadata, lockfile metadata, and packaged skill metadata to `0.19.10`.
+
 ## 0.19.9: Locked Branch Inbox Mutations
 
 - `[Branch Messages]` Added lock-guarded append and status rewrites for branch-local direct-message inbox files so concurrent direct delivery and coordinator claim/handle transitions do not overwrite each other.

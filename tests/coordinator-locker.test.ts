@@ -112,7 +112,15 @@ test("coordinator processes and handles direct inbox messages", async () => {
       status: "queued",
       queued_at: new Date().toISOString()
     };
-    await writeFile(inboxFile, JSON.stringify(testMessage) + "\n", "utf8");
+    const legacyMessage = {
+      from: "branch:direct-inbox-test/qa",
+      to: "branch:direct-inbox-test/mapper",
+      type: "task.followup",
+      body: "Legacy message without id",
+      status: "queued",
+      queued_at: new Date().toISOString()
+    };
+    await writeFile(inboxFile, `${JSON.stringify(testMessage)}\n${JSON.stringify(legacyMessage)}\n`, "utf8");
 
     const artifact = join(root, "artifact.md");
     const result = spawnSync(roomSwarmScript, [
@@ -141,13 +149,20 @@ test("coordinator processes and handles direct inbox messages", async () => {
     const loggedArgs = await readFile(argLog, "utf8");
     assert.match(loggedArgs, /DIRECT INBOX MESSAGES FOR YOU/);
     assert.match(loggedArgs, /Audit auth boundary risks/);
+    assert.match(loggedArgs, /Legacy message without id/);
 
-    // Verify inbox message was transitioned to 'handled'
-    const inboxContent = await readFile(inboxFile, "utf8");
-    const updatedMsg = JSON.parse(inboxContent.trim());
-    assert.equal(updatedMsg.status, "handled");
-    assert.ok(updatedMsg.claimed_at);
-    assert.ok(updatedMsg.handled_at);
+    // Verify inbox messages were transitioned to 'handled'
+    const inboxMessages = (await readFile(inboxFile, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(inboxMessages.length, 2);
+    for (const updatedMsg of inboxMessages) {
+      assert.equal(updatedMsg.status, "handled");
+      assert.ok(updatedMsg.id);
+      assert.ok(updatedMsg.claimed_at);
+      assert.ok(updatedMsg.handled_at);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

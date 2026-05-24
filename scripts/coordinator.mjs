@@ -237,12 +237,18 @@ async function claimQueuedInboxMessages(runId, branchName) {
     const messages = await readInboxLines(inboxPath);
     const claimedAt = new Date().toISOString();
     const queuedMessages = [];
-    const updated = messages.map((msg) => {
+    const updated = messages.map((msg, index) => {
       if (msg.status !== "queued" && msg.status) return msg;
-      queuedMessages.push(msg);
-      return msg.id ? { ...msg, claimed_at: claimedAt, status: "claimed" } : msg;
+      const claimed = {
+        ...msg,
+        claimed_at: claimedAt,
+        id: msg.id || `legacy-${Date.now()}-${index}`,
+        status: "claimed",
+      };
+      queuedMessages.push(claimed);
+      return claimed;
     });
-    if (queuedMessages.some((message) => message.id)) await writeInboxMessages(inboxPath, updated);
+    if (queuedMessages.length > 0) await writeInboxMessages(inboxPath, updated);
     return queuedMessages;
   } catch {
     return [];

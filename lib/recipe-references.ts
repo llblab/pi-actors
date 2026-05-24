@@ -70,6 +70,20 @@ interface ImportedRecipe {
   values: Record<string, unknown>;
 }
 
+export interface TemplateRecipeContextRecord {
+  alias?: string;
+  depth: number;
+  file: string;
+  import_path: string[];
+  name: string;
+  recipe: Record<string, unknown>;
+  role: "entry" | "import";
+}
+
+export interface ReadResolvedRecipeConfigOptions {
+  includeActorRecipeContext?: boolean;
+}
+
 function hasWhitespace(value: string): boolean {
   return /\s/.test(value);
 }
@@ -218,7 +232,7 @@ function getRecipeCommandTemplate(
   return normalizeRecipeTemplate({ ...envelope, template });
 }
 
-function readRawRecipeConfig(
+export function readRawRecipeConfig(
   path: string,
 ): Record<string, unknown> | undefined {
   if (!existsSync(path)) return undefined;
@@ -437,14 +451,25 @@ function applyDefaultsToTemplate(
   } as CommandTemplates.CommandTemplateObjectConfig;
 }
 
+function withActorRecipeContext(
+  value: CommandTemplateValue,
+  context: CommandTemplates.CommandTemplateActorRecipeContext,
+): CommandTemplateValue {
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return { ...value, actorRecipeContext: context };
+  }
+  return { actorRecipeContext: context, template: value };
+}
+
 function expandImportNodes(
   value: CommandTemplateValue,
   imports: Record<string, ImportedRecipe>,
+  options: ReadResolvedRecipeConfigOptions = {},
 ): CommandTemplateValue {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
     return value.map(
-      (item) => expandImportNodes(item, imports) as CommandTemplateConfig,
+      (item) => expandImportNodes(item, imports, options) as CommandTemplateConfig,
     );
   }
   const record = value as Record<string, unknown>;
@@ -465,7 +490,16 @@ function expandImportNodes(
       nodeDefaults,
       nodeValues,
     );
-    return applyDefaultsToTemplate(imported.config.template, defaults, record);
+    const expanded = applyDefaultsToTemplate(imported.config.template, defaults, record);
+    return options.includeActorRecipeContext
+      ? withActorRecipeContext(expanded, {
+          alias: imported.alias,
+          file: imported.file,
+          name: imported.name,
+          path: imported.alias,
+          role: "import",
+        })
+      : expanded;
   }
   if (Array.isArray(record.template)) {
     return {
@@ -475,6 +509,7 @@ function expandImportNodes(
           expandImportNodes(
             item as CommandTemplateValue,
             imports,
+            options,
           ) as CommandTemplateConfig,
       ),
     } as CommandTemplates.CommandTemplateObjectConfig;
@@ -485,6 +520,7 @@ function expandImportNodes(
       template: expandImportNodes(
         record.template as CommandTemplateValue,
         imports,
+        options,
       ),
     } as CommandTemplates.CommandTemplateObjectConfig;
   }
@@ -494,6 +530,7 @@ function expandImportNodes(
 export function readResolvedRecipeConfig(
   file: string,
   stack: string[] = [],
+  options: ReadResolvedRecipeConfigOptions = {},
 ): TemplateRecipeConfig | undefined {
   const path = resolveRecipePath(
     file,
@@ -512,7 +549,7 @@ export function readResolvedRecipeConfig(
   const imports: Record<string, ImportedRecipe> = {};
   for (const [alias, binding] of Object.entries(getRecipeImports(raw))) {
     const importPath = resolveRecipeImportPath(getImportFrom(binding), dirname(path));
-    const config = readResolvedRecipeConfig(importPath, [...stack, path]);
+    const config = readResolvedRecipeConfig(importPath, [...stack, path], options);
     if (!config) throw new Error(`Recipe import not found: ${alias}`);
     const bindingDefaults =
       typeof binding === "string" ? undefined : binding.defaults;
@@ -533,9 +570,18 @@ export function readResolvedRecipeConfig(
   >;
   const template = getRecipeCommandTemplate(substituted);
   if (!template) return undefined;
-  const expandedTemplate = expandImportNodes(template, imports);
+  const expandedTemplate = expandImportNodes(template, imports, options);
+  const recipeName = getRecipeIdFromPath(path);
+  const templateWithContext = options.includeActorRecipeContext
+    ? withActorRecipeContext(expandedTemplate, {
+        file: path,
+        name: recipeName,
+        path: recipeName,
+        role: stack.length > 0 ? "import" : "entry",
+      })
+    : expandedTemplate;
   return {
-    name: getRecipeIdFromPath(path),
+    name: recipeName,
     ...(typeof substituted.description === "string" &&
     substituted.description.trim()
       ? { description: substituted.description.trim() }
@@ -554,7 +600,7 @@ export function readResolvedRecipeConfig(
     ...(Object.keys(imports).length > 0
       ? { imports: getRecipeImports(raw) }
       : {}),
-    template: expandedTemplate,
+    template: templateWithContext,
     ...(Array.isArray(substituted.args)
       ? { args: substituted.args as string[] }
       : {}),
@@ -633,6 +679,49 @@ export function readResolvedRecipeConfig(
     ...(isRecord(substituted.values) ? { values: substituted.values } : {}),
     ...(isRecord(substituted.usage) ? { usage: substituted.usage } : {}),
   };
+}
+
+function collectRecipeContextRecords(
+  file: string,
+  stack: string[],
+  importPath: string[],
+  alias?: string,
+): TemplateRecipeContextRecord[] {
+  const path = resolveRecipePath(
+    file,
+    stack.length > 0 ? dirname(stack.at(-1)!) : Paths.getRecipeRoot(),
+  );
+  if (stack.includes(path)) {
+    throw new Error(`Cyclic recipe import: ${[...stack, path].join(" -> ")}`);
+  }
+  if (stack.length >= MAX_RECIPE_IMPORT_DEPTH) {
+    throw new Error(
+      `Recipe import depth exceeds limit ${MAX_RECIPE_IMPORT_DEPTH}: ${[...stack, path].join(" -> ")}`,
+    );
+  }
+  const raw = readRawRecipeConfig(path);
+  if (!raw || !Object.hasOwn(raw, "template")) return [];
+  const record: TemplateRecipeContextRecord = {
+    ...(alias ? { alias } : {}),
+    depth: stack.length,
+    file: path,
+    import_path: importPath,
+    name: getRecipeIdFromPath(path),
+    recipe: raw,
+    role: stack.length === 0 ? "entry" : "import",
+  };
+  const imports = getRecipeImports(raw);
+  const children = Object.entries(imports).flatMap(([childAlias, binding]) => {
+    const importFile = resolveRecipeImportPath(getImportFrom(binding), dirname(path));
+    return collectRecipeContextRecords(importFile, [...stack, path], [...importPath, childAlias], childAlias);
+  });
+  return [record, ...children];
+}
+
+export function buildRecipeContextRecords(
+  file: string,
+): TemplateRecipeContextRecord[] {
+  return collectRecipeContextRecords(file, [], []);
 }
 
 export function getRecipeTemplate(

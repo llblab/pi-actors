@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.19.1
+  version: 0.19.2
 ---
 
 # Actors (pi-actors)
@@ -124,7 +124,7 @@ Actor inspector commands:
 - `/actors-inspector-filter all|room|direct|broadcast|mention <text>`: narrow table previews without changing room/run state.
 - `/actors-inspect <number>`: open one visible row as a full-message view.
 
-The table is compact and optimistic by default: bounded body previews, capped noisy room rows, and an inline roster summary in the form `role/name` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
+The table is compact and optimistic by default: bounded body previews, capped noisy room rows, and an inline roster summary in the form `name/role` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
 
 Let terminal notifications arrive; avoid sleep-poll loops except during diagnosis.
 
@@ -218,8 +218,9 @@ Rules:
 5. Declare `mailbox` for actors that accept or emit meaningful messages.
 6. Declare `artifacts` for durable outputs the coordinator should inspect.
 7. File-backed recipe identity comes from the filename basename; legacy top-level `name` fields are ignored by loaders.
-8. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
-9. Do not ship concrete model-version defaults in packaged recipes; expose `model`, `models`, and stage-specific model args so the caller must choose current policy at launch.
+8. File-backed async recipes pass child `pi -p` actors a bounded JSONL recipe context bundle by default: raw entry/import recipe records, derived `name`, import path/alias, and `"you_are_here": true` on the launching recipe node. Set `"actor_context": false` or `"off"` to suppress it for minimal prompts.
+9. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
+10. Do not ship concrete model-version defaults in packaged recipes; expose `model`, `models`, and stage-specific model args so the caller must choose current policy at launch.
 
 Priority for same-id recipes:
 

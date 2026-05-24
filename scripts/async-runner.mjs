@@ -21,6 +21,7 @@ if (!stateDir) {
 }
 const { executeRegisteredTool } = await import("../lib/execution.ts");
 const { execCommandTemplate } = await import("../lib/command-templates.ts");
+const { appendRecipeContextToPiArgs } = await import("../lib/actor-recipe-context.ts");
 const { writeJsonAtomic } = await import("../lib/file-state.ts");
 const runPath = join(stateDir, "run.json");
 const progressPath = join(stateDir, "progress.json");
@@ -90,10 +91,16 @@ function progressRunning() {
 }
 async function observedExec(command, args, options) {
   const commandDetail = formatCommandDetail(command, args);
+  const execArgs = appendRecipeContextToPiArgs(
+    command,
+    args,
+    meta.recipe_context_records,
+    options?.actorRecipeContext,
+  );
   activeSubagents += 1;
   event("command.start", { activeSubagents, command: commandDetail });
   progressRunning();
-  const result = await execCommandTemplate(command, args, options);
+  const result = await execCommandTemplate(command, execArgs, options);
   activeSubagents = Math.max(0, activeSubagents - 1);
   completedSubagents += 1;
   if (result.code !== 0) {

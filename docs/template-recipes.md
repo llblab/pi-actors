@@ -137,6 +137,22 @@ Use recipe-level `mailbox` to document the semantic messages a recipe actor acce
 
 `mailbox` is contract metadata, not transport configuration. It should name semantic message types, not transport commands, file paths, or CLI fragments.
 
+## Actor Recipe Context
+
+File-backed async recipes automatically build a bounded recipe context bundle for child LLM actor launches. The bundle is appended to child `pi -p` prompts as JSONL: each line is one recipe/context record containing filename-derived `name`, source file, role/depth, import path/alias, and the raw authored recipe JSON. The record whose command-template node launched the current child is marked with `"you_are_here": true` and path metadata.
+
+This context is provenance, not the task instruction. The authored prompt remains authoritative; the bundle explains the recipe/composition tree that produced the launch. A child actor can use it to give advisory feedback on whether its recipe, imports, mailbox metadata, and role boundaries fit the task, without needing a separate hand-written workflow explanation. Recipes that require a minimal child prompt may opt out:
+
+```json
+{
+  "async": true,
+  "actor_context": false,
+  "template": "pi -p --model {model} {prompt}"
+}
+```
+
+`"actor_context": "off"` is equivalent. Bundle generation uses the same recipe file-size and import-depth safety limits as normal recipe loading.
+
 ## Actor Message Delivery
 
 Recipes do not declare a second event-delivery policy. A running actor emits addressed messages such as `command.done`, `run.done`, or `checkpoint.needs_input`; the coordinator/runtime decides whether a message stays diagnostic, becomes a notification, or re-enters the agent context. This keeps recipe metadata focused on the actor contract:

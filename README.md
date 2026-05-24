@@ -159,7 +159,7 @@ The terminal actor inspector is hidden by default. When opened without an explic
 /actors-inspect 3
 ```
 
-The table is compact and optimistic by default: bounded route/type/summary/body previews, capped noisy room rows, and an inline roster summary in the form `role/name` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` remain visible as inactive/muted participants from the current run. `/actors-inspect <number>` opens the selected row as a full-message view; toggle again to return to the table or close it. Actor display names come from room `actor.join` roster metadata or branch addresses, keeping debugger output plain and name-driven.
+The table is compact and optimistic by default: bounded route/type/summary/body previews, capped noisy room rows, and an inline roster summary in the form `name/role` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` remain visible as inactive/muted participants from the current run. `/actors-inspect <number>` opens the selected row as a full-message view; toggle again to return to the table or close it. Actor display names come from room `actor.join` roster metadata or branch addresses, keeping debugger output plain and name-driven.
 
 ## Registry Model
 
@@ -218,7 +218,7 @@ Templates support:
 - Retries, recovery, failure policy, delays, and guarded execution;
 - Async run values such as `{run_id}`, `{state_dir}`, `{actor_address}`, `{default_room}`, and `{communication_file}`.
 
-The template owns execution shape. The recipe owns saved metadata, defaults, imports, mailbox, and artifacts. The run actor owns detached lifecycle, state, messages, cancellation, and inspection.
+The template owns execution shape. The recipe owns saved metadata, defaults, imports, mailbox, and artifacts. The run actor owns detached lifecycle, state, messages, cancellation, and inspection. File-backed async recipes also provide child `pi -p` actors with a bounded JSONL recipe context bundle by default, including raw entry/import recipe records and a `"you_are_here": true` marker for the recipe node that launched the child. Set `"actor_context": false` or `"off"` in a recipe to suppress that context for minimal prompts.
 
 ## Recipe Library
 

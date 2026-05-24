@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { getRecipeIdFromPath, readResolvedRecipeConfig, resolveRecipePath } from "../lib/recipe-references.ts";
+import { buildRecipeContextRecords, getRecipeIdFromPath, readResolvedRecipeConfig, resolveRecipePath } from "../lib/recipe-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -51,6 +51,61 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
       },
       "wc -c",
     ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template recipe context records preserve raw composition identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-context-"));
+  try {
+    const child = join(root, "child.json");
+    const parent = join(root, "parent.json");
+    await writeFile(
+      child,
+      JSON.stringify({
+        defaults: { message: "hello" },
+        template: "pi -p child",
+      }),
+    );
+    await writeFile(
+      parent,
+      JSON.stringify({
+        imports: { child_alias: "child.json" },
+        template: [{ name: "child_alias" }],
+      }),
+    );
+
+    const records = buildRecipeContextRecords(parent);
+    assert.deepEqual(
+      records.map((record) => ({
+        alias: record.alias,
+        depth: record.depth,
+        import_path: record.import_path,
+        name: record.name,
+        role: record.role,
+      })),
+      [
+        { alias: undefined, depth: 0, import_path: [], name: "parent", role: "entry" },
+        { alias: "child_alias", depth: 1, import_path: ["child_alias"], name: "child", role: "import" },
+      ],
+    );
+    assert.deepEqual(records[1].recipe, {
+      defaults: { message: "hello" },
+      template: "pi -p child",
+    });
+
+    const config = readResolvedRecipeConfig(parent, [], {
+      includeActorRecipeContext: true,
+    })!;
+    assert.equal(
+      JSON.stringify(config.template).includes('"actorRecipeContext"'),
+      true,
+    );
+    assert.equal(
+      JSON.stringify(config.template).includes('"alias":"child_alias"'),
+      true,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

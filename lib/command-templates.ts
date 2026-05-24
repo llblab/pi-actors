@@ -10,7 +10,16 @@ import { isAbsolute, resolve } from "node:path";
 
 export type CommandTemplateFailureScope = "continue" | "branch" | "root";
 
+export interface CommandTemplateActorRecipeContext {
+  alias?: string;
+  file?: string;
+  name?: string;
+  path?: string;
+  role?: string;
+}
+
 export interface CommandTemplateObjectConfig {
+  actorRecipeContext?: CommandTemplateActorRecipeContext;
   label?: string;
   parallel?: boolean;
   when?: boolean | string;

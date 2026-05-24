@@ -20,7 +20,8 @@ import {
   writeSync,
 } from "node:fs";
 import { platform } from "node:os";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   CommandTemplateFailureScope,
@@ -118,8 +119,23 @@ export interface AsyncRunMeta {
 
 const DEFAULT_STATE_ROOT = Paths.getRunStateRoot();
 const DEFAULT_RECIPE_ROOT = Paths.getRecipeRoot();
-const RUNNER_PATH = new URL("../scripts/async-runner.mjs", import.meta.url)
-  .pathname;
+
+function packageRoot(): string {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  if (basename(moduleDir) === "lib" && basename(dirname(moduleDir)) === "dist") {
+    return dirname(dirname(moduleDir));
+  }
+  return dirname(moduleDir);
+}
+
+const PACKAGE_ROOT = packageRoot();
+const RUNNER_PATH = join(PACKAGE_ROOT, "scripts", "async-runner.mjs");
+
+function asyncRunnerArgv(stateDir: string): string[] {
+  return existsSync(join(PACKAGE_ROOT, "dist", "lib", "execution.js"))
+    ? [RUNNER_PATH, stateDir]
+    : ["--experimental-strip-types", RUNNER_PATH, stateDir];
+}
 
 function safeRunId(value: string | undefined): string {
   const run = (value || `run-${Date.now()}`).trim();
@@ -400,7 +416,7 @@ export function startRun(
   }
   const outFd = openSync(stdout, "a");
   const errFd = openSync(stderr, "a");
-  const argv = ["--experimental-strip-types", RUNNER_PATH, stateDir];
+  const argv = asyncRunnerArgv(stateDir);
   const values = {
     ...(startParams.values || {}),
     actor_address: `run:${run}`,

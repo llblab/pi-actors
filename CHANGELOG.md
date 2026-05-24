@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.20.0: Compiled Runtime Entrypoints
+
+- `[Packaging]` Added a build step that emits compiled `dist/lib/*.js` and declaration files from the TypeScript runtime modules, with relative `.ts` imports rewritten to `.js` for installed package execution.
+- `[Async Runs]` Replaced the emergency installed-package copy workaround in `scripts/async-runner.mjs` with dist-first imports. Installed npm packages now execute the async runner against compiled JS without relying on Node native type stripping for `.ts` files under `node_modules`; source checkouts still fall back to TypeScript imports for local development.
+- `[Scripts]` Updated `scripts/validate-recipe.mjs` to use the same dist-first import path, so packaged recipe validation also runs from compiled JS when installed from npm.
+- `[Tests]` Updated installed-package smoke coverage to simulate `node_modules/@llblab/pi-actors` with `dist`, execute scripts without `--experimental-strip-types`, and assert the old `.type-strip-lib` workaround is not used.
+- `[Package]` Changed the package description to `Local Actor Kernel for Pi`, added `tsconfig.build.json`, included `dist` in the published package, and bumped package/skill metadata to `0.20.0`.
+
 ## 0.19.11: Installed Async Runner Hotfix
 
 - `[Async Runs]` Fixed installed npm package async recipe launches on Node 22 by avoiding direct runtime imports of raw `.ts` files from under `node_modules` in `scripts/async-runner.mjs`. Installed runners now copy the package `lib` sources into the run state before importing them, keeping Node native type stripping outside the blocked `node_modules` path.

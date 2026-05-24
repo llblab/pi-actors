@@ -25,6 +25,7 @@ async function readTextIfExists(path: string): Promise<string> {
 async function prepareInstalledPackage(root: string): Promise<string> {
   const packageDir = join(root, "node_modules", "@llblab", "pi-actors");
   await mkdir(packageDir, { recursive: true });
+  await cp(join(process.cwd(), "dist"), join(packageDir, "dist"), { recursive: true });
   await cp(join(process.cwd(), "lib"), join(packageDir, "lib"), { recursive: true });
   await cp(join(process.cwd(), "scripts"), join(packageDir, "scripts"), { recursive: true });
   return packageDir;
@@ -54,7 +55,6 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
     );
 
     await execFileAsync(process.execPath, [
-      "--experimental-strip-types",
       join(packageDir, "scripts", "async-runner.mjs"),
       stateDir,
     ]);
@@ -66,6 +66,7 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
       /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/,
     );
     assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /installed async ok/);
+    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "execution.ts")), "");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -79,7 +80,6 @@ test("installed validate-recipe avoids importing TypeScript from node_modules", 
     await writeFile(recipe, `${JSON.stringify({ template: "echo ok" })}\n`);
 
     const { stdout } = await execFileAsync(process.execPath, [
-      "--experimental-strip-types",
       join(packageDir, "scripts", "validate-recipe.mjs"),
       recipe,
     ]);

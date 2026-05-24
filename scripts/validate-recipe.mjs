@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
-import { cpSync, existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -8,22 +8,18 @@ function scriptFile() {
   return fileURLToPath(import.meta.url);
 }
 
-function isUnderNodeModules(file) {
-  return /[/\\]node_modules[/\\]/.test(file);
+function packageRoot() {
+  return dirname(dirname(scriptFile()));
 }
 
-function prepareTypeStripImportRoot() {
-  const packageRoot = dirname(dirname(scriptFile()));
-  const sourceLib = join(packageRoot, "lib");
-  if (!isUnderNodeModules(packageRoot)) return sourceLib;
-  const copiedLib = join(mkdtempSync(join(tmpdir(), "pi-actors-validate-lib-")), "lib");
-  cpSync(sourceLib, copiedLib, { recursive: true });
-  return copiedLib;
+function libModulePath(name) {
+  const root = packageRoot();
+  const compiled = join(root, "dist", "lib", `${name}.js`);
+  return existsSync(compiled) ? compiled : join(root, "lib", `${name}.ts`);
 }
 
-const typeStripImportRoot = prepareTypeStripImportRoot();
 const { readResolvedRecipeConfig } = await import(
-  pathToFileURL(join(typeStripImportRoot, "recipe-references.ts")).href
+  pathToFileURL(libModulePath("recipe-references")).href
 );
 
 function usage() {

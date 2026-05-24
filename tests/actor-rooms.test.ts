@@ -279,6 +279,29 @@ test("Actor rooms read room status without losing count or last message metadata
   }
 });
 
+test("Actor room append results report full message counts after preview limit", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-count-"));
+  try {
+    ensureDefaultRoom(stateDir, "demo");
+    let result = ensureDefaultRoom(stateDir, "demo");
+    for (let index = 0; index < 75; index += 1) {
+      result = appendRoomMessage(stateDir, "main", {
+        body: { index },
+        from: `branch:demo/worker-${index}`,
+        summary: `message ${index}`,
+        to: "room:demo",
+        type: "chat.message",
+      });
+    }
+    assert.equal(readRoomMessages(stateDir, "main").length, 40);
+    assert.equal(result.message_count, 76);
+    assert.equal(ensureDefaultRoom(stateDir, "demo").message_count, 76);
+    assert.equal(getRoomStatus(stateDir, "main").message_count, 76);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Actor rooms expose TUI-ready message previews", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
   try {

@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -24,13 +24,48 @@ async function readTextIfExists(path: string): Promise<string> {
 
 async function prepareInstalledPackage(root: string): Promise<string> {
   const packageDir = join(root, "node_modules", "@llblab", "pi-actors");
+  const peersDir = join(root, "node_modules", "@earendil-works");
   await mkdir(packageDir, { recursive: true });
+  await mkdir(peersDir, { recursive: true });
+  for (const peer of ["pi-coding-agent", "pi-tui"]) {
+    await symlink(join(process.cwd(), "node_modules", "@earendil-works", peer), join(peersDir, peer), "dir");
+  }
+  await cp(join(process.cwd(), "package.json"), join(packageDir, "package.json"));
+  await cp(join(process.cwd(), "index.js"), join(packageDir, "index.js"));
   await cp(join(process.cwd(), "dist"), join(packageDir, "dist"), { recursive: true });
   await cp(join(process.cwd(), "lib"), join(packageDir, "lib"), { recursive: true });
   await cp(join(process.cwd(), "scripts"), join(packageDir, "scripts"), { recursive: true });
   await cp(join(process.cwd(), "recipes"), join(packageDir, "recipes"), { recursive: true });
   return packageDir;
 }
+
+test("installed extension entrypoint from package metadata imports compiled runtime", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-entry-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const { stdout, stderr } = await execFileAsync(process.execPath, [
+      "-e",
+      `const { readFileSync } = require("node:fs");
+       const { join } = require("node:path");
+       const { pathToFileURL } = require("node:url");
+       const packageDir = process.argv[1];
+       const pkg = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+       const entry = join(packageDir, pkg.pi.extensions[0]);
+       import(pathToFileURL(entry).href).then((mod) => {
+         if (typeof mod.default !== "function") throw new Error("extension default export missing");
+         console.log("installed extension ok");
+       }).catch((error) => {
+         console.error(error.code || error.name, error.message);
+         process.exit(1);
+       });`,
+      packageDir,
+    ]);
+    assert.match(stdout, /installed extension ok/);
+    assert.doesNotMatch(stderr, /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("installed async-runner avoids importing TypeScript from node_modules", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-runner-"));

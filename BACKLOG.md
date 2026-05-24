@@ -2,6 +2,39 @@
 
 ## Open Work
 
+### Branch Inbox Retention and Transition Scaling
+
+- Priority: Medium.
+- Goal: Keep direct branch message queues reliable for long-lived interactive branch runners without unbounded rewrite amplification.
+- Direction:
+  - Evaluate current whole-file branch inbox status rewrites under realistic long-lived direct-message workloads.
+  - Consider bounded retention, compaction, or append-only transition logs for `queued` / `claimed` / `handled` / `failed` state changes while preserving stable message IDs and exact-once claim semantics.
+  - Keep branch-local inbox append/status mutations lock-guarded and preserve inspector visibility for unread/current-branch filters.
+- Exit:
+  - A documented decision or implementation explains how branch inboxes scale for persistent runners and proves existing direct-message semantics remain compatible.
+
+### Installed Recipe Trust Boundary Hardening
+
+- Priority: Medium.
+- Goal: Keep recipe-library growth local-first without letting operator muscle memory become an accidental sandbox bypass.
+- Direction:
+  - Review packaged recipes, examples, and docs for destructive or external side effects and ensure they require explicit paths, typed args, narrow helper scripts, and clear operator gates.
+  - Keep warnings framed as diagnostics, not a security boundary.
+  - Prefer small audited helper scripts over broad shell templates when recipes touch files, processes, networks, or external services.
+- Exit:
+  - A trust-boundary review confirms packaged recipes and docs preserve the current local-first/not-sandbox-first contract, with any needed hardening captured in tests or docs.
+
+### Direct Branch Message Consumption Semantics
+
+- Priority: Medium.
+- Goal: Make it impossible to misunderstand branch inbox delivery as universal active delivery without a consuming coordinator or runner protocol.
+- Direction:
+  - Audit README, actor-message docs, async-run docs, actors skill, and recipe guidance for branch inbox wording.
+  - Clarify that direct branch messages are queued and become active work only when the relevant coordinator/runner claims, injects, handles, or fails them.
+  - Add or update a bounded smoke scenario that demonstrates queued direct messages, claim/handle transitions, and inspector visibility.
+- Exit:
+  - Public docs and tests show both halves of direct branch delivery: durable branch-local queueing and explicit worker consumption semantics.
+
 ### Actor Rooms, Roster, and Cross-Branch Messaging
 
 - Priority: High.

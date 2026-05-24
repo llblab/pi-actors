@@ -241,6 +241,15 @@ function readJsonlLineCount(file: string): number {
   }
 }
 
+function readRoomMessageCount(stateDir: string, room: string): number {
+  try {
+    return readJsonlLineCount(messagesFile(stateDir, room));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
+}
+
 function readJsonlTailLines(file: string, limit: number): string[] {
   const lineLimit = Math.max(1, limit);
   const stat = fs.statSync(file);
@@ -446,7 +455,7 @@ export function appendRoomMessage(
       }
     }
     return {
-      message_count: readRoomMessages(stateDir, room).length,
+      message_count: readRoomMessageCount(stateDir, room),
       room,
       roster_count: Object.keys(roster).length,
       sent: true,
@@ -496,12 +505,7 @@ export function readRoomMessagePreviews(
 }
 
 export function getRoomStatus(stateDir: string, room: string): RoomStatus {
-  let messageCount = 0;
-  try {
-    messageCount = readJsonlLineCount(messagesFile(stateDir, room));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+  const messageCount = readRoomMessageCount(stateDir, room);
   const [last] = readRoomMessages(stateDir, room, 1);
   return {
     ...(last
@@ -529,7 +533,7 @@ export function ensureRoomMember(
   const roster = readRoomRoster(stateDir, room);
   if (roster[address]) {
     return {
-      message_count: readRoomMessages(stateDir, room).length,
+      message_count: readRoomMessageCount(stateDir, room),
       room,
       roster_count: Object.keys(roster).length,
       sent: true,

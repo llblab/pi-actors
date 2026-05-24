@@ -1,5 +1,4 @@
 {
-  "name": "music-player",
   "async": true,
   "args": [
     "repo:path",

@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-review-readiness",
   "async": true,
   "imports": {
     "coordinator": "subagent-review-coordinator.json"

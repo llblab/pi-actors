@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-architect-coordinator",
   "async": true,
   "imports": {
     "reviewer": "subagent-review.json",

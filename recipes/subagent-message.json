@@ -1,5 +1,4 @@
 {
-  "name": "subagent-message",
   "async": true,
   "args": [
     "type:string",

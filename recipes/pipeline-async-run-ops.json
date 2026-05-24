@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-async-run-ops",
   "async": true,
   "imports": {
     "snapshot": "utility-run-ops-snapshot.json",

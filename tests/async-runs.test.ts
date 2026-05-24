@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -55,6 +55,59 @@ async function waitForStatus(
   }
   throw new Error(`run did not reach status: ${expected}`);
 }
+
+test("Async runs reject reuse of an active run state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-active-"));
+  const stateDir = join(root, "active");
+  try {
+    startRun(
+      {
+        run_id: "active",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 2000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    assert.throws(
+      () =>
+        startRun(
+          {
+            run_id: "active",
+            state_dir: stateDir,
+            template: `${process.execPath} -e "console.log('replacement')"`,
+          },
+          process.cwd(),
+        ),
+      /active owned process/,
+    );
+    cancelRun(stateDir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async runs reject state dirs with an in-progress start lock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-start-lock-"));
+  const stateDir = join(root, "locked");
+  try {
+    await mkdir(join(stateDir, ".start.lock"), { recursive: true });
+    assert.throws(
+      () =>
+        startRun(
+          {
+            run_id: "locked",
+            state_dir: stateDir,
+            template: `${process.execPath} -e "console.log('replacement')"`,
+          },
+          process.cwd(),
+        ),
+      /already being started/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("Async runs write state files and finish", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
@@ -280,6 +333,7 @@ test("Async runs can start from recipe files with overrides", async () => {
           name: "from-file",
           state_dir: stateDir,
           mailbox: { accepts: ["control.continue"], emits: ["run.done"] },
+          retire_when: "children_terminal",
           template: `${process.execPath} -e "console.log(process.argv[1] + ' ' + process.argv[2])" {greeting} {name}`,
           values: { greeting: "hello", name: "file" },
         },
@@ -292,9 +346,10 @@ test("Async runs can start from recipe files with overrides", async () => {
       process.cwd(),
     );
     assert.equal(meta.run, "override-run");
-    assert.equal(meta.recipe, "from-file");
+    assert.equal(meta.recipe, "say");
     assert.equal(meta.values.greeting, "hello");
     assert.deepEqual(meta.mailbox, { accepts: ["control.continue"], emits: ["run.done"] });
+    assert.equal(meta.retire_when, "children_terminal");
     assert.equal(meta.values.name, "override");
     assert.equal(meta.values.run_id, "override-run");
     assert.equal(meta.values.state_dir, stateDir);

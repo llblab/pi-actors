@@ -24,7 +24,6 @@ function normalizeRoles(value) {
   return value.map((role, index) => ({
     name: String(role.name ?? `actor-${index + 1}`),
     persona: String(role.persona ?? role.role ?? "room participant"),
-    ...(role.glyph ? { glyph: String(role.glyph) } : {}),
   }));
 }
 
@@ -133,9 +132,9 @@ function runPi(prompt, model, thinking) {
 }
 
 async function participant(role, config) {
-  const displayName = role.glyph ? `${role.glyph} ${role.name}` : role.name;
+  const displayName = role.name;
   const address = `branch:${config.runId}/${role.name}`;
-  const joinPrompt = `You are ${displayName}, ${role.persona}. Mission: ${config.mission}. Call tool message exactly once with to=${shellQuote(config.room)}, from=${shellQuote(address)}, type='actor.join', summary='${displayName} joined', body JSON {"role":${JSON.stringify(role.persona)},"display":${JSON.stringify(displayName)},"glyph":${JSON.stringify(role.glyph ?? "")},"caps":["coordination","synthesis"],"claim":"coordinate on mission"}. Then print one short line.`;
+  const joinPrompt = `You are ${displayName}, ${role.persona}. Mission: ${config.mission}. Call tool message exactly once with to=${shellQuote(config.room)}, from=${shellQuote(address)}, type='actor.join', summary='${displayName} joined', body JSON {"role":${JSON.stringify(role.persona)},"display":${JSON.stringify(displayName)},"caps":["coordination","synthesis"],"claim":"coordinate on mission"}. Then print one short line.`;
   await runPi(joinPrompt, config.model, config.thinking);
   for (let round = 1; round <= config.rounds; round += 1) {
     const prompt = `You are ${displayName} (${address}), ${role.persona}. Mission: ${config.mission}. Round ${round}/${config.rounds}. First call inspect target=${config.room} view=previews lines=30 and inspect target=${config.room} view=contacts. Then call message once to ${config.room} from ${address} type=chat.message. Body: 2-4 sentences that react to a named participant, propose the next coordination step, and refine the shared artifact. Use contacts for peer names and addresses, but keep this packaged swarm's coordination room-visible; do not send direct branch messages unless a caller-specific worker protocol says recipients consume them. End stdout with summary <=160 chars.`;
@@ -195,14 +194,14 @@ async function synthesize(config, locker) {
 }
 
 const defaultRoles = [
-  { name: "mapper", glyph: "🗺️", persona: "systems mapper; tracks shared structure and dependencies" },
-  { name: "memory", glyph: "🌿", persona: "memory keeper; preserves decisions and unresolved questions" },
-  { name: "risk", glyph: "🧨", persona: "risk scout; challenges weak coordination and missing owners" },
-  { name: "flow", glyph: "🌊", persona: "flow designer; turns scattered ideas into process rhythm" },
-  { name: "operator", glyph: "🔥", persona: "operator; converts ideas into concrete next actions" },
-  { name: "narrative", glyph: "📖", persona: "narrative synthesizer; keeps the artifact coherent" },
-  { name: "interface", glyph: "✨", persona: "interface designer; makes outputs visible and usable" },
-  { name: "facilitator", glyph: "🤫", persona: "facilitator; asks for consensus and convergence" },
+  { name: "mapper", persona: "systems mapper; tracks shared structure and dependencies" },
+  { name: "memory", persona: "memory keeper; preserves decisions and unresolved questions" },
+  { name: "risk", persona: "risk scout; challenges weak coordination and missing owners" },
+  { name: "flow", persona: "flow designer; turns scattered ideas into process rhythm" },
+  { name: "operator", persona: "operator; converts ideas into concrete next actions" },
+  { name: "narrative", persona: "narrative synthesizer; keeps the artifact coherent" },
+  { name: "interface", persona: "interface designer; makes outputs visible and usable" },
+  { name: "facilitator", persona: "facilitator; asks for consensus and convergence" },
 ];
 
 const config = {

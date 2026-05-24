@@ -1,5 +1,4 @@
 {
-  "name": "utility-run-summary",
   "args": [
     "repo:path",
     "state_root:path"

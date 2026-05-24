@@ -4,27 +4,29 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { discoverRecipeSources, discoverRecipes, summarizeDiscovery } from "../lib/recipe-discovery.ts";
+import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, summarizeDiscovery } from "../lib/recipe-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
 }
 
-test("Recipe discovery exposes tool recipes by filename identity", async () => {
+test("Recipe discovery exposes tool recipes by location and filename identity", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-"));
   try {
     await writeRecipe(root, "docs-review", {
-      tool: true,
+      name: "ignored-docs-review",
+      tool: false,
       description: "Docs review",
       template: "echo review",
     });
 
-    const result = discoverRecipes([root]);
+    const result = discoverRecipeSources([{ root, defaultTool: true }]);
     const recipe = result.active.get("docs-review")!;
     assert.equal(recipe.active, true);
     assert.equal(recipe.tool, true);
@@ -35,23 +37,64 @@ test("Recipe discovery exposes tool recipes by filename identity", async () => {
   }
 });
 
-test("Recipe discovery can expose user recipe roots as tools by default", async () => {
+test("Recipe discovery surfaces risky recipe diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-"));
+  try {
+    await chmod(root, 0o777);
+    await writeRecipe(root, "shell-risk", {
+      description: "Shell risk",
+      template: "bash -c {script}",
+    });
+    const result = discoverRecipeSources([{ root, defaultTool: true }]);
+    const diagnostics = result.diagnostics.join("\n");
+    assert.match(diagnostics, /world-writable/);
+    assert.match(diagnostics, /group-writable/);
+    assert.match(diagnostics, /invokes bash/);
+    assert.match(result.active.get("shell-risk")?.diagnostics.join("\n") ?? "", /bash/);
+  } finally {
+    await chmod(root, 0o700).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipe discovery exposes an integrity manifest", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-"));
+  try {
+    const body = JSON.stringify({ description: "Manifest", template: "echo manifest" });
+    await writeFile(join(root, "manifest.json"), body);
+    const result = discoverRecipeSources([{ root, defaultTool: true }]);
+    const manifest = createRecipeIntegrityManifest(result);
+    assert.equal(manifest.length, 1);
+    assert.equal(manifest[0].id, "manifest");
+    assert.equal(manifest[0].size, Buffer.byteLength(body));
+    assert.equal(
+      manifest[0].sha256,
+      createHash("sha256").update(body).digest("hex"),
+    );
+    const summary = summarizeDiscovery(result);
+    assert.deepEqual(summary.integrity_manifest, manifest);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipe discovery exposes user recipe roots as tools by location", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-"));
   try {
     await writeRecipe(root, "default-tool", {
       description: "Default tool recipe",
       template: "echo default",
     });
-    await writeRecipe(root, "recipe-only", {
+    await writeRecipe(root, "recipe-owned-flag", {
       tool: false,
-      description: "Recipe-only override",
+      description: "Tool flag is ignored",
       template: "echo recipe-only",
     });
 
     const result = discoverRecipeSources([{ root, defaultTool: true, mutableUsage: true }]);
     assert.equal(result.active.get("default-tool")?.tool, true);
     assert.equal(result.active.get("default-tool")?.mutableUsage, true);
-    assert.equal(result.active.get("recipe-only")?.tool, false);
+    assert.equal(result.active.get("recipe-owned-flag")?.tool, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -72,10 +115,10 @@ test("Recipe discovery gives higher-priority roots shadowing control", async () 
       template: "echo high",
     });
 
-    const result = discoverRecipes([high, low]);
+    const result = discoverRecipeSources([{ root: high, defaultTool: true }, { root: low }]);
     const active = result.active.get("repo-health")!;
     assert.equal(active.path, join(high, "repo-health.json"));
-    assert.equal(active.tool, false);
+    assert.equal(active.tool, true);
     assert.deepEqual(active.shadows, [join(low, "repo-health.json")]);
     assert.equal(result.entries.find((entry) => entry.path === join(low, "repo-health.json"))?.shadowed, true);
   } finally {

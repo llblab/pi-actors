@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-artifact-write",
   "async": true,
   "imports": {
     "normalizer": "subagent-normalize.json",

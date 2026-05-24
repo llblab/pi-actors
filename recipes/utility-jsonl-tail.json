@@ -1,5 +1,4 @@
 {
-  "name": "utility-jsonl-tail",
   "args": [
     "file:path",
     "lines:int"

@@ -1,5 +1,4 @@
 {
-  "name": "utility-git-log",
   "args": [
     "repo:path",
     "count:int"

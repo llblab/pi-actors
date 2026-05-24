@@ -137,6 +137,35 @@ Existing seeds:
 - `subagent-contradiction-map`
 - `subagent-verify`
 
+### Consensus-First Build Cell
+
+Purpose: turn several expert proposals into one coherent artifact without parallel writers fragmenting the result.
+
+Pipeline:
+
+```text
+mission → lens proposers in room → consensus transcript → named implementer writes artifact → QA reviewer checks artifact + transcript → finalizer applies fixes → artifact assertions
+```
+
+Use this for creative demos, single-file artifacts, specs, docs, prompt packs, and product/UX deliverables where broad input matters but one owner should shape the final file. Proposers should have message/inspect tools only. The implementer should be the first role with write tools. QA should inspect/read but not mutate. The finalizer may write only after reading QA evidence.
+
+Required gates:
+
+- Artifact path, report path, and minimum acceptance checks are explicit inputs.
+- The workflow fails if the requested artifact is missing, too small, or not self-contained enough for the task.
+- `run.done` is emitted only after QA/finalizer passes, not merely after room discussion.
+
+Existing seeds:
+
+- `pipeline-room-swarm` for room-visible discussion and rosters.
+- `subagent-message` for explicit room handoffs.
+- `subagent-review` / `subagent-verify` for QA roles.
+- `pipeline-artifact-write` or a small helper script for deterministic artifact assertion.
+
+Next recipe direction:
+
+- Add a generic packaged consensus-build pipeline once the interface stabilizes around proposer roles, implementer prompt, QA prompt, artifact assertions, and public model/tool knobs.
+
 ### Implementation Tasking Cell
 
 Purpose: prepare bounded work for one or more implementation agents.

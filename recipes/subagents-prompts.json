@@ -1,5 +1,4 @@
 {
-  "name": "subagents-prompts",
   "async": true,
   "imports": {
     "subagent": "subagent-prompt.json"

@@ -1,5 +1,4 @@
 {
-  "name": "subagent-verify",
   "async": true,
   "args": [
     "claim:string",

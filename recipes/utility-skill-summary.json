@@ -1,5 +1,4 @@
 {
-  "name": "utility-skill-summary",
   "args": [
     "skill:path",
     "package_json:path",

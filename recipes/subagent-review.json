@@ -1,5 +1,4 @@
 {
-  "name": "subagent-review",
   "async": true,
   "args": [
     "scope:string",

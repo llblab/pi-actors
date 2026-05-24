@@ -1,5 +1,4 @@
 {
-  "name": "subagent-critic",
   "async": true,
   "args": [
     "target:string",

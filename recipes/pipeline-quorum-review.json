@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-quorum-review",
   "async": true,
   "imports": {
     "quorum": "subagent-quorum.json",

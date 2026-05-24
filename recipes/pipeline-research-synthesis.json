@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-research-synthesis",
   "async": true,
   "imports": {
     "planner": "subagent-plan.json",

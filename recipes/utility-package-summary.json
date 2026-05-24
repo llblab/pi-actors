@@ -1,5 +1,4 @@
 {
-  "name": "utility-package-summary",
   "args": [
     "package_json:path",
     "repo:path"

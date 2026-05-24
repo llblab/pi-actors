@@ -1,5 +1,4 @@
 {
-  "name": "subagent-prompt",
   "async": true,
   "args": [
     "prompt:string",

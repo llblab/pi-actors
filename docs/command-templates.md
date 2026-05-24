@@ -159,6 +159,8 @@ template="echo 'literal words' {text}"
 
 ## Composition
 
+Shell syntax warning: command-template placeholder parsing still sees braces inside shell snippets. Avoid inline Bash parameter expansion such as `${file%.md}` or `${name}` in recipe/template strings because `{file...}` can be parsed as a pi-actors placeholder. For non-trivial shell loops or parameter expansion, put the shell logic in a small trusted script and call that script from the template; keep the command template as the launch boundary.
+
 `template: [...]` means sequential composition by default; each leaf is a command template executed with one shared runtime value map:
 
 ```json

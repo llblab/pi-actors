@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-release-summary",
   "async": true,
   "imports": {
     "changelog": "utility-changelog-section.json",

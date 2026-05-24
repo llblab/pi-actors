@@ -1,5 +1,4 @@
 {
-  "name": "subagent-plan",
   "async": true,
   "args": [
     "goal:string",

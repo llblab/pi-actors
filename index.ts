@@ -50,7 +50,13 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   let runStatusFrame = 0;
   let communicationWidgetVisible = false;
   let actorInspectorRows = 12;
+  let actorInspectorChannels:
+    | ActorInspectorTui.ActorInspectorPreview["channel"][]
+    | undefined;
+  let actorInspectorMention: string | undefined;
+  const actorInspectorRoomLimitPerRun = 6;
   let selectedInspectorSequence: number | undefined;
+  let recipeWatcherFailureNotified = false;
   const getRunOwnerId = (ctx: ExtensionContext): string =>
     ctx.sessionManager.getSessionId();
   const updateRunUi = (ctx: ExtensionContext, notify = false): void => {
@@ -64,40 +70,59 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     ctx.ui.setWidget(
       "zz-pi-actors-comms",
       communicationWidgetVisible
-        ? () => ({
-            invalidate() {},
-            render(width: number) {
-              const previews = ActorInspectorTui.readActorInspectorPreviews(
-                RUN_STATE_ROOT,
-                actorInspectorRows,
-                { ownerId, currentRunOnly: true },
-              );
-              const style = {
-                actor: (text: string) => ctx.ui.theme.fg("accent", text),
-                muted: (text: string) => ctx.ui.theme.fg("dim", text),
-                preview: (text: string) => ctx.ui.theme.fg("text", text),
-                stripe: (text: string) => text,
-                stripeAlt: (text: string) =>
-                  ctx.ui.theme.bg("customMessageBg", text),
-                target: (text: string) => ctx.ui.theme.fg("success", text),
-                type: (text: string) => ctx.ui.theme.fg("warning", text),
-              };
-              return (
-                (selectedInspectorSequence !== undefined
-                  ? ActorInspectorTui.renderInspectorItemView(
-                      previews,
+        ? () => {
+            const style = {
+              actor: (text: string) => ctx.ui.theme.fg("accent", text),
+              muted: (text: string) => ctx.ui.theme.fg("dim", text),
+              preview: (text: string) => ctx.ui.theme.fg("text", text),
+              stripe: (text: string) => text,
+              stripeAlt: (text: string) =>
+                ctx.ui.theme.bg("customMessageBg", text),
+              target: (text: string) => ctx.ui.theme.fg("success", text),
+              type: (text: string) => ctx.ui.theme.fg("warning", text),
+            };
+            return {
+              invalidate() {},
+              render(width: number) {
+                const previews = ActorInspectorTui.readActorInspectorPreviews(
+                  RUN_STATE_ROOT,
+                  actorInspectorRows,
+                  {
+                    channels: actorInspectorChannels,
+                    currentRunOnly: true,
+                    mention: actorInspectorMention,
+                    ownerId,
+                    roomLimitPerRun: actorInspectorRoomLimitPerRun,
+                  },
+                );
+                const rows =
+                  (selectedInspectorSequence !== undefined
+                    ? ActorInspectorTui.renderInspectorItemView(
+                        previews,
+                        width,
+                        style,
+                        { sequence: selectedInspectorSequence },
+                      )
+                    : ActorInspectorTui.renderInspectorWidget(
+                        previews,
+                        width,
+                        style,
+                      )) ?? [];
+                const run = previews[0]?.run;
+                const roster = run
+                  ? ActorInspectorTui.renderInspectorRosterPanel(
+                      ActorInspectorTui.readActorInspectorRoster(
+                        RUN_STATE_ROOT,
+                        run,
+                      ),
                       width,
                       style,
-                      { sequence: selectedInspectorSequence },
                     )
-                  : ActorInspectorTui.renderInspectorWidget(
-                      previews,
-                      width,
-                      style,
-                    )) ?? []
-              );
-            },
-          })
+                  : undefined;
+                return roster ? [...roster, ...rows] : rows;
+              },
+            };
+          }
         : undefined,
       { placement: "belowEditor" },
     );
@@ -127,6 +152,12 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
         { deliverAs: "followUp", triggerTurn: true },
       );
     }
+    Observability.pruneRunObservationState(
+      observedRuns,
+      observedRunEventLines,
+      summary,
+      transitions.map((transition) => transition.run),
+    );
     for (const event of outboxEvents) {
       if (!Observability.shouldNotifyRunOutboxEvent(event)) continue;
       const text = Observability.formatRunOutboxMessage(event);
@@ -200,7 +231,16 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     if (recipeReloadTimeout) clearTimeout(recipeReloadTimeout);
     recipeReloadTimeout = undefined;
   };
+  const notifyRecipeWatcherFailure = (ctx: ExtensionContext): void => {
+    if (recipeWatcherFailureNotified) return;
+    recipeWatcherFailureNotified = true;
+    ctx.ui.notify(
+      "Recipe live reload watcher failed; restart the session or use register_tool again to refresh recipe tools.",
+      "warning",
+    );
+  };
   const scheduleRecipeReload = (ctx: ExtensionContext): void => {
+    recipeWatcherFailureNotified = false;
     if (recipeReloadTimeout) clearTimeout(recipeReloadTimeout);
     recipeReloadTimeout = setTimeout(() => {
       runtime.loadTools(ctx);
@@ -216,9 +256,10 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       recipeRootWatcher.on("error", () => {
         recipeRootWatcher?.close();
         recipeRootWatcher = undefined;
+        notifyRecipeWatcherFailure(ctx);
       });
     } catch {
-      // Watching is best-effort; restarting the session reloads recipe tools.
+      notifyRecipeWatcherFailure(ctx);
     }
   };
   const actorToolDefinitions = new Map<string, any>();
@@ -290,6 +331,44 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
         `Actor inspector ${communicationWidgetVisible ? "shown" : "hidden"}`,
         "info",
       );
+    },
+  });
+  pi.registerCommand("actors-inspector-filter", {
+    description:
+      "Filter actor inspector rows: all, room, direct, broadcast, mention <text>",
+    handler: async (args, ctx) => {
+      const parts = Array.isArray(args)
+        ? args.map(String)
+        : String(args ?? "").split(/\s+/);
+      const mode = (parts[0] ?? "").trim().toLowerCase();
+      if (!mode || mode === "all" || mode === "clear") {
+        actorInspectorChannels = undefined;
+        actorInspectorMention = undefined;
+      } else if (mode === "room" || mode === "direct" || mode === "broadcast") {
+        actorInspectorChannels = [mode];
+        actorInspectorMention = undefined;
+      } else if (mode === "mention") {
+        const mention = parts.slice(1).join(" ").trim();
+        if (!mention) {
+          ctx.ui.notify(
+            "Usage: /actors-inspector-filter mention <text>",
+            "warning",
+          );
+          return;
+        }
+        actorInspectorChannels = undefined;
+        actorInspectorMention = mention;
+      } else {
+        ctx.ui.notify(
+          "Usage: /actors-inspector-filter all|room|direct|broadcast|mention <text>",
+          "warning",
+        );
+        return;
+      }
+      selectedInspectorSequence = undefined;
+      communicationWidgetVisible = true;
+      updateRunUi(ctx);
+      ctx.ui.notify(`Actor inspector filter ${mode || "all"}`, "info");
     },
   });
   pi.registerCommand("actors-inspect", {

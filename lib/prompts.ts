@@ -25,13 +25,13 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Command templates stay sync: string leaf, array sequence, object node; flags include args/defaults, parallel, when, timeout, delay, retry, failure, recover, repeat, output.
 - Placeholders support typed/default args plus {value??fallback} and {flag?yes:no}.
 - ~/.pi/agent/recipes/*.json is actor muscle memory: every recipe there is auto-registered as an agent tool across sessions; register_tool writes there.
-- Recipes own template directly and may declare metadata/defaults/imports/mailbox/artifacts.
+- Recipes own template directly and may declare metadata/defaults/imports/mailbox/artifacts; files >1 MiB or import depth >32 fail closed.
 - Recipe imports are local variables; imported recipes are definitions, not nested async runs; parent async:true creates one run.
 - Use spawn/message/inspect for actor-level start/send/observe; avoid runtime/FIFO/outbox vocabulary in public guidance.
 - Run state lives under ~/.pi/agent/tmp/pi-actors/runs; inspect status/tail/messages/mailbox/files/artifacts intentionally and avoid busy-polling.
 - Maintain ~/.pi/agent/recipes like MEMORY.md for capabilities: keep useful tools, curate stale ones; packaged recipes are lower-priority components, not tools by location.
 - Foreground tools/templates fit short work; async recipes/runs fit subagents, services, fanout, media, and long pipelines.
-- Long fanout = parent async recipe wrapping template(parallel:true) and imports; packaged fanout recipes bubble branch completion messages.
+- Long fanout = parent async recipe wrapping template(parallel:true) and imports; packaged fanout recipes bubble branch completion messages; grow recurring multi-agent workflows as packaged recipes/pipelines, not ad hoc external scripts.
 - For deeper pi-actors guidance, inspect installed extension sources/docs/recipes; README and docs are not automatically in context.`;
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {

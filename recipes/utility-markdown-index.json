@@ -1,5 +1,4 @@
 {
-  "name": "utility-markdown-index",
   "args": [
     "directory:path",
     "title:string",

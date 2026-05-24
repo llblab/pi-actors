@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-checkpoint-continuation",
   "async": true,
   "imports": {
     "checkpoint": "subagent-checkpoint.json",

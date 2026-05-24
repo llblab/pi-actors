@@ -1,5 +1,4 @@
 {
-  "name": "utility-playlist-build",
   "args": [
     "repo:path",
     "source_dir:path",

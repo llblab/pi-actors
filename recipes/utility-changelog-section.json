@@ -1,5 +1,4 @@
 {
-  "name": "utility-changelog-section",
   "args": [
     "repo:path",
     "file:path",

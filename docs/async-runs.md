@@ -22,7 +22,7 @@ Async-run standard owns:
 Async-run standard does not own:
 
 - Command-template syntax, placeholders, graph semantics, or branch policy.
-- Recipe import resolution, recipe names, or recipe storage format.
+- Recipe import resolution, filename-derived recipe identity, or recipe storage format.
 - Domain semantics for subagents, swarms, release readiness, media playback, or project policy.
 - Scheduling, queue daemons, distributed workers, or workflow DSLs.
 
@@ -52,7 +52,6 @@ A recipe with `async: true` starts detached when invoked through its registered 
 
 ```json
 {
-  "name": "music-player",
   "async": true,
   "template": "play-audio {source}"
 }
@@ -72,7 +71,7 @@ A caller can also start any recipe or inline template explicitly through `spawn`
 
 `spawn` always starts a detached run actor. Registered recipe tools follow the recipe's `async` flag.
 
-Use `run_id` on async recipe tools or `as: "run:<id>"` on `spawn` when the caller wants a stable id for later inspection or control. Recipe `name` identifies the saved definition; the run id identifies one execution instance of that recipe. Async runs inject lifecycle and communication values into template values so scripts can write run-local status files, control endpoints, or room-aware coordination messages:
+Use `run_id` on async recipe tools or `as: "run:<id>"` on `spawn` when the caller wants a stable id for later inspection or control. The recipe filename identifies the saved definition; the run id identifies one execution instance of that recipe. Async runs inject lifecycle and communication values into template values so scripts can write run-local status files, control endpoints, or room-aware coordination messages:
 
 - `{run_id}`: stable run id.
 - `{state_dir}`: run-local state directory.
@@ -182,7 +181,7 @@ Some recipes expose a run-local control channel. When present, a caller can send
 }
 ```
 
-For `run:<id>`, `message` adapts the body to the recipe's run-local control channel. For `branch:<run>/<branch>`, it sends the full envelope through the parent run mailbox so the run can dispatch branch-local control. For `tool:<name>`, object bodies become the target tool parameters and primitive bodies are passed as `{ "input": body }`. The generic runtime records control messages but does not interpret arbitrary run mailbox content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
+For `run:<id>`, `message` adapts the body to the recipe's run-local control channel. For `branch:<run>/<branch>`, it sends the full envelope through the parent run mailbox and records a queued branch-local inbox entry at `branches/<branch>/inbox.jsonl` so the run can dispatch branch-local control. Current consumers are recipe-specific worker protocols that read the parent run mailbox or branch inbox; independent one-shot prompt processes do not automatically consume branch inbox entries. For `tool:<name>`, object bodies become the target tool parameters and primitive bodies are passed as `{ "input": body }`. The generic runtime records control messages but does not interpret arbitrary run mailbox content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
 
 The standard run-local transport is Unix-oriented. Use WSL/Linux/macOS for packaged message-controlled recipes, or let a Windows-specific recipe expose its own transport such as a Windows named pipe or localhost socket.
 
@@ -294,7 +293,6 @@ Example recipe:
 
 ```json
 {
-  "name": "collab-{run}",
   "async": true,
   "parallel": true,
   "timeout": 1800000,

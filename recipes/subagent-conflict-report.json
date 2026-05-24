@@ -1,5 +1,4 @@
 {
-  "name": "subagent-conflict-report",
   "async": true,
   "args": [
     "change:string",

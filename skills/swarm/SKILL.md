@@ -2,7 +2,7 @@
 name: swarm
 description: Subagent orchestration with scoped locks and quorum consensus. Use for multi-model review, parallel scoped work, delegated audit, and coordinated subagent execution.
 metadata:
-  version: 0.17.1
+  version: 0.18.0
 ---
 
 # Swarm
@@ -134,6 +134,20 @@ Planner → Lens Swarm → Merger → Scoped Implementers → Integrator → Rev
 ```
 
 Use scoped write locks or a repository-local soft-lock manifest when multiple implementers may edit files. Keep implementation agents bounded by module, artifact, or responsibility: code, tests, docs, examples, migration, or release notes. Prefer one owner per writable scope and run verification with fresh reviewers after implementation.
+
+### Consensus-First Build Swarm
+
+Purpose: create one coherent artifact from several expert lenses without making every participant write the artifact.
+
+Recommended flow:
+
+```text
+Lens proposers → shared room consensus → named implementer → QA reviewer → finalizer
+```
+
+Use this shape for creative/product artifacts, demos, single-file deliverables, docs, specs, prompts, and other work where parallel implementation would fragment the result. Lens proposers should post concrete constraints, proposals, and handoff notes to the shared room but should not mutate files. One named implementer inspects the room transcript and owns the first artifact write. A fresh QA reviewer inspects the artifact plus room evidence and reports issues back to the room. The implementer/finalizer then applies only the review-grounded fixes and emits the final artifact message.
+
+Failure mode: if the runner only asks all lenses to chat and then writes a report, it can "succeed" without producing the requested artifact. Guard against this with explicit artifact assertions, role-specific write permissions, and a finalizer that checks artifact existence/size/content before `run.done`.
 
 ### Small-Team Development Swarm
 

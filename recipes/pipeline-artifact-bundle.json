@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-artifact-bundle",
   "async": true,
   "imports": {
     "artifactWrite": "pipeline-artifact-write.json",

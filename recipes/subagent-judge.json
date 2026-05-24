@@ -1,5 +1,4 @@
 {
-  "name": "subagent-judge",
   "async": true,
   "args": [
     "report:string",

@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-docs-maintenance",
   "async": true,
   "imports": {
     "docs_index": "utility-markdown-index.json",

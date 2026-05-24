@@ -1,9 +1,30 @@
 #!/usr/bin/env -S node --experimental-strip-types
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { cpSync, existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { readResolvedRecipeConfig } from "../lib/recipe-references.ts";
+function scriptFile() {
+  return fileURLToPath(import.meta.url);
+}
+
+function isUnderNodeModules(file) {
+  return /[/\\]node_modules[/\\]/.test(file);
+}
+
+function prepareTypeStripImportRoot() {
+  const packageRoot = dirname(dirname(scriptFile()));
+  const sourceLib = join(packageRoot, "lib");
+  if (!isUnderNodeModules(packageRoot)) return sourceLib;
+  const copiedLib = join(mkdtempSync(join(tmpdir(), "pi-actors-validate-lib-")), "lib");
+  cpSync(sourceLib, copiedLib, { recursive: true });
+  return copiedLib;
+}
+
+const typeStripImportRoot = prepareTypeStripImportRoot();
+const { readResolvedRecipeConfig } = await import(
+  pathToFileURL(join(typeStripImportRoot, "recipe-references.ts")).href
+);
 
 function usage() {
   console.error(`Usage:

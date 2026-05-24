@@ -9,5 +9,5 @@
     "rewriteRelativeImportExtensions": true,
     "rootDir": "."
   },
-  "include": ["lib/**/*.ts"]
+  "include": ["index.ts", "lib/**/*.ts"]
 }

@@ -2,30 +2,6 @@
 
 ## Open Work
 
-### Compiled Extension Entrypoint for Installed Packages
-
-- Priority: High.
-- Goal: Remove the remaining installed-package reliance on a TypeScript extension entrypoint under `node_modules`.
-- Direction:
-  - Verify exactly how the Pi host loads package extension entries from npm installs and whether it applies a custom TypeScript loader or normal Node import semantics.
-  - If normal Node semantics apply, ship a compiled `dist/index.js` entrypoint or dual-entry strategy while preserving source-checkout development ergonomics.
-  - Keep script/runtime entrypoints dist-first as in `0.20.x`; do not reintroduce Node native type stripping for `.ts` files under `node_modules`.
-  - Add installed-package smoke coverage that imports the extension entrypoint through package metadata, not only `scripts/async-runner.mjs` and `scripts/validate-recipe.mjs`.
-- Exit:
-  - An npm-installed `@llblab/pi-actors` package can load its Pi extension entrypoint without `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.
-  - Package metadata, build output, package contents, docs, and installed-package tests agree on the extension entry path.
-
-### Room Append Result Message Count Accuracy
-
-- Priority: High.
-- Goal: Keep immediate room message tool results semantically aligned with room status counts after long timelines.
-- Direction:
-  - Replace `appendRoomMessage` and existing-member `ensureRoomMember` result counts that derive from default-tail `readRoomMessages(...).length` with a true JSONL line count, or explicitly rename any bounded count to a preview count.
-  - Preserve efficient room status reads and existing timeline compaction behavior.
-  - Add regression coverage with more than the default room read limit so append results and `getRoomStatus()` agree.
-- Exit:
-  - Posting message 41+ to a room reports the true current persisted room message count, not the default 40-message preview length.
-
 ### Branch Inbox Retention and Transition Scaling
 
 - Priority: Medium.

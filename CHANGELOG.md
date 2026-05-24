@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.20.2: Installed Extension Entrypoint Hotfix
+
+- `[Packaging]` Added a JavaScript extension entrypoint wrapper and changed package metadata to load `./index.js`, so npm-installed packages import compiled `dist/index.js` instead of asking Node to strip `index.ts` under `node_modules`. Source checkouts still fall back to `index.ts` before a local build exists.
+- `[Build]` Extended the compiled runtime build to emit `dist/index.js` alongside `dist/lib/*.js`, keeping extension entrypoint imports and script runtime imports on the same installed-package path model.
+- `[Rooms]` Fixed immediate room append results to report the true persisted room message count after long timelines instead of the default 40-message preview length; `appendRoomMessage`, existing-member room joins, and `getRoomStatus()` now share the same line-count helper.
+- `[Tests]` Added installed-package coverage that imports the extension entrypoint from package metadata without TypeScript stripping, plus room-count regression coverage beyond the default preview limit.
+- `[Package]` Bumped package metadata and packaged skill metadata to `0.20.2` for the hotfix release.
+
 ## 0.20.1: Installed Packaged Recipe Root Hotfix
 
 - `[Recipe Imports]` Fixed installed compiled runtime path resolution so bare user recipe imports can fall back to the packaged standard-library `recipes/` directory instead of looking for a non-existent `dist/recipes` directory.

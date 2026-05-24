@@ -8,10 +8,13 @@
 - Goal: Continue evolving actor communication without adding a second public messaging model.
 - Direction:
   - Evaluate whether room storage/routing should remain built into the tool adapter or move behind a dedicated non-LLM communication actor recipe/script, possibly singleton-scoped. Preserve the same public `room:<run>` address and envelope either way.
+  - Treat the next backend decision as an evidence-backed experiment, not a rewrite: stress a real room/direct-message workload, compare the current file-backed adapter with a thin communication actor/helper, and record the decision.
   - Consider reducing direct file-backed state where it improves coherence: model room/roster state as actor-owned data structures served by helper scripts/actors, with files retained only for durable snapshots, recovery, artifacts, or audit logs.
-  - Further storage changes should preserve the current burst/read/concurrency safeguards: branch communication snapshot writes are debounced, root snapshots stay current, roster files are not rewritten during bursts when only `last_seen` changes, room status inspection does not parse full timelines, and branch-local inbox append/status rewrites are lock-guarded.
+  - Further storage changes should preserve the current burst/read/concurrency safeguards: branch communication snapshot writes are debounced, root snapshots stay current, roster files are not rewritten during bursts when only `last_seen` changes, room status inspection does not parse full timelines, branch-local inbox append/status rewrites are lock-guarded, and legacy no-ID branch inbox records can be claimed exactly once.
+  - Prevent monolith drift: `actor-rooms.ts` may remain a thin adapter, but growing routing policy, subscription loops, fanout policy, or long-lived state ownership should move behind a focused communication helper/actor rather than accumulating in the tool adapter.
 - Exit:
   - Any backend/storage change preserves existing `spawn` / `message` / `inspect` semantics and room address compatibility.
+  - A short decision note or changelog entry explains why the room backend stayed file-backed or moved behind a communication actor/helper.
 
 ### Graceful Actor Retirement
 
@@ -27,6 +30,18 @@
   - A packaged coordinator recipe can launch worker actors, complete its coordination duties, and shut itself down automatically after the worker tree reaches terminal state.
   - Persistent services and implementer actors remain alive unless their recipe explicitly opts into retirement.
 
+### Coordinator Strategy Boundary
+
+- Priority: Medium.
+- Goal: Keep the generic coordinator from becoming a second overloaded monolith as room/direct-message workflows mature.
+- Direction:
+  - Split only at real pressure points: branch inbox claim/finalize helpers, participant execution, room transcript synthesis, and mode strategies are likely seams, but avoid cosmetic module churn.
+  - Preserve the current principle that the locker stays generic/thin and all orchestration policy stays in coordinator strategy code or recipe composition.
+  - Prefer reusable helper modules or small scripts only when at least two packaged workflows need the same behavior.
+- Exit:
+  - Adding a new coordinator mode or packaged multi-agent workflow does not require editing unrelated mode logic.
+  - Existing room-swarm, locker, and direct-branch-message tests still cover the extracted seams.
+
 ### Consensus-First Build Recipe
 
 - Priority: Medium.
@@ -41,6 +56,18 @@
 - Exit:
   - A packaged recipe can reproduce the interactive-music-instrument workflow shape for another single-artifact task without copying the demo script.
   - Docs and skills point agents to the packaged recipe and explain when to choose it over a free-form room swarm.
+
+### Actor OS Scenario Smoke Matrix
+
+- Priority: Medium.
+- Goal: Convert the 0.19.x actor-communication hardening into repeatable end-to-end scenario checks instead of relying on ad hoc demos.
+- Direction:
+  - Cover one scenario each for shared room coordination, direct branch work delivery, branch inbox claim/handle/fail transitions, inspector navigation, recipe context injection, recipe persistence suggestion, and opt-in retirement candidate detection.
+  - Keep scenarios local-first and bounded: fake `pi`/models where possible, no external services, no long sleeps, no broad golden transcripts.
+  - Prefer packaged recipes and public `spawn` / `message` / `inspect` calls so the smoke matrix exercises the same surface agents use.
+- Exit:
+  - A single validation command or documented test group verifies the actor OS behaviors that made 0.19.x production-useful.
+  - The smoke matrix catches regressions in actor communication, recipe memory, and observability without requiring a manual swarm demo.
 
 ### Persistent Backlog Implementer Workflow
 
@@ -84,10 +111,22 @@
   - Add nested recipe directories only after flat `recipes/*.json` discovery semantics are stable.
   - Keep same-id priority and invalid-blocking behavior explicit if nested ids are introduced.
 
+### Actor Recipe Feedback Loop
+
+- Priority: Low.
+- Goal: Turn actor recipe-context awareness into a practical improvement loop for packaged recipes and operator-owned recipe memory.
+- Direction:
+  - After real multi-agent runs, capture whether child actors report that recipe/import/mailbox/role boundaries fit the task.
+  - Keep the loop advisory and operator-gated: feedback may suggest recipe edits or copying into `~/.pi/agent/recipes`, but must not auto-save or rewrite durable recipes without confirmation.
+  - Prefer small recipe/readme/skill refinements over adding scenario catalogs; recurring patterns should become packaged recipes only after repeated use.
+- Exit:
+  - At least one real run produces recipe-boundary feedback that is either applied to a recipe/docs change or explicitly rejected with rationale.
+
 ### Recipe Usage Telemetry Evolution
 
 - Priority: Low.
 - Goal: Improve long-term operator insight into recipe usefulness without making telemetry noisy.
 - Direction:
   - Consider sidecar stats sync/backup policy after inline user-owned `usage.calls` / `usage.last_called` proves useful.
+  - Consider an operator-approved recipe promotion workflow that turns successful package/ad hoc/direct spawn suggestions into a reviewed `~/.pi/agent/recipes` entry with provenance and diff, without auto-saving.
   - Do not add failure counters as primary usefulness evidence unless there is a strong operator-facing need.

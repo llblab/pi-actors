@@ -1,6 +1,7 @@
 {
   "async": true,
   "args": [
+    "mode:string",
     "mission:string",
     "model:string",
     "thinking:string",
@@ -14,6 +15,7 @@
     "repo:path"
   ],
   "defaults": {
+    "mode": "consensus",
     "thinking": "off",
     "roles": "",
     "roles_path": "",
@@ -44,5 +46,5 @@
       "run.failed"
     ]
   },
-  "template": "{repo}/scripts/room-swarm.mjs --run-id={run_id} --mission={mission} --model={model} --thinking={thinking} --roles={roles} --roles-path={roles_path} --rounds={rounds} --delay={delay} --locker={locker} --locker-lease-ms={locker_lease_ms} --artifact-path={artifact_path}"
+  "template": "{repo}/scripts/coordinator.mjs --run-id={run_id} --mode={mode} --mission={mission} --model={model} --thinking={thinking} --roles={roles} --roles-path={roles_path} --rounds={rounds} --delay={delay} --locker={locker} --locker-lease-ms={locker_lease_ms} --artifact-path={artifact_path}"
 }

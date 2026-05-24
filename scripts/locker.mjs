@@ -58,7 +58,7 @@ function journal(event, data = {}) {
 function outbox(type, summary, body = {}, level = "info") {
   appendFileSync(
     outboxPath,
-    `${JSON.stringify({ to: "coordinator", from: `run:${process.env.run_id ?? "coordinator-locker"}`, type, event: type, summary, body, data: body, delivery: "followup", level, ts: new Date().toISOString() })}\n`,
+    `${JSON.stringify({ to: "coordinator", from: `run:${process.env.run_id ?? "locker"}`, type, event: type, summary, body, data: body, delivery: "followup", level, ts: new Date().toISOString() })}\n`,
   );
 }
 function now() {
@@ -82,7 +82,7 @@ function normalizeMessage(line) {
   try {
     return JSON.parse(trimmed);
   } catch {
-    return { type: "coord.enqueue", body: { task: trimmed } };
+    return { type: "lock.enqueue", body: { task: trimmed } };
   }
 }
 function tailJournal(count) {
@@ -127,7 +127,7 @@ function nextTask(queue, locks) {
   return items.splice(index, 1)[0];
 }
 function handle(message) {
-  const type = message.type || message.event || "coord.enqueue";
+  const type = message.type || message.event || "lock.enqueue";
   const body =
     message.body && typeof message.body === "object" ? message.body : message;
   let queue = readJson(queuePath, { items: [] });
@@ -135,12 +135,12 @@ function handle(message) {
   if (type === "control.stop" || type === "control.cancel") {
     writeJson(locksPath, locks);
     journal("control.stop", {});
-    outbox("coord.stopped", "Coordinator locker stopped", {
+    outbox("lock.stopped", "Locker stopped", {
       queueDepth: queue.items?.length ?? 0,
     });
     process.exit(0);
   }
-  if (type === "coord.enqueue") {
+  if (type === "lock.enqueue" || type === "coord.enqueue") {
     const item = {
       id: body.id || `task-${Date.now()}`,
       task: body.task ?? body,
@@ -150,20 +150,20 @@ function handle(message) {
     queue.items = [...(queue.items ?? []), item];
     writeJson(queuePath, queue);
     writeJson(locksPath, locks);
-    journal("coord.enqueued", { id: item.id, resources: item.resources });
-    outbox("coord.enqueued", `Queued ${item.id}`, {
+    journal("lock.enqueued", { id: item.id, resources: item.resources });
+    outbox("lock.enqueued", `Queued task ${item.id}`, {
       id: item.id,
       queueDepth: queue.items.length,
     });
     return;
   }
-  if (type === "coord.claim") {
+  if (type === "lock.claim" || type === "coord.claim") {
     const owner = body.owner || message.from || "worker";
     const item = nextTask(queue, locks);
     if (!item) {
       writeJson(queuePath, queue);
       writeJson(locksPath, locks);
-      outbox("coord.empty", "No claimable task", {
+      outbox("lock.empty", "No claimable task", {
         owner,
         queueDepth: queue.items?.length ?? 0,
       });
@@ -173,12 +173,12 @@ function handle(message) {
       locks[resource] = { owner, task: item.id, expiresAt: now() + leaseMs };
     writeJson(queuePath, queue);
     writeJson(locksPath, locks);
-    journal("coord.assigned", {
+    journal("lock.assigned", {
       id: item.id,
       owner,
       resources: item.resources,
     });
-    outbox("coord.assigned", `Assigned ${item.id}`, { owner, task: item });
+    outbox("lock.assigned", `Assigned task ${item.id}`, { owner, task: item });
     return;
   }
   if (type === "lock.acquire") {
@@ -222,20 +222,21 @@ function handle(message) {
     outbox("lock.released", `Lock released ${resource}`, { resource });
     return;
   }
-  if (type === "coord.complete" || type === "coord.fail") {
-    journal(type, body);
+  if (type === "lock.complete" || type === "lock.fail" || type === "coord.complete" || type === "coord.fail") {
+    const eventType = type.startsWith("coord.") ? type.replace("coord.", "lock.") : type;
+    journal(eventType, body);
     outbox(
-      type,
-      `${type} ${body.id ?? ""}`.trim(),
+      eventType,
+      `${eventType} ${body.id ?? ""}`.trim(),
       body,
-      type === "coord.fail" ? "error" : "info",
+      eventType === "lock.fail" ? "error" : "info",
     );
     writeJson(locksPath, locks);
     writeJson(queuePath, queue);
     return;
   }
-  journal("coord.unknown", { type, body });
-  outbox("coord.unknown", `Unknown message ${type}`, { type, body }, "warning");
+  journal("lock.unknown", { type, body });
+  outbox("lock.unknown", `Unknown message ${type}`, { type, body }, "warning");
 }
 
 if (mode === "snapshot") {
@@ -250,8 +251,8 @@ if (!existsSync(controlPath)) {
 }
 writeJson(queuePath, readJson(queuePath, { items: [] }));
 writeJson(locksPath, cleanExpiredLocks(readJson(locksPath, {})));
-journal("coord.started", { leaseMs });
-outbox("coord.started", "Coordinator locker ready", { leaseMs });
+journal("lock.started", { leaseMs });
+outbox("lock.started", "Locker ready", { leaseMs });
 
 while (true) {
   const stream = await import("node:fs").then((fs) =>
@@ -265,8 +266,8 @@ while (true) {
       handle(message);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
-      journal("coord.error", { error: text });
-      outbox("coord.error", text, { error: text }, "error");
+      journal("lock.error", { error: text });
+      outbox("lock.error", text, { error: text }, "error");
     }
   }
 }

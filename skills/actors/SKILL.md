@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.18.0
+  version: 0.19.0
 ---
 
 # Actors (pi-actors)
@@ -257,6 +257,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 ### Coordination and Services
 
 - [`coordinator-locker`](../../recipes/coordinator-locker.json): queue + acquire/renew/release lease locks + journaled coordinator messages.
+- [`locker`](../../recipes/locker.json): modular queue + acquire/renew/release lease locks + journaled locker messages.
 - [`utility-coordinator-lock-snapshot`](../../recipes/utility-coordinator-lock-snapshot.json): one-shot JSON snapshot of a coordinator-locker state directory.
 - [`music-player`](../../recipes/music-player.json): background local/URL/directory/playlist playback actor controlled by messages.
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.0: Modular Coordination And Active Mailboxes
+
+- `[Coordination]` Decoupled the overloaded `coordinator-locker.mjs` script into two completely independent, single-purpose components: a dedicated stateful `locker.mjs` (recipes `locker.json` and `coordinator-locker.json`) that manages resource locking, task queueing, and lease expirations; and a powerful, modular `coordinator.mjs` orchestrator. The coordinator manages execution lifecycles and process pools, supporting four distinct pluggable strategies via `--mode`: `consensus` (chat-swarm), `pipeline` (sequential), `fanout` (parallel review), and `pool` (worker pool pulling from locker).
+- `[Actor Messages]` Implemented active direct actor inbox queue semantics. The modular coordinator now automatically inspects, claims (`claimed`), injects into prompt context, and finalizes (`handled` or `failed`) any queued direct branch messages (`branches/<branch>/inbox.jsonl`) during subagent executions, making direct messages active initiating work items. Backed by complete regression test coverage.
+
 ## 0.18.0: Actor Runtime Hardening And Recipe Guardrails
 
 - `[Async Runs]` Made actor starts safer under concurrency and stale state. Duplicate active `run_id` / `state_dir` launches now fail before state is cleared, concurrent starts are serialized by a start lock, stale terminal run directories are cleaned automatically, and atomic JSON writes use collision-resistant temp names. Impact: restarts and concurrent launches no longer orphan active processes or overwrite logs, messages, progress, and control metadata.

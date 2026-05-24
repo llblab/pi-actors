@@ -112,16 +112,21 @@ async function stopLocker(locker) {
 
 function runPi(prompt, model, thinking) {
   return new Promise((resolve) => {
-    const child = spawn("pi", [
-      "--model", model,
-      "--thinking", thinking,
+    const args = [
       "--tools", "inspect,message",
       "--no-context-files",
       "--no-skills",
       "--no-session",
-      "-p",
-      prompt,
-    ], { stdio: ["ignore", "pipe", "pipe"] });
+    ];
+    if (model) {
+      args.push("--model", model);
+    }
+    if (thinking) {
+      args.push("--thinking", thinking);
+    }
+    args.push("-p", prompt);
+
+    const child = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });

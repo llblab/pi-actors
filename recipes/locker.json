@@ -10,10 +10,10 @@
   },
   "mailbox": {
     "accepts": [
-      "coord.enqueue",
-      "coord.claim",
-      "coord.complete",
-      "coord.fail",
+      "lock.enqueue",
+      "lock.claim",
+      "lock.complete",
+      "lock.fail",
       "lock.acquire",
       "lock.renew",
       "lock.release",
@@ -22,12 +22,12 @@
       "control.kill"
     ],
     "emits": [
-      "coord.started",
-      "coord.enqueued",
-      "coord.assigned",
-      "coord.empty",
-      "coord.completed",
-      "coord.failed",
+      "lock.started",
+      "lock.enqueued",
+      "lock.assigned",
+      "lock.empty",
+      "lock.completed",
+      "lock.failed",
       "lock.granted",
       "lock.denied",
       "lock.renewed",

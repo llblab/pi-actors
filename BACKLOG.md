@@ -2,19 +2,6 @@
 
 ## Open Work
 
-### Direct Actor Inbox Queue Semantics
-
-- Priority: High.
-- Goal: Make direct actor-to-actor messages initiating work items, not passive files that the receiving actor may or may not inspect.
-- Direction:
-  - Deliver direct messages into the recipient actor's next prompt/context as soon as the branch runner can accept work.
-  - Keep the model simple: FIFO direct messages, no priority tiers unless real usage proves they are needed.
-  - Keep room messages as shared transcript only; a direct message may ask the recipient to inspect room history when broader context is needed.
-  - Wire branch runner protocols to claim/handle/fail messages from the current inspectable per-branch inbox files (`branches/<branch>/inbox.jsonl`, surfaced through `inspect branch:<run>/<branch> view=mailbox`); internal helpers can already transition queued messages to claimed/handled/failed for retries.
-- Exit:
-  - A direct branch message can wake or continue a long-lived branch runner without waiting for that runner to poll room files.
-  - Room transcript semantics remain unchanged and compatible with `room:<run>` inspection.
-
 ### Actor Rooms, Roster, and Cross-Branch Messaging
 
 - Priority: High.
@@ -78,7 +65,6 @@
   - A packaged workflow, if added, is described by recipes and existing helper cells; no one-off backlog-implementer scripts are required.
   - The actors skill documents the supported launch scenarios and the concrete packaged recipes for each.
 
-
 ### Branch-Local Checkpoint Semantics
 
 - Priority: Low.
@@ -114,4 +100,3 @@
 - Direction:
   - Consider sidecar stats sync/backup policy after inline user-owned `usage.calls` / `usage.last_called` proves useful.
   - Do not add failure counters as primary usefulness evidence unless there is a strong operator-facing need.
-

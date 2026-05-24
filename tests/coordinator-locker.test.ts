@@ -10,8 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-const script = new URL("../scripts/coordinator-locker.mjs", import.meta.url).pathname;
-const roomSwarmScript = new URL("../scripts/room-swarm.mjs", import.meta.url).pathname;
+const script = new URL("../scripts/locker.mjs", import.meta.url).pathname;
+const roomSwarmScript = new URL("../scripts/coordinator.mjs", import.meta.url).pathname;
 
 async function waitForPath(path: string): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -75,8 +75,78 @@ test("room-swarm optional locker records artifact coordination", async () => {
     const journal = await readFile(join(lockerDir, "journal.jsonl"), "utf8");
     assert.deepEqual(queue.items, []);
     assert.deepEqual(locks, {});
-    assert.match(journal, /coord\.assigned/);
-    assert.match(journal, /coord\.complete/);
+    assert.match(journal, /lock\.assigned/);
+    assert.match(journal, /lock\.complete/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("coordinator processes and handles direct inbox messages", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-direct-inbox-"));
+  try {
+    const fakeBin = join(root, "bin");
+    await mkdir(fakeBin, { recursive: true });
+    const fakePi = join(fakeBin, "pi");
+    // Write a mock pi script that logs all received arguments to a file
+    const argLog = join(root, "pi-args.txt");
+    await writeFile(
+      fakePi,
+      `#!/usr/bin/env bash\necho "$*" >> "${argLog}"\necho '# Mock output'\n`,
+      "utf8"
+    );
+    await chmod(fakePi, 0o755);
+
+    const runId = "direct-inbox-test";
+    const branchDir = join(root, "tmp", "pi-actors", "runs", runId, "branches", "mapper");
+    await mkdir(branchDir, { recursive: true });
+
+    // Pre-populate branch inbox with a queued message
+    const inboxFile = join(branchDir, "inbox.jsonl");
+    const testMessage = {
+      id: "msg-123",
+      from: "branch:direct-inbox-test/risk",
+      to: "branch:direct-inbox-test/mapper",
+      type: "task.assign",
+      body: "Audit auth boundary risks",
+      status: "queued",
+      queued_at: new Date().toISOString()
+    };
+    await writeFile(inboxFile, JSON.stringify(testMessage) + "\n", "utf8");
+
+    const artifact = join(root, "artifact.md");
+    const result = spawnSync(roomSwarmScript, [
+      `--run-id=${runId}`,
+      "--mode=pipeline",
+      "--mission=solve task",
+      "--model=fake-model",
+      "--thinking=off",
+      "--roles=mapper",
+      "--rounds=1",
+      "--delay=0",
+      `--artifact-path=${artifact}`,
+    ], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        PI_CODING_AGENT_DIR: root,
+      },
+      timeout: 10000,
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    // Verify message was injected into the prompt
+    const loggedArgs = await readFile(argLog, "utf8");
+    assert.match(loggedArgs, /DIRECT INBOX MESSAGES FOR YOU/);
+    assert.match(loggedArgs, /Audit auth boundary risks/);
+
+    // Verify inbox message was transitioned to 'handled'
+    const inboxContent = await readFile(inboxFile, "utf8");
+    const updatedMsg = JSON.parse(inboxContent.trim());
+    assert.equal(updatedMsg.status, "handled");
+    assert.ok(updatedMsg.handled_at);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -109,10 +179,10 @@ test("coordinator-locker queues, assigns, locks, and stops", async () => {
       .map((line) => JSON.parse(line));
     assert.deepEqual(queue.items, []);
     assert.equal(locks["file:README.md"].owner, "run:worker");
-    assert.equal(messages.some((message) => message.type === "coord.assigned"), true);
+    assert.equal(messages.some((message) => message.type === "lock.assigned"), true);
     assert.equal(messages.some((message) => message.type === "lock.renewed"), true);
     assert.equal(messages.some((message) => message.type === "lock.denied"), true);
-    assert.equal(messages.at(-1)?.type, "coord.stopped");
+    assert.equal(messages.at(-1)?.type, "lock.stopped");
     const snapshot = spawn(script, ["snapshot", "--state-dir", stateDir, "--lines", "5"], {
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -126,7 +196,7 @@ test("coordinator-locker queues, assigns, locks, and stops", async () => {
     const summary = JSON.parse(snapshotStdout);
     assert.equal(summary.queueDepth, 0);
     assert.equal(summary.locks["file:README.md"].owner, "run:worker");
-    assert.equal(summary.journal.some((entry: { event?: string }) => entry.event === "coord.assigned"), true);
+    assert.equal(summary.journal.some((entry: { event?: string }) => entry.event === "lock.assigned"), true);
   } finally {
     child.kill("SIGKILL");
     await rm(stateDir, { recursive: true, force: true });

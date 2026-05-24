@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.4: User Recipe Collection Suggestions
+
+- `[Observability]` Broadened recipe persistence suggestions from direct inline spawns to the normal user workflow: any successful actor run backed by a recipe outside `~/.pi/agent/recipes` now asks the launching agent to offer copying/registering it into the user recipe root when it fits this machine's recurring workflow.
+- `[Runtime]` Preserved the ask-first boundary and suppression for recipes already in the user recipe root, so pi-actors grows operator muscle memory without silently writing user recipe files.
+- `[Docs/Prompt]` Updated README, async-run docs, actors skill, onboarding prompt, and project context to frame `~/.pi/agent/recipes` as the everyday per-machine collection of reusable actor recipes/tools.
+- `[Tests]` Added coverage for successful external recipe suggestions, while keeping user-owned recipe suppression covered.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.4` for the hotfix release.
+
 ## 0.19.3: Spawn Recipe Persistence Suggestions
 
 - `[Observability]` Added semi-active recipe persistence suggestions for successful direct `spawn` runs. Inline/ad hoc spawned actors now record `launch_source: "spawn"`, and their successful terminal follow-up asks the agent to offer saving the reusable pattern as a durable recipe/tool under `~/.pi/agent/recipes` without auto-saving.

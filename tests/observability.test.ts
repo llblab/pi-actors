@@ -210,7 +210,23 @@ test("Run observability suggests persistence for successful transient spawns", a
   }
 });
 
-test("Run observability does not suggest persistence for saved recipe spawns", () => {
+test("Run observability suggests persistence for successful external recipes", () => {
+  const transition = {
+    from: "running" as const,
+    launchSource: "tool" as const,
+    recipeFile: "/repo/recipes/pipeline-demo.json",
+    run: "demo",
+    to: "done" as const,
+    tool: "pipeline_demo",
+  };
+  assert.equal(shouldSuggestRecipePersistence(transition), true);
+  assert.match(
+    formatRunTransitionMessage(transition),
+    /copy or register it as a durable tool recipe under ~\/\.pi\/agent\/recipes/,
+  );
+});
+
+test("Run observability does not suggest persistence for saved user recipes", () => {
   const transition = {
     from: "running" as const,
     launchSource: "spawn" as const,

@@ -636,17 +636,17 @@ function isUserRecipeFile(file: string | undefined): boolean {
 export function shouldSuggestRecipePersistence(
   transition: RunTransition,
 ): boolean {
-  return (
-    transition.to === "done" &&
-    transition.launchSource === "spawn" &&
-    !transition.tool &&
-    !isUserRecipeFile(transition.recipeFile)
-  );
+  if (transition.to !== "done") return false;
+  if (isUserRecipeFile(transition.recipeFile)) return false;
+  return Boolean(transition.recipeFile) || transition.launchSource === "spawn";
 }
 
 function formatRecipePersistenceSuggestion(transition: RunTransition): string {
   if (!shouldSuggestRecipePersistence(transition)) return "";
-  return `\nAgent note: this actor was spawned directly and completed successfully. If this pattern looks reusable, ask the operator whether to save it as a durable recipe/tool under ~/.pi/agent/recipes with register_tool. Do not auto-save without confirmation.`;
+  if (transition.recipeFile) {
+    return `\nAgent note: this actor completed successfully from recipe ${transition.recipeFile}. If this recipe fits this machine's recurring workflow, ask the operator whether to copy or register it as a durable tool recipe under ~/.pi/agent/recipes. Do not auto-save without confirmation.`;
+  }
+  return `\nAgent note: this actor was spawned directly and completed successfully. If this pattern fits this machine's recurring workflow, ask the operator whether to save it as a durable recipe/tool under ~/.pi/agent/recipes with register_tool. Do not auto-save without confirmation.`;
 }
 
 export function formatRunTransitionMessage(transition: RunTransition): string {

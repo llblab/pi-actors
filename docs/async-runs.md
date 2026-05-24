@@ -124,7 +124,7 @@ The core loop is:
    { "recipe": "music-player.json", "as": "run:music" }
    ```
 
-2. Let terminal completion, `command.done`, and script-authored follow-up messages reach the launching coordinator automatically. When a directly spawned inline/ad hoc actor completes successfully, the coordinator follow-up tells the agent to offer recipe persistence only as a question to the operator; it must not auto-save.
+2. Let terminal completion, `command.done`, and script-authored follow-up messages reach the launching coordinator automatically. When a directly spawned inline/ad hoc actor or a recipe outside `~/.pi/agent/recipes` completes successfully, the coordinator follow-up tells the agent to offer recipe persistence only as a question to the operator; it must not auto-save.
 
 3. Respond with explicit run-local messages when needed:
 

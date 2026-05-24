@@ -10,6 +10,7 @@ import {
   appendBranchInboxMessage,
   appendRoomMessage,
   ensureDefaultRoom,
+  getRoomStatus,
   readBranchInboxMessages,
   readCommunicationSnapshot,
   readRoomContacts,
@@ -125,6 +126,40 @@ test("Actor rooms track branch inbox handling state", async () => {
   }
 });
 
+test("Actor rooms debounce roster rewrites when only last_seen changes", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
+  const previous = process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS;
+  process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS = "10000";
+  try {
+    appendRoomMessage(stateDir, "main", {
+      body: { role: "reviewer" },
+      from: "branch:demo/a",
+      to: "room:demo",
+      type: "chat.message",
+    });
+    const rosterFile = join(stateDir, "rooms", "main", "roster.json");
+    const firstMtime = (await stat(rosterFile)).mtimeMs;
+    appendRoomMessage(stateDir, "main", {
+      from: "branch:demo/a",
+      to: "room:demo",
+      type: "chat.message",
+    });
+    assert.equal((await stat(rosterFile)).mtimeMs, firstMtime);
+    appendRoomMessage(stateDir, "main", {
+      body: { role: "implementer" },
+      from: "branch:demo/a",
+      to: "room:demo",
+      type: "chat.message",
+    });
+    assert.notEqual((await stat(rosterFile)).mtimeMs, firstMtime);
+    assert.equal(readRoomRoster(stateDir, "main")["branch:demo/a"].role, "implementer");
+  } finally {
+    if (previous === undefined) delete process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS;
+    else process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS = previous;
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Actor rooms debounce bursty communication snapshot writes", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
   const previous = process.env.PI_ACTORS_COMMUNICATION_SNAPSHOT_MIN_MS;
@@ -147,6 +182,31 @@ test("Actor rooms debounce bursty communication snapshot writes", async () => {
   } finally {
     if (previous === undefined) delete process.env.PI_ACTORS_COMMUNICATION_SNAPSHOT_MIN_MS;
     else process.env.PI_ACTORS_COMMUNICATION_SNAPSHOT_MIN_MS = previous;
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor rooms preserve concurrent branch inbox appends", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-branch-inbox-concurrent-"));
+  try {
+    const script = `
+      import { appendBranchInboxMessage } from ${JSON.stringify(join(process.cwd(), "lib", "actor-rooms.ts"))};
+      appendBranchInboxMessage(process.argv[1], "demo", "branch:demo/worker", {
+        body: { index: Number(process.argv[2]) },
+        from: "branch:demo/sender-" + process.argv[2],
+        to: "branch:demo/worker",
+        type: "task.assign"
+      });
+    `;
+    await Promise.all(
+      Array.from({ length: 12 }, (_unused, index) =>
+        execFileAsync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script, stateDir, String(index)]),
+      ),
+    );
+    const messages = readBranchInboxMessages(stateDir, "demo", "branch:demo/worker", 20);
+    assert.equal(messages.length, 12);
+    assert.deepEqual(new Set(messages.map((message) => message.status)), new Set(["queued"]));
+  } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
 });
@@ -192,6 +252,28 @@ test("Actor rooms read bounded message tails", async () => {
       messages.map((message) => (message.body as { index: number }).index),
       [70, 71, 72, 73, 74],
     );
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor rooms read room status without losing count or last message metadata", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
+  try {
+    for (let index = 0; index < 75; index += 1) {
+      appendRoomMessage(stateDir, "main", {
+        body: { index },
+        from: `branch:demo/worker-${index}`,
+        summary: `message ${index}`,
+        to: "room:demo",
+        type: "chat.message",
+      });
+    }
+    const status = getRoomStatus(stateDir, "main");
+    assert.equal(status.message_count, 75);
+    assert.equal(status.last_message_from, "branch:demo/worker-74");
+    assert.equal(status.last_message_summary, "message 74");
+    assert.equal(status.last_message_type, "chat.message");
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

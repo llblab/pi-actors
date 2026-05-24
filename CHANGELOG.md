@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.19.10: Legacy Branch Message Claim IDs
+
+- `[Branch Messages]` Coordinator claim handling now assigns IDs to older/manual queued branch inbox entries that lack `id`, so injected direct messages can still transition to `handled` or `failed` and do not repeat forever.
+- `[Tests]` Extended direct branch inbox coordinator coverage to include a legacy no-ID message and assert both claimed/handled timestamps are recorded.
+- `[Docs/Context]` Updated actor-message docs, durable project context, package metadata, lockfile metadata, and packaged skill metadata to `0.19.10`.
+
+## 0.19.9: Locked Branch Inbox Mutations
+
+- `[Branch Messages]` Added lock-guarded append and status rewrites for branch-local direct-message inbox files so concurrent direct delivery and coordinator claim/handle transitions do not overwrite each other.
+- `[Coordinator]` Made room-swarm branch prompt execution atomically claim queued direct messages before injection, then mark claimed messages as `handled` or `failed` after the child prompt exits.
+- `[Tests]` Added concurrent branch inbox append coverage and asserted coordinator direct-message handling records both `claimed_at` and `handled_at`.
+- `[Docs/Context]` Updated actor-message docs, project context, backlog safeguards, package metadata, lockfile metadata, and packaged skill metadata to `0.19.9`.
+
+## 0.19.8: Efficient Room Status Reads
+
+- `[Rooms]` Changed room status inspection to count JSONL entries and read only the last timeline record instead of parsing the full room timeline into actor-envelope objects.
+- `[Inspector]` Preserved the existing `inspect room:<run> view=status` shape while reducing storage/read amplification for large room transcripts.
+- `[Docs/Context]` Updated actor-message docs, backlog safeguards, project context, package metadata, lockfile metadata, and skill metadata for `0.19.8`.
+- `[Tests]` Added regression coverage that room status preserves message count and last-message metadata across longer timelines.
+
+## 0.19.7: Burst-Safe Roster Writes
+
+- `[Rooms]` Debounced room roster rewrites when a burst only changes a member's `last_seen`, while still writing semantic roster changes such as role, status, display, caps, claim, or parent immediately.
+- `[Runtime IO]` Added `PI_ACTORS_ROOM_ROSTER_MIN_MS` as the roster-only debounce interval, mirroring the existing communication snapshot debounce approach without changing public `room:<run>` message or inspect semantics.
+- `[Docs/Context]` Updated actor-message docs, project context, and the remaining rooms backlog scope to preserve the new burst-safe roster invariant during future storage/backend changes.
+- `[Tests]` Added regression coverage for roster rewrite debounce and immediate semantic roster updates.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.7` for the hotfix release.
+
+## 0.19.6: Conservative Retirement Candidates
+
+- `[Observability]` Added per-run descendant `pi -p` worker counting and exposes `descendantSubagents` on run observations. Ambient run status still counts active descendant workers, but now retains the per-run attribution needed for supervisor lifecycle decisions.
+- `[Retirement]` Tightened opt-in `retire_when: "children_terminal"` candidate detection so supervisors are not considered retirement-ready while command-template progress or descendant `pi -p` workers are still active.
+- `[Docs/Context]` Updated async-run docs, project context, and the remaining retirement backlog scope to reflect the conservative candidate baseline and the remaining child async-run/output-flush work.
+- `[Tests]` Added regression coverage that blocks retirement candidates with descendant subagents.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.6` for the hotfix release.
+
+## 0.19.5: Branch Inbox Inspector Filters
+
+- `[Actor Inspector]` Added branch-local inbox previews to the compact actor communication table, so queued direct `branch:<run>/<branch>` work is visible alongside room, run inbox, and outbox messages.
+- `[Actor Inspector]` Added `/actors-inspector-filter unread`, `/actors-inspector-filter branch <name>`, and `/actors-inspector-filter current-branch <name>` to focus queued branch inbox work and one branch's room/direct/inbox traffic without exposing full payloads by default.
+- `[Docs/Skills]` Updated README and the packaged actors skill with the new inspector filters and branch-inbox preview behavior.
+- `[Backlog]` Closed the high-priority actor communication TUI preview item now that unread/current-branch navigation is implemented with branch read-state semantics.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.5` for the hotfix release.
+
 ## 0.19.4: User Recipe Collection Suggestions
 
 - `[Observability]` Broadened recipe persistence suggestions from direct inline spawns to the normal user workflow: any successful actor run backed by a recipe outside `~/.pi/agent/recipes` now asks the launching agent to offer copying/registering it into the user recipe root when it fits this machine's recurring workflow.

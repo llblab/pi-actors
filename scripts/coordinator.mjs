@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 
 function arg(name, fallback = "") {
   const prefix = `--${name}=`;
@@ -60,12 +60,46 @@ async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const STATE_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
+const STATE_LOCK_TIMEOUT_MS = 5000;
+
 async function waitForPath(path, timeoutMs = 5000) {
   const started = Date.now();
   while (!existsSync(path)) {
     if (Date.now() - started > timeoutMs) throw new Error(`timed out waiting for ${path}`);
     await sleep(50);
   }
+}
+
+async function acquireStateLock(parentDir, name, label) {
+  await mkdir(parentDir, { recursive: true });
+  const lockDir = `${parentDir}/${name}`;
+  const started = Date.now();
+  while (true) {
+    try {
+      await mkdir(lockDir);
+      await writeFile(`${lockDir}/owner.json`, `${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() })}\n`, "utf8");
+      return async () => rm(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      try {
+        const current = await stat(lockDir);
+        if (Date.now() - current.mtimeMs > STATE_LOCK_MAX_AGE_MS) {
+          await rm(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() - started > STATE_LOCK_TIMEOUT_MS) {
+        throw new Error(`${label} lock timed out.`, { cause: error });
+      }
+      await sleep(10);
+    }
+  }
+}
+
+async function acquireBranchInboxLock(runId, branchName) {
+  return acquireStateLock(`${runStateDir(runId)}/branches/${branchName}`, ".inbox.lock", `Branch inbox ${branchName}`);
 }
 
 async function writeLockerMessage(locker, message) {
@@ -186,46 +220,64 @@ async function synthesize(config, locker) {
   process.stdout.write(`artifact=${config.artifactPath}\n`);
 }
 
+async function readInboxLines(inboxPath) {
+  if (!existsSync(inboxPath)) return [];
+  const content = await readFile(inboxPath, "utf8");
+  return content.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+async function writeInboxMessages(inboxPath, messages) {
+  await writeFile(inboxPath, messages.map((message) => JSON.stringify(message)).join("\n") + "\n", "utf8");
+}
+
+async function claimQueuedInboxMessages(runId, branchName) {
+  const inboxPath = `${runStateDir(runId)}/branches/${branchName}/inbox.jsonl`;
+  const releaseLock = await acquireBranchInboxLock(runId, branchName);
+  try {
+    const messages = await readInboxLines(inboxPath);
+    const claimedAt = new Date().toISOString();
+    const queuedMessages = [];
+    const updated = messages.map((msg, index) => {
+      if (msg.status !== "queued" && msg.status) return msg;
+      const claimed = {
+        ...msg,
+        claimed_at: claimedAt,
+        id: msg.id || `legacy-${Date.now()}-${index}`,
+        status: "claimed",
+      };
+      queuedMessages.push(claimed);
+      return claimed;
+    });
+    if (queuedMessages.length > 0) await writeInboxMessages(inboxPath, updated);
+    return queuedMessages;
+  } catch {
+    return [];
+  } finally {
+    await releaseLock();
+  }
+}
+
 async function updateInboxMessagesStatus(runId, branchName, ids, status) {
   const inboxPath = `${runStateDir(runId)}/branches/${branchName}/inbox.jsonl`;
+  const releaseLock = await acquireBranchInboxLock(runId, branchName);
   try {
-    if (!existsSync(inboxPath)) return;
-    const content = await readFile(inboxPath, "utf8");
-    const lines = content.split("\n").filter(Boolean);
-    const updatedLines = [];
-    for (const line of lines) {
-      const msg = JSON.parse(line);
-      if (msg.id && ids.includes(msg.id)) {
-        msg.status = status;
-        msg[`${status}_at`] = new Date().toISOString();
-      }
-      updatedLines.push(JSON.stringify(msg));
-    }
-    await writeFile(inboxPath, updatedLines.join("\n") + "\n", "utf8");
-  } catch (err) {
+    const messages = await readInboxLines(inboxPath);
+    const idSet = new Set(ids);
+    const updated = messages.map((msg) => {
+      if (!msg.id || !idSet.has(msg.id)) return msg;
+      return { ...msg, [`${status}_at`]: new Date().toISOString(), status };
+    });
+    await writeInboxMessages(inboxPath, updated);
+  } catch {
     // Best-effort write
+  } finally {
+    await releaseLock();
   }
 }
 
 async function executeParticipantPrompt(role, basePrompt, config) {
   const branchName = role.name;
-  const inboxPath = `${runStateDir(config.runId)}/branches/${branchName}/inbox.jsonl`;
-  const queuedMessages = [];
-  
-  try {
-    if (existsSync(inboxPath)) {
-      const content = await readFile(inboxPath, "utf8");
-      const lines = content.split("\n").filter(Boolean);
-      for (const line of lines) {
-        const msg = JSON.parse(line);
-        if (msg.status === "queued" || !msg.status) {
-          queuedMessages.push(msg);
-        }
-      }
-    }
-  } catch (err) {
-    // Best-effort read
-  }
+  const queuedMessages = await claimQueuedInboxMessages(config.runId, branchName);
 
   let finalPrompt = basePrompt;
   const claimedIds = [];
@@ -239,10 +291,6 @@ async function executeParticipantPrompt(role, basePrompt, config) {
     }
     inboxSection += "\nPlease acknowledge and address these direct messages in your response.\n";
     finalPrompt += inboxSection;
-
-    if (claimedIds.length > 0) {
-      await updateInboxMessagesStatus(config.runId, branchName, claimedIds, "claimed");
-    }
   }
 
   const result = await runPi(finalPrompt, config.model, config.thinking);

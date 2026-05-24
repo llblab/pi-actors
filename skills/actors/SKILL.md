@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.19.4
+  version: 0.19.10
 ---
 
 # Actors (pi-actors)
@@ -122,10 +122,10 @@ Views:
 Actor inspector commands:
 
 - `/actors-inspector-toggle [rows]`: open/close the compact table or set row count; default is 12 log rows when no size is supplied.
-- `/actors-inspector-filter all|room|direct|broadcast|mention <text>`: narrow table previews without changing room/run state.
+- `/actors-inspector-filter all|room|direct|broadcast|unread|branch <name>|current-branch <name>|mention <text>`: narrow table previews without changing room/run state.
 - `/actors-inspect <number>`: open one visible row as a full-message view.
 
-The table is compact and optimistic by default: bounded body previews, capped noisy room rows, and an inline roster summary in the form `name/role` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
+The table is compact and optimistic by default: bounded body previews, capped noisy room rows, branch-local inbox previews, and an inline roster summary in the form `name/role` that wraps only when needed. Use `unread` for queued branch inbox work and `branch <name>` / `current-branch <name>` for one branch's room/direct/inbox traffic. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
 
 Let terminal notifications arrive; avoid sleep-poll loops except during diagnosis.
 

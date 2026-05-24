@@ -439,6 +439,45 @@ test("Run observability finds opt-in retirement candidates", async () => {
   }
 });
 
+test("Run observability blocks retirement candidates with descendant subagents", () => {
+  const candidates = findRunRetirementCandidates({
+    cancelled: 0,
+    done: 0,
+    exited: 0,
+    failed: 0,
+    killed: 0,
+    running: 2,
+    runningSubagents: 2,
+    runs: [
+      {
+        activeSubagents: 0,
+        descendantSubagents: 1,
+        retireWhen: "children_terminal",
+        run: "supervisor-busy",
+        stateDir: "/tmp/supervisor-busy",
+        status: "running",
+      },
+      {
+        activeSubagents: 0,
+        descendantSubagents: 0,
+        retireWhen: "children_terminal",
+        run: "supervisor-idle",
+        stateDir: "/tmp/supervisor-idle",
+        status: "running",
+      },
+    ],
+    total: 2,
+  });
+  assert.deepEqual(candidates, [
+    {
+      activeSubagents: 0,
+      descendantSubagents: 0,
+      run: "supervisor-idle",
+      stateDir: "/tmp/supervisor-idle",
+    },
+  ]);
+});
+
 test("Run observability hides status when no runs are running", () => {
   assert.equal(
     renderRunStatus({

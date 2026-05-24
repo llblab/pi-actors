@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.5: Branch Inbox Inspector Filters
+
+- `[Actor Inspector]` Added branch-local inbox previews to the compact actor communication table, so queued direct `branch:<run>/<branch>` work is visible alongside room, run inbox, and outbox messages.
+- `[Actor Inspector]` Added `/actors-inspector-filter unread`, `/actors-inspector-filter branch <name>`, and `/actors-inspector-filter current-branch <name>` to focus queued branch inbox work and one branch's room/direct/inbox traffic without exposing full payloads by default.
+- `[Docs/Skills]` Updated README and the packaged actors skill with the new inspector filters and branch-inbox preview behavior.
+- `[Backlog]` Closed the high-priority actor communication TUI preview item now that unread/current-branch navigation is implemented with branch read-state semantics.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.5` for the hotfix release.
+
 ## 0.19.4: User Recipe Collection Suggestions
 
 - `[Observability]` Broadened recipe persistence suggestions from direct inline spawns to the normal user workflow: any successful actor run backed by a recipe outside `~/.pi/agent/recipes` now asks the launching agent to offer copying/registering it into the user recipe root when it fits this machine's recurring workflow.

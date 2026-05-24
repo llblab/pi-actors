@@ -13,15 +13,6 @@
 - Exit:
   - Any backend/storage change preserves existing `spawn` / `message` / `inspect` semantics and room address compatibility.
 
-### Actor Communication TUI Preview
-
-- Priority: High.
-- Goal: Make actor-to-actor communication more navigable in the terminal UI without exposing large payloads by default.
-- Direction:
-  - Add current-branch and unread filters after branch read-state semantics are real.
-- Exit:
-  - Operators can distinguish unread/current-branch messages while retaining intentional full-body inspection.
-
 ### Graceful Actor Retirement
 
 - Priority: Medium.

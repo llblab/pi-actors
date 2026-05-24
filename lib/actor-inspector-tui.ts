@@ -13,9 +13,12 @@ import * as Paths from "./paths.ts";
 
 export interface ActorInspectorPreview {
   body_preview?: string;
+  branch?: string;
   channel: "broadcast" | "direct" | "room";
   from?: string;
   from_display?: string;
+  inbox_status?: string;
+  message_id?: string;
   run: string;
   sequence?: number;
   summary?: string;
@@ -50,10 +53,12 @@ export interface ActorInspectorRosterMember {
 
 export interface ActorInspectorPreviewReadOptions {
   ownerId?: string;
+  branch?: string;
   currentRunOnly?: boolean;
   channels?: ActorInspectorPreview["channel"][];
   mention?: string;
   roomLimitPerRun?: number;
+  unreadOnly?: boolean;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -207,6 +212,39 @@ function readInboxPreviews(
     .filter((preview): preview is ActorInspectorPreview => Boolean(preview));
 }
 
+function readBranchInboxPreviews(
+  run: string,
+  stateDir: string,
+): ActorInspectorPreview[] {
+  const branchesDir = path.join(stateDir, "branches");
+  try {
+    return fs
+      .readdirSync(branchesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) =>
+        readJsonLines(path.join(branchesDir, entry.name, "inbox.jsonl"))
+          .map((message): ActorInspectorPreview | undefined => {
+            const preview = previewFromMessage(
+              run,
+              message,
+              String(message.queued_at ?? message.received_at ?? message.timestamp ?? ""),
+            );
+            if (!preview) return undefined;
+            return {
+              ...preview,
+              branch: entry.name,
+              ...(typeof message.id === "string" ? { message_id: message.id } : {}),
+              ...(typeof message.status === "string" ? { inbox_status: message.status } : {}),
+            };
+          })
+          .filter((preview): preview is ActorInspectorPreview => Boolean(preview)),
+      );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    return [];
+  }
+}
+
 function readOutboxPreviews(
   run: string,
   stateDir: string,
@@ -238,6 +276,21 @@ function matchesOwner(stateDir: string, ownerId: string | undefined): boolean {
   return ownerId === undefined || getRunOwnerId(stateDir) === ownerId;
 }
 
+function isUnreadPreview(preview: ActorInspectorPreview): boolean {
+  return preview.inbox_status === "queued" || preview.inbox_status === undefined && preview.branch !== undefined;
+}
+
+function matchesBranchFilter(
+  preview: ActorInspectorPreview,
+  branch: string | undefined,
+): boolean {
+  const name = branch?.trim();
+  if (!name) return true;
+  if (preview.branch !== undefined) return preview.branch === name;
+  const address = `branch:${preview.run}/${name}`;
+  return preview.from === address || preview.to === address;
+}
+
 function matchesPreviewFilter(
   preview: ActorInspectorPreview,
   options: ActorInspectorPreviewReadOptions,
@@ -245,11 +298,15 @@ function matchesPreviewFilter(
   if (options.channels?.length && !options.channels.includes(preview.channel)) {
     return false;
   }
+  if (options.unreadOnly && !isUnreadPreview(preview)) return false;
+  if (!matchesBranchFilter(preview, options.branch)) return false;
   const mention = options.mention?.trim().toLowerCase();
   if (!mention) return true;
   return [
+    preview.branch,
     preview.from,
     preview.from_display,
+    preview.inbox_status,
     preview.to,
     preview.type,
     preview.summary,
@@ -297,6 +354,7 @@ export function readActorInspectorPreviews(
         return [
           ...readRoomPreviews(entry.name, stateDir),
           ...readInboxPreviews(entry.name, stateDir),
+          ...readBranchInboxPreviews(entry.name, stateDir),
           ...readOutboxPreviews(entry.name, stateDir),
         ];
       })

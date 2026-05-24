@@ -155,11 +155,13 @@ The terminal actor inspector is hidden by default. When opened without an explic
 /actors-inspector-toggle 20
 /actors-inspector-filter room
 /actors-inspector-filter direct
+/actors-inspector-filter unread
+/actors-inspector-filter branch front
 /actors-inspector-filter mention checkpoint
 /actors-inspect 3
 ```
 
-The table is compact and optimistic by default: bounded route/type/summary/body previews, capped noisy room rows, and an inline roster summary in the form `name/role` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` remain visible as inactive/muted participants from the current run. `/actors-inspect <number>` opens the selected row as a full-message view; toggle again to return to the table or close it. Actor display names come from room `actor.join` roster metadata or branch addresses, keeping debugger output plain and name-driven.
+The table is compact and optimistic by default: bounded route/type/summary/body previews, capped noisy room rows, branch-local inbox previews, and an inline roster summary in the form `name/role` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` remain visible as inactive/muted participants from the current run. Use `unread` to focus queued branch inbox work and `branch <name>` / `current-branch <name>` to focus one branch's room/direct/inbox traffic. `/actors-inspect <number>` opens the selected row as a full-message view; toggle again to return to the table or close it. Actor display names come from room `actor.join` roster metadata or branch addresses, keeping debugger output plain and name-driven.
 
 ## Registry Model
 

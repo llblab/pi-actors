@@ -54,6 +54,8 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     | ActorInspectorTui.ActorInspectorPreview["channel"][]
     | undefined;
   let actorInspectorMention: string | undefined;
+  let actorInspectorBranch: string | undefined;
+  let actorInspectorUnreadOnly = false;
   let actorInspectorRoomLimitPerRun = 12;
   let selectedInspectorSequence: number | undefined;
   let recipeWatcherFailureNotified = false;
@@ -90,9 +92,11 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
                   {
                     channels: actorInspectorChannels,
                     currentRunOnly: true,
+                    branch: actorInspectorBranch,
                     mention: actorInspectorMention,
                     ownerId,
                     roomLimitPerRun: actorInspectorRoomLimitPerRun,
+                    unreadOnly: actorInspectorUnreadOnly,
                   },
                 );
                 const rows =
@@ -337,7 +341,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   });
   pi.registerCommand("actors-inspector-filter", {
     description:
-      "Filter actor inspector rows: all, room, direct, broadcast, mention <text>",
+      "Filter actor inspector rows: all, room, direct, broadcast, unread, branch <name>, mention <text>",
     handler: async (args, ctx) => {
       const parts = Array.isArray(args)
         ? args.map(String)
@@ -346,9 +350,23 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       if (!mode || mode === "all" || mode === "clear") {
         actorInspectorChannels = undefined;
         actorInspectorMention = undefined;
+        actorInspectorBranch = undefined;
+        actorInspectorUnreadOnly = false;
       } else if (mode === "room" || mode === "direct" || mode === "broadcast") {
         actorInspectorChannels = [mode];
         actorInspectorMention = undefined;
+      } else if (mode === "unread") {
+        actorInspectorUnreadOnly = true;
+      } else if (mode === "branch" || mode === "current-branch") {
+        const branch = parts.slice(1).join(" ").trim();
+        if (!branch) {
+          ctx.ui.notify(
+            `Usage: /actors-inspector-filter ${mode} <branch-name>`,
+            "warning",
+          );
+          return;
+        }
+        actorInspectorBranch = branch;
       } else if (mode === "mention") {
         const mention = parts.slice(1).join(" ").trim();
         if (!mention) {
@@ -362,7 +380,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
         actorInspectorMention = mention;
       } else {
         ctx.ui.notify(
-          "Usage: /actors-inspector-filter all|room|direct|broadcast|mention <text>",
+          "Usage: /actors-inspector-filter all|room|direct|broadcast|unread|branch <name>|mention <text>",
           "warning",
         );
         return;

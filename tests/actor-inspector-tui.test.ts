@@ -333,6 +333,66 @@ test("Actor inspector TUI filters previews by channel and mention", async () => 
   }
 });
 
+test("Actor inspector TUI reads branch inbox previews and filters unread branch work", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-branch-inbox-"));
+  try {
+    const stateDir = join(root, "demo");
+    await mkdir(join(stateDir, "branches", "front"), { recursive: true });
+    await mkdir(join(stateDir, "branches", "back"), { recursive: true });
+    await writeFile(
+      join(stateDir, "branches", "front", "inbox.jsonl"),
+      [
+        JSON.stringify({
+          body: "front queued",
+          from: "branch:demo/back",
+          id: "front-1",
+          queued_at: "2026-01-01T00:00:00.000Z",
+          status: "queued",
+          to: "branch:demo/front",
+          type: "task.assign",
+        }),
+        JSON.stringify({
+          body: "front handled",
+          from: "branch:demo/back",
+          id: "front-2",
+          queued_at: "2026-01-01T00:00:01.000Z",
+          status: "handled",
+          to: "branch:demo/front",
+          type: "task.assign",
+        }),
+      ].join("\n"),
+    );
+    await writeFile(
+      join(stateDir, "branches", "back", "inbox.jsonl"),
+      `${JSON.stringify({
+        body: "back queued",
+        from: "branch:demo/front",
+        id: "back-1",
+        queued_at: "2026-01-01T00:00:02.000Z",
+        status: "queued",
+        to: "branch:demo/back",
+        type: "task.assign",
+      })}\n`,
+    );
+    const previews = readActorInspectorPreviews(root, 10);
+    assert.equal(previews.filter((preview) => preview.branch).length, 3);
+    assert.deepEqual(
+      readActorInspectorPreviews(root, 10, { branch: "front", unreadOnly: true }).map(
+        (preview) => [preview.branch, preview.message_id, preview.body_preview],
+      ),
+      [["front", "front-1", "front queued"]],
+    );
+    assert.deepEqual(
+      readActorInspectorPreviews(root, 10, { unreadOnly: true }).map(
+        (preview) => preview.message_id,
+      ),
+      ["front-1", "back-1"],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Actor inspector TUI can scope previews to the current run and reset numbering", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-current-"));
   try {

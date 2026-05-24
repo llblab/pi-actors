@@ -211,6 +211,31 @@ function compactRoomMessages(stateDir: string, room: string): void {
   });
 }
 
+function readJsonlLineCount(file: string): number {
+  const stat = fs.statSync(file);
+  if (stat.size === 0) return 0;
+  const fd = fs.openSync(file, "r");
+  try {
+    const chunkSize = 64 * 1024;
+    const chunk = Buffer.allocUnsafe(chunkSize);
+    let position = 0;
+    let count = 0;
+    let lastByte: number | undefined;
+    while (position < stat.size) {
+      const bytesRead = fs.readSync(fd, chunk, 0, Math.min(chunkSize, stat.size - position), position);
+      if (bytesRead <= 0) break;
+      position += bytesRead;
+      for (let index = 0; index < bytesRead; index += 1) {
+        if (chunk[index] === 10) count += 1;
+      }
+      lastByte = chunk[bytesRead - 1];
+    }
+    return lastByte === 10 ? count : count + 1;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function readJsonlTailLines(file: string, limit: number): string[] {
   const lineLimit = Math.max(1, limit);
   const stat = fs.statSync(file);
@@ -457,8 +482,13 @@ export function readRoomMessagePreviews(
 }
 
 export function getRoomStatus(stateDir: string, room: string): RoomStatus {
-  const messages = readRoomMessages(stateDir, room, Number.MAX_SAFE_INTEGER);
-  const last = messages[messages.length - 1];
+  let messageCount = 0;
+  try {
+    messageCount = readJsonlLineCount(messagesFile(stateDir, room));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const [last] = readRoomMessages(stateDir, room, 1);
   return {
     ...(last
       ? {
@@ -468,7 +498,7 @@ export function getRoomStatus(stateDir: string, room: string): RoomStatus {
           last_message_type: last.type,
         }
       : {}),
-    message_count: messages.length,
+    message_count: messageCount,
     room,
     roster_count: Object.keys(readRoomRoster(stateDir, room)).length,
   };

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.8: Efficient Room Status Reads
+
+- `[Rooms]` Changed room status inspection to count JSONL entries and read only the last timeline record instead of parsing the full room timeline into actor-envelope objects.
+- `[Inspector]` Preserved the existing `inspect room:<run> view=status` shape while reducing storage/read amplification for large room transcripts.
+- `[Docs/Context]` Updated actor-message docs, backlog safeguards, project context, package metadata, lockfile metadata, and skill metadata for `0.19.8`.
+- `[Tests]` Added regression coverage that room status preserves message count and last-message metadata across longer timelines.
+
 ## 0.19.7: Burst-Safe Roster Writes
 
 - `[Rooms]` Debounced room roster rewrites when a burst only changes a member's `last_seen`, while still writing semantic roster changes such as role, status, display, caps, claim, or parent immediately.

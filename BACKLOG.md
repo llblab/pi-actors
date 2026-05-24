@@ -9,7 +9,7 @@
 - Direction:
   - Evaluate whether room storage/routing should remain built into the tool adapter or move behind a dedicated non-LLM communication actor recipe/script, possibly singleton-scoped. Preserve the same public `room:<run>` address and envelope either way.
   - Consider reducing direct file-backed state where it improves coherence: model room/roster state as actor-owned data structures served by helper scripts/actors, with files retained only for durable snapshots, recovery, artifacts, or audit logs.
-  - Further storage changes should preserve the current burst safeguards: branch communication snapshot writes are debounced, root snapshots stay current, and roster files are not rewritten during bursts when only `last_seen` changes.
+  - Further storage changes should preserve the current burst/read safeguards: branch communication snapshot writes are debounced, root snapshots stay current, roster files are not rewritten during bursts when only `last_seen` changes, and room status inspection does not parse full timelines.
 - Exit:
   - Any backend/storage change preserves existing `spawn` / `message` / `inspect` semantics and room address compatibility.
 

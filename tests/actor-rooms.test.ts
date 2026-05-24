@@ -10,6 +10,7 @@ import {
   appendBranchInboxMessage,
   appendRoomMessage,
   ensureDefaultRoom,
+  getRoomStatus,
   readBranchInboxMessages,
   readCommunicationSnapshot,
   readRoomContacts,
@@ -226,6 +227,28 @@ test("Actor rooms read bounded message tails", async () => {
       messages.map((message) => (message.body as { index: number }).index),
       [70, 71, 72, 73, 74],
     );
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor rooms read room status without losing count or last message metadata", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
+  try {
+    for (let index = 0; index < 75; index += 1) {
+      appendRoomMessage(stateDir, "main", {
+        body: { index },
+        from: `branch:demo/worker-${index}`,
+        summary: `message ${index}`,
+        to: "room:demo",
+        type: "chat.message",
+      });
+    }
+    const status = getRoomStatus(stateDir, "main");
+    assert.equal(status.message_count, 75);
+    assert.equal(status.last_message_from, "branch:demo/worker-74");
+    assert.equal(status.last_message_summary, "message 74");
+    assert.equal(status.last_message_type, "chat.message");
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

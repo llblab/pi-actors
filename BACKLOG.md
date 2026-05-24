@@ -20,7 +20,7 @@
 - Direction:
   - Build on the existing `retire_when: "children_terminal"` recipe/run metadata contract and observability retirement-candidate detection for ephemeral supervisors.
   - Treat auto-retirement as opt-in only; never infer it for arbitrary long-lived services, user tools, or persistent backlog implementers.
-  - Extend candidate detection from current `progress.activeSubagents === 0` gating to full observed child/descendant actor state rather than log text: the supervisor may retire only when all launched child async runs or descendant `pi -p` workers are terminal and required artifacts/outbox events have been flushed.
+  - Extend candidate detection beyond current active command/proc-descendant gating to full observed child async-run state rather than log text: the supervisor may retire only when all launched child async runs are terminal and required artifacts/outbox events have been flushed.
   - Prefer graceful stop (`control.stop` / actor message) before process termination; escalate only after a bounded timeout and record the retirement event in run state.
   - Preserve manual `cancel` / `kill` semantics and make retirement visible through `inspect` / ambient observability.
 - Exit:

@@ -158,6 +158,8 @@ The actor-level surface is:
 - `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `tool:<name>`, `coordinator`, or `session:<id>`.
 - `inspect`: intentionally read owned `run:<id>` status, tail, messages, artifacts, files, mailbox metadata, or communication snapshot; read `room:<run>` status, messages, previews, roster, or contacts; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
 
+Opt-in supervisor retirement uses `retire_when: "children_terminal"` as lifecycle metadata. Candidate detection is conservative: a supervisor is not retirement-ready while command-template progress or descendant `pi -p` worker processes are still active; future retirement execution must also verify child async-run state and flushed outputs before stopping the supervisor.
+
 Low-level async actions map into the actor surface instead of forming a second public model:
 
 - Start → `spawn`

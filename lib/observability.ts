@@ -23,6 +23,7 @@ export type RunOutboxLevel = "info" | "warning" | "error";
 export interface RunObservation {
   activeSubagents?: number;
   completed?: number;
+  descendantSubagents?: number;
   failures?: number;
   ownerId?: string;
   artifacts?: Record<string, string>;
@@ -51,6 +52,7 @@ export interface RunSummary {
 
 export interface RunRetirementCandidate {
   activeSubagents: number;
+  descendantSubagents: number;
   run: string;
   stateDir: string;
 }
@@ -94,7 +96,7 @@ const PROC_DESCENDANT_SCAN_TTL_MS = 1000;
 
 const procDescendantScanCache = new Map<
   string,
-  { count: number; expiresAt: number; signature: string }
+  { counts: Map<string, number>; expiresAt: number; signature: string }
 >();
 
 function toNumber(value: unknown): number | undefined {
@@ -182,18 +184,26 @@ export function summarizeRuns(
     .filter((run): run is RunObservation => Boolean(run))
     .filter((run) => ownerId === undefined || run.ownerId === ownerId)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-  const runningRuns = runs.filter((run) => run.status === "running");
+  const processSubagentsByRun = countRunningSubagentsByRun(stateRoot, ownerId);
+  const runsWithDescendants = runs.map((run) => {
+    const descendantSubagents = processSubagentsByRun.get(run.run) ?? 0;
+    return descendantSubagents > 0 ? { ...run, descendantSubagents } : run;
+  });
+  const runningRuns = runsWithDescendants.filter((run) => run.status === "running");
   const running = runningRuns.length;
-  const done = runs.filter((run) => run.status === "done").length;
-  const exited = runs.filter((run) => run.status === "exited").length;
-  const failed = runs.filter((run) => run.status === "failed").length;
-  const cancelled = runs.filter((run) => run.status === "cancelled").length;
-  const killed = runs.filter((run) => run.status === "killed").length;
+  const done = runsWithDescendants.filter((run) => run.status === "done").length;
+  const exited = runsWithDescendants.filter((run) => run.status === "exited").length;
+  const failed = runsWithDescendants.filter((run) => run.status === "failed").length;
+  const cancelled = runsWithDescendants.filter((run) => run.status === "cancelled").length;
+  const killed = runsWithDescendants.filter((run) => run.status === "killed").length;
   const progressSubagents = runningRuns.reduce(
     (sum, run) => sum + Math.max(1, Math.floor(run.activeSubagents ?? 0)),
     0,
   );
-  const processSubagents = countRunningSubagents(stateRoot, ownerId);
+  const processSubagents = [...processSubagentsByRun.values()].reduce(
+    (sum, count) => sum + count,
+    0,
+  );
   const runningSubagents = Math.max(progressSubagents, running + processSubagents);
   return {
     cancelled,
@@ -203,8 +213,8 @@ export function summarizeRuns(
     killed,
     running,
     runningSubagents,
-    runs,
-    total: runs.length,
+    runs: runsWithDescendants,
+    total: runsWithDescendants.length,
   };
 }
 
@@ -228,13 +238,13 @@ function getProcCommand(pid: string): string {
   return (readProcFile(`/proc/${pid}/cmdline`) ?? "").replaceAll("\0", " ");
 }
 
-function getRunningRunPids(stateRoot: string, ownerId?: string): Set<string> {
-  const pids = new Set<string>();
+function getRunningRunPidMap(stateRoot: string, ownerId?: string): Map<string, string> {
+  const pids = new Map<string, string>();
   for (const run of summarizeRunsWithoutSubagents(stateRoot, ownerId).runs) {
     if (run.status !== "running") continue;
     const status = AsyncRuns.getRunStatus(join(stateRoot, run.run));
     const pid = Number(status.pid || 0);
-    if (pid > 0) pids.add(String(pid));
+    if (pid > 0) pids.set(String(pid), run.run);
   }
   return pids;
 }
@@ -278,18 +288,18 @@ function summarizeRunsWithoutSubagents(
   };
 }
 
-export function countRunningSubagents(
+export function countRunningSubagentsByRun(
   stateRoot = Paths.getRunStateRoot(),
   ownerId?: string,
-): number {
-  const runPids = getRunningRunPids(stateRoot, ownerId);
-  if (runPids.size === 0 || !existsSync("/proc")) return 0;
-  const signature = [...runPids].sort().join(",");
+): Map<string, number> {
+  const runPidMap = getRunningRunPidMap(stateRoot, ownerId);
+  if (runPidMap.size === 0 || !existsSync("/proc")) return new Map();
+  const signature = [...runPidMap.keys()].sort().join(",");
   const cacheKey = `${stateRoot}\0${ownerId ?? ""}`;
   const cached = procDescendantScanCache.get(cacheKey);
   const now = Date.now();
   if (cached && cached.signature === signature && cached.expiresAt > now) {
-    return cached.count;
+    return new Map(cached.counts);
   }
   const parentByPid = new Map<string, string>();
   const commandByPid = new Map<string, string>();
@@ -297,7 +307,7 @@ export function countRunningSubagents(
   try {
     procEntries = readdirSync("/proc", { withFileTypes: true });
   } catch {
-    return 0;
+    return new Map();
   }
   for (const entry of procEntries) {
     if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
@@ -306,27 +316,39 @@ export function countRunningSubagents(
     parentByPid.set(entry.name, ppid);
     commandByPid.set(entry.name, getProcCommand(entry.name));
   }
-  const descendantOfRun = (pid: string): boolean => {
+  const runForDescendant = (pid: string): string | undefined => {
     let current = parentByPid.get(pid);
     const seen = new Set<string>();
     while (current && !seen.has(current)) {
-      if (runPids.has(current)) return true;
+      const run = runPidMap.get(current);
+      if (run) return run;
       seen.add(current);
       current = parentByPid.get(current);
     }
-    return false;
+    return undefined;
   };
-  let count = 0;
+  const counts = new Map<string, number>();
   for (const [pid, command] of commandByPid.entries()) {
     if (!command.includes("pi -p") && !command.includes("pi\0-p")) continue;
-    if (descendantOfRun(pid)) count++;
+    const run = runForDescendant(pid);
+    if (run) counts.set(run, (counts.get(run) ?? 0) + 1);
   }
   procDescendantScanCache.set(cacheKey, {
-    count,
+    counts,
     expiresAt: now + PROC_DESCENDANT_SCAN_TTL_MS,
     signature,
   });
-  return count;
+  return new Map(counts);
+}
+
+export function countRunningSubagents(
+  stateRoot = Paths.getRunStateRoot(),
+  ownerId?: string,
+): number {
+  return [...countRunningSubagentsByRun(stateRoot, ownerId).values()].reduce(
+    (sum, count) => sum + count,
+    0,
+  );
 }
 
 export function renderSubagentStatus(
@@ -352,14 +374,19 @@ export function findRunRetirementCandidates(
   summary: RunSummary,
 ): RunRetirementCandidate[] {
   return summary.runs
-    .filter((run) =>
-      run.status === "running" &&
-      run.retireWhen === "children_terminal" &&
-      run.stateDir &&
-      Math.floor(run.activeSubagents ?? 0) <= 0,
-    )
+    .filter((run) => {
+      const activeSubagents = Math.max(0, Math.floor(run.activeSubagents ?? 0));
+      const descendantSubagents = Math.max(0, Math.floor(run.descendantSubagents ?? 0));
+      return (
+        run.status === "running" &&
+        run.retireWhen === "children_terminal" &&
+        run.stateDir &&
+        activeSubagents + descendantSubagents <= 0
+      );
+    })
     .map((run) => ({
       activeSubagents: Math.max(0, Math.floor(run.activeSubagents ?? 0)),
+      descendantSubagents: Math.max(0, Math.floor(run.descendantSubagents ?? 0)),
       run: run.run,
       stateDir: run.stateDir!,
     }));

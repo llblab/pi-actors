@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.6: Conservative Retirement Candidates
+
+- `[Observability]` Added per-run descendant `pi -p` worker counting and exposes `descendantSubagents` on run observations. Ambient run status still counts active descendant workers, but now retains the per-run attribution needed for supervisor lifecycle decisions.
+- `[Retirement]` Tightened opt-in `retire_when: "children_terminal"` candidate detection so supervisors are not considered retirement-ready while command-template progress or descendant `pi -p` workers are still active.
+- `[Docs/Context]` Updated async-run docs, project context, and the remaining retirement backlog scope to reflect the conservative candidate baseline and the remaining child async-run/output-flush work.
+- `[Tests]` Added regression coverage that blocks retirement candidates with descendant subagents.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.6` for the hotfix release.
+
 ## 0.19.5: Branch Inbox Inspector Filters
 
 - `[Actor Inspector]` Added branch-local inbox previews to the compact actor communication table, so queued direct `branch:<run>/<branch>` work is visible alongside room, run inbox, and outbox messages.

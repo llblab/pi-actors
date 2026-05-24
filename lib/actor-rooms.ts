@@ -10,8 +10,8 @@ import * as path from "node:path";
 
 import type { ActorMessage } from "./actor-messages.ts";
 
-const ROOM_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
-const ROOM_LOCK_TIMEOUT_MS = 5000;
+const STATE_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
+const STATE_LOCK_TIMEOUT_MS = 5000;
 const DEFAULT_ROOM_MAX_MESSAGES = 10000;
 const DEFAULT_SNAPSHOT_MIN_INTERVAL_MS = 250;
 
@@ -117,9 +117,9 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function acquireRoomLock(stateDir: string, room: string): () => void {
-  ensureRoomDir(stateDir, room);
-  const lockDir = path.join(roomDir(stateDir, room), ".append.lock");
+function acquireStateLock(parentDir: string, name: string, label: string): () => void {
+  fs.mkdirSync(parentDir, { recursive: true });
+  const lockDir = path.join(parentDir, name);
   const started = Date.now();
   while (true) {
     try {
@@ -132,22 +132,27 @@ function acquireRoomLock(stateDir: string, room: string): () => void {
     } catch (error) {
       try {
         const stat = fs.statSync(lockDir);
-        if (Date.now() - stat.mtimeMs > ROOM_LOCK_MAX_AGE_MS) {
+        if (Date.now() - stat.mtimeMs > STATE_LOCK_MAX_AGE_MS) {
           fs.rmSync(lockDir, { recursive: true, force: true });
           continue;
         }
       } catch {
         continue;
       }
-      if (Date.now() - started > ROOM_LOCK_TIMEOUT_MS) {
-        throw new Error(
-          `Room append lock timed out for ${room} in ${stateDir}.`,
-          { cause: error },
-        );
+      if (Date.now() - started > STATE_LOCK_TIMEOUT_MS) {
+        throw new Error(`${label} lock timed out.`, { cause: error });
       }
       sleepSync(10);
     }
   }
+}
+
+function acquireRoomLock(stateDir: string, room: string): () => void {
+  return acquireStateLock(roomDir(stateDir, room), ".append.lock", `Room append ${room}`);
+}
+
+function acquireBranchInboxLock(stateDir: string, branch: string): () => void {
+  return acquireStateLock(path.dirname(branchInboxFile(stateDir, branch)), ".inbox.lock", `Branch inbox ${branch}`);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -380,12 +385,16 @@ export function appendBranchInboxMessage(
 ): void {
   const branch = branchIdFromAddress(address, run);
   if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
-  fs.mkdirSync(path.dirname(branchInboxFile(stateDir, branch)), { recursive: true });
-  fs.writeFileSync(
-    branchInboxFile(stateDir, branch),
-    `${JSON.stringify({ ...message, id: randomUUID(), queued_at: new Date().toISOString(), status: "queued" })}\n`,
-    { flag: "a" },
-  );
+  const releaseLock = acquireBranchInboxLock(stateDir, branch);
+  try {
+    fs.writeFileSync(
+      branchInboxFile(stateDir, branch),
+      `${JSON.stringify({ ...message, id: randomUUID(), queued_at: new Date().toISOString(), status: "queued" })}\n`,
+      { flag: "a" },
+    );
+  } finally {
+    releaseLock();
+  }
 }
 
 export function updateBranchInboxMessageStatus(
@@ -398,18 +407,23 @@ export function updateBranchInboxMessageStatus(
 ): boolean {
   const branch = branchIdFromAddress(address, run);
   if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
-  const file = branchInboxFile(stateDir, branch);
-  const messages = readBranchInboxMessages(stateDir, run, address, Number.MAX_SAFE_INTEGER);
-  let changed = false;
-  const timestampKey = `${status}_at`;
-  const updated = messages.map((message) => {
-    if (message.id !== id) return message;
-    changed = true;
-    return { ...message, ...metadata, [timestampKey]: new Date().toISOString(), status };
-  });
-  if (!changed) return false;
-  fs.writeFileSync(file, `${updated.map((message) => JSON.stringify(message)).join("\n")}\n`);
-  return true;
+  const releaseLock = acquireBranchInboxLock(stateDir, branch);
+  try {
+    const file = branchInboxFile(stateDir, branch);
+    const messages = readBranchInboxMessages(stateDir, run, address, Number.MAX_SAFE_INTEGER);
+    let changed = false;
+    const timestampKey = `${status}_at`;
+    const updated = messages.map((message) => {
+      if (message.id !== id) return message;
+      changed = true;
+      return { ...message, ...metadata, [timestampKey]: new Date().toISOString(), status };
+    });
+    if (!changed) return false;
+    fs.writeFileSync(file, `${updated.map((message) => JSON.stringify(message)).join("\n")}\n`);
+    return true;
+  } finally {
+    releaseLock();
+  }
 }
 
 export function appendRoomMessage(

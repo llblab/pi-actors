@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.9: Locked Branch Inbox Mutations
+
+- `[Branch Messages]` Added lock-guarded append and status rewrites for branch-local direct-message inbox files so concurrent direct delivery and coordinator claim/handle transitions do not overwrite each other.
+- `[Coordinator]` Made room-swarm branch prompt execution atomically claim queued direct messages before injection, then mark claimed messages as `handled` or `failed` after the child prompt exits.
+- `[Tests]` Added concurrent branch inbox append coverage and asserted coordinator direct-message handling records both `claimed_at` and `handled_at`.
+- `[Docs/Context]` Updated actor-message docs, project context, backlog safeguards, package metadata, lockfile metadata, and packaged skill metadata to `0.19.9`.
+
 ## 0.19.8: Efficient Room Status Reads
 
 - `[Rooms]` Changed room status inspection to count JSONL entries and read only the last timeline record instead of parsing the full room timeline into actor-envelope objects.

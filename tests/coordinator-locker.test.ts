@@ -146,6 +146,7 @@ test("coordinator processes and handles direct inbox messages", async () => {
     const inboxContent = await readFile(inboxFile, "utf8");
     const updatedMsg = JSON.parse(inboxContent.trim());
     assert.equal(updatedMsg.status, "handled");
+    assert.ok(updatedMsg.claimed_at);
     assert.ok(updatedMsg.handled_at);
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -186,6 +186,31 @@ test("Actor rooms debounce bursty communication snapshot writes", async () => {
   }
 });
 
+test("Actor rooms preserve concurrent branch inbox appends", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-branch-inbox-concurrent-"));
+  try {
+    const script = `
+      import { appendBranchInboxMessage } from ${JSON.stringify(join(process.cwd(), "lib", "actor-rooms.ts"))};
+      appendBranchInboxMessage(process.argv[1], "demo", "branch:demo/worker", {
+        body: { index: Number(process.argv[2]) },
+        from: "branch:demo/sender-" + process.argv[2],
+        to: "branch:demo/worker",
+        type: "task.assign"
+      });
+    `;
+    await Promise.all(
+      Array.from({ length: 12 }, (_unused, index) =>
+        execFileAsync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script, stateDir, String(index)]),
+      ),
+    );
+    const messages = readBranchInboxMessages(stateDir, "demo", "branch:demo/worker", 20);
+    assert.equal(messages.length, 12);
+    assert.deepEqual(new Set(messages.map((message) => message.status)), new Set(["queued"]));
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Actor rooms compact long room timelines", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
   const previous = process.env.PI_ACTORS_ROOM_MAX_MESSAGES;

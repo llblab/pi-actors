@@ -56,6 +56,19 @@ async function waitForStatus(
   throw new Error(`run did not reach status: ${expected}`);
 }
 
+async function waitForRunProcessExit(stateDir: string): Promise<void> {
+  for (let i = 0; i < 40; i++) {
+    const pid = Number(getRunStatus(stateDir).pid || 0);
+    if (!pid) return;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 test("Async runs reject reuse of an active run state", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-active-"));
   const stateDir = join(root, "active");
@@ -242,6 +255,12 @@ test("Async runs append actor messages to outbox", async () => {
     assert.deepEqual(events[0].metadata, { checkpoint: "ready" });
     assert.deepEqual(events[0].body, { ok: true });
   } finally {
+    try {
+      cancelRun(stateDir);
+      await waitForRunProcessExit(stateDir);
+    } catch {
+      // Best-effort cleanup for the intentionally long-running actor.
+    }
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -283,6 +302,7 @@ test("Async run restart clears stale terminal state", async () => {
     );
     await waitForResult(stateDir);
     assert.equal(getRunStatus(stateDir).status, "done");
+    await waitForRunProcessExit(stateDir);
 
     startRun(
       {

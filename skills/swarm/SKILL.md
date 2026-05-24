@@ -2,7 +2,7 @@
 name: swarm
 description: Subagent orchestration with scoped locks and quorum consensus. Use for multi-model review, parallel scoped work, delegated audit, and coordinated subagent execution.
 metadata:
-  version: 0.19.11
+  version: 0.20.0
 ---
 
 # Swarm

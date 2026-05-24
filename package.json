@@ -1,8 +1,8 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.19.11",
+  "version": "0.20.0",
   "private": false,
-  "description": "Actor runtime and orchestrator for agent-managed local processes",
+  "description": "Local Actor Kernel for Pi",
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -28,12 +28,15 @@
     "check": "node --experimental-strip-types -e \"await import('./index.ts'); console.log('pi-actors: extension import ok')\"",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "pack:dry": "npm pack --dry-run",
-    "validate": "npx tsc --noEmit && npm run check && npm test && npm run pack:dry"
+    "validate": "npx tsc --noEmit && npm run build && npm run check && npm test && npm run pack:dry",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build"
   },
   "files": [
     "index.ts",
     "lib",
     "scripts",
+    "dist",
     "recipes",
     "skills",
     "README.md",

@@ -11,7 +11,7 @@
  * Keep orchestration policy out of this file.
  */
 
-import { appendFileSync, cpSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -25,22 +25,18 @@ function scriptFile() {
   return fileURLToPath(import.meta.url);
 }
 
-function isUnderNodeModules(file) {
-  return /[/\\]node_modules[/\\]/.test(file);
+function packageRoot() {
+  return dirname(dirname(scriptFile()));
 }
 
-function prepareTypeStripImportRoot() {
-  const packageRoot = dirname(dirname(scriptFile()));
-  const sourceLib = join(packageRoot, "lib");
-  if (!isUnderNodeModules(packageRoot)) return sourceLib;
-  const copiedLib = join(stateDir, ".type-strip-lib");
-  if (!existsSync(copiedLib)) cpSync(sourceLib, copiedLib, { recursive: true });
-  return copiedLib;
+function libModulePath(name) {
+  const root = packageRoot();
+  const compiled = join(root, "dist", "lib", `${name}.js`);
+  return existsSync(compiled) ? compiled : join(root, "lib", `${name}.ts`);
 }
 
-const typeStripImportRoot = prepareTypeStripImportRoot();
 async function importLib(name) {
-  return import(pathToFileURL(join(typeStripImportRoot, `${name}.ts`)).href);
+  return import(pathToFileURL(libModulePath(name)).href);
 }
 
 const { executeRegisteredTool } = await importLib("execution");

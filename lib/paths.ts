@@ -4,6 +4,7 @@
  * Owns agent directory, tools config, recipe root, and actor run state root resolution
  */
 
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,5 +37,8 @@ export function getRecipeRoot(agentDir = getAgentDir()): string {
 }
 
 export function getPackagedRecipeRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "recipes");
+  const here = dirname(fileURLToPath(import.meta.url));
+  const compiledRoot = resolve(here, "..", "..", "recipes");
+  if (existsSync(compiledRoot)) return compiledRoot;
+  return resolve(here, "..", "recipes");
 }

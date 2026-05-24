@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.1: Installed Packaged Recipe Root Hotfix
+
+- `[Recipe Imports]` Fixed installed compiled runtime path resolution so bare user recipe imports can fall back to the packaged standard-library `recipes/` directory instead of looking for a non-existent `dist/recipes` directory.
+- `[Tests]` Added installed-package validation coverage for a user recipe that imports a packaged recipe by bare name, preserving the documented priority order for user, adjacent, and packaged recipes.
+- `[Package]` Bumped package metadata and packaged skill metadata to `0.20.1` for the hotfix release.
+
 ## 0.20.0: Compiled Runtime Entrypoints
 
 - `[Packaging]` Added a build step that emits compiled `dist/lib/*.js` and declaration files from the TypeScript runtime modules, with relative `.ts` imports rewritten to `.js` for installed package execution.

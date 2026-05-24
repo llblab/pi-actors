@@ -5,13 +5,14 @@
 
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import test from "node:test";
 
 import {
   getAgentDir,
   getConfigPath,
   getExtensionTmpDir,
+  getPackagedRecipeRoot,
   getRecipeRoot,
   getRunStateRoot,
 } from "../lib/paths.ts";
@@ -41,4 +42,9 @@ test("Run state root lives under the extension tmp dir", () => {
 
 test("Recipe root lives under the agent dir", () => {
   assert.equal(getRecipeRoot("/agent"), "/agent/recipes");
+});
+
+test("Packaged recipe root resolves to the repository recipes directory", () => {
+  assert.equal(basename(getPackagedRecipeRoot()), "recipes");
+  assert.equal(getPackagedRecipeRoot(), resolve("recipes"));
 });

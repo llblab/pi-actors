@@ -28,6 +28,7 @@ async function prepareInstalledPackage(root: string): Promise<string> {
   await cp(join(process.cwd(), "dist"), join(packageDir, "dist"), { recursive: true });
   await cp(join(process.cwd(), "lib"), join(packageDir, "lib"), { recursive: true });
   await cp(join(process.cwd(), "scripts"), join(packageDir, "scripts"), { recursive: true });
+  await cp(join(process.cwd(), "recipes"), join(packageDir, "recipes"), { recursive: true });
   return packageDir;
 }
 
@@ -78,6 +79,31 @@ test("installed validate-recipe avoids importing TypeScript from node_modules", 
     const packageDir = await prepareInstalledPackage(root);
     const recipe = join(root, "recipe.json");
     await writeFile(recipe, `${JSON.stringify({ template: "echo ok" })}\n`);
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      join(packageDir, "scripts", "validate-recipe.mjs"),
+      recipe,
+    ]);
+    const report = JSON.parse(stdout);
+    assert.equal(report.ok, true);
+    assert.equal(report.passed, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installed validate-recipe resolves bare imports from packaged recipes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-imports-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const recipe = join(root, "recipe.json");
+    await writeFile(
+      recipe,
+      `${JSON.stringify({
+        imports: { status: "utility-git-status" },
+        template: [{ name: "status" }],
+      })}\n`,
+    );
 
     const { stdout } = await execFileAsync(process.execPath, [
       join(packageDir, "scripts", "validate-recipe.mjs"),

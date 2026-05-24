@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-repo-health",
   "async": true,
   "imports": {
     "git_status": "utility-git-status.json",

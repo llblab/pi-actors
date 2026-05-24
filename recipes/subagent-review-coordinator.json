@@ -1,5 +1,4 @@
 {
-  "name": "subagent-review-coordinator",
   "async": true,
   "imports": {
     "reviewer": "subagent-review.json",

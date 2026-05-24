@@ -10,7 +10,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
-import { startRun } from "../lib/async-runs.ts";
+import { cancelRun, startRun } from "../lib/async-runs.ts";
 import {
   createActorMessageToolDefinition,
   createInspectToolDefinition,
@@ -149,12 +149,13 @@ test(
     let stateDir = "";
     const readyFile = join(root, "ready");
     const messageFile = join(root, "message");
+    const runId = `parent-${process.pid}-${Date.now()}`;
     const script =
       'mkfifo "$1/control.fifo"; printf ready >"$2"; IFS= read -r message <"$1/control.fifo"; printf %s "$message" >"$3"';
     try {
       const meta = startRun(
         {
-          run_id: "parent",
+          run_id: runId,
           template: "bash -lc {script} -- {state_dir} {readyFile} {messageFile}",
           values: { messageFile, readyFile, script },
         },
@@ -166,58 +167,76 @@ test(
         "call-branch-message",
         {
           body: { decision: "approve" },
-          from: "branch:parent/builder-a",
-          to: "branch:parent/reviewer-a",
+          from: `branch:${runId}/builder-a`,
+          to: `branch:${runId}/reviewer-a`,
           type: "control.approve",
         },
         undefined,
         undefined,
         undefined,
       );
-      assert.match(result.content[0].text, /to=branch:parent\/reviewer-a/);
+      assert.match(result.content[0].text, new RegExp(`to=branch:${runId}/reviewer-a`));
       assert.match(result.content[0].text, /message=sent/);
       await waitForFile(messageFile);
       const envelope = JSON.parse(await readFile(messageFile, "utf8"));
-      assert.equal(envelope.from, "branch:parent/builder-a");
-      assert.equal(envelope.to, "branch:parent/reviewer-a");
+      assert.equal(envelope.from, `branch:${runId}/builder-a`);
+      assert.equal(envelope.to, `branch:${runId}/reviewer-a`);
       assert.equal(envelope.type, "control.approve");
       assert.deepEqual(envelope.body, { decision: "approve" });
       const roster = JSON.parse(
         await readFile(join(stateDir, "rooms", "main", "roster.json"), "utf8"),
       );
-      assert.equal(roster["branch:parent/reviewer-a"].role, "branch");
-      assert.equal(roster["branch:parent/reviewer-a"].parent, "run:parent");
-      assert.equal(roster["branch:parent/builder-a"].role, "branch");
-      assert.equal(roster["branch:parent/builder-a"].parent, "run:parent");
+      assert.equal(roster[`branch:${runId}/reviewer-a`].role, "branch");
+      assert.equal(roster[`branch:${runId}/reviewer-a`].parent, `run:${runId}`);
+      assert.equal(roster[`branch:${runId}/builder-a`].role, "branch");
+      assert.equal(roster[`branch:${runId}/builder-a`].parent, `run:${runId}`);
       const snapshot = JSON.parse(
         await readFile(join(stateDir, "communication.json"), "utf8"),
       );
       assert.equal(
         snapshot.rooms[0].members.some(
           (member: Record<string, unknown>) =>
-            member.address === "branch:parent/reviewer-a",
+            member.address === `branch:${runId}/reviewer-a`,
         ),
         true,
       );
       assert.equal(
         snapshot.rooms[0].members.some(
           (member: Record<string, unknown>) =>
-            member.address === "branch:parent/builder-a",
+            member.address === `branch:${runId}/builder-a`,
         ),
         true,
       );
       const senderSnapshot = JSON.parse(
         await readFile(join(stateDir, "branches", "builder-a", "communication.json"), "utf8"),
       );
-      assert.equal(senderSnapshot.self, "branch:parent/builder-a");
+      assert.equal(senderSnapshot.self, `branch:${runId}/builder-a`);
       const recipientSnapshot = JSON.parse(
         await readFile(join(stateDir, "branches", "reviewer-a", "communication.json"), "utf8"),
       );
-      assert.equal(recipientSnapshot.self, "branch:parent/reviewer-a");
+      assert.equal(recipientSnapshot.self, `branch:${runId}/reviewer-a`);
+      const branchInbox = JSON.parse(
+        (await readFile(join(stateDir, "branches", "reviewer-a", "inbox.jsonl"), "utf8")).trim(),
+      );
+      assert.equal(branchInbox.to, `branch:${runId}/reviewer-a`);
+      assert.equal(branchInbox.status, "queued");
+      assert.match(branchInbox.queued_at, /\d{4}-\d{2}-\d{2}T/);
+      const inspect = createInspectToolDefinition();
+      const inspected = await inspect.execute(
+        "call-branch-mailbox",
+        { target: `branch:${runId}/reviewer-a`, view: "mailbox" },
+        undefined,
+        undefined,
+        undefined,
+      );
+      assert.match(inspected.content[0].text, /id=[0-9a-f-]+/);
+      assert.match(inspected.content[0].text, /status=queued/);
+      assert.match(inspected.content[0].text, /type=control\.approve/);
+      assert.equal(inspected.details.messages.length, 1);
       await waitForFile(join(stateDir, "result.json"));
     } finally {
-      if (stateDir) await rm(stateDir, { recursive: true, force: true });
-      await rm(root, { recursive: true, force: true });
+      if (stateDir) await rm(stateDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+      await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
     }
   },
 );
@@ -323,7 +342,7 @@ test("Actor message and inspect tools support room timelines and rosters", async
       undefined,
       undefined,
     );
-    assert.match(leaveResult.content[0].text, /roster=1/);
+    assert.match(leaveResult.content[0].text, /roster=2/);
     const finalRoster = await inspectTool.execute(
       "call-room-final-roster",
       { target: `room:${run}`, view: "roster" },
@@ -331,7 +350,7 @@ test("Actor message and inspect tools support room timelines and rosters", async
       undefined,
       undefined,
     );
-    assert.equal(finalRoster.details.roster[`branch:${run}/builder`], undefined);
+    assert.equal(finalRoster.details.roster[`branch:${run}/builder`].status, "left");
 
     const statusResult = await inspectTool.execute(
       "call-room-status",
@@ -341,7 +360,7 @@ test("Actor message and inspect tools support room timelines and rosters", async
       undefined,
     );
     assert.match(statusResult.content[0].text, /room=main/);
-    assert.match(statusResult.content[0].text, /roster=1/);
+    assert.match(statusResult.content[0].text, /roster=2/);
     assert.match(statusResult.content[0].text, /last_message_at=\d{4}-\d{2}-\d{2}T/);
     assert.match(statusResult.content[0].text, new RegExp(`last_from=branch:${run}/builder`));
     assert.match(statusResult.content[0].text, /last_type=actor.leave/);
@@ -385,6 +404,100 @@ test("Actor message and inspect tools support room timelines and rosters", async
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  "Actor message tool supports selected-recipient room multicast",
+  { skip: process.platform === "win32" },
+  async () => {
+  const definition = createActorMessageToolDefinition();
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-room-multicast-"));
+  const readyFile = join(root, "ready");
+  const script = 'mkfifo "$1/control.fifo"; exec 3<>"$1/control.fifo"; printf ready >"$2"; IFS= read -r one <&3; IFS= read -r two <&3';
+  const meta = startRun(
+    {
+      run_id: `room-multicast-${process.pid}-${Date.now()}`,
+      template: "bash -lc {script} -- {state_dir} {readyFile}",
+      values: { readyFile, script },
+    },
+    process.cwd(),
+  );
+  try {
+    await waitForFile(readyFile);
+    const result = await definition.execute(
+      "call-room-multicast",
+      {
+        body: "private subset, visible transcript",
+        from: `branch:${meta.run}/planner`,
+        metadata: {
+          recipients: [
+            `branch:${meta.run}/builder`,
+            `branch:${meta.run}/reviewer`,
+          ],
+        },
+        summary: "Selected multicast",
+        to: `room:${meta.run}`,
+        type: "chat.message",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.equal(result.details.result.multicast_count, 2);
+    assert.deepEqual(result.details.result.multicast, [
+      `branch:${meta.run}/builder`,
+      `branch:${meta.run}/reviewer`,
+    ]);
+    const inbox = (await readFile(join(meta.state_dir, "inbox.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(
+      inbox.map((message) => message.to),
+      [`branch:${meta.run}/builder`, `branch:${meta.run}/reviewer`],
+    );
+    const roomMessages = await readFile(
+      join(meta.state_dir, "rooms", "main", "messages.jsonl"),
+      "utf8",
+    );
+    assert.match(roomMessages, /room-multicast/);
+    assert.match(roomMessages, /Selected multicast/);
+  } finally {
+    cancelRun(meta.state_dir);
+    await rm(meta.state_dir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects room multicast outside the run", async () => {
+  const definition = createActorMessageToolDefinition();
+  const meta = startRun(
+    {
+      run_id: `room-multicast-invalid-${process.pid}-${Date.now()}`,
+      template: "true",
+    },
+    process.cwd(),
+  );
+  try {
+    await assert.rejects(
+      () =>
+        definition.execute(
+          "call-room-multicast-invalid",
+          {
+            from: `branch:${meta.run}/planner`,
+            metadata: { recipients: ["branch:other/reviewer"] },
+            to: `room:${meta.run}`,
+            type: "chat.message",
+          },
+          undefined,
+          undefined,
+          undefined,
+        ),
+      /room multicast recipient must be branch:/,
+    );
+  } finally {
+    await rm(meta.state_dir, { recursive: true, force: true });
   }
 });
 
@@ -791,6 +904,7 @@ test("Inspect tool reads coordinator-owned runs", async () => {
       {
         run_id: `coordinator-inspect-${process.pid}-${Date.now()}`,
         ownerId: "session-demo",
+        retire_when: "children_terminal",
         template: `${process.execPath} -e "console.log('ok')"`,
       },
       process.cwd(),
@@ -804,6 +918,7 @@ test("Inspect tool reads coordinator-owned runs", async () => {
       { sessionManager: { getSessionId: () => "session-demo" } },
     );
     assert.match(result.content[0].text, /session=session-demo/);
+    assert.match(result.content[0].text, /retire_when=children_terminal/);
     assert.equal(result.details.runs.length, 1);
     assert.equal(result.details.runs[0].run, meta.run);
     await waitForFile(join(stateDir, "result.json"));
@@ -970,6 +1085,9 @@ test("Actor tools start, inspect, and stop run actors", async () => {
   const message = createActorMessageToolDefinition();
   const runId = `compact-${process.pid}-${Date.now()}`;
   let stateDir = "";
+  let retireStateDir = "";
+  const recipeRunId = `${runId}-retire`;
+  const recipeFile = join(tmpdir(), `${recipeRunId}.json`);
   const ctx = { cwd: process.cwd() };
   try {
     const started = await spawn.execute(
@@ -985,6 +1103,24 @@ test("Actor tools start, inspect, and stop run actors", async () => {
     stateDir = String(started.details.state_dir);
     assert.match(started.content[0].text, new RegExp(`run=${runId} status=running pid=\\d+`));
     assert.doesNotMatch(started.content[0].text, /argv|template|values/);
+
+    await writeFile(
+      recipeFile,
+      JSON.stringify({
+        async: true,
+        retire_when: "children_terminal",
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      }),
+    );
+    const retireStarted = await spawn.execute(
+      "call-retire",
+      { as: `run:${recipeRunId}`, file: recipeFile },
+      undefined,
+      undefined,
+      ctx,
+    );
+    retireStateDir = String(retireStarted.details.state_dir);
+    assert.match(retireStarted.content[0].text, /retire_when=children_terminal/);
 
     const verbose = await inspect.execute(
       "call-2",
@@ -1018,6 +1154,15 @@ test("Actor tools start, inspect, and stop run actors", async () => {
     assert.doesNotMatch(cancelled.content[0].text, /state_dir|argv/);
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    if (retireStateDir) {
+      try {
+        cancelRun(retireStateDir);
+      } catch {
+        // Best-effort cleanup; the short-lived test run may already be terminal.
+      }
+      await rm(retireStateDir, { recursive: true, force: true });
+    }
+    await rm(recipeFile, { force: true });
   }
 });
 

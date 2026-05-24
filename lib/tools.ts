@@ -164,6 +164,7 @@ function compactAsyncRunStatus(value: unknown): string {
   ];
   if (status.tool) tokens.push(`tool=${String(status.tool)}`);
   if (status.recipe) tokens.push(`recipe=${String(status.recipe)}`);
+  if (status.retire_when) tokens.push(`retire_when=${String(status.retire_when)}`);
   if (Number(status.pid) > 0) tokens.push(`pid=${Number(status.pid)}`);
   if (progress.phase && progress.phase !== status.status)
     tokens.push(`phase=${String(progress.phase)}`);
@@ -286,6 +287,25 @@ function compactCommunicationSnapshot(
   return `\nself=${snapshot.self} root=${snapshot.root} rooms=${snapshot.rooms.length} updated_at=${snapshot.updated_at}`;
 }
 
+function compactBranchInbox(messages: Array<Record<string, unknown>>): string {
+  if (messages.length === 0) return "\n(no branch inbox messages)";
+  return `\n${messages
+    .map((message) =>
+      [
+        ...(message.id ? [`id=${String(message.id)}`] : []),
+        `status=${String(message.status ?? "")}`,
+        `type=${String(message.type ?? "")}`,
+        `from=${String(message.from ?? "")}`,
+        `to=${String(message.to ?? "")}`,
+        ...(message.queued_at ? [`queued_at=${String(message.queued_at)}`] : []),
+        ...(message.claimed_at ? [`claimed_at=${String(message.claimed_at)}`] : []),
+        ...(message.handled_at ? [`handled_at=${String(message.handled_at)}`] : []),
+        ...(message.failed_at ? [`failed_at=${String(message.failed_at)}`] : []),
+      ].join(" "),
+    )
+    .join("\n")}`;
+}
+
 function compactActorFiles(status: Record<string, unknown>): string {
   const run = String(status.run ?? "<unknown>");
   const artifacts = asRecord(status.artifacts);
@@ -311,10 +331,15 @@ function compactSessionRuns(
 ): string {
   if (runs.length === 0) return `\nsession=${session} runs=0`;
   return `\nsession=${session} runs=${runs.length}\n${runs
-    .map(
-      (run) =>
-        `run=${String(run.run ?? "")} status=${String(run.status ?? "")}${run.recipe ? ` recipe=${String(run.recipe)}` : ""}`,
-    )
+    .map((run) => {
+      const tokens = [
+        `run=${String(run.run ?? "")}`,
+        `status=${String(run.status ?? "")}`,
+      ];
+      if (run.recipe) tokens.push(`recipe=${String(run.recipe)}`);
+      if (run.retire_when) tokens.push(`retire_when=${String(run.retire_when)}`);
+      return tokens.join(" ");
+    })
     .join("\n")}`;
 }
 
@@ -474,6 +499,29 @@ function assertMessageSenderBelongsToRun(
   }
 }
 
+function getRoomMulticastRecipients(
+  message: ActorMessages.ActorMessage,
+  run: string,
+): string[] {
+  const raw = message.metadata?.recipients;
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error("room multicast metadata.recipients must be an array.");
+  }
+  return raw.map((recipient) => {
+    if (typeof recipient !== "string") {
+      throw new Error("room multicast recipients must be actor addresses.");
+    }
+    const parsed = ActorMessages.parseActorAddress(recipient);
+    if (parsed.kind !== "branch" || parsed.value !== run) {
+      throw new Error(
+        `room multicast recipient must be branch:${run}/<branch>; got ${recipient}.`,
+      );
+    }
+    return ActorMessages.formatActorAddress(parsed);
+  });
+}
+
 export function createSpawnToolDefinition<
   TContext extends AsyncRunToolContext,
 >(): any {
@@ -534,7 +582,9 @@ export function createSpawnToolDefinition<
           run_id: runId,
           state_dir:
             typeof input.state_dir === "string" ? input.state_dir : undefined,
-          template: input.template as AsyncRuns.AsyncRunStartParams["template"],
+          ...(input.template !== undefined
+            ? { template: input.template as AsyncRuns.AsyncRunStartParams["template"] }
+            : {}),
           values: asRecord(input.values),
           ...(input.artifacts &&
           typeof input.artifacts === "object" &&
@@ -840,11 +890,34 @@ export function createInspectToolDefinition<TContext = unknown>(
         }
         throw new Error("inspect room:<run> supports view=status, view=messages, view=previews, view=roster, or view=contacts.");
       }
-      const runId = address.kind === "run" ? address.value : undefined;
+      const runId = address.kind === "run" || address.kind === "branch" ? address.value : undefined;
       if (!runId)
         throw new Error(
-          "inspect target must be run:<id>, coordinator, session:<id>, or tool:<name>.",
+          "inspect target must be run:<id>, branch:<run>/<branch>, coordinator, session:<id>, or tool:<name>.",
         );
+      if (address.kind === "branch") {
+        if (view !== "mailbox") throw new Error("inspect branch:<run>/<branch> supports view=mailbox.");
+        const status = assertRunAccessibleToContext(runId, ctx);
+        const messages = ActorRooms.readBranchInboxMessages(
+          String(status.state_dir ?? ""),
+          runId,
+          target,
+          Number(input.lines || 40),
+        );
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: maybeJsonText(
+                messages,
+                input.verbose === true,
+                compactBranchInbox(messages.map((message) => ({ ...message }))),
+              ),
+            },
+          ],
+          details: { messages },
+        };
+      }
       switch (view) {
         case "status": {
           const status = assertRunAccessibleToContext(runId, ctx);
@@ -945,7 +1018,7 @@ export function createInspectToolDefinition<TContext = unknown>(
         }
         default:
           throw new Error(
-            "inspect view must be one of: status, tail, messages, artifacts, files, mailbox, communication.",
+            "inspect view must be one of: status, tail, messages, artifacts, files, mailbox, communication; branch targets support mailbox.",
           );
       }
     },
@@ -1055,17 +1128,32 @@ export function createActorMessageToolDefinition<TContext = unknown>(
             }
           }
           ActorRooms.writeCommunicationSnapshot(stateDir, runId);
+          ActorRooms.appendBranchInboxMessage(stateDir, runId, message.to, message);
         }
         result = AsyncRuns.sendRunMessage(
           address.value,
           JSON.stringify(message),
         );
       } else if (address.kind === "room" && address.value && address.room) {
-        assertMessageSenderBelongsToRun(message, address.value, `room:${address.value}`);
-        const status = assertRunExistsForActorMessage(address.value);
+        const runId = address.value;
+        assertMessageSenderBelongsToRun(message, runId, `room:${runId}`);
+        const status = assertRunExistsForActorMessage(runId);
         const stateDir = String(status.state_dir ?? "");
         if (!stateDir) throw new Error(`${message.to} has no run state directory.`);
-        result = { ...ActorRooms.appendRoomMessage(stateDir, address.room, message) };
+        const recipients = getRoomMulticastRecipients(message, runId);
+        const roomResult = ActorRooms.appendRoomMessage(stateDir, address.room, message);
+        const multicast = recipients.map((recipient) =>
+          AsyncRuns.sendRunMessage(
+            runId,
+            JSON.stringify({ ...message, to: recipient }),
+          ),
+        );
+        result = {
+          ...roomResult,
+          ...(multicast.length > 0
+            ? { multicast: recipients, multicast_count: multicast.length }
+            : {}),
+        };
       } else if (address.kind === "tool" && address.value) {
         const tool = deps.getTool?.(address.value);
         if (!tool || typeof tool.execute !== "function") {

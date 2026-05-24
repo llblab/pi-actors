@@ -27,6 +27,7 @@ export interface RunObservation {
   ownerId?: string;
   artifacts?: Record<string, string>;
   terminalHandled?: boolean;
+  retireWhen?: string;
   run: string;
   stateDir?: string;
   status: RunObservedStatus;
@@ -43,6 +44,12 @@ export interface RunSummary {
   runningSubagents: number;
   runs: RunObservation[];
   total: number;
+}
+
+export interface RunRetirementCandidate {
+  activeSubagents: number;
+  run: string;
+  stateDir: string;
 }
 
 export interface RunTransition {
@@ -77,6 +84,12 @@ const TERMINAL = new Set<RunObservedStatus>([
   "cancelled",
   "killed",
 ]);
+const PROC_DESCENDANT_SCAN_TTL_MS = 1000;
+
+const procDescendantScanCache = new Map<
+  string,
+  { count: number; expiresAt: number; signature: string }
+>();
 
 function toNumber(value: unknown): number | undefined {
   const number = Number(value);
@@ -120,6 +133,9 @@ function observeRun(stateDir: string): RunObservation | undefined {
         ? { artifacts: status.artifacts as Record<string, string> }
         : {}),
       ...(status.terminal_handled ? { terminalHandled: true } : {}),
+      ...(typeof status.retire_when === "string"
+        ? { retireWhen: status.retire_when }
+        : {}),
       run,
       stateDir,
       status: status.status as RunObservedStatus,
@@ -160,10 +176,12 @@ export function summarizeRuns(
   const failed = runs.filter((run) => run.status === "failed").length;
   const cancelled = runs.filter((run) => run.status === "cancelled").length;
   const killed = runs.filter((run) => run.status === "killed").length;
-  const runningSubagents = runningRuns.reduce(
+  const progressSubagents = runningRuns.reduce(
     (sum, run) => sum + Math.max(1, Math.floor(run.activeSubagents ?? 0)),
     0,
   );
+  const processSubagents = countRunningSubagents(stateRoot, ownerId);
+  const runningSubagents = Math.max(progressSubagents, running + processSubagents);
   return {
     cancelled,
     done,
@@ -253,9 +271,22 @@ export function countRunningSubagents(
 ): number {
   const runPids = getRunningRunPids(stateRoot, ownerId);
   if (runPids.size === 0 || !existsSync("/proc")) return 0;
+  const signature = [...runPids].sort().join(",");
+  const cacheKey = `${stateRoot}\0${ownerId ?? ""}`;
+  const cached = procDescendantScanCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.signature === signature && cached.expiresAt > now) {
+    return cached.count;
+  }
   const parentByPid = new Map<string, string>();
   const commandByPid = new Map<string, string>();
-  for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+  let procEntries: import("node:fs").Dirent[];
+  try {
+    procEntries = readdirSync("/proc", { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of procEntries) {
     if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
     const ppid = getProcPpid(entry.name);
     if (!ppid) continue;
@@ -277,6 +308,11 @@ export function countRunningSubagents(
     if (!command.includes("pi -p") && !command.includes("pi\0-p")) continue;
     if (descendantOfRun(pid)) count++;
   }
+  procDescendantScanCache.set(cacheKey, {
+    count,
+    expiresAt: now + PROC_DESCENDANT_SCAN_TTL_MS,
+    signature,
+  });
   return count;
 }
 
@@ -297,6 +333,23 @@ export function renderRunStatus(
   frame = 0,
 ): string | undefined {
   return renderSubagentStatus(summary.runningSubagents, frame);
+}
+
+export function findRunRetirementCandidates(
+  summary: RunSummary,
+): RunRetirementCandidate[] {
+  return summary.runs
+    .filter((run) =>
+      run.status === "running" &&
+      run.retireWhen === "children_terminal" &&
+      run.stateDir &&
+      Math.floor(run.activeSubagents ?? 0) <= 0,
+    )
+    .map((run) => ({
+      activeSubagents: Math.max(0, Math.floor(run.activeSubagents ?? 0)),
+      run: run.run,
+      stateDir: run.stateDir!,
+    }));
 }
 
 export function detectRunTransitions(
@@ -382,6 +435,33 @@ function readOutboxLines(run: RunObservation): string[] {
   if (!existsSync(path)) return [];
   const content = readFileSync(path, "utf8").trimEnd();
   return content ? content.split("\n") : [];
+}
+
+export function pruneRunObservationState(
+  previousStatuses: Map<string, RunObservedStatus>,
+  previousLineCounts: Map<string, number>,
+  summary: RunSummary,
+  terminalRuns: Iterable<string> = [],
+): void {
+  const activeRuns = new Set(summary.runs.map((run) => run.run));
+  const terminalRunSet = new Set(terminalRuns);
+  const terminalLineKeys = new Set(
+    summary.runs
+      .filter((run) => terminalRunSet.has(run.run))
+      .map((run) => run.stateDir ?? run.run),
+  );
+  const activeLineKeys = new Set(
+    summary.runs.map((run) => run.stateDir ?? run.run),
+  );
+  for (const run of terminalRunSet) previousStatuses.delete(run);
+  for (const run of previousStatuses.keys()) {
+    if (!activeRuns.has(run)) previousStatuses.delete(run);
+  }
+  for (const key of previousLineCounts.keys()) {
+    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) {
+      previousLineCounts.delete(key);
+    }
+  }
 }
 
 export function detectRunOutboxEvents(

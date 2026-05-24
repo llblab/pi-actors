@@ -1,5 +1,4 @@
 {
-  "name": "subagent-artifact",
   "async": true,
   "args": [
     "input:string",

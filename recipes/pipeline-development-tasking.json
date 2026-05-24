@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-development-tasking",
   "async": true,
   "imports": {
     "planner": "subagent-plan.json",

@@ -47,7 +47,8 @@ test("Legacy registry migration writes tool recipes and archives source", async 
 
     const recipePath = join(recipeRoot, "hello_tool.json");
     const recipe = await readJson(recipePath);
-    assert.equal(recipe.tool, true);
+    assert.equal(recipe.tool, undefined);
+    assert.equal(recipe.name, undefined);
     assert.equal(recipe.description, "Say hello");
     assert.deepEqual(recipe.args, ["name"]);
     assert.deepEqual(recipe.defaults, { name: "world" });
@@ -55,7 +56,7 @@ test("Legacy registry migration writes tool recipes and archives source", async 
 
     const parsed = readResolvedRecipeConfig(recipePath)!;
     assert.equal(parsed.name, "hello_tool");
-    assert.equal(parsed.tool, true);
+
   } finally {
     await rm(root, { recursive: true, force: true });
   }

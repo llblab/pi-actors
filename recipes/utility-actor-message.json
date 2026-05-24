@@ -1,5 +1,4 @@
 {
-  "name": "utility-actor-message",
   "async": false,
   "args": [
     "type:string",

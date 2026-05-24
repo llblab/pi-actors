@@ -43,6 +43,11 @@ test("Entrypoint delegates register_tool definition to the tools domain", () => 
   assert.equal(indexSource.includes('name: "register_tool"'), false);
 });
 
+test("Entrypoint reports recipe watcher failures", () => {
+  assert.match(indexSource, /Recipe live reload watcher failed/);
+  assert.match(indexSource, /notifyRecipeWatcherFailure\(ctx\)/);
+});
+
 const publicGuidanceFiles = [
   "AGENTS.md",
   "BACKLOG.md",

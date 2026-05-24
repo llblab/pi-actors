@@ -35,9 +35,7 @@ function recipePathForTool(recipeRoot: string, name: string): string {
 
 function toRecipeConfig(tool: Config.RegisteredTool): TemplateRecipeConfig {
   return {
-    name: tool.name,
     description: tool.description,
-    tool: true,
     ...(tool.recipe?.async !== undefined ? { async: tool.recipe.async } : {}),
     ...(tool.recipe?.state_dir ? { state_dir: tool.recipe.state_dir } : {}),
     ...(tool.storedArgs ? { args: tool.storedArgs } : {}),

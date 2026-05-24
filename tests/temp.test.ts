@@ -10,6 +10,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  cleanupStaleRunEntries,
   cleanupStaleTempEntries,
   prepareExtensionTempDir,
 } from "../lib/temp.ts";
@@ -41,6 +42,30 @@ test("Extension temp cleanup removes stale files and directories", async () => {
     await assert.rejects(stat(staleDir));
     assert.equal((await stat(runsDir)).isDirectory(), true);
     assert.equal((await stat(freshFile)).isFile(), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Extension temp cleanup removes stale terminal run entries", async () => {
+  const root = join(
+    tmpdir(),
+    `pi-actors-temp-runs-${process.pid}-${Date.now()}`,
+  );
+  const staleRun = join(root, "stale-run");
+  const freshRun = join(root, "fresh-run");
+  try {
+    await mkdir(staleRun, { recursive: true });
+    await mkdir(freshRun, { recursive: true });
+    await writeFile(join(staleRun, "run.json"), JSON.stringify({ pid: 0, run: "stale-run" }));
+    await writeFile(join(freshRun, "run.json"), JSON.stringify({ pid: 0, run: "fresh-run" }));
+    const now = Date.now();
+    const old = new Date(now - 8 * 24 * 60 * 60 * 1000);
+    await utimes(staleRun, old, old);
+    const removed = await cleanupStaleRunEntries(root, 7 * 24 * 60 * 60 * 1000, now);
+    assert.equal(removed, 1);
+    await assert.rejects(stat(staleRun));
+    assert.equal((await stat(freshRun)).isDirectory(), true);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

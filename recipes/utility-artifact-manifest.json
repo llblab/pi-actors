@@ -1,5 +1,4 @@
 {
-  "name": "utility-artifact-manifest",
   "args": [
     "repo:path",
     "artifact_path:path",

@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-media-library",
   "async": true,
   "imports": {
     "playlist": "utility-playlist-build.json",

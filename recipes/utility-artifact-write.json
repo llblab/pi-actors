@@ -1,5 +1,4 @@
 {
-  "name": "utility-artifact-write",
   "async": false,
   "args": [
     "repo:path",

@@ -67,6 +67,43 @@ test("Recipe paths expand repo and agent placeholders", async () => {
   }
 });
 
+test("Template recipe imports resolve bare names by recipe-root priority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  try {
+    const agentDir = join(root, "agent");
+    const userRoot = join(agentDir, "recipes");
+    const adHocRoot = join(root, "adhoc");
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    await import("node:fs/promises").then((fs) => Promise.all([
+      fs.mkdir(userRoot, { recursive: true }),
+      fs.mkdir(adHocRoot, { recursive: true }),
+    ]));
+    await writeFile(join(userRoot, "shared.json"), JSON.stringify({ template: "echo user" }));
+    await writeFile(join(adHocRoot, "shared.json"), JSON.stringify({ template: "echo adhoc" }));
+    await writeFile(
+      join(adHocRoot, "parent.json"),
+      JSON.stringify({ imports: { shared: "shared" }, template: { name: "shared" } }),
+    );
+    await writeFile(
+      join(adHocRoot, "stdlib-parent.json"),
+      JSON.stringify({ imports: { utility: "utility-package-summary" }, template: { name: "utility" } }),
+    );
+
+    const config = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
+    assert.deepEqual(config.template, { template: "echo user" });
+    await rm(join(userRoot, "shared.json"), { force: true });
+    const fallbackConfig = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
+    assert.deepEqual(fallbackConfig.template, { template: "echo adhoc" });
+    const stdlibConfig = readResolvedRecipeConfig(join(adHocRoot, "stdlib-parent.json"))!;
+    assert.match(JSON.stringify(stdlibConfig.template), /recipe-utils\.mjs/);
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Template recipe imports expand repo placeholders", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
@@ -89,13 +126,14 @@ test("Template recipe imports expand repo placeholders", async () => {
   }
 });
 
-test("Template recipes derive recipe identity from filename when name is omitted", async () => {
+test("Template recipes derive recipe identity from filename", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const recipe = join(root, "file-identity.json");
     await writeFile(
       recipe,
       JSON.stringify({
+        name: "ignored-name",
         tool: true,
         description: "File identity recipe",
         template: "echo ok",
@@ -105,7 +143,6 @@ test("Template recipes derive recipe identity from filename when name is omitted
     const config = readResolvedRecipeConfig(recipe)!;
     assert.equal(getRecipeIdFromPath(recipe), "file-identity");
     assert.equal(config.name, "file-identity");
-    assert.equal(config.tool, true);
     assert.equal(config.description, "File identity recipe");
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -174,7 +211,7 @@ test("Template recipes reference imported defaults and explicit values", async (
       inherited_profile: "safe",
       inherited_level: 3,
       target: "docs",
-      label: "base-recipe:docs",
+      label: "base:docs",
       fallback: "default-profile",
       enabled_label: "enabled",
       empty_label: "empty",
@@ -184,7 +221,7 @@ test("Template recipes reference imported defaults and explicit values", async (
         inherited_profile: "safe",
         inherited_level: 3,
         target: "docs",
-        label: "base-recipe:docs",
+        label: "base:docs",
         fallback: "default-profile",
         enabled_label: "enabled",
         empty_label: "empty",
@@ -317,6 +354,44 @@ test("Packaged async recipes expose actor-native termination controls", async ()
       [],
       `${file} should expose actor-native termination controls`,
     );
+  }
+});
+
+test("Template recipe rejects oversized files before parsing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
+  try {
+    const recipe = join(root, "huge.json");
+    await writeFile(
+      recipe,
+      JSON.stringify({ template: "echo ok", padding: "x".repeat(1024 * 1024) }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(recipe),
+      /Recipe file exceeds size limit/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template recipe imports reject excessive depth", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
+  try {
+    for (let index = 0; index < 34; index += 1) {
+      await writeFile(
+        join(root, `r${index}.json`),
+        JSON.stringify({
+          ...(index < 33 ? { imports: { next: `r${index + 1}.json` } } : {}),
+          template: "echo ok",
+        }),
+      );
+    }
+    assert.throws(
+      () => readResolvedRecipeConfig(join(root, "r0.json")),
+      /Recipe import depth exceeds limit 32/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

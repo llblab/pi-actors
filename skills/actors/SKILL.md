@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.17.1
+  version: 0.18.0
 ---
 
 # Actors (pi-actors)
@@ -113,17 +113,25 @@ Views:
 - `roster`: room member list with address, role, parent, caps, claim, status, and last seen.
 - `contacts`: roster-derived direct-message targets without full roster metadata.
 - `previews`: TUI-ready bounded room message previews with timestamp/from/to/type/summary/body_preview.
-- `mailbox`: declared accepts/emits contract.
+- `mailbox`: declared accepts/emits contract for runs; queued direct branch inbox messages for `branch:<run>/<branch>` with `id`, status, route/type, and queue/handling timestamps.
 - `files`: run state directory file list.
 - `artifacts`: declared artifact paths/status.
 - `recipes` target: registry summary for active, shadowed, invalid, disabled, and diagnostic recipe entries.
+
+Actor inspector commands:
+
+- `/actors-inspector-toggle [rows]`: open/close the compact table or set row count; default is 12 log rows when no size is supplied.
+- `/actors-inspector-filter all|room|direct|broadcast|mention <text>`: narrow table previews without changing room/run state.
+- `/actors-inspect <number>`: open one visible row as a full-message view.
+
+The table is compact and optimistic by default: bounded body previews, capped noisy room rows, and an inline roster summary in the form `role/name` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
 
 Let terminal notifications arrive; avoid sleep-poll loops except during diagnosis.
 
 ## Stable Multi-Actor Review Rules
 
 - Prefer independent read-only reviewers for review swarms. Use shared room messages for coordination signals and observability, not for letting reviewers converge early, unless the task explicitly asks for collaborative discussion.
-- Treat inspector-visible communication logs as recipe-quality evidence. Verbose room/direct timelines show whether recipes coordinate clearly, emit useful summaries, over-chat, miss handoffs, choose poor message types, or need better mailbox/artifact conventions. Use `inspect room:<run> view=messages|previews`, `inspect run:<id> view=communication`, and the actor inspector compact/verbose modes to improve recipes after real runs.
+- Treat inspector-visible communication logs as recipe-quality evidence. Full room/direct timelines show whether recipes coordinate clearly, emit useful summaries, over-chat, miss handoffs, choose poor message types, or need better mailbox/artifact conventions. Use `inspect room:<run> view=messages|previews`, `inspect run:<id> view=communication`, and the actor inspector table/full-message views to improve recipes after real runs.
 - Smoke-test provider/model availability before launching expensive fanout, or choose a provider known to be configured in this environment. A failed provider fanout creates noisy run transitions without useful review signal.
 - Keep one public communication model: `spawn` creates actors, `message` sends typed envelopes, and `inspect` observes. Avoid adding public side channels or storage nouns when a normal actor address/view can express the operation.
 - Keep route and semantic type separate. Direct, room, coordinator, and session messages may share `type`; delivery behavior comes from `to`.
@@ -189,7 +197,6 @@ Minimal actor recipe:
 
 ```json
 {
-  "name": "my-task",
   "async": true,
   "args": ["path:path", "model:string"],
   "defaults": {},
@@ -210,11 +217,11 @@ Rules:
 4. Use `imports` to compose recipes; imported recipes are definitions, not nested async runs.
 5. Declare `mailbox` for actors that accept or emit meaningful messages.
 6. Declare `artifacts` for durable outputs the coordinator should inspect.
-7. Recipe identity comes from the filename basename when `name` is omitted.
+7. File-backed recipe identity comes from the filename basename; legacy top-level `name` fields are ignored by loaders.
 8. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
 9. Do not ship concrete model-version defaults in packaged recipes; expose `model`, `models`, and stage-specific model args so the caller must choose current policy at launch.
 
-Priority for same-name recipes:
+Priority for same-id recipes:
 
 1. No recipe: no capability.
 2. Packaged pi-actors recipe: standard-library declarative actor component.
@@ -270,7 +277,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 - [`pipeline-docs-maintenance`](../../recipes/pipeline-docs-maintenance.json): docs index/review/planning → maintenance artifact.
 - Artifacts: [`pipeline-artifact-report`](../../recipes/pipeline-artifact-report.json), [`pipeline-artifact-write`](../../recipes/pipeline-artifact-write.json), [`pipeline-artifact-bundle`](../../recipes/pipeline-artifact-bundle.json).
 - Review gates: [`pipeline-quorum-review`](../../recipes/pipeline-quorum-review.json), [`pipeline-review-readiness`](../../recipes/pipeline-review-readiness.json).
-- Task-first workflows: [`pipeline-architect-coordinator`](../../recipes/pipeline-architect-coordinator.json), [`pipeline-research-synthesis`](../../recipes/pipeline-research-synthesis.json), [`pipeline-development-tasking`](../../recipes/pipeline-development-tasking.json), [`pipeline-checkpoint-continuation`](../../recipes/pipeline-checkpoint-continuation.json), [`pipeline-media-library`](../../recipes/pipeline-media-library.json), [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json). For room swarms, prefer `roles_path` for custom role JSON; keep role `name` ASCII-safe for branch addresses and use optional `glyph` only as display identity. Use `locker=true` when the swarm needs a coordinator-locker-backed artifact lock and journal.
+- Task-first workflows: [`pipeline-architect-coordinator`](../../recipes/pipeline-architect-coordinator.json), [`pipeline-research-synthesis`](../../recipes/pipeline-research-synthesis.json), [`pipeline-development-tasking`](../../recipes/pipeline-development-tasking.json), [`pipeline-checkpoint-continuation`](../../recipes/pipeline-checkpoint-continuation.json), [`pipeline-media-library`](../../recipes/pipeline-media-library.json), [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json). For room swarms, prefer `roles_path` for custom role JSON and keep role `name` ASCII-safe for branch addresses. Use `locker=true` when the swarm needs a coordinator-locker-backed artifact lock and journal.
 
 ### Utilities
 
@@ -285,14 +292,15 @@ Deep inventory: [`docs/recipe-library.md`](../../docs/recipe-library.md).
 - **Short deterministic command**: call foreground registered tool or command template.
 - **Long job/service/fanout**: `spawn` async recipe, then inspect/messages/artifacts.
 - **One-off experiment**: inline `template`; promote after repeat use.
-- **Reusable workflow**: recipe with public knobs, mailbox, artifacts, docs.
-- **Subagent/swarm execution**: actor mechanics here; methodology belongs to swarm guidance.
+- **Reusable workflow**: packaged or user recipe with public knobs, mailbox, artifacts, docs.
+- **Subagent/swarm execution**: compose packaged recipes/pipelines from smaller recipe cells; add missing generic cells to the extension rather than creating one-off external orchestration scripts.
+- **Consensus-first build**: when many lenses should shape one artifact, have proposer subagents post room messages, then one named implementer writes, one QA reviewer checks, and one finalizer emits `run.done`; do not ask every lens to mutate the same artifact.
 - **Coordinated workers**: spawn `coordinator-locker` when several actors need a shared queue, acquire/renew/release resource leases, or a journaled coordination point.
 - **Release/review pipeline**: pi-actors can prepare evidence, summaries, and artifacts; external actions such as commit, PR, merge, tag, and publish require the appropriate gated release workflow.
 
 ## Complementary Methodology Engines
 
-pi-actors is the local execution engine for methodology skills. A methodology skill can define abstract patterns such as lens swarm, quorum, task cards, lock discipline, or clean-context merge; pi-actors turns those patterns into concrete local actors, recipes, queues, leases, artifacts, and messages.
+pi-actors is the local execution engine for methodology skills. A methodology skill can define abstract patterns such as lens swarm, quorum, task cards, lock discipline, consensus-first build, or clean-context merge; pi-actors turns those patterns into concrete local actors, recipes, queues, leases, artifacts, and messages.
 
 Example mapping:
 
@@ -313,19 +321,24 @@ Keep the split clean: methodology chooses coordination shape; pi-actors supplies
 3. Inspect `status` after launch.
 4. Use notifications and `inspect`; do not busy-poll.
 5. Read `messages` and `artifacts`, not only stdout.
-6. Use `message` for explicit control or domain commands.
+6. Use `message` for explicit control or domain commands; treat direct branch messages as intended initiating work. Direct branch envelopes are queued under the recipient branch inbox and can be inspected with `inspect branch:<run>/<branch> view=mailbox`; queued entries have stable `id` values and internal `claimed` / `handled` / `failed` states for worker protocols and retries. Room messages are shared transcript/context.
 7. Promote repeated inline forms to recipes.
-8. Update docs/context when changing public behavior.
+8. Keep recipes small and shallow: files over 1 MiB or import chains deeper than 32 are rejected.
+9. Update docs/context when changing public behavior; if the change affects how agents operate this extension, update this skill and the bundled prompt guidance too.
 
 ## Common Pitfalls
 
 - Treating actor mechanics as multi-agent methodology.
 - Repeating inline templates instead of promoting recipes.
+- Creating task-specific external orchestration scripts when the scenario belongs in pi-actors as a reusable recipe/pipeline with prompts, roles, artifact paths, and model/tool policy passed as args.
+- Embedding complex shell loops or Bash `${...}` parameter expansion directly in command templates; braces are pi-actors placeholders too, so put only generic trusted helper cells in packaged scripts when command-template composition is not enough.
 - Omitting stable run ids for work that needs follow-up.
 - Sending domain messages without checking `mailbox`.
+- Expecting current room messages to wake prompt-only subagents; use direct branch messages or a runner protocol for initiating work.
 - Reading only stdout and missing actor messages/artifacts.
 - Baking local absolute paths into published docs or reusable recipes.
 - Creating recipes that perform external side effects without explicit operator gates.
+- Letting project insights live only in chat instead of updating BACKLOG/CHANGELOG/docs and, when agent behavior changes, the packaged skill or prompt guidance.
 - Preserving old runtime/event/FIFO vocabulary instead of `spawn`/`message`/`inspect` and actor messages.
 
 ## Deep References

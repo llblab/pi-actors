@@ -2,6 +2,19 @@
 
 ## Open Work
 
+### Direct Actor Inbox Queue Semantics
+
+- Priority: High.
+- Goal: Make direct actor-to-actor messages initiating work items, not passive files that the receiving actor may or may not inspect.
+- Direction:
+  - Deliver direct messages into the recipient actor's next prompt/context as soon as the branch runner can accept work.
+  - Keep the model simple: FIFO direct messages, no priority tiers unless real usage proves they are needed.
+  - Keep room messages as shared transcript only; a direct message may ask the recipient to inspect room history when broader context is needed.
+  - Wire branch runner protocols to claim/handle/fail messages from the current inspectable per-branch inbox files (`branches/<branch>/inbox.jsonl`, surfaced through `inspect branch:<run>/<branch> view=mailbox`); internal helpers can already transition queued messages to claimed/handled/failed for retries.
+- Exit:
+  - A direct branch message can wake or continue a long-lived branch runner without waiting for that runner to poll room files.
+  - Room transcript semantics remain unchanged and compatible with `room:<run>` inspection.
+
 ### Actor Rooms, Roster, and Cross-Branch Messaging
 
 - Priority: High.
@@ -9,23 +22,47 @@
 - Direction:
   - Evaluate whether room storage/routing should remain built into the tool adapter or move behind a dedicated non-LLM communication actor recipe/script, possibly singleton-scoped. Preserve the same public `room:<run>` address and envelope either way.
   - Consider reducing direct file-backed state where it improves coherence: model room/roster state as actor-owned data structures served by helper scripts/actors, with files retained only for durable snapshots, recovery, artifacts, or audit logs.
-  - Add selected-recipient multicast for a subset of actors without creating subrooms.
-  - Clarify which worker protocols consume direct `branch:<run>/<branch>` envelopes and which swarm scenarios should stay room-visible.
+  - Avoid full roster rewrite amplification during bursty room activity; branch communication snapshot writes are already debounced while root snapshots stay current.
 - Exit:
   - Any backend/storage change preserves existing `spawn` / `message` / `inspect` semantics and room address compatibility.
-  - Selected-recipient multicast remains route-based and does not introduce named subrooms.
 
 ### Actor Communication TUI Preview
 
 - Priority: High.
 - Goal: Make actor-to-actor communication more navigable in the terminal UI without exposing large payloads by default.
 - Direction:
-  - Add explicit filters for current branch, room, direct messages, unread messages, and mentions.
-  - Add a roster panel for current run/room participants with address, role, caps, status, and last seen.
-  - Collapse long bodies by default and respect sensitive/redacted metadata.
-  - Rate-limit noisy rooms and keep full body inspection intentional.
+  - Add current-branch and unread filters after branch read-state semantics are real.
 - Exit:
-  - Operators can answer “what are the actors saying?” from the TUI at a glance, then intentionally inspect full room or direct-message bodies when needed.
+  - Operators can distinguish unread/current-branch messages while retaining intentional full-body inspection.
+
+### Graceful Actor Retirement
+
+- Priority: Medium.
+- Goal: Automatically retire coordinator/helper actors that were launched only to supervise a bounded worker tree once their dependent workers have finished.
+- Direction:
+  - Build on the existing `retire_when: "children_terminal"` recipe/run metadata contract and observability retirement-candidate detection for ephemeral supervisors.
+  - Treat auto-retirement as opt-in only; never infer it for arbitrary long-lived services, user tools, or persistent backlog implementers.
+  - Extend candidate detection from current `progress.activeSubagents === 0` gating to full observed child/descendant actor state rather than log text: the supervisor may retire only when all launched child async runs or descendant `pi -p` workers are terminal and required artifacts/outbox events have been flushed.
+  - Prefer graceful stop (`control.stop` / actor message) before process termination; escalate only after a bounded timeout and record the retirement event in run state.
+  - Preserve manual `cancel` / `kill` semantics and make retirement visible through `inspect` / ambient observability.
+- Exit:
+  - A packaged coordinator recipe can launch worker actors, complete its coordination duties, and shut itself down automatically after the worker tree reaches terminal state.
+  - Persistent services and implementer actors remain alive unless their recipe explicitly opts into retirement.
+
+### Consensus-First Build Recipe
+
+- Priority: Medium.
+- Goal: Promote the proven proposer → implementer → QA → finalizer pattern into a generic packaged workflow instead of demo-specific scripts; pi-actors should grow its standard recipe/script library for recurring actor OS scenarios.
+- Direction:
+  - Public inputs: mission, artifact paths/assertions, proposer role JSON, implementer prompt, QA prompt, model/thinking/tool knobs, and optional room/locker settings.
+  - Proposers should coordinate through room messages with no write tools.
+  - The implementer owns the first artifact write after inspecting room consensus.
+  - QA inspects artifacts and room evidence without mutating files.
+  - The finalizer applies QA-grounded fixes and emits `run.done` only after artifact assertions pass.
+  - Reuse packaged subagent/message/artifact components where practical; if a script is needed, make it a generic packaged helper in the extension, not a task-local demo script.
+- Exit:
+  - A packaged recipe can reproduce the interactive-music-instrument workflow shape for another single-artifact task without copying the demo script.
+  - Docs and skills point agents to the packaged recipe and explain when to choose it over a free-form room swarm.
 
 ### Persistent Backlog Implementer Workflow
 
@@ -41,15 +78,6 @@
   - A packaged workflow, if added, is described by recipes and existing helper cells; no one-off backlog-implementer scripts are required.
   - The actors skill documents the supported launch scenarios and the concrete packaged recipes for each.
 
-### Recipe Schema Simplification
-
-- Priority: Medium.
-- Goal: Remove recipe metadata that duplicates storage context.
-- Direction:
-  - Remove `name` from the recipe standard. Recipe identity should come from the recipe filename/id rather than a redundant JSON property. Keep migration/backward compatibility explicit for existing packaged and user recipes.
-  - Finish hardening validators/discovery against recipe-owned tool exposure: tool status should be determined by location under `~/.pi/agent/recipes/*.json`, while packaged/ad hoc/component recipes are not tools by default. Repository recipes and docs no longer author `tool`.
-- Exit:
-  - Docs, validators, packaged recipes, discovery, and migration behavior all agree on filename-derived identity and location-derived tool exposure.
 
 ### Branch-Local Checkpoint Semantics
 
@@ -87,10 +115,3 @@
   - Consider sidecar stats sync/backup policy after inline user-owned `usage.calls` / `usage.last_called` proves useful.
   - Do not add failure counters as primary usefulness evidence unless there is a strong operator-facing need.
 
-### Opportunistic Recipe Library Growth
-
-- Priority: Low.
-- Goal: Expand packaged recipes only when concrete repeated task patterns justify them.
-- Direction:
-  - Add new utilities or pipelines when they can be expressed as reusable recipe composition.
-  - Avoid scenario-specific scripts when existing component recipes can be composed.

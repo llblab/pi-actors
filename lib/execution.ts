@@ -70,6 +70,8 @@ export type RegisteredToolExec = (
   options?: ToolExecOptions,
 ) => Promise<ToolExecResult>;
 
+const DEFAULT_MAX_PARALLEL_BRANCHES = 64;
+
 type TemplateExecution = {
   branches: BranchReport[];
   commands: string[];
@@ -168,6 +170,19 @@ function createSoftQuorum(
     failed,
     usable: done > 0,
   };
+}
+
+function getMaxParallelBranches(): number {
+  const raw = Number(process.env.PI_ACTORS_MAX_PARALLEL_BRANCHES ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_MAX_PARALLEL_BRANCHES;
+}
+
+function assertParallelBranchLimit(count: number): void {
+  const max = getMaxParallelBranches();
+  if (count <= max) return;
+  throw new Error(
+    `Command template parallel fanout ${count} exceeds limit ${max}; set PI_ACTORS_MAX_PARALLEL_BRANCHES to override intentionally.`,
+  );
 }
 
 function normalizeFailureScope(
@@ -428,6 +443,7 @@ async function executeTemplateConfig(
     );
     if (repeat === undefined)
       throw new Error("Command template repeat could not be resolved.");
+    if (normalized.parallel === true) assertParallelBranchLimit(repeat);
     const repeatedSteps = Array.from({ length: repeat }, (_unused, index0) => {
       const { repeat: _repeat, ...rest } = normalized;
       return {
@@ -521,6 +537,7 @@ async function executeTemplateConfig(
   if (steps.length === 0)
     throw new Error(formatToolText("Tool template produced no command steps."));
   if (normalized.parallel === true) {
+    assertParallelBranchLimit(steps.length);
     const branchResults = await Promise.all(
       steps.map((step) =>
         executeTemplateConfig(

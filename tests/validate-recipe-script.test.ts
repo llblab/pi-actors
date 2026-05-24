@@ -27,7 +27,7 @@ test("validate-recipe validates one recipe file", async () => {
     const report = JSON.parse(stdout);
     assert.equal(report.ok, true);
     assert.equal(report.total, 1);
-    assert.equal(report.results[0].name, "demo");
+    assert.equal(report.results[0].name, "recipe");
     assert.equal(report.results[0].template, "leaf");
   } finally {
     await rm(root, { recursive: true, force: true });

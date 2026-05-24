@@ -1,5 +1,4 @@
 {
-  "name": "pipeline-room-swarm",
   "async": true,
   "args": [
     "mission:string",

@@ -48,13 +48,13 @@ pi install git:github.com/llblab/pi-actors
 Actors and coordination endpoints are addressed with compact route strings:
 
 ```text
-run:<id>                 one detached actor run
-branch:<run>/<branch>    branch-local actor endpoint
-room:<run>               shared run-local task room
-coordinator              launching coordinator attention path
-session:                 current session actor surface
-session:all              cross-session inventory surface
-tool:<name>              executable registered tool
+run:<id>               one detached actor run
+branch:<run>/<branch>  branch-local actor endpoint
+room:<run>             shared run-local task room
+coordinator            launching coordinator attention path
+session:               current session actor surface
+session:all            cross-session inventory surface
+tool:<name>            executable registered tool
 ```
 
 Actor messages use one envelope shape:
@@ -144,7 +144,22 @@ inspect target=room:review view=contacts
 inspect target=room:review view=messages
 ```
 
-Room posts require a same-run sender, so unrelated runs do not pollute the roster. Direct messages and room messages use the same envelope; only the address changes.
+Room posts require a same-run sender, so unrelated runs do not pollute the roster. Direct messages and room messages use the same envelope; only the address changes. Direct `branch:<run>/<branch>` messages are private: they are forwarded through the parent run mailbox and recorded in the recipient branch inbox for worker protocols that consume queued branch work. For selected-recipient multicast, send to `room:<run>` with `metadata.recipients` set to same-run `branch:<run>/<branch>` addresses; this keeps one room transcript entry while forwarding branch-targeted copies.
+
+## Actor Inspector
+
+The terminal actor inspector is hidden by default. When opened without an explicit size, it shows 12 log rows by default. Use it when async actors are actively coordinating:
+
+```text
+/actors-inspector-toggle
+/actors-inspector-toggle 20
+/actors-inspector-filter room
+/actors-inspector-filter direct
+/actors-inspector-filter mention checkpoint
+/actors-inspect 3
+```
+
+The table is compact and optimistic by default: bounded route/type/summary/body previews, capped noisy room rows, and an inline roster summary in the form `role/name` that wraps only when needed. Active roster members use the target color; members that sent `actor.leave` remain visible as inactive/muted participants from the current run. `/actors-inspect <number>` opens the selected row as a full-message view; toggle again to return to the table or close it. Actor display names come from room `actor.join` roster metadata or branch addresses, keeping debugger output plain and name-driven.
 
 ## Registry Model
 

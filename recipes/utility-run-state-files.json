@@ -1,5 +1,4 @@
 {
-  "name": "utility-run-state-files",
   "args": [
     "state_root:path",
     "file_name:string",

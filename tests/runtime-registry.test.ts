@@ -115,15 +115,16 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
 
     assert.deepEqual([...runtime.getTools().keys()].sort(), [
-      "stdlib-tool",
+      "recipe-only",
       "user-tool",
     ]);
     assert.equal(runtime.getTools().get("user-tool")?.sourcePath, join(recipeRoot, "user-tool.json"));
-    assert.equal(runtime.getTools().get("stdlib-tool")?.sourcePath, undefined);
-    assert.deepEqual(registered.sort(), ["stdlib-tool", "user-tool"]);
+    assert.equal(runtime.getTools().get("recipe-only")?.sourcePath, join(recipeRoot, "recipe-only.json"));
+    assert.equal(runtime.getTools().get("stdlib-tool"), undefined);
+    assert.deepEqual(registered.sort(), ["recipe-only", "user-tool"]);
 
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
-    assert.deepEqual(registered.sort(), ["stdlib-tool", "user-tool"]);
+    assert.deepEqual(registered.sort(), ["recipe-only", "user-tool"]);
 
     await writeRecipe(recipeRoot, "user-tool", {
       description: "Updated user tool",
@@ -131,12 +132,12 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       template: "echo updated {scope}",
     });
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
-    assert.deepEqual(registered.sort(), ["stdlib-tool", "user-tool", "user-tool"]);
+    assert.deepEqual(registered.sort(), ["recipe-only", "user-tool", "user-tool"]);
 
     await unlink(join(recipeRoot, "user-tool.json"));
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
     assert.equal(runtime.getTools().has("user-tool"), false);
-    assert.deepEqual(activeTools.sort(), ["read", "stdlib-tool"]);
+    assert.deepEqual(activeTools.sort(), ["read", "recipe-only"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -5,16 +5,21 @@
  */
 
 import * as fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import * as path from "node:path";
 
 import type { ActorMessage } from "./actor-messages.ts";
+
+const ROOM_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
+const ROOM_LOCK_TIMEOUT_MS = 5000;
+const DEFAULT_ROOM_MAX_MESSAGES = 10000;
+const DEFAULT_SNAPSHOT_MIN_INTERVAL_MS = 250;
 
 export interface RoomMember {
   address: string;
   caps?: unknown;
   claim?: unknown;
   display?: unknown;
-  glyph?: unknown;
   joined_at: string;
   last_seen: string;
   parent?: unknown;
@@ -94,6 +99,10 @@ function branchSnapshotFile(stateDir: string, branch: string): string {
   return path.join(stateDir, "branches", branch, "communication.json");
 }
 
+function branchInboxFile(stateDir: string, branch: string): string {
+  return path.join(stateDir, "branches", branch, "inbox.jsonl");
+}
+
 function branchIdFromAddress(address: string | undefined, run: string): string | undefined {
   if (!address) return undefined;
   const match = new RegExp(`^branch:${run}/(.+)$`).exec(address);
@@ -102,6 +111,43 @@ function branchIdFromAddress(address: string | undefined, run: string): string |
 
 function ensureRoomDir(stateDir: string, room: string): void {
   fs.mkdirSync(roomDir(stateDir, room), { recursive: true });
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function acquireRoomLock(stateDir: string, room: string): () => void {
+  ensureRoomDir(stateDir, room);
+  const lockDir = path.join(roomDir(stateDir, room), ".append.lock");
+  const started = Date.now();
+  while (true) {
+    try {
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(
+        path.join(lockDir, "owner.json"),
+        `${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() })}\n`,
+      );
+      return () => fs.rmSync(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      try {
+        const stat = fs.statSync(lockDir);
+        if (Date.now() - stat.mtimeMs > ROOM_LOCK_MAX_AGE_MS) {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() - started > ROOM_LOCK_TIMEOUT_MS) {
+        throw new Error(
+          `Room append lock timed out for ${room} in ${stateDir}.`,
+          { cause: error },
+        );
+      }
+      sleepSync(10);
+    }
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -129,6 +175,65 @@ function writeJsonFile(file: string, value: unknown): void {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function positiveEnvInt(name: string, fallback: number): number {
+  const value = Number(process.env[name] ?? fallback);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+function roomMaxMessages(): number {
+  return positiveEnvInt("PI_ACTORS_ROOM_MAX_MESSAGES", DEFAULT_ROOM_MAX_MESSAGES);
+}
+
+function snapshotMinIntervalMs(): number {
+  return positiveEnvInt(
+    "PI_ACTORS_COMMUNICATION_SNAPSHOT_MIN_MS",
+    DEFAULT_SNAPSHOT_MIN_INTERVAL_MS,
+  );
+}
+
+function compactRoomMessages(stateDir: string, room: string): void {
+  const maxMessages = roomMaxMessages();
+  const file = messagesFile(stateDir, room);
+  const lines = readJsonlTailLines(file, maxMessages + 1);
+  if (lines.length <= maxMessages) return;
+  const kept = lines.slice(-maxMessages);
+  fs.writeFileSync(file, `${kept.join("\n")}\n`);
+  writeJsonFile(path.join(roomDir(stateDir, room), "compaction.json"), {
+    compacted_at: new Date().toISOString(),
+    max_messages: maxMessages,
+  });
+}
+
+function readJsonlTailLines(file: string, limit: number): string[] {
+  const lineLimit = Math.max(1, limit);
+  const stat = fs.statSync(file);
+  if (stat.size === 0) return [];
+  const fd = fs.openSync(file, "r");
+  try {
+    const chunkSize = 64 * 1024;
+    const chunks: Buffer[] = [];
+    let position = stat.size;
+    let newlines = 0;
+    while (position > 0 && newlines <= lineLimit) {
+      const size = Math.min(chunkSize, position);
+      position -= size;
+      const chunk = Buffer.allocUnsafe(size);
+      fs.readSync(fd, chunk, 0, size, position);
+      chunks.unshift(chunk);
+      for (let index = size - 1; index >= 0; index -= 1) {
+        if (chunk[index] === 10) newlines += 1;
+      }
+    }
+    return Buffer.concat(chunks)
+      .toString("utf8")
+      .split("\n")
+      .filter(Boolean)
+      .slice(-lineLimit);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function readRoomRoster(
   stateDir: string,
   room: string,
@@ -145,6 +250,15 @@ function writeRoomRoster(
   writeJsonFile(rosterFile(stateDir, room), roster);
 }
 
+function shouldDebounceSnapshot(file: string): boolean {
+  try {
+    return Date.now() - fs.statSync(file).mtimeMs < snapshotMinIntervalMs();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 function updateRosterForMessage(
   stateDir: string,
   room: string,
@@ -153,13 +267,23 @@ function updateRosterForMessage(
 ): Record<string, RoomMember> {
   const roster = readRoomRoster(stateDir, room);
   if (!message.from) return roster;
+  const body = asRecord(message.body);
+  const current = roster[message.from];
   if (message.type === "actor.leave") {
-    delete roster[message.from];
+    roster[message.from] = {
+      address: message.from,
+      joined_at: current?.joined_at ?? receivedAt,
+      last_seen: receivedAt,
+      ...(current?.caps !== undefined ? { caps: current.caps } : {}),
+      ...(current?.claim !== undefined ? { claim: current.claim } : {}),
+      ...(current?.display !== undefined ? { display: current.display } : {}),
+      ...(current?.parent !== undefined ? { parent: current.parent } : {}),
+      ...(current?.role !== undefined ? { role: current.role } : { role: "actor" }),
+      status: String(body.status ?? "left"),
+    };
     writeRoomRoster(stateDir, room, roster);
     return roster;
   }
-  const body = asRecord(message.body);
-  const current = roster[message.from];
   roster[message.from] = {
     address: message.from,
     joined_at: current?.joined_at ?? receivedAt,
@@ -167,7 +291,6 @@ function updateRosterForMessage(
     ...(body.caps !== undefined ? { caps: body.caps } : current?.caps !== undefined ? { caps: current.caps } : {}),
     ...(body.claim !== undefined ? { claim: body.claim } : current?.claim !== undefined ? { claim: current.claim } : {}),
     ...(body.display !== undefined ? { display: body.display } : current?.display !== undefined ? { display: current.display } : {}),
-    ...(body.glyph !== undefined ? { glyph: body.glyph } : current?.glyph !== undefined ? { glyph: current.glyph } : {}),
     ...(body.parent !== undefined ? { parent: body.parent } : current?.parent !== undefined ? { parent: current.parent } : {}),
     ...(body.role !== undefined ? { role: body.role } : current?.role !== undefined ? { role: current.role } : { role: "actor" }),
     status: String(body.status ?? current?.status ?? "present"),
@@ -176,29 +299,92 @@ function updateRosterForMessage(
   return roster;
 }
 
+export function readBranchInboxMessages(
+  stateDir: string,
+  run: string,
+  address: string,
+  limit = 40,
+): Array<ActorMessage & { id?: string; queued_at?: string; status?: string }> {
+  const branch = branchIdFromAddress(address, run);
+  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  try {
+    return readJsonlTailLines(branchInboxFile(stateDir, branch), limit).map(
+      (line) => JSON.parse(line),
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+export function appendBranchInboxMessage(
+  stateDir: string,
+  run: string,
+  address: string,
+  message: ActorMessage,
+): void {
+  const branch = branchIdFromAddress(address, run);
+  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  fs.mkdirSync(path.dirname(branchInboxFile(stateDir, branch)), { recursive: true });
+  fs.writeFileSync(
+    branchInboxFile(stateDir, branch),
+    `${JSON.stringify({ ...message, id: randomUUID(), queued_at: new Date().toISOString(), status: "queued" })}\n`,
+    { flag: "a" },
+  );
+}
+
+export function updateBranchInboxMessageStatus(
+  stateDir: string,
+  run: string,
+  address: string,
+  id: string,
+  status: "claimed" | "handled" | "failed",
+  metadata: Record<string, unknown> = {},
+): boolean {
+  const branch = branchIdFromAddress(address, run);
+  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  const file = branchInboxFile(stateDir, branch);
+  const messages = readBranchInboxMessages(stateDir, run, address, Number.MAX_SAFE_INTEGER);
+  let changed = false;
+  const timestampKey = `${status}_at`;
+  const updated = messages.map((message) => {
+    if (message.id !== id) return message;
+    changed = true;
+    return { ...message, ...metadata, [timestampKey]: new Date().toISOString(), status };
+  });
+  if (!changed) return false;
+  fs.writeFileSync(file, `${updated.map((message) => JSON.stringify(message)).join("\n")}\n`);
+  return true;
+}
+
 export function appendRoomMessage(
   stateDir: string,
   room: string,
   message: ActorMessage,
 ): RoomAppendResult {
-  ensureRoomDir(stateDir, room);
-  const receivedAt = new Date().toISOString();
-  const entry: RoomTimelineEntry = { ...message, received_at: receivedAt };
-  fs.appendFileSync(messagesFile(stateDir, room), `${JSON.stringify(entry)}\n`);
-  const roster = updateRosterForMessage(stateDir, room, message, receivedAt);
-  const run = runFromRoomAddress(message.to);
-  if (run) {
-    writeCommunicationSnapshot(stateDir, run);
-    if (message.from && branchIdFromAddress(message.from, run)) {
-      writeBranchCommunicationSnapshot(stateDir, run, message.from);
+  const releaseLock = acquireRoomLock(stateDir, room);
+  try {
+    const receivedAt = new Date().toISOString();
+    const entry: RoomTimelineEntry = { ...message, received_at: receivedAt };
+    fs.appendFileSync(messagesFile(stateDir, room), `${JSON.stringify(entry)}\n`);
+    compactRoomMessages(stateDir, room);
+    const roster = updateRosterForMessage(stateDir, room, message, receivedAt);
+    const run = runFromRoomAddress(message.to);
+    if (run) {
+      writeCommunicationSnapshot(stateDir, run);
+      if (message.from && branchIdFromAddress(message.from, run)) {
+        writeBranchCommunicationSnapshotDebounced(stateDir, run, message.from);
+      }
     }
+    return {
+      message_count: readRoomMessages(stateDir, room).length,
+      room,
+      roster_count: Object.keys(roster).length,
+      sent: true,
+    };
+  } finally {
+    releaseLock();
   }
-  return {
-    message_count: readRoomMessages(stateDir, room).length,
-    room,
-    roster_count: Object.keys(roster).length,
-    sent: true,
-  };
 }
 
 export function readRoomMessages(
@@ -207,11 +393,8 @@ export function readRoomMessages(
   limit = 40,
 ): RoomTimelineEntry[] {
   try {
-    const lines = fs
-      .readFileSync(messagesFile(stateDir, room), "utf8")
-      .split("\n")
-      .filter(Boolean);
-    return lines.slice(-Math.max(1, limit)).map((line) => JSON.parse(line));
+    const lines = readJsonlTailLines(messagesFile(stateDir, room), limit);
+    return lines.map((line) => JSON.parse(line));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
@@ -370,4 +553,15 @@ export function writeBranchCommunicationSnapshot(
   const snapshot = buildCommunicationSnapshot(stateDir, run, self);
   writeJsonFile(branchSnapshotFile(stateDir, branch), snapshot);
   return snapshot;
+}
+
+function writeBranchCommunicationSnapshotDebounced(
+  stateDir: string,
+  run: string,
+  self: string,
+): ActorCommunicationSnapshot | undefined {
+  const branch = branchIdFromAddress(self, run);
+  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${self}`);
+  if (shouldDebounceSnapshot(branchSnapshotFile(stateDir, branch))) return undefined;
+  return writeBranchCommunicationSnapshot(stateDir, run, self);
 }

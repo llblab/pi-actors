@@ -1,5 +1,4 @@
 {
-  "name": "subagent-quorum",
   "async": true,
   "imports": {
     "subagent": "subagent-prompt.json"

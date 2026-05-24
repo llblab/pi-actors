@@ -4,11 +4,13 @@
  * Owns filename identity discovery across prioritized recipe roots
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import type { RegisteredTool } from "./config.ts";
 import type { TemplateRecipeConfig } from "./recipe-references.ts";
+import * as CommandTemplates from "./command-templates.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as Schema from "./schema.ts";
 
@@ -26,6 +28,19 @@ export interface DiscoveredRecipe {
   mutableUsage: boolean;
   diagnostics: string[];
   shadows: string[];
+}
+
+export interface RecipeIntegrityManifestEntry {
+  id: string;
+  path: string;
+  root: string;
+  sha256: string;
+  size: number;
+  tool: boolean;
+  active: boolean;
+  invalid: boolean;
+  disabled: boolean;
+  shadowed: boolean;
 }
 
 export interface RecipeDiscoveryResult {
@@ -80,6 +95,16 @@ function listRecipeFiles(root: string): string[] {
     .sort();
 }
 
+function getRecipeConfigDiagnostics(
+  file: string,
+  config: TemplateRecipeConfig | undefined,
+): string[] {
+  if (!config) return [`Invalid recipe: ${file}`];
+  return CommandTemplates.getCommandTemplateWarnings(
+    typeof config.template === "string" ? config.template : { template: config.template },
+  ).map((warning) => `Recipe ${file}: ${warning}`);
+}
+
 function readDiscoveredRecipe(
   root: string,
   file: string,
@@ -102,9 +127,9 @@ function readDiscoveredRecipe(
       shadowed: false,
       invalid,
       disabled,
-      tool: (config?.tool ?? defaultTool) === true && !disabled && !invalid,
+      tool: defaultTool && !disabled && !invalid,
       mutableUsage,
-      diagnostics: invalid ? [`Invalid recipe: ${file}`] : [],
+      diagnostics: getRecipeConfigDiagnostics(file, config),
       shadows: [],
     };
   } catch (error) {
@@ -144,6 +169,36 @@ function filesForSource(
     : [];
 }
 
+function getRecipeRootDiagnostics(sources: RecipeDiscoverySource[]): string[] {
+  const diagnostics: string[] = [];
+  const roots = new Set(
+    sources
+      .map((source) => source.root)
+      .filter((root): root is string => typeof root === "string"),
+  );
+  for (const root of roots) {
+    try {
+      if (!existsSync(root)) continue;
+      const stat = statSync(root);
+      if ((stat.mode & 0o002) !== 0) {
+        diagnostics.push(
+          `Recipe root is world-writable; review permissions: ${root}`,
+        );
+      }
+      if ((stat.mode & 0o020) !== 0) {
+        diagnostics.push(
+          `Recipe root is group-writable; review ownership and permissions: ${root}`,
+        );
+      }
+    } catch (error) {
+      diagnostics.push(
+        `Failed to inspect recipe root ${root}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return diagnostics;
+}
+
 export function discoverRecipeSources(
   sources: RecipeDiscoverySource[],
 ): RecipeDiscoveryResult {
@@ -160,7 +215,7 @@ export function discoverRecipeSources(
   }
 
   const active = new Map<string, DiscoveredRecipe>();
-  const diagnostics: string[] = [];
+  const diagnostics: string[] = getRecipeRootDiagnostics(sources);
   for (const [id, bucket] of byId) {
     bucket.sort(
       (a, b) => a.priority - b.priority || a.path.localeCompare(b.path),
@@ -231,7 +286,7 @@ function cleanupRecommendation(entry: DiscoveredRecipe): Record<string, unknown>
       id: entry.id,
       path: entry.path,
       reason: "active user tool has no recorded launches",
-      actions: ["keep as tool", "set tool false", "delete", "archive"],
+      actions: ["keep as tool", "move out of tool root", "delete", "archive"],
     };
   }
   if (entry.mutableUsage && !entry.tool) {
@@ -239,7 +294,7 @@ function cleanupRecommendation(entry: DiscoveredRecipe): Record<string, unknown>
       id: entry.id,
       path: entry.path,
       reason: "user recipe is a component, not an active tool",
-      actions: ["keep component", "enable tool", "merge", "delete", "archive"],
+      actions: ["keep component", "move into tool root", "merge", "delete", "archive"],
     };
   }
   if (entry.shadows.length > 0) {
@@ -251,6 +306,30 @@ function cleanupRecommendation(entry: DiscoveredRecipe): Record<string, unknown>
     };
   }
   return undefined;
+}
+
+export function createRecipeIntegrityManifest(
+  result: RecipeDiscoveryResult,
+): RecipeIntegrityManifestEntry[] {
+  return result.entries
+    .map((entry) => {
+      const bytes = readFileSync(entry.path);
+      return {
+        active: entry.active,
+        disabled: entry.disabled,
+        id: entry.id,
+        invalid: entry.invalid,
+        path: entry.path,
+        root: entry.root,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        shadowed: entry.shadowed,
+        size: bytes.byteLength,
+        tool: entry.tool,
+      };
+    })
+    .sort(
+      (a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path),
+    );
 }
 
 function recommendationForEntry(
@@ -298,6 +377,7 @@ export function summarizeDiscovery(result: RecipeDiscoveryResult): Record<string
       .sort((a, b) => a.id.localeCompare(b.id)),
     recommendations,
     diagnostics: result.diagnostics,
+    integrity_manifest: createRecipeIntegrityManifest(result),
   };
 }
 

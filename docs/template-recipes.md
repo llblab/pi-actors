@@ -19,7 +19,7 @@ async: true     = run through detached lifecycle
 
 A recipe wraps one command-template tree. The wrapped `template` keeps the normal command-template semantics: argv splitting, placeholders, defaults, typed args, sequence, `parallel: true`, `when`, delay, retry, failure propagation, recover cleanup, and output selection.
 
-Layer boundary: `imports`, `{ "name": "alias" }` imported-recipe nodes, `{alias.defaults.key}` references, fallback expressions, and recipe-local ternaries are recipe-loading features. They resolve before the command-template graph runs and do not extend the portable Command Template Standard. Typed imports are recipe definitions: they expose the imported recipe's command-template-shaped metadata (`template`, `args`, `defaults`, flags, and `values`), while async-run launch fields such as `async` and `state_dir` remain lifecycle configuration for starting a run, not part of the imported execution graph.
+Layer boundary: `imports`, `{ "name": "alias" }` imported-recipe nodes, `{alias.defaults.key}` references, fallback expressions, and recipe-local ternaries are recipe-loading features. They resolve before the command-template graph runs and do not extend the portable Command Template Standard. Typed imports are recipe definitions: they expose the imported recipe's command-template-shaped metadata (`template`, `args`, `defaults`, flags, and `values`), while async-run launch fields such as `async`, `state_dir`, and `retire_when` remain lifecycle configuration for starting a run, not part of the imported execution graph.
 
 Packaged recipes are the pi-actors recipe standard library: declarative actor config components that can be imported, launched, inspected, overridden, or composed by user recipes. Treat them as stable building blocks rather than user-local policy.
 
@@ -29,7 +29,7 @@ Template-recipe standard owns:
 
 - Saved JSON definitions around one command-template graph.
 - File-backed and co-located recipe shapes.
-- Recipe identity through `name` or filename.
+- Recipe identity through file-backed filename or co-located tool id.
 - Recipe defaults, values, imports, import references, and import-node expansion.
 - Ordered named artifact declarations through `artifacts`.
 - Foreground-vs-detached selection through `async: true` when invoked by a recipe-aware host.
@@ -52,7 +52,6 @@ Synchronous recipe:
 
 ```json
 {
-  "name": "check-docs",
   "template": "npm run check:docs"
 }
 ```
@@ -61,13 +60,12 @@ Async recipe:
 
 ```json
 {
-  "name": "review-docs",
   "async": true,
   "template": "review docs/spec.md"
 }
 ```
 
-`name` names the saved definition when an explicit name is needed. File-backed recipes usually omit it because the filename is the canonical recipe id. `template` is the command-template tree. `async: true` selects detached run mode when the recipe is invoked through a registered tool.
+A file-backed recipe's id comes from its filename, not a JSON `name` field. Legacy files may still contain `name`, but loaders ignore it for identity. `template` is the command-template tree. `async: true` selects detached run mode when the recipe is invoked through a registered tool.
 
 ## Discovery Priority
 
@@ -107,7 +105,6 @@ Use recipe-level `artifacts` to declare stable artifact names and paths for the 
 
 ```json
 {
-  "name": "report-task",
   "args": ["report_path:path"],
   "defaults": { "report_path": "artifacts/report.md" },
   "artifacts": {
@@ -156,11 +153,10 @@ Recipes do not declare a second event-delivery policy. A running actor emits add
 
 ## Command-Template Flags At Recipe Top Level
 
-Top-level command-template flags may sit beside `name` and `async`:
+Top-level command-template flags may sit beside recipe metadata such as `async`:
 
 ```json
 {
-  "name": "review-docs",
   "async": true,
   "parallel": true,
   "timeout": 300000,
@@ -199,7 +195,7 @@ Bare recipe names resolve under that directory, so `file: "review-docs"` loads:
 ~/.pi/agent/recipes/review-docs.json
 ```
 
-Call-time params override file params. `values` are merged with file values; call-time values win. If a run id is omitted for an explicit async start, the explicit recipe `name` or file basename becomes the default run id.
+Call-time params override file params. `values` are merged with file values; call-time values win. If a run id is omitted for an explicit async start, the file basename becomes the default run id.
 
 ## Registered Recipe Tools
 
@@ -226,7 +222,7 @@ Example: a recipe may expose a private `repo` default for an example script, whi
 
 ## Recipe Imports
 
-File-backed recipes may import other file-backed recipes at the recipe layer. Imports are resolved before the command-template graph is executed, so command-template core stays registry-free and synchronous.
+File-backed recipes may import other file-backed recipes at the recipe layer. Imports are resolved before the command-template graph is executed, so command-template core stays registry-free and synchronous. Recipe loading is intentionally bounded: a single recipe file larger than 1 MiB is rejected before JSON parsing, and import chains deeper than 32 are rejected before further resolution. Split very large prompts/data into explicit files or artifacts and keep recipe graphs shallow enough for operator review.
 
 ```json
 {
@@ -244,17 +240,16 @@ File-backed recipes may import other file-backed recipes at the recipe layer. Im
 
 An import binding may be either a string recipe path/name or an object with:
 
-- `from`: recipe path or bare name. Import paths support static load-time placeholders: `{repo}` expands to the directory above the active recipe root, and `{agent}` expands to the pi agent directory. For a packaged recipe in `<repo>/recipes/name.json`, `{repo}/recipes/other.json` resolves to a sibling packaged recipe. For a user recipe in `~/.pi/agent/recipes/name.json`, `{repo}` and `{agent}` both resolve to `~/.pi/agent`.
+- `from`: recipe path or bare recipe name. Import paths support static load-time placeholders: `{repo}` expands to the directory above the active recipe root, and `{agent}` expands to the pi agent directory. For a packaged recipe in `<repo>/recipes/name.json`, `{repo}/recipes/other.json` resolves to a sibling packaged recipe. For a user recipe in `~/.pi/agent/recipes/name.json`, `{repo}` and `{agent}` both resolve to `~/.pi/agent`. Bare names such as `utility-package-summary` resolve by recipe priority: first `~/.pi/agent/recipes`, then the importing recipe's directory, then the packaged standard library. This makes packaged recipes easy to reuse while preserving user/ad hoc overrides by filename identity.
 - `defaults`: extra default values exposed through the import.
 - `values`: explicit values for embedding that imported recipe.
 
 A template node of `{ "name": "alias" }` is replaced with the imported recipe's command-template graph. Imported recipe defaults are merged with import `defaults`, import `values`, node `defaults`, and node `values`; later layers win. This lets a parent recipe embed a reusable recipe in a sequence or `parallel: true` branch without inventing a workflow language.
 
-Async composition stays explicit: importing a recipe reuses its command-template-shaped definition. It does not start a nested async run. Put `async: true` on the parent recipe when the combined imported graph should run detached as one run with one state dir. For agent-callable fanout, prefer public inputs such as `prompts:array` plus `repeat: "{prompts.length}"`, then select each branch value with `{prompts[index]}` instead of baking concrete prompts or file names into the reusable recipe.
+Async composition stays explicit: importing a recipe reuses its command-template-shaped definition. It does not start a nested async run. Put `async: true` on the parent recipe when the combined imported graph should run detached as one run with one state dir. Ephemeral coordinator recipes may declare `retire_when: "children_terminal"` as an opt-in lifecycle hint for future graceful retirement handling; persistent services and implementer loops should omit it. For agent-callable fanout, prefer public inputs such as `prompts:array` plus `repeat: "{prompts.length}"`, then select each branch value with `{prompts[index]}` instead of baking concrete prompts or file names into the reusable recipe.
 
 ```json
 {
-  "name": "parallel-review",
   "async": true,
   "imports": {
     "review": "review-one.json"
@@ -301,6 +296,6 @@ Nested object keys are dot-separated. Import references are resolved before norm
 
 ## Recipe Shape
 
-Use `name` for an explicit recipe id, rely on the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
+Use the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
 
 If a proposed recipe needs a scheduler, queue daemon, `goto`, or custom workflow syntax, stop. Keep the recipe as saved command-template JSON and put policy in the registered tool, script, or caller.

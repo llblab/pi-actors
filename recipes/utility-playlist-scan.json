@@ -1,5 +1,4 @@
 {
-  "name": "utility-playlist-scan",
   "args": [
     "source_dir:path",
     "max_depth:int"

@@ -1,5 +1,4 @@
 {
-  "name": "utility-run-ops-snapshot",
   "args": [
     "repo:path",
     "state_root:path",

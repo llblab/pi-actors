@@ -4,12 +4,13 @@
  * Owns generic durable JSON file writes shared by registry config and async run state.
  */
 
+import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export function writeJsonAtomic(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
-  const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const tempPath = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
     renameSync(tempPath, path);

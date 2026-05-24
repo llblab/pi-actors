@@ -259,6 +259,35 @@ test("Registered tool execution repeats template nodes", async () => {
   assert.equal(result.details.branches?.length, 3);
 });
 
+test("Registered tool execution rejects excessive parallel fanout", async () => {
+  const cfg: RegisteredTool = {
+    args: [],
+    defaults: {},
+    description: "fanout cap test",
+    name: "fanout-cap",
+    template: {
+      parallel: true,
+      repeat: 65,
+      template: `${process.execPath} -e "console.log('x')"`,
+    },
+  };
+  await assert.rejects(
+    () =>
+      executeRegisteredTool(
+        cfg,
+        {},
+        async () => ({
+          code: 0,
+          killed: false,
+          stderr: "",
+          stdout: "",
+        }),
+        process.cwd(),
+      ),
+    /parallel fanout 65 exceeds limit 64/,
+  );
+});
+
 test("Registered tool execution repeats template nodes from array length", async () => {
   const result = await executeRegisteredTool(
     {

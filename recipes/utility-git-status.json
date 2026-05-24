@@ -1,5 +1,4 @@
 {
-  "name": "utility-git-status",
   "args": [
     "repo:path"
   ],

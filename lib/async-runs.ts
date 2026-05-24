@@ -32,6 +32,8 @@ import * as Paths from "./paths.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as RecipeUsage from "./recipe-usage.ts";
 
+const START_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
+
 export interface AsyncRunStartParams {
   async?: boolean;
   file?: string;
@@ -51,6 +53,7 @@ export interface AsyncRunStartParams {
   output?: string;
   artifacts?: Record<string, string>;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
+  retire_when?: "children_terminal";
   retry?: number | string;
   failure?: CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
@@ -104,6 +107,7 @@ export interface AsyncRunMeta {
   values: Record<string, unknown>;
   artifacts?: Record<string, string>;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
+  retire_when?: "children_terminal";
 }
 
 const DEFAULT_STATE_ROOT = Paths.getRunStateRoot();
@@ -167,6 +171,17 @@ function resolveRunTemplate(params: AsyncRunStartParams): {
 
 function resolveStateDir(params: AsyncRunStartParams, run: string): string {
   return resolve(params.state_dir || join(DEFAULT_STATE_ROOT, run));
+}
+
+function assertNoActiveRunState(stateDir: string): void {
+  const meta = readJson(join(stateDir, "run.json"));
+  if (!meta) return;
+  const pid = Number(meta.pid || 0);
+  const cwd = String(meta.cwd ?? "");
+  if (!pid || !isAlive(pid) || !pidMatchesRun(pid, cwd, stateDir)) return;
+  throw new Error(
+    `Run state already has an active owned process: ${String(meta.run ?? stateDir)}. Stop it before reusing the same run_id or state_dir.`,
+  );
 }
 
 function resolveRecipeFile(file: string): string {
@@ -277,6 +292,39 @@ function getInterruptedRunStatus(
   return undefined;
 }
 
+function acquireStateStartLock(stateDir: string): () => void {
+  const lockDir = join(stateDir, ".start.lock");
+  try {
+    mkdirSync(lockDir);
+    writeFileSync(
+      join(lockDir, "owner.json"),
+      `${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    try {
+      const stat = statSync(lockDir);
+      if (Date.now() - stat.mtimeMs > START_LOCK_MAX_AGE_MS) {
+        rmSync(lockDir, { recursive: true, force: true });
+        mkdirSync(lockDir);
+        writeFileSync(
+          join(lockDir, "owner.json"),
+          `${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString(), recovered: true })}\n`,
+          "utf8",
+        );
+        return () => rmSync(lockDir, { recursive: true, force: true });
+      }
+    } catch {
+      // Keep the original lock acquisition error below.
+    }
+    throw new Error(
+      `Run state is already being started: ${stateDir}. Retry after the current start finishes.`,
+      { cause: error },
+    );
+  }
+  return () => rmSync(lockDir, { recursive: true, force: true });
+}
+
 function prepareStateDirForStart(stateDir: string): void {
   const existing = readJson(join(stateDir, "run.json"));
   const existingPid = Number(existing?.pid || 0);
@@ -316,8 +364,12 @@ export function startRun(
   const resolved = resolveRunTemplate(startParams);
   const run = safeRunId(startParams.run_id);
   const stateDir = resolveStateDir(startParams, run);
+  assertNoActiveRunState(stateDir);
   mkdirSync(stateDir, { recursive: true });
-  prepareStateDirForStart(stateDir);
+  const releaseStartLock = acquireStateStartLock(stateDir);
+  try {
+    assertNoActiveRunState(stateDir);
+    prepareStateDirForStart(stateDir);
   const stdout = join(stateDir, "stdout.log");
   const stderr = join(stateDir, "stderr.log");
   const recipeFile = startParams.file
@@ -359,6 +411,9 @@ export function startRun(
     values,
     ...(artifacts ? { artifacts } : {}),
     ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
+    ...(startParams.retire_when === "children_terminal"
+      ? { retire_when: "children_terminal" as const }
+      : {}),
   };
   writeJsonAtomic(join(stateDir, "run.json"), meta);
   const child = spawn(process.execPath, argv, {
@@ -383,6 +438,9 @@ export function startRun(
   );
   child.unref();
   return meta;
+  } finally {
+    releaseStartLock();
+  }
 }
 
 function normalizeRunOutboxDelivery(value: unknown): RunOutboxDelivery {

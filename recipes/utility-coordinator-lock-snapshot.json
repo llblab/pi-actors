@@ -1,5 +1,4 @@
 {
-  "name": "utility-coordinator-lock-snapshot",
   "args": [
     "repo:path",
     "state_dir:path",

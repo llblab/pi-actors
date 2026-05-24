@@ -1,5 +1,4 @@
 {
-  "name": "subagent-task-card",
   "async": true,
   "args": [
     "goal:string",

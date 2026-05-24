@@ -1,5 +1,4 @@
 {
-  "name": "subagent-followup",
   "async": true,
   "args": [
     "checkpoint:string",

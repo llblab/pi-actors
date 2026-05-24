@@ -10,8 +10,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  countRunningSubagents,
   detectRunOutboxEvents,
   detectRunTransitions,
+  findRunRetirementCandidates,
+  pruneRunObservationState,
   formatRunOutboxMessage,
   formatRunTransitionMessage,
   getRunOutboxNotificationType,
@@ -32,6 +35,7 @@ async function writeRun(
   failures: unknown[] = [],
   activeSubagents = 0,
   ownerId?: string,
+  retireWhen?: string,
 ): Promise<void> {
   const dir = join(root, run);
   await mkdir(dir, { recursive: true });
@@ -42,6 +46,7 @@ async function writeRun(
       cwd: process.cwd(),
       run,
       ...(ownerId ? { ownerId } : {}),
+      ...(retireWhen ? { retire_when: retireWhen } : {}),
       pid: status === "running" ? process.pid : 999999999,
       state_dir: dir,
     }),
@@ -284,6 +289,40 @@ test("Run observability suppresses duplicate handled terminal transitions", () =
   assert.equal(shouldSendRunTransitionFollowUp(done), true);
 });
 
+test("Run observability prunes terminal and stale map entries", () => {
+  const statuses = new Map([
+    ["done-run", "done" as const],
+    ["missing-run", "running" as const],
+    ["live-run", "running" as const],
+  ]);
+  const lineCounts = new Map([
+    ["/tmp/done", 3],
+    ["/tmp/missing", 4],
+    ["/tmp/live", 5],
+  ]);
+  pruneRunObservationState(
+    statuses,
+    lineCounts,
+    {
+      cancelled: 0,
+      done: 1,
+      exited: 0,
+      failed: 0,
+      killed: 0,
+      running: 1,
+      runningSubagents: 1,
+      runs: [
+        { run: "done-run", stateDir: "/tmp/done", status: "done" },
+        { run: "live-run", stateDir: "/tmp/live", status: "running" },
+      ],
+      total: 2,
+    },
+    ["done-run"],
+  );
+  assert.deepEqual([...statuses.keys()], ["live-run"]);
+  assert.deepEqual([...lineCounts.keys()], ["/tmp/live"]);
+});
+
 test("Run observability renders animated subagent triangles", () => {
   assert.equal(renderSubagentStatus(0), undefined);
   assert.equal(renderSubagentStatus(1, 0), "▶");
@@ -309,6 +348,16 @@ test("Run observability counts active parallel branches", async () => {
   }
 });
 
+test("Run observability caches proc descendant scans", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
+  try {
+    await writeRun(root, "alpha", "running", [], 0);
+    assert.equal(countRunningSubagents(root), countRunningSubagents(root));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Run observability keeps at least one triangle per running async run", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
@@ -319,6 +368,20 @@ test("Run observability keeps at least one triangle per running async run", asyn
     assert.equal(summary.running, 3);
     assert.equal(summary.runningSubagents, 4);
     assert.equal(renderRunStatus(summary, 1), "▷ ▶ ▷ ▷");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability finds opt-in retirement candidates", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
+  try {
+    await writeRun(root, "coordinator", "running", [], 0, undefined, "children_terminal");
+    await writeRun(root, "busy", "running", [], 2, undefined, "children_terminal");
+    await writeRun(root, "service", "running", [], 0);
+    await writeRun(root, "done", "done", [], 0, undefined, "children_terminal");
+    const candidates = findRunRetirementCandidates(summarizeRuns(root));
+    assert.deepEqual(candidates.map((item) => item.run), ["coordinator"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

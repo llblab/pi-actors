@@ -4,7 +4,7 @@
  * Owns detection, loading, and recipe-layer expansion for template recipe files
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 
@@ -14,6 +14,9 @@ import type {
 } from "./command-templates.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import * as Paths from "./paths.ts";
+
+const MAX_RECIPE_FILE_BYTES = 1024 * 1024;
+const MAX_RECIPE_IMPORT_DEPTH = 32;
 
 export interface TemplateRecipeImportBinding {
   from?: string;
@@ -31,7 +34,6 @@ export interface TemplateRecipeMailbox {
 export interface TemplateRecipeDefinition {
   name?: string;
   description?: string;
-  tool?: boolean;
   disabled?: boolean;
   imports?: Record<string, TemplateRecipeImport>;
   template: CommandTemplateValue;
@@ -45,6 +47,7 @@ export interface TemplateRecipeDefinition {
   output?: string;
   artifacts?: Record<string, string>;
   mailbox?: TemplateRecipeMailbox;
+  retire_when?: "children_terminal";
   retry?: number | string;
   failure?: CommandTemplates.CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
@@ -86,6 +89,28 @@ export function resolveRecipePath(
     recipeRoot,
     expanded.endsWith(".json") ? expanded : `${expanded}.json`,
   );
+}
+
+function isBareRecipeName(value: string): boolean {
+  const trimmed = value.trim();
+  return Boolean(trimmed) && !trimmed.includes("/") && !trimmed.startsWith("~") && !trimmed.includes("{");
+}
+
+function recipeNameFile(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.endsWith(".json") ? trimmed : `${trimmed}.json`;
+}
+
+function resolveRecipeImportPath(value: string, currentRecipeRoot: string): string {
+  if (!isBareRecipeName(value)) return resolveRecipePath(value, currentRecipeRoot);
+  const file = recipeNameFile(value);
+  const roots = [
+    Paths.getRecipeRoot(),
+    currentRecipeRoot,
+    Paths.getPackagedRecipeRoot(),
+  ];
+  const candidates = [...new Set(roots.map((root) => resolve(root, file)))];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
 }
 
 export function getRecipePath(
@@ -197,6 +222,12 @@ function readRawRecipeConfig(
   path: string,
 ): Record<string, unknown> | undefined {
   if (!existsSync(path)) return undefined;
+  const size = statSync(path).size;
+  if (size > MAX_RECIPE_FILE_BYTES) {
+    throw new Error(
+      `Recipe file exceeds size limit ${MAX_RECIPE_FILE_BYTES} bytes: ${path}`,
+    );
+  }
   try {
     const raw = JSON.parse(readFileSync(path, "utf8")) as Record<
       string,
@@ -471,11 +502,16 @@ export function readResolvedRecipeConfig(
   if (stack.includes(path)) {
     throw new Error(`Cyclic recipe import: ${[...stack, path].join(" -> ")}`);
   }
+  if (stack.length >= MAX_RECIPE_IMPORT_DEPTH) {
+    throw new Error(
+      `Recipe import depth exceeds limit ${MAX_RECIPE_IMPORT_DEPTH}: ${[...stack, path].join(" -> ")}`,
+    );
+  }
   const raw = readRawRecipeConfig(path);
   if (!raw || !Object.hasOwn(raw, "template")) return undefined;
   const imports: Record<string, ImportedRecipe> = {};
   for (const [alias, binding] of Object.entries(getRecipeImports(raw))) {
-    const importPath = resolveRecipePath(getImportFrom(binding), dirname(path));
+    const importPath = resolveRecipeImportPath(getImportFrom(binding), dirname(path));
     const config = readResolvedRecipeConfig(importPath, [...stack, path]);
     if (!config) throw new Error(`Recipe import not found: ${alias}`);
     const bindingDefaults =
@@ -499,16 +535,10 @@ export function readResolvedRecipeConfig(
   if (!template) return undefined;
   const expandedTemplate = expandImportNodes(template, imports);
   return {
-    name:
-      typeof substituted.name === "string"
-        ? substituted.name
-        : getRecipeIdFromPath(path),
+    name: getRecipeIdFromPath(path),
     ...(typeof substituted.description === "string" &&
     substituted.description.trim()
       ? { description: substituted.description.trim() }
-      : {}),
-    ...(typeof substituted.tool === "boolean"
-      ? { tool: substituted.tool }
       : {}),
     ...(typeof substituted.disabled === "boolean"
       ? { disabled: substituted.disabled }
@@ -581,6 +611,9 @@ export function readResolvedRecipeConfig(
               : {}),
           },
         }
+      : {}),
+    ...(substituted.retire_when === "children_terminal"
+      ? { retire_when: "children_terminal" as const }
       : {}),
     ...(typeof substituted.retry === "number" ||
     typeof substituted.retry === "string"

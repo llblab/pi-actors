@@ -1,5 +1,4 @@
 {
-  "name": "lens-swarm",
   "description": "General-purpose multi-lens review swarm. Launches independent reviewers by lens, then verifies, merges, judges, and normalizes the result.",
   "async": true,
   "imports": {

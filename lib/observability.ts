@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
@@ -26,9 +26,12 @@ export interface RunObservation {
   failures?: number;
   ownerId?: string;
   artifacts?: Record<string, string>;
+  launchSource?: AsyncRuns.AsyncRunLaunchSource;
+  recipeFile?: string;
   terminalHandled?: boolean;
   retireWhen?: string;
   run: string;
+  tool?: string;
   stateDir?: string;
   status: RunObservedStatus;
   updatedAt?: string;
@@ -57,8 +60,11 @@ export interface RunTransition {
   run: string;
   stateDir?: string;
   artifacts?: Record<string, string>;
+  launchSource?: AsyncRuns.AsyncRunLaunchSource;
+  recipeFile?: string;
   terminalHandled?: boolean;
   to: RunObservedStatus;
+  tool?: string;
 }
 
 export interface RunOutboxEvent {
@@ -132,6 +138,12 @@ function observeRun(stateDir: string): RunObservation | undefined {
       !Array.isArray(status.artifacts)
         ? { artifacts: status.artifacts as Record<string, string> }
         : {}),
+      ...(status.launch_source === "spawn" || status.launch_source === "tool"
+        ? { launchSource: status.launch_source }
+        : {}),
+      ...(typeof status.recipe_file === "string"
+        ? { recipeFile: status.recipe_file }
+        : {}),
       ...(status.terminal_handled ? { terminalHandled: true } : {}),
       ...(typeof status.retire_when === "string"
         ? { retireWhen: status.retire_when }
@@ -139,6 +151,7 @@ function observeRun(stateDir: string): RunObservation | undefined {
       run,
       stateDir,
       status: status.status as RunObservedStatus,
+      ...(typeof status.tool === "string" ? { tool: status.tool } : {}),
       updatedAt: getUpdatedAt(status),
     };
   } catch {
@@ -365,8 +378,11 @@ export function detectRunTransitions(
         run: run.run,
         ...(run.stateDir ? { stateDir: run.stateDir } : {}),
         ...(run.artifacts ? { artifacts: run.artifacts } : {}),
+        ...(run.launchSource ? { launchSource: run.launchSource } : {}),
+        ...(run.recipeFile ? { recipeFile: run.recipeFile } : {}),
         ...(run.terminalHandled ? { terminalHandled: true } : {}),
         to: run.status,
+        ...(run.tool ? { tool: run.tool } : {}),
       });
     }
     previous.set(run.run, run.status);
@@ -610,11 +626,35 @@ function getRunArtifacts(transition: RunTransition): string[] {
   ];
 }
 
+function isUserRecipeFile(file: string | undefined): boolean {
+  if (!file) return false;
+  const recipeRoot = resolve(Paths.getRecipeRoot());
+  const path = resolve(file);
+  return path === recipeRoot || path.startsWith(`${recipeRoot}/`);
+}
+
+export function shouldSuggestRecipePersistence(
+  transition: RunTransition,
+): boolean {
+  return (
+    transition.to === "done" &&
+    transition.launchSource === "spawn" &&
+    !transition.tool &&
+    !isUserRecipeFile(transition.recipeFile)
+  );
+}
+
+function formatRecipePersistenceSuggestion(transition: RunTransition): string {
+  if (!shouldSuggestRecipePersistence(transition)) return "";
+  return `\nAgent note: this actor was spawned directly and completed successfully. If this pattern looks reusable, ask the operator whether to save it as a durable recipe/tool under ~/.pi/agent/recipes with register_tool. Do not auto-save without confirmation.`;
+}
+
 export function formatRunTransitionMessage(transition: RunTransition): string {
   const artifacts = formatNamedArtifacts(transition.artifacts);
   const runFiles = formatRunFileList(getRunArtifacts(transition));
+  const persistenceSuggestion = formatRecipePersistenceSuggestion(transition);
   if (transition.to === "done")
-    return `Run ${transition.run} completed successfully.${artifacts}${runFiles}\nUse inspect target=run:${transition.run} view=status or view=tail if the result needs inspection.`;
+    return `Run ${transition.run} completed successfully.${artifacts}${runFiles}\nUse inspect target=run:${transition.run} view=status or view=tail if the result needs inspection.${persistenceSuggestion}`;
   if (transition.to === "failed")
     return `Run ${transition.run} failed.${artifacts}${runFiles}\nUse inspect target=run:${transition.run} view=status or view=tail for details.`;
   if (transition.to === "cancelled")

@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.19.2
+  version: 0.19.3
 ---
 
 # Actors (pi-actors)
@@ -63,6 +63,7 @@ Rules:
 
 - Use `file`/`recipe` for saved recipes; bare names resolve under `~/.pi/agent/recipes`.
 - Use inline `template` for one-off experiments; promote useful repeats to recipes.
+- When a directly spawned inline/ad hoc actor completes successfully and the follow-up suggests persistence, offer to save it as a recipe/tool; ask before writing `~/.pi/agent/recipes`.
 - Use stable `as` names when you will inspect or message the actor later.
 - `async: true` on the recipe is the detached run switch.
 

@@ -2,6 +2,63 @@
 
 ## Open Work
 
+### Compiled Extension Entrypoint for Installed Packages
+
+- Priority: High.
+- Goal: Remove the remaining installed-package reliance on a TypeScript extension entrypoint under `node_modules`.
+- Direction:
+  - Verify exactly how the Pi host loads package extension entries from npm installs and whether it applies a custom TypeScript loader or normal Node import semantics.
+  - If normal Node semantics apply, ship a compiled `dist/index.js` entrypoint or dual-entry strategy while preserving source-checkout development ergonomics.
+  - Keep script/runtime entrypoints dist-first as in `0.20.x`; do not reintroduce Node native type stripping for `.ts` files under `node_modules`.
+  - Add installed-package smoke coverage that imports the extension entrypoint through package metadata, not only `scripts/async-runner.mjs` and `scripts/validate-recipe.mjs`.
+- Exit:
+  - An npm-installed `@llblab/pi-actors` package can load its Pi extension entrypoint without `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.
+  - Package metadata, build output, package contents, docs, and installed-package tests agree on the extension entry path.
+
+### Room Append Result Message Count Accuracy
+
+- Priority: High.
+- Goal: Keep immediate room message tool results semantically aligned with room status counts after long timelines.
+- Direction:
+  - Replace `appendRoomMessage` and existing-member `ensureRoomMember` result counts that derive from default-tail `readRoomMessages(...).length` with a true JSONL line count, or explicitly rename any bounded count to a preview count.
+  - Preserve efficient room status reads and existing timeline compaction behavior.
+  - Add regression coverage with more than the default room read limit so append results and `getRoomStatus()` agree.
+- Exit:
+  - Posting message 41+ to a room reports the true current persisted room message count, not the default 40-message preview length.
+
+### Branch Inbox Retention and Transition Scaling
+
+- Priority: Medium.
+- Goal: Keep direct branch message queues reliable for long-lived interactive branch runners without unbounded rewrite amplification.
+- Direction:
+  - Evaluate current whole-file branch inbox status rewrites under realistic long-lived direct-message workloads.
+  - Consider bounded retention, compaction, or append-only transition logs for `queued` / `claimed` / `handled` / `failed` state changes while preserving stable message IDs and exact-once claim semantics.
+  - Keep branch-local inbox append/status mutations lock-guarded and preserve inspector visibility for unread/current-branch filters.
+- Exit:
+  - A documented decision or implementation explains how branch inboxes scale for persistent runners and proves existing direct-message semantics remain compatible.
+
+### Installed Recipe Trust Boundary Hardening
+
+- Priority: Medium.
+- Goal: Keep recipe-library growth local-first without letting operator muscle memory become an accidental sandbox bypass.
+- Direction:
+  - Review packaged recipes, examples, and docs for destructive or external side effects and ensure they require explicit paths, typed args, narrow helper scripts, and clear operator gates.
+  - Keep warnings framed as diagnostics, not a security boundary.
+  - Prefer small audited helper scripts over broad shell templates when recipes touch files, processes, networks, or external services.
+- Exit:
+  - A trust-boundary review confirms packaged recipes and docs preserve the current local-first/not-sandbox-first contract, with any needed hardening captured in tests or docs.
+
+### Direct Branch Message Consumption Semantics
+
+- Priority: Medium.
+- Goal: Make it impossible to misunderstand branch inbox delivery as universal active delivery without a consuming coordinator or runner protocol.
+- Direction:
+  - Audit README, actor-message docs, async-run docs, actors skill, and recipe guidance for branch inbox wording.
+  - Clarify that direct branch messages are queued and become active work only when the relevant coordinator/runner claims, injects, handles, or fails them.
+  - Add or update a bounded smoke scenario that demonstrates queued direct messages, claim/handle transitions, and inspector visibility.
+- Exit:
+  - Public docs and tests show both halves of direct branch delivery: durable branch-local queueing and explicit worker consumption semantics.
+
 ### Actor Rooms, Roster, and Cross-Branch Messaging
 
 - Priority: High.

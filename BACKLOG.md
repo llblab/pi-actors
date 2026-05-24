@@ -35,6 +35,22 @@
 - Exit:
   - Public docs and tests show both halves of direct branch delivery: durable branch-local queueing and explicit worker consumption semantics.
 
+### Markdown-Authored Recipe Format
+
+- Priority: Medium.
+- Goal: Add a human-friendly recipe authoring format that compiles into the existing canonical JSON recipe model without replacing JSON as the abstract syntax tree/source of truth for runtime execution.
+- Direction:
+  - Support `.md` recipe files with YAML frontmatter for machine-readable recipe metadata and fenced executable recipe/template content for the command-template graph.
+  - Treat JSON recipes as the highest-priority canonical format when the same recipe id exists as both `<id>.json` and `<id>.md`; Markdown recipes participate only when no same-id JSON recipe is present at that priority layer.
+  - Do not add a standalone `.yaml` / `.yml` recipe format initially. Authors who want YAML should use Markdown frontmatter so there is always a place for human context, usage notes, rationale, and agent guidance next to the machine-readable shape.
+  - Compile Markdown recipes into the same internal `TemplateRecipeDefinition` / resolved recipe graph used by JSON recipes, preserving imports, defaults, args, mailbox, artifacts, async flags, actor context, and priority/shadowing semantics.
+  - Keep Markdown body prose advisory only: it may feed future recipe-context bundles or docs, but runtime behavior must come from frontmatter plus explicitly fenced template/recipe blocks.
+  - Add validation and discovery diagnostics that clearly identify whether a recipe came from JSON or Markdown and why a same-id Markdown recipe is shadowed by JSON.
+- Exit:
+  - `spawn`, registered recipe tools, recipe imports, `inspect recipes`, and `scripts/validate-recipe.mjs` can load a Markdown-authored recipe when no same-id JSON recipe shadows it.
+  - Same-id JSON and Markdown files deterministically choose JSON, and diagnostics explain the shadowing.
+  - Docs and examples describe JSON as the canonical precise format and Markdown as the literate authoring format.
+
 ### Actor Rooms, Roster, and Cross-Branch Messaging
 
 - Priority: High.

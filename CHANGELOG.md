@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.3: Spawn Recipe Persistence Suggestions
+
+- `[Observability]` Added semi-active recipe persistence suggestions for successful direct `spawn` runs. Inline/ad hoc spawned actors now record `launch_source: "spawn"`, and their successful terminal follow-up asks the agent to offer saving the reusable pattern as a durable recipe/tool under `~/.pi/agent/recipes` without auto-saving.
+- `[Runtime]` Recorded `launch_source` metadata for actor starts so observability can distinguish direct spawns from registered recipe-tool runs and avoid prompting for actors already backed by user-owned recipes.
+- `[Docs/Prompt]` Updated onboarding prompt guidance, README, async-run docs, and project context around ask-first recipe persistence after successful transient actors.
+- `[Tests]` Added regression coverage for successful transient spawn suggestions and suppression when the run already came from a saved user recipe.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.3` for the hotfix release.
+
 ## 0.19.2: Actor Recipe Context Bundle
 
 - `[Actor Context]` Added a recipe context bundle for file-backed async recipes. The runtime now collects the raw authored entry recipe and resolved imports into deterministic JSONL records with filename-derived `name`, import alias/path metadata, role/depth, and raw recipe JSON so spawned LLM actors can understand the workflow composition behind their prompt.

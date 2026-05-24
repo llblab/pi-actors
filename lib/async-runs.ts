@@ -34,9 +34,12 @@ import * as RecipeUsage from "./recipe-usage.ts";
 
 const START_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
 
+export type AsyncRunLaunchSource = "spawn" | "tool";
+
 export interface AsyncRunStartParams {
   async?: boolean;
   file?: string;
+  launch_source?: AsyncRunLaunchSource;
   name?: string;
   ownerId?: string;
   run_id?: string;
@@ -96,6 +99,7 @@ export interface AsyncRunMeta {
   argv: string[];
   createdAt: string;
   cwd: string;
+  launch_source?: AsyncRunLaunchSource;
   ownerId?: string;
   pid: number;
   recipe?: string;
@@ -414,6 +418,7 @@ export function startRun(
     argv: [process.execPath, ...argv],
     createdAt: new Date().toISOString(),
     cwd,
+    ...(startParams.launch_source ? { launch_source: startParams.launch_source } : {}),
     ...(startParams.ownerId ? { ownerId: startParams.ownerId } : {}),
     pid: 0,
     ...(recipe ? { recipe } : {}),

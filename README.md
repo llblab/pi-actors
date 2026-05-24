@@ -239,7 +239,7 @@ Packaged recipes are building blocks. Copy them into `~/.pi/agent/recipes/` or r
 
 Use a foreground registered tool when the work is short, bounded, and does not need lifecycle.
 
-Use an async recipe or `spawn` when the work is long-running, service-like, parallel, agentic, artifact-producing, or needs later control.
+Use an async recipe or `spawn` when the work is long-running, service-like, parallel, agentic, artifact-producing, or needs later control. If a directly spawned inline/ad hoc actor completes successfully, pi-actors sends the launching agent a follow-up note to offer saving that pattern as a durable recipe/tool under `~/.pi/agent/recipes`; the agent should ask first and never auto-save.
 
 Use `room:<run>` when multiple actors in the same run need shared context, roster discovery, or group-visible progress.
 

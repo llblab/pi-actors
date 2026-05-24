@@ -83,7 +83,7 @@ Use `run_id` on async recipe tools or `as: "run:<id>"` on `spawn` when the calle
 
 Use ordinary files under the extension temp directory so status tools stay simple and inspectable:
 
-- `run.json`: pid, optional source metadata (`tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, mailbox metadata, created time, and state dir.
+- `run.json`: pid, optional source metadata (`launch_source`, `tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, mailbox metadata, created time, and state dir.
 - `communication.json`: compact actor communication snapshot with self/root/parent, default-room, member, and contact hints for room-aware scripts and agents.
 - `progress.json`: phase, active command count, completed count, failures, and updated time.
 - `events.jsonl`: append-only implementation lifecycle log.
@@ -124,7 +124,7 @@ The core loop is:
    { "recipe": "music-player.json", "as": "run:music" }
    ```
 
-2. Let terminal completion, `command.done`, and script-authored follow-up messages reach the launching coordinator automatically.
+2. Let terminal completion, `command.done`, and script-authored follow-up messages reach the launching coordinator automatically. When a directly spawned inline/ad hoc actor completes successfully, the coordinator follow-up tells the agent to offer recipe persistence only as a question to the operator; it must not auto-save.
 
 3. Respond with explicit run-local messages when needed:
 

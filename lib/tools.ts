@@ -578,6 +578,7 @@ export function createSpawnToolDefinition<
               : typeof input.recipe === "string"
                 ? input.recipe
                 : undefined,
+          launch_source: "spawn",
           ownerId: getRunOwnerId(ctx),
           run_id: runId,
           state_dir:
@@ -1301,6 +1302,7 @@ export function createRuntimeToolDefinition(
           const meta = AsyncRuns.startRun(
             {
               ...base,
+              launch_source: "tool",
               ownerId: getRunOwnerId(ctx),
               run_id: runId,
               tool: cfg.name,

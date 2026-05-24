@@ -25,8 +25,10 @@ import {
   shouldNotifyRunTransition,
   shouldSendRunOutboxFollowUp,
   shouldSendRunTransitionFollowUp,
+  shouldSuggestRecipePersistence,
   summarizeRuns,
 } from "../lib/observability.ts";
+import * as Paths from "../lib/paths.ts";
 
 async function writeRun(
   root: string,
@@ -36,6 +38,9 @@ async function writeRun(
   activeSubagents = 0,
   ownerId?: string,
   retireWhen?: string,
+  launchSource?: "spawn" | "tool",
+  recipeFile?: string,
+  tool?: string,
 ): Promise<void> {
   const dir = join(root, run);
   await mkdir(dir, { recursive: true });
@@ -47,6 +52,9 @@ async function writeRun(
       run,
       ...(ownerId ? { ownerId } : {}),
       ...(retireWhen ? { retire_when: retireWhen } : {}),
+      ...(launchSource ? { launch_source: launchSource } : {}),
+      ...(recipeFile ? { recipe_file: recipeFile } : {}),
+      ...(tool ? { tool } : {}),
       pid: status === "running" ? process.pid : 999999999,
       state_dir: dir,
     }),
@@ -183,6 +191,34 @@ test("Run observability detects terminal transitions", () => {
     "Run review completed successfully.\nArtifacts:\n- Base: `artifacts`\n- Files: `report.md`\nUse inspect target=run:review view=status or view=tail if the result needs inspection.",
   );
   assert.equal(previous.get("review"), "done");
+});
+
+test("Run observability suggests persistence for successful transient spawns", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
+  try {
+    await writeRun(root, "scratch", "running");
+    const previous = new Map([["scratch", "running" as const]]);
+    await writeRun(root, "scratch", "done", [], 0, undefined, undefined, "spawn");
+    const [transition] = detectRunTransitions(previous, summarizeRuns(root));
+    assert.equal(shouldSuggestRecipePersistence(transition), true);
+    assert.match(
+      formatRunTransitionMessage(transition),
+      /ask the operator whether to save it as a durable recipe\/tool/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability does not suggest persistence for saved recipe spawns", () => {
+  const transition = {
+    from: "running" as const,
+    launchSource: "spawn" as const,
+    recipeFile: join(Paths.getRecipeRoot(), "saved.json"),
+    run: "saved",
+    to: "done" as const,
+  };
+  assert.equal(shouldSuggestRecipePersistence(transition), false);
 });
 
 test("Run observability suppresses terminal follow-up after handled stop messages", () => {

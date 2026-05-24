@@ -97,23 +97,47 @@ test("Actor inspector TUI renders roster panel summaries", async () => {
     const members = readActorInspectorRoster(root, "demo");
     assert.equal(members.length, 2);
     const line = renderInspectorRosterLine(members, 48);
-    assert.match(line ?? "", /roster 2: implementer\/Builder/);
+    assert.match(line ?? "", /roster 2: Builder\/implementer/);
     assert.equal(line?.startsWith(" "), true);
     assert.equal(line?.endsWith(" "), true);
     assert.equal(visibleWidth(line ?? ""), 48);
     const panel = renderInspectorRosterPanel(members, 120);
     assert.equal(panel?.length, 1);
-    assert.match(panel?.[0] ?? "", /roster 2: implementer\/Builder, review-lens\/reviewer/);
+    assert.match(panel?.[0] ?? "", /roster 2: Builder\/implementer, reviewer\/review-lens/);
     assert.equal(panel?.[0]?.startsWith(" "), true);
     assert.equal(panel?.[0]?.endsWith(" "), true);
     assert.equal(panel?.every((item) => visibleWidth(item) <= 120), true);
+    const roleSummary = renderInspectorRosterPanel(
+      [
+        {
+          address: "branch:demo/writer",
+          display: "writer",
+          role: "software implementer; writes the clean, robust Python timer script",
+          status: "present",
+        },
+      ],
+      120,
+    );
+    assert.match(roleSummary?.[0] ?? "", /writer\/software-implementer/);
+    assert.doesNotMatch(roleSummary?.[0] ?? "", /writes-the-clean/);
+    const runSummary = renderInspectorRosterPanel(
+      [
+        {
+          address: "run:demo",
+          role: "run",
+          status: "present",
+        },
+      ],
+      120,
+    );
+    assert.match(runSummary?.[0] ?? "", /run\/demo/);
     const styled = renderInspectorRosterPanel(
       [members[0], { ...members[1], status: "left" }],
       120,
       { muted: (text) => `<muted>${text}</muted>`, target: (text) => `<target>${text}</target>` },
     );
-    assert.match(styled?.[0] ?? "", /<target>implementer\/Builder<\/target>/);
-    assert.match(styled?.[0] ?? "", /<muted>review-lens\/reviewer<\/muted>/);
+    assert.match(styled?.[0] ?? "", /<target>Builder\/implementer<\/target>/);
+    assert.match(styled?.[0] ?? "", /<muted>reviewer\/review-lens<\/muted>/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -216,6 +240,10 @@ test("Actor inspector TUI keeps noisy room previews bounded per run", async () =
     assert.deepEqual(
       previews.map((preview) => preview.body_preview),
       ["room 4", "room 5", "private"],
+    );
+    assert.deepEqual(
+      previews.map((preview) => preview.sequence),
+      [4, 5, 6],
     );
   } finally {
     await rm(root, { recursive: true, force: true });

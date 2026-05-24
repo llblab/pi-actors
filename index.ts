@@ -54,7 +54,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     | ActorInspectorTui.ActorInspectorPreview["channel"][]
     | undefined;
   let actorInspectorMention: string | undefined;
-  const actorInspectorRoomLimitPerRun = 6;
+  let actorInspectorRoomLimitPerRun = 12;
   let selectedInspectorSequence: number | undefined;
   let recipeWatcherFailureNotified = false;
   const getRunOwnerId = (ctx: ExtensionContext): string =>
@@ -307,6 +307,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
           return;
         }
         actorInspectorRows = rows;
+        actorInspectorRoomLimitPerRun = rows;
         selectedInspectorSequence = undefined;
         communicationWidgetVisible = true;
         updateRunUi(ctx);
@@ -324,6 +325,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
         communicationWidgetVisible = false;
       } else {
         actorInspectorRows = 12;
+        actorInspectorRoomLimitPerRun = 12;
         communicationWidgetVisible = true;
       }
       updateRunUi(ctx);

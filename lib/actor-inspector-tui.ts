@@ -164,7 +164,6 @@ function readRoomDisplayNames(stateDir: string, room: string): Record<string, st
 function readRoomPreviews(
   run: string,
   stateDir: string,
-  limitPerRun?: number,
 ): ActorInspectorPreview[] {
   const roomsDir = path.join(stateDir, "rooms");
   try {
@@ -186,8 +185,7 @@ function readRoomPreviews(
             Boolean(preview),
           );
       });
-    const limit = Number.isFinite(limitPerRun) ? Math.max(0, Number(limitPerRun)) : undefined;
-    return limit === undefined ? previews : previews.slice(-limit);
+    return previews;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     return [];
@@ -259,6 +257,31 @@ function matchesPreviewFilter(
   ].some((value) => value?.toLowerCase().includes(mention));
 }
 
+function limitRoomPreviewsPerRun(
+  previews: ActorInspectorPreview[],
+  limitPerRun?: number,
+): ActorInspectorPreview[] {
+  if (!Number.isFinite(limitPerRun)) return previews;
+  const limit = Math.max(0, Number(limitPerRun));
+  const remainingByRun = new Map<string, number>();
+  const keep = new Set<ActorInspectorPreview>();
+  for (let index = previews.length - 1; index >= 0; index -= 1) {
+    const preview = previews[index];
+    if (preview.channel !== "room") {
+      keep.add(preview);
+      continue;
+    }
+    const remaining = remainingByRun.get(preview.run) ?? limit;
+    if (remaining <= 0) {
+      remainingByRun.set(preview.run, 0);
+      continue;
+    }
+    keep.add(preview);
+    remainingByRun.set(preview.run, remaining - 1);
+  }
+  return previews.filter((preview) => keep.has(preview));
+}
+
 export function readActorInspectorPreviews(
   stateRoot = Paths.getRunStateRoot(),
   limit = 8,
@@ -272,7 +295,7 @@ export function readActorInspectorPreviews(
         const stateDir = path.join(stateRoot, entry.name);
         if (!matchesOwner(stateDir, options.ownerId)) return [];
         return [
-          ...readRoomPreviews(entry.name, stateDir, options.roomLimitPerRun),
+          ...readRoomPreviews(entry.name, stateDir),
           ...readInboxPreviews(entry.name, stateDir),
           ...readOutboxPreviews(entry.name, stateDir),
         ];
@@ -282,15 +305,17 @@ export function readActorInspectorPreviews(
     const currentRun = options.currentRunOnly
       ? previews.at(-1)?.run
       : undefined;
-    return previews
+    const sequenced = previews
       .filter((preview) => !currentRun || preview.run === currentRun)
       .filter((preview) => matchesPreviewFilter(preview, options))
       .map((preview, index) => ({
         ...preview,
         sequence: index + 1,
         stripe: index % 2 === 1,
-      }))
-      .slice(-Math.max(1, limit));
+      }));
+    return limitRoomPreviewsPerRun(sequenced, options.roomLimitPerRun).slice(
+      -Math.max(1, limit),
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     return [];
@@ -505,7 +530,8 @@ export function readActorInspectorRoster(
 }
 
 function rosterRoleText(role: string | undefined): string | undefined {
-  const cleaned = role?.replaceAll(/\s*\([^)]*\)\s*$/g, "").trim().toLowerCase();
+  const roleLabel = role?.split(";")[0] ?? "";
+  const cleaned = roleLabel.replaceAll(/\s*\([^)]*\)\s*$/g, "").trim().toLowerCase();
   if (!cleaned || cleaned === "actor") return undefined;
   return cleaned.replaceAll(/\s+/g, "-");
 }
@@ -513,7 +539,8 @@ function rosterRoleText(role: string | undefined): string | undefined {
 function rosterMemberText(member: ActorInspectorRosterMember): string {
   const name = member.display || actorName(member.address);
   const role = rosterRoleText(member.role);
-  return role ? `${role}/${name}` : name;
+  if (role === "run") return `run/${name}`;
+  return role ? `${name}/${role}` : name;
 }
 
 function isRosterMemberActive(member: ActorInspectorRosterMember): boolean {

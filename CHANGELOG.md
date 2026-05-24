@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.1: Actor Inspector Hotfix
+
+- `[Actor Inspector]` Fixed the live communications roster and row numbering controls after real swarm usage. `/actors-inspector-toggle <rows>` now keeps the room preview cap aligned with the requested row count, current-run sequence numbers are assigned before row limiting so the visible tail keeps its full-log positions, and roster role labels use concise `name/role` text instead of slugifying full role descriptions.
+- `[Coordinator]` Preserved explicit `--thinking off` forwarding in `scripts/coordinator.mjs` so packaged room-swarm launches keep caller-selected thinking policy instead of silently relying on CLI defaults.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.1` for the hotfix release.
+
 ## 0.19.0: Modular Coordination And Active Mailboxes
 
 - `[Coordination]` Decoupled the overloaded `coordinator-locker.mjs` script into two completely independent, single-purpose components: a dedicated stateful `locker.mjs` (recipes `locker.json` and `coordinator-locker.json`) that manages resource locking, task queueing, and lease expirations; and a powerful, modular `coordinator.mjs` orchestrator. The coordinator manages execution lifecycles and process pools, supporting four distinct pluggable strategies via `--mode`: `consensus` (chat-swarm), `pipeline` (sequential), `fanout` (parallel review), and `pool` (worker pool pulling from locker).

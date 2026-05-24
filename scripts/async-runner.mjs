@@ -11,18 +11,42 @@
  * Keep orchestration policy out of this file.
  */
 
-import { appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, cpSync, existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const stateDir = process.argv[2];
 if (!stateDir) {
   console.error("missing state dir");
   process.exit(1);
 }
-const { executeRegisteredTool } = await import("../lib/execution.ts");
-const { execCommandTemplate } = await import("../lib/command-templates.ts");
-const { appendRecipeContextToPiArgs } = await import("../lib/actor-recipe-context.ts");
-const { writeJsonAtomic } = await import("../lib/file-state.ts");
+
+function scriptFile() {
+  return fileURLToPath(import.meta.url);
+}
+
+function isUnderNodeModules(file) {
+  return /[/\\]node_modules[/\\]/.test(file);
+}
+
+function prepareTypeStripImportRoot() {
+  const packageRoot = dirname(dirname(scriptFile()));
+  const sourceLib = join(packageRoot, "lib");
+  if (!isUnderNodeModules(packageRoot)) return sourceLib;
+  const copiedLib = join(stateDir, ".type-strip-lib");
+  if (!existsSync(copiedLib)) cpSync(sourceLib, copiedLib, { recursive: true });
+  return copiedLib;
+}
+
+const typeStripImportRoot = prepareTypeStripImportRoot();
+async function importLib(name) {
+  return import(pathToFileURL(join(typeStripImportRoot, `${name}.ts`)).href);
+}
+
+const { executeRegisteredTool } = await importLib("execution");
+const { execCommandTemplate } = await importLib("command-templates");
+const { appendRecipeContextToPiArgs } = await importLib("actor-recipe-context");
+const { writeJsonAtomic } = await importLib("file-state");
 const runPath = join(stateDir, "run.json");
 const progressPath = join(stateDir, "progress.json");
 const resultPath = join(stateDir, "result.json");

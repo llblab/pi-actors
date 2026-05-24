@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.11: Installed Async Runner Hotfix
+
+- `[Async Runs]` Fixed installed npm package async recipe launches on Node 22 by avoiding direct runtime imports of raw `.ts` files from under `node_modules` in `scripts/async-runner.mjs`. Installed runners now copy the package `lib` sources into the run state before importing them, keeping Node native type stripping outside the blocked `node_modules` path.
+- `[Scripts]` Applied the same installed-package import guard to `scripts/validate-recipe.mjs`, so the packaged recipe validator works when invoked from an installed `@llblab/pi-actors` package.
+- `[Tests]` Added installed-package script smoke coverage that copies `lib`/`scripts` under a temporary `node_modules/@llblab/pi-actors` path and verifies both async runner execution and recipe validation avoid `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.11` for the hotfix release.
+
 ## 0.19.10: Legacy Branch Message Claim IDs
 
 - `[Branch Messages]` Coordinator claim handling now assigns IDs to older/manual queued branch inbox entries that lack `id`, so injected direct messages can still transition to `handled` or `failed` and do not repeat forever.

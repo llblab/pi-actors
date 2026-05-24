@@ -10,6 +10,7 @@ import { formatFailureOutput, formatOutput, formatToolText } from "./output.ts";
 import * as Schema from "./schema.ts";
 
 export interface ToolExecOptions {
+  actorRecipeContext?: CommandTemplates.CommandTemplateActorRecipeContext;
   cwd?: string;
   signal?: AbortSignal;
   stdin?: string;
@@ -331,6 +332,7 @@ async function executeRetriableTemplateConfig(
   signal: AbortSignal | undefined,
   stdin: string | undefined,
   isRoot: boolean,
+  actorRecipeContext: CommandTemplates.CommandTemplateActorRecipeContext | undefined,
 ): Promise<TemplateExecution> {
   const maxAttempts = normalizeRetry(normalized.retry, {
     ...(inherited.defaults ?? {}),
@@ -358,6 +360,7 @@ async function executeRetriableTemplateConfig(
       signal,
       stdin,
       isRoot,
+      actorRecipeContext,
     );
     mergeExecution(aggregate, executed);
     aggregate.result = executed.result;
@@ -376,6 +379,7 @@ async function executeRetriableTemplateConfig(
       signal,
       executed.result.stdout,
       false,
+      actorRecipeContext,
     );
     mergeExecution(aggregate, recovered);
     if (recovered.result.code === 0) continue;
@@ -403,6 +407,7 @@ async function executeTemplateConfig(
   signal: AbortSignal | undefined,
   stdin: string | undefined,
   isRoot: boolean,
+  inheritedActorRecipeContext: CommandTemplates.CommandTemplateActorRecipeContext | undefined,
 ): Promise<TemplateExecution> {
   const normalized = CommandTemplates.normalizeCommandTemplateConfig(config);
   const normalizedDefaults = CommandTemplates.resolveInheritedDefaultReferences(
@@ -420,6 +425,7 @@ async function executeTemplateConfig(
       ? { defaults: mergeDefaults(inherited.defaults, normalizedDefaults) }
       : {}),
   };
+  const actorRecipeContext = normalized.actorRecipeContext ?? inheritedActorRecipeContext;
   const controlValues = { ...(context.defaults ?? {}), ...params };
   await applyDelay(normalized.delay, controlValues, signal);
   if (
@@ -464,6 +470,7 @@ async function executeTemplateConfig(
       signal,
       stdin,
       isRoot,
+      actorRecipeContext,
     );
   }
   if (
@@ -479,6 +486,7 @@ async function executeTemplateConfig(
       signal,
       stdin,
       isRoot,
+      actorRecipeContext,
     );
   }
   if (
@@ -495,6 +503,7 @@ async function executeTemplateConfig(
       signal,
       stdin,
       false,
+      actorRecipeContext,
     );
   }
   if (!Array.isArray(normalized.template)) {
@@ -506,6 +515,7 @@ async function executeTemplateConfig(
       { emptyMessage: "Tool template produced an empty command." },
     );
     const result = await exec(invocation.command, invocation.args, {
+      ...(actorRecipeContext ? { actorRecipeContext } : {}),
       cwd,
       signal,
       stdin,
@@ -549,6 +559,7 @@ async function executeTemplateConfig(
           signal,
           stdin,
           false,
+          actorRecipeContext,
         ),
       ),
     );
@@ -640,6 +651,7 @@ async function executeTemplateConfig(
       signal,
       nextStdin,
       false,
+      actorRecipeContext,
     );
     branches.push(...executed.branches);
     commands.push(...executed.commands);
@@ -699,6 +711,7 @@ async function executeTemplateSteps(
     signal,
     undefined,
     true,
+    undefined,
   );
 }
 

@@ -57,6 +57,38 @@ test("Registered tool execution expands command and returns formatted payload", 
   assert.equal(result.details.truncated, false);
 });
 
+test("Registered tool execution passes actor recipe context to leaves", async () => {
+  const contexts: unknown[] = [];
+  await executeRegisteredTool(
+    {
+      name: "recipe_context_tool",
+      description: "Run with actor context",
+      template: {
+        actorRecipeContext: { name: "entry", file: "/recipes/entry.json" },
+        template: [
+          "echo entry",
+          {
+            actorRecipeContext: { name: "child", file: "/recipes/child.json" },
+            template: "echo child",
+          },
+        ],
+      },
+      args: [],
+      defaults: {},
+    },
+    {},
+    async (_command, _args, options) => {
+      contexts.push(options?.actorRecipeContext);
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.deepEqual(contexts, [
+    { name: "entry", file: "/recipes/entry.json" },
+    { name: "child", file: "/recipes/child.json" },
+  ]);
+});
+
 test("Registered tool execution normalizes typed runtime values", async () => {
   const calls: string[][] = [];
   await executeRegisteredTool(

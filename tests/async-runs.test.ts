@@ -364,6 +364,68 @@ test("Async runs can start from recipe files with overrides", async () => {
   }
 });
 
+test("Async runs persist recipe context bundles for file-backed recipes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-context-"));
+  const stateDir = join(root, "context-run");
+  const child = join(root, "child.json");
+  const parent = join(root, "parent.json");
+  try {
+    await writeFile(
+      child,
+      JSON.stringify({ template: `${process.execPath} -e "console.log('child')"` }),
+    );
+    await writeFile(
+      parent,
+      JSON.stringify({
+        imports: { child_step: "child.json" },
+        state_dir: stateDir,
+        template: [{ name: "child_step" }],
+      }),
+    );
+    const meta = startRun({ file: parent }, process.cwd());
+    assert.equal(meta.recipe_context_records?.length, 2);
+    assert.deepEqual(
+      meta.recipe_context_records?.map((record) => ({
+        alias: record.alias,
+        name: record.name,
+        role: record.role,
+      })),
+      [
+        { alias: undefined, name: "parent", role: "entry" },
+        { alias: "child_step", name: "child", role: "import" },
+      ],
+    );
+    assert.match(JSON.stringify(meta.template), /actorRecipeContext/);
+    const result = await waitForResult(stateDir);
+    assert.equal(result.code, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async runs allow recipes to opt out of actor recipe context", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-context-off-"));
+  const stateDir = join(root, "context-off-run");
+  const file = join(root, "quiet.json");
+  try {
+    await writeFile(
+      file,
+      JSON.stringify({
+        actor_context: false,
+        state_dir: stateDir,
+        template: `${process.execPath} -e "console.log('quiet')"`,
+      }),
+    );
+    const meta = startRun({ file }, process.cwd());
+    assert.equal(meta.recipe_context_records, undefined);
+    assert.doesNotMatch(JSON.stringify(meta.template), /actorRecipeContext/);
+    const result = await waitForResult(stateDir);
+    assert.equal(result.code, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Recipe files can put command-template flags at the recipe top level", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "top-level-parallel");

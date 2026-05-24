@@ -59,6 +59,7 @@ export interface AsyncRunStartParams {
   recover?: CommandTemplateValue;
   repeat?: number;
   values?: Record<string, unknown>;
+  actor_context?: boolean | string;
   cwd?: string;
 }
 
@@ -107,6 +108,7 @@ export interface AsyncRunMeta {
   values: Record<string, unknown>;
   artifacts?: Record<string, string>;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
+  recipe_context_records?: RecipeReferences.TemplateRecipeContextRecord[];
   retire_when?: "children_terminal";
 }
 
@@ -196,17 +198,25 @@ function isMutableUsageRecipeFile(file: string): boolean {
 
 function readRecipeFile(file: string): AsyncRunStartParams {
   const path = resolveRecipeFile(file);
-  const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  if (Object.hasOwn(raw, "tool")) {
+  const raw = RecipeReferences.readRawRecipeConfig(path);
+  if (raw && Object.hasOwn(raw, "tool")) {
     throw new Error(
       `Template recipe cannot define tool; use template in ${path}`,
     );
   }
-  const config = RecipeReferences.readResolvedRecipeConfig(path);
+  const includeActorRecipeContext =
+    raw?.actor_context !== false && raw?.actor_context !== "off";
+  const config = RecipeReferences.readResolvedRecipeConfig(path, [], {
+    includeActorRecipeContext,
+  });
   if (!config) {
     throw new Error(`Template recipe must define template: ${path}`);
   }
-  return { ...(config as AsyncRunStartParams), file: path };
+  return {
+    ...(config as AsyncRunStartParams),
+    file: path,
+    ...(includeActorRecipeContext ? {} : { actor_context: false }),
+  };
 }
 
 function getRunIdFromFile(file: string | undefined): string | undefined {
@@ -376,6 +386,11 @@ export function startRun(
     ? resolveRecipeFile(startParams.file)
     : undefined;
   const recipe = startParams.name || getRunIdFromFile(recipeFile);
+  const includeActorRecipeContext =
+    startParams.actor_context !== false && startParams.actor_context !== "off";
+  const recipeContextRecords = recipeFile && includeActorRecipeContext
+    ? RecipeReferences.buildRecipeContextRecords(recipeFile)
+    : undefined;
   if (recipeFile && isMutableUsageRecipeFile(recipeFile)) {
     RecipeUsage.recordRecipeLaunch(recipeFile);
   }
@@ -411,6 +426,9 @@ export function startRun(
     values,
     ...(artifacts ? { artifacts } : {}),
     ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
+    ...(recipeContextRecords && recipeContextRecords.length > 0
+      ? { recipe_context_records: recipeContextRecords }
+      : {}),
     ...(startParams.retire_when === "children_terminal"
       ? { retire_when: "children_terminal" as const }
       : {}),

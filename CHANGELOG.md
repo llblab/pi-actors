@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.2: Actor Recipe Context Bundle
+
+- `[Actor Context]` Added a recipe context bundle for file-backed async recipes. The runtime now collects the raw authored entry recipe and resolved imports into deterministic JSONL records with filename-derived `name`, import alias/path metadata, role/depth, and raw recipe JSON so spawned LLM actors can understand the workflow composition behind their prompt.
+- `[Actor Context]` Annotated command-template leaves with actor recipe context and appends the JSONL bundle to child `pi -p` prompts. The recipe record that launched the current child receives `"you_are_here": true` plus path metadata, enabling actors to give advisory feedback on their own recipe/composition fit; recipes can opt out with `"actor_context": false` / `"off"` when a minimal prompt is required.
+- `[Tests]` Added coverage for raw recipe context record generation, import identity, `you_are_here` JSONL marking, prompt injection for `pi -p`, execution-time context propagation, async-run persistence, and recipe opt-out behavior.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.2` for the hotfix release.
+
 ## 0.19.1: Actor Inspector Hotfix
 
 - `[Actor Inspector]` Fixed the live communications roster and row numbering controls after real swarm usage. `/actors-inspector-toggle <rows>` now keeps the room preview cap aligned with the requested row count, current-run sequence numbers are assigned before row limiting so the visible tail keeps its full-log positions, and roster role labels use concise `name/role` text instead of slugifying full role descriptions.

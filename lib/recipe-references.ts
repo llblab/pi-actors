@@ -6,7 +6,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 
 import type {
   CommandTemplateConfig,
@@ -101,7 +101,9 @@ export function resolveRecipePath(
   if (expanded.includes("/")) return resolve(expanded);
   return resolve(
     recipeRoot,
-    expanded.endsWith(".json") ? expanded : `${expanded}.json`,
+    expanded.endsWith(".json") || expanded.endsWith(".md")
+      ? expanded
+      : `${expanded}.json`,
   );
 }
 
@@ -110,20 +112,26 @@ function isBareRecipeName(value: string): boolean {
   return Boolean(trimmed) && !trimmed.includes("/") && !trimmed.startsWith("~") && !trimmed.includes("{");
 }
 
-function recipeNameFile(value: string): string {
+function recipeNameFiles(value: string): string[] {
   const trimmed = value.trim();
-  return trimmed.endsWith(".json") ? trimmed : `${trimmed}.json`;
+  if (trimmed.endsWith(".json") || trimmed.endsWith(".md")) return [trimmed];
+  return [`${trimmed}.json`, `${trimmed}.md`];
 }
 
 function resolveRecipeImportPath(value: string, currentRecipeRoot: string): string {
   if (!isBareRecipeName(value)) return resolveRecipePath(value, currentRecipeRoot);
-  const file = recipeNameFile(value);
   const roots = [
     Paths.getRecipeRoot(),
     currentRecipeRoot,
     Paths.getPackagedRecipeRoot(),
   ];
-  const candidates = [...new Set(roots.map((root) => resolve(root, file)))];
+  const candidates = [
+    ...new Set(
+      roots.flatMap((root) =>
+        recipeNameFiles(value).map((file) => resolve(root, file)),
+      ),
+    ),
+  ];
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
 }
 
@@ -134,14 +142,14 @@ export function getRecipePath(
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (!trimmed || hasWhitespace(trimmed)) return undefined;
-  if (trimmed.endsWith(".json")) return resolveRecipePath(trimmed, recipeRoot);
-  const path = resolveRecipePath(trimmed, recipeRoot);
+  if (trimmed.endsWith(".json") || trimmed.endsWith(".md"))
+    return resolveRecipePath(trimmed, recipeRoot);
+  const jsonPath = resolveRecipePath(trimmed, recipeRoot);
+  const mdPath = resolveRecipePath(`${trimmed}.md`, recipeRoot);
+  const path = existsSync(jsonPath) ? jsonPath : mdPath;
   if (!existsSync(path)) return undefined;
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<
-      string,
-      unknown
-    >;
+    const raw = readRawRecipeConfig(path);
     return raw && typeof raw === "object" && Object.hasOwn(raw, "template")
       ? path
       : undefined;
@@ -232,6 +240,123 @@ function getRecipeCommandTemplate(
   return normalizeRecipeTemplate({ ...envelope, template });
 }
 
+function parseMarkdownScalar(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed;
+    }
+  }
+  const quoted = trimmed.match(/^(?:"([^"]*)"|'([^']*)')$/);
+  if (quoted) return quoted[1] ?? quoted[2] ?? "";
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed === "null") return null;
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  return trimmed;
+}
+
+function parseMarkdownFrontmatterObject(
+  lines: string[],
+): Record<string, unknown> | unknown[] {
+  if (lines.every((line) => /^\s*-\s+/.test(line))) {
+    return lines.map((line) => parseMarkdownScalar(line.replace(/^\s*-\s+/, "")));
+  }
+  const result: Record<string, unknown> = {};
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^\s{2}([A-Za-z_][A-Za-z0-9_.-]*):\s*(.*)$/);
+    if (!match) continue;
+    if (match[2]) {
+      result[match[1]] = parseMarkdownScalar(match[2]);
+      continue;
+    }
+    const nested: string[] = [];
+    while (index + 1 < lines.length && /^\s{4}/.test(lines[index + 1])) {
+      index += 1;
+      nested.push(lines[index].slice(2));
+    }
+    result[match[1]] = parseMarkdownFrontmatterObject(nested);
+  }
+  return result;
+}
+
+function parseMarkdownFrontmatter(value: string): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  const lines = value.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_.-]*):\s*(.*)$/);
+    if (!match) continue;
+    if (match[2]) {
+      result[match[1]] = parseMarkdownScalar(match[2]);
+      continue;
+    }
+    const nested: string[] = [];
+    while (index + 1 < lines.length && /^\s+/.test(lines[index + 1])) {
+      index += 1;
+      nested.push(lines[index]);
+    }
+    result[match[1]] = parseMarkdownFrontmatterObject(nested);
+  }
+  return result;
+}
+
+function findMarkdownRecipeFence(
+  body: string,
+): { info: string; body: string } | undefined {
+  const pattern = /```([^\n`]*)\n([\s\S]*?)```/g;
+  for (const match of body.matchAll(pattern)) {
+    const info = match[1].trim().toLowerCase();
+    if (
+      info.includes("recipe") ||
+      info.includes("template") ||
+      info.includes("command") ||
+      info.includes("json")
+    ) {
+      return { info, body: match[2].trim() };
+    }
+  }
+  return undefined;
+}
+
+function parseMarkdownRecipeConfig(
+  content: string,
+): Record<string, unknown> | undefined {
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") return undefined;
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (end === -1) return undefined;
+  const frontmatter = parseMarkdownFrontmatter(lines.slice(1, end).join("\n"));
+  const fence = findMarkdownRecipeFence(lines.slice(end + 1).join("\n"));
+  if (!fence) return Object.hasOwn(frontmatter, "template") ? frontmatter : undefined;
+  const text = fence.body.trim();
+  if (!text) return undefined;
+  if (
+    fence.info.includes("json") ||
+    fence.info.includes("recipe") ||
+    text.startsWith("{") ||
+    text.startsWith("[") ||
+    text.startsWith('"')
+  ) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (isRecord(parsed) && Object.hasOwn(parsed, "template"))
+        return { ...frontmatter, ...parsed };
+      return { ...frontmatter, template: parsed };
+    } catch {
+      if (fence.info.includes("json") || fence.info.includes("recipe")) return undefined;
+    }
+  }
+  return { ...frontmatter, template: text };
+}
+
 export function readRawRecipeConfig(
   path: string,
 ): Record<string, unknown> | undefined {
@@ -243,10 +368,9 @@ export function readRawRecipeConfig(
     );
   }
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<
-      string,
-      unknown
-    >;
+    const content = readFileSync(path, "utf8");
+    if (path.endsWith(".md")) return parseMarkdownRecipeConfig(content);
+    const raw = JSON.parse(content) as Record<string, unknown>;
     return raw && typeof raw === "object" ? raw : undefined;
   } catch {
     return undefined;
@@ -254,7 +378,7 @@ export function readRawRecipeConfig(
 }
 
 export function getRecipeIdFromPath(file: string): string {
-  return basename(file, ".json");
+  return basename(file, extname(file));
 }
 
 function readRecipeConfig(value: unknown): TemplateRecipeConfig | undefined {

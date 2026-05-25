@@ -13,6 +13,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import * as ActorInspectorTui from "./lib/actor-inspector-tui.ts";
+import * as AsyncRuns from "./lib/async-runs.ts";
 import * as CommandTemplates from "./lib/command-templates.ts";
 import * as Observability from "./lib/observability.ts";
 import * as Paths from "./lib/paths.ts";
@@ -47,6 +48,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   const runDirWatchers = new Map<string, FSWatcher>();
   const observedRuns = new Map<string, Observability.RunObservedStatus>();
   const observedRunEventLines = new Map<string, number>();
+  const retirementAttempts = new Set<string>();
   let runStatusFrame = 0;
   let communicationWidgetVisible = false;
   let actorInspectorRows = 12;
@@ -61,6 +63,17 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   let recipeWatcherFailureNotified = false;
   const getRunOwnerId = (ctx: ExtensionContext): string =>
     ctx.sessionManager.getSessionId();
+  const retireCandidateRuns = (
+    ctx: ExtensionContext,
+    summary: Observability.RunSummary,
+  ): void => {
+    void Observability.executeRunRetirements(summary, {
+      attempted: retirementAttempts,
+      cancelRun: (candidate) => AsyncRuns.cancelRun(candidate.stateDir),
+      notify: (message, level) => ctx.ui.notify(message, level),
+      sendStop: (candidate) => AsyncRuns.sendRunMessage(candidate.stateDir, "stop"),
+    });
+  };
   const updateRunUi = (ctx: ExtensionContext, notify = false): void => {
     const ownerId = getRunOwnerId(ctx);
     const summary = Observability.summarizeRuns(undefined, ownerId);
@@ -139,6 +152,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       summary,
     );
     if (!notify) return;
+    retireCandidateRuns(ctx, summary);
     for (const transition of transitions) {
       if (!Observability.shouldNotifyRunTransition(transition)) continue;
       const text = Observability.formatRunTransitionMessage(transition);

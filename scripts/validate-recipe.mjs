@@ -26,7 +26,7 @@ function usage() {
   console.error(`Usage:
   validate-recipe.mjs <recipe-file-or-dir> [--all]
 
-Validates one template recipe file, or all *.json files in a directory when --all is set.`);
+Validates one template recipe file, or all *.json/*.md files in a directory when --all is set.`);
 }
 
 function expandPath(value) {
@@ -56,7 +56,7 @@ function recipeFiles(target, all) {
     throw new Error(`Recipe path is not a file or directory: ${target}`);
   if (!all) throw new Error("Directory validation requires --all.");
   return readdirSync(target)
-    .filter((file) => file.endsWith(".json"))
+    .filter((file) => file.endsWith(".json") || file.endsWith(".md"))
     .sort((a, b) => a.localeCompare(b))
     .map((file) => resolve(target, file));
 }

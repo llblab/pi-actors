@@ -70,7 +70,7 @@ inspect target=run:docs_review view=tail
 
 Pipeline recipes demonstrate second-order composition:
 
-- `recipes/coordinator-locker.json`: Long-lived coordinator cell with queue, acquire/renew/release lease locks, journal, and actor messages for worker coordination.
+- `recipes/coordinator-locker.json`: Long-lived coordinator cell with queue, acquire/renew/release lease locks, journal, actor messages for worker coordination, and platform-adapted control metadata.
 - `recipes/subagent-review-coordinator.json`: Lens reviewers → verifier → merger → judge → normalizer.
 - `recipes/pipeline-release-readiness.json`: Task-first release cell: changelog section → package summary → packaged skill summary → validation → release review → artifact report.
 - `recipes/pipeline-release-summary.json`: Evidence-only release summary cell: changelog section → package summary → packaged skill summary → validation → release summary / risks / PR body draft artifact. It does not commit, open a PR, merge, tag, publish, or perform external release side effects.
@@ -84,7 +84,7 @@ Pipeline recipes demonstrate second-order composition:
 - `recipes/pipeline-development-tasking.json`: Plan → task card → critique → integrator handoff.
 - `recipes/pipeline-docs-maintenance.json`: Docs index → documentation review → maintenance plan → artifact report.
 - `recipes/pipeline-media-library.json`: Playlist build → media-library artifact report.
-- `recipes/pipeline-room-swarm.json`: Room participants join `room:<run>`, coordinate over repeated room-visible rounds, leave cleanly, and synthesize the room transcript into a caller-provided artifact path. Keep model/thinking/mission policy caller-owned. Custom roles can be supplied with `roles_path` as a JSON array of `{ "name", "persona" }` objects; `name` stays ASCII-safe for `branch:<run>/<name>` addresses and debugger output remains plain and name-driven. The packaged swarm uses contacts for peer awareness but does not rely on direct branch delivery unless a caller-specific worker protocol consumes branch envelopes. Set `locker=true` to compose a local `coordinator-locker` cell under `{state_dir}/locker` for artifact ownership, resource lease locks, and a decision journal without merging locker policy into the room-participant script.
+- `recipes/pipeline-room-swarm.json`: Room participants join `room:<run>`, coordinate over repeated room-visible rounds, leave cleanly, and synthesize the room transcript into a caller-provided artifact path. Supported coordinator modes are `consensus`, `pipeline`, `fanout`, and `pool`; unknown modes fail closed instead of silently running consensus. Keep model/thinking/mission policy caller-owned. Custom roles can be supplied with `roles_path` as a JSON array of `{ "name", "persona" }` objects; `name` stays ASCII-safe for `branch:<run>/<name>` addresses and debugger output remains plain and name-driven. The packaged swarm uses contacts for peer awareness but does not rely on direct branch delivery unless a caller-specific worker protocol consumes branch envelopes. Set `locker=true` to compose a local `coordinator-locker` cell under `{state_dir}/locker` for artifact ownership, resource lease locks, and a decision journal without merging locker policy into the room-participant script.
 - `recipes/pipeline-artifact-report.json`: Normalize → artifact-shaped output → actor-message-shaped record. This pipeline prepares a candidate artifact and emits `artifact.prepared`/`artifact.blocked`; the `artifact_path` is a target path, not a guarantee that the file was written.
 - `recipes/pipeline-artifact-write.json`: Normalize → artifact-shaped output → deterministic artifact write → actor-message-shaped record. Use only when the caller explicitly wants filesystem writes; `write_mode` is `create`, `overwrite`, or `append`.
 - `recipes/pipeline-artifact-bundle.json`: Optional validation → deterministic artifact write → machine-readable manifest generation → deterministic manifest write → actor-message-shaped record. Use when the caller explicitly wants a filesystem handoff bundle with both artifact and manifest paths.
@@ -97,7 +97,7 @@ Utility recipes cover local operator workflows that do not need subagents:
 
 - `recipes/utility-markdown-index.json`: List Markdown files in a directory as input for README/docs index maintenance.
 - `recipes/utility-jsonl-tail.json`: Tail a JSONL message/log file with a configurable line count.
-- `recipes/utility-validation-wrapper.json`: Run a caller-supplied validation command in a scoped directory with a bounded timeout.
+- `recipes/utility-validation-wrapper.json`: Run a caller-supplied validation command in a scoped directory with a bounded timeout. This intentionally crosses a trusted shell boundary; discovery surfaces it as a diagnostic, and callers should pass explicit validation commands only.
 - `recipes/utility-git-status.json`: Read concise branch/worktree state for a repo.
 - `recipes/utility-git-log.json`: Read recent decorated commit history for a repo.
 - `recipes/utility-run-state-files.json`: List run-state files such as `run.json` under an async run state root.
@@ -115,7 +115,17 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-skill-summary.json`: Use `scripts/recipe-utils.mjs` to summarize packaged skill frontmatter, body shape, formatter-safe scalar lines, and package-version alignment.
 - `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 
-These recipes are intentionally small. Register them only for trusted local commands and prefer narrow scopes. The helper-backed utilities share `scripts/recipe-utils.mjs` so repeated parsing/listing logic stays out of recipe strings.
+These recipes are intentionally small. Register them only for trusted local commands and prefer narrow scopes. Discovery diagnostics flag obvious trust-boundary shapes such as shell/eval/destructive commands; those warnings are operator review aids, not a sandbox. The helper-backed utilities share `scripts/recipe-utils.mjs` so repeated parsing/listing logic stays out of recipe strings.
+
+## Actor OS Smoke Matrix
+
+The repeatable smoke surface is the normal validation suite:
+
+```text
+npm test
+```
+
+The scenario coverage is intentionally local-first and bounded: shared room coordination and roster snapshots (`actor-rooms` / `tools` tests), direct branch delivery and claim/handle transitions (`tools` and coordinator tests), inspector navigation (`actor-inspector-tui` tests), recipe context injection (`actor-recipe-context` / async-run tests), recipe persistence suggestions (`observability` tests), and opt-in retirement candidate/execution smoke (`observability` / async-run tests). These scenarios exercise public `spawn` / `message` / `inspect` behavior or the packaged script surfaces rather than relying on manual swarm demos.
 
 ## Music Player
 

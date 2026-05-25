@@ -8,7 +8,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import readline from "node:readline";
 
 function parseArgs(argv) {
@@ -48,6 +50,17 @@ function readJson(path, fallback) {
 function writeJson(path, value) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+function getControlEndpoint() {
+  if (process.platform !== "win32") return { path: controlPath, type: "fifo" };
+  const hash = createHash("sha256").update(resolve(stateDir)).digest("hex").slice(0, 20);
+  return { path: `\\\\.\\pipe\\pi-actors-locker-${hash}`, type: "named-pipe" };
+}
+function writeControlEndpoint(endpoint) {
+  writeJson(join(stateDir, "control.json"), endpoint);
+  const runPath = join(stateDir, "run.json");
+  const run = readJson(runPath, undefined);
+  if (run && typeof run === "object") writeJson(runPath, { ...run, control: endpoint });
 }
 function journal(event, data = {}) {
   appendFileSync(
@@ -244,30 +257,55 @@ if (mode === "snapshot") {
   process.exit(0);
 }
 
-if (!existsSync(controlPath)) {
-  const result = spawnSync("mkfifo", [controlPath]);
-  if (result.status !== 0)
-    throw new Error(`mkfifo failed: ${result.stderr?.toString?.() ?? ""}`);
-}
-writeJson(queuePath, readJson(queuePath, { items: [] }));
-writeJson(locksPath, cleanExpiredLocks(readJson(locksPath, {})));
-journal("lock.started", { leaseMs });
-outbox("lock.started", "Locker ready", { leaseMs });
-
-while (true) {
-  const stream = await import("node:fs").then((fs) =>
-    fs.createReadStream(controlPath, { encoding: "utf8" }),
-  );
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  for await (const line of rl) {
-    const message = normalizeMessage(line);
-    if (!message) continue;
-    try {
-      handle(message);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      journal("lock.error", { error: text });
-      outbox("lock.error", text, { error: text }, "error");
-    }
+function handleLine(line) {
+  const message = normalizeMessage(line);
+  if (!message) return;
+  try {
+    handle(message);
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    journal("lock.error", { error: text });
+    outbox("lock.error", text, { error: text }, "error");
   }
 }
+
+async function serveFifo(endpoint) {
+  if (!existsSync(endpoint.path)) {
+    const result = spawnSync("mkfifo", [endpoint.path]);
+    if (result.status !== 0)
+      throw new Error(`mkfifo failed: ${result.stderr?.toString?.() ?? ""}`);
+  }
+  writeControlEndpoint(endpoint);
+  while (true) {
+    const stream = await import("node:fs").then((fs) =>
+      fs.createReadStream(endpoint.path, { encoding: "utf8" }),
+    );
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    for await (const line of rl) handleLine(line);
+  }
+}
+
+async function serveNamedPipe(endpoint) {
+  rmSync(endpoint.path, { force: true });
+  const server = createServer((socket) => {
+    const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
+    rl.on("line", handleLine);
+  });
+  await new Promise((resolveReady, rejectReady) => {
+    server.once("error", rejectReady);
+    server.listen(endpoint.path, () => {
+      server.off("error", rejectReady);
+      writeControlEndpoint(endpoint);
+      resolveReady();
+    });
+  });
+  await new Promise(() => {});
+}
+
+const endpoint = getControlEndpoint();
+writeJson(queuePath, readJson(queuePath, { items: [] }));
+writeJson(locksPath, cleanExpiredLocks(readJson(locksPath, {})));
+journal("lock.started", { leaseMs, control: endpoint.type });
+outbox("lock.started", "Locker ready", { leaseMs, control: endpoint.type });
+if (endpoint.type === "named-pipe") await serveNamedPipe(endpoint);
+else await serveFifo(endpoint);

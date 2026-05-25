@@ -1089,7 +1089,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         } else if (message.type === "control.kill") {
           result = AsyncRuns.killRun(address.value);
         } else {
-          result = AsyncRuns.sendRunMessage(
+          result = await AsyncRuns.sendRunMessage(
             address.value,
             messageBodyToRunLine(message),
           );
@@ -1131,7 +1131,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           ActorRooms.writeCommunicationSnapshot(stateDir, runId);
           ActorRooms.appendBranchInboxMessage(stateDir, runId, message.to, message);
         }
-        result = AsyncRuns.sendRunMessage(
+        result = await AsyncRuns.sendRunMessage(
           address.value,
           JSON.stringify(message),
         );
@@ -1143,16 +1143,18 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         if (!stateDir) throw new Error(`${message.to} has no run state directory.`);
         const recipients = getRoomMulticastRecipients(message, runId);
         const roomResult = ActorRooms.appendRoomMessage(stateDir, address.room, message);
-        const multicast = recipients.map((recipient) =>
-          AsyncRuns.sendRunMessage(
-            runId,
-            JSON.stringify({ ...message, to: recipient }),
+        await Promise.all(
+          recipients.map((recipient) =>
+            AsyncRuns.sendRunMessage(
+              runId,
+              JSON.stringify({ ...message, to: recipient }),
+            ),
           ),
         );
         result = {
           ...roomResult,
-          ...(multicast.length > 0
-            ? { multicast: recipients, multicast_count: multicast.length }
+          ...(recipients.length > 0
+            ? { multicast: recipients, multicast_count: recipients.length }
             : {}),
         };
       } else if (address.kind === "tool" && address.value) {

@@ -1,7 +1,7 @@
 {
   "async": true,
   "args": [
-    "mode:string",
+    "mode:enum(consensus,pipeline,fanout,pool)",
     "mission:string",
     "model:string",
     "thinking:string",

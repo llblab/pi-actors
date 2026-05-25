@@ -157,8 +157,15 @@ function getExecutableName(command: string | undefined): string {
   return command.split(/[\\/]/).pop()?.toLowerCase() ?? "";
 }
 
+function matchesFlag(arg: string, flag: string): boolean {
+  if (arg === flag) return true;
+  if (/^-[A-Za-z]$/.test(flag) && /^-[A-Za-z]+$/.test(arg))
+    return arg.slice(1).includes(flag.slice(1));
+  return false;
+}
+
 function hasAnyFlag(args: string[], flags: string[]): boolean {
-  return args.some((arg) => flags.includes(arg));
+  return args.some((arg) => flags.some((flag) => matchesFlag(arg, flag)));
 }
 
 function hasRiskyPathArg(args: string[]): boolean {

@@ -1,10 +1,10 @@
 # Template Recipe Standard
 
-Template recipes are saved JSON definitions around the synchronous [Command Template Standard](./command-templates.md).
+Template recipes are saved definitions around the synchronous [Command Template Standard](./command-templates.md). JSON remains the canonical precise format; Markdown is a literate authoring format that compiles into the same recipe model.
 
 **Meta-contract:** a recipe stores a command-template graph plus defaults and run mode. It does not create a second execution language.
 
-**Scope:** reusable JSON shape, recipe naming, file-backed recipes, co-located recipes, recipe-layer imports/references, call-time values, foreground execution, and the `async: true` handoff to the [Async Run Standard](./async-runs.md).
+**Scope:** reusable JSON/Markdown shape, recipe naming, file-backed recipes, co-located recipes, recipe-layer imports/references, call-time values, foreground execution, and the `async: true` handoff to the [Async Run Standard](./async-runs.md).
 
 ---
 
@@ -27,7 +27,7 @@ Packaged recipes are the pi-actors recipe standard library: declarative actor co
 
 Template-recipe standard owns:
 
-- Saved JSON definitions around one command-template graph.
+- Saved JSON definitions around one command-template graph, plus Markdown-authored recipes that compile to that shape.
 - File-backed and co-located recipe shapes.
 - Recipe identity through file-backed filename or co-located tool id.
 - Recipe defaults, values, imports, import references, and import-node expansion.
@@ -67,6 +67,33 @@ Async recipe:
 
 A file-backed recipe's id comes from its filename, not a JSON `name` field. Legacy files may still contain `name`, but loaders ignore it for identity. `template` is the command-template tree. `async: true` selects detached run mode when the recipe is invoked through a registered tool.
 
+## Markdown Authoring
+
+Markdown recipes use `.md` files with YAML-like frontmatter for recipe metadata and one fenced executable block for the recipe/template body. Runtime behavior comes only from frontmatter plus the fenced block; surrounding prose is advisory for humans and future recipe-context use.
+
+````markdown
+---
+description: Literate docs check
+args:
+  - scope:path
+defaults:
+  scope: docs
+mailbox:
+  accepts:
+    - control.stop
+---
+
+Human notes can explain intent, examples, or review guidance.
+
+```template
+npm run check -- {scope}
+```
+````
+
+Fenced blocks marked `template`, `command-template`, `json`, or `recipe` are executable. A `template` fence stores its text as the command-template string. A JSON fence can contain either a full recipe object with `template` or a raw command-template value. Frontmatter supports the recipe metadata used by JSON recipes, including `args`, `defaults`, `imports`, `mailbox`, `artifacts`, `async`, and command-template flags.
+
+JSON remains the source-of-truth format for precise machine editing. If `<id>.json` and `<id>.md` exist in the same discovery priority layer, `<id>.json` wins and the Markdown recipe is reported as shadowed.
+
 ## Discovery Priority
 
 Recipe priority only matters when two discovered recipes have the same filename id. The conceptual ladder from lowest to highest priority is:
@@ -74,11 +101,11 @@ Recipe priority only matters when two discovered recipes have the same filename 
 1. No recipe for that id.
 2. Packaged pi-actors recipe components, acting as the standard library.
 3. Explicitly referenced ad hoc user recipe files located outside `~/.pi/agent/recipes`.
-4. User recipe files under `~/.pi/agent/recipes/*.json`.
+4. User recipe files under `~/.pi/agent/recipes/*.json` or `*.md`.
 
 The high-priority user recipe directory is also the default tool set: recipes placed there are agent tools by location. This preserves the old advantage of a tool-only registry because listing `~/.pi/agent/recipes` shows the operator-managed tool surface. Packaged and ad hoc recipes are recipe components by default; they become tools only when copied or registered into the agent recipe root.
 
-Higher-priority files shadow lower-priority files with the same basename. A highest-priority invalid recipe is still visible and blocks fallback so operators do not accidentally run packaged behavior when a user override is broken. A highest-priority recipe with `disabled: true` also blocks fallback and intentionally disables that id.
+Higher-priority files shadow lower-priority files with the same basename. Within one priority layer, same-id JSON shadows Markdown because JSON is the canonical precise format. A highest-priority invalid recipe is still visible and blocks fallback so operators do not accidentally run packaged behavior when a user override is broken. A highest-priority recipe with `disabled: true` also blocks fallback and intentionally disables that id.
 
 ## Usage Metadata
 
@@ -203,19 +230,22 @@ Reusable local recipes live in:
 
 ```text
 ~/.pi/agent/recipes/*.json
+~/.pi/agent/recipes/*.md
 ```
 
 Bare recipe names resolve under that directory, so `file: "review-docs"` loads:
 
 ```text
 ~/.pi/agent/recipes/review-docs.json
+# or, when no same-id JSON file exists:
+~/.pi/agent/recipes/review-docs.md
 ```
 
 Call-time params override file params. `values` are merged with file values; call-time values win. If a run id is omitted for an explicit async start, the file basename becomes the default run id.
 
 ## Registered Recipe Tools
 
-A registered tool is a recipe file exposed as an agent tool. User recipes under `~/.pi/agent/recipes/*.json` are tools by location; packaged/ad hoc recipes are components unless copied or registered into that user recipe root:
+A registered tool is a recipe file exposed as an agent tool. User recipes under `~/.pi/agent/recipes/*.json` or `*.md` are tools by location; packaged/ad hoc recipes are components unless copied or registered into that user recipe root:
 
 ```json
 {
@@ -312,6 +342,6 @@ Nested object keys are dot-separated. Import references are resolved before norm
 
 ## Recipe Shape
 
-Use the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` before relying on recipe launchers.
+Use the filename for file-backed recipe ids, and use `async: true` for detached runs. Use `parallel: true` for fanout, `when` for node guards, and semantic public args such as `tools`, `all`, or `timeout_ms` instead of leaking CLI fragments or reusing node-control names. Local files belong under `~/.pi/agent/recipes/*.json` or `*.md` before relying on recipe launchers.
 
 If a proposed recipe needs a scheduler, queue daemon, `goto`, or custom workflow syntax, stop. Keep the recipe as saved command-template JSON and put policy in the registered tool, script, or caller.

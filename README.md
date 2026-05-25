@@ -169,6 +169,7 @@ The persistent tool surface is file-discovered:
 
 ```text
 ~/.pi/agent/recipes/*.json
+~/.pi/agent/recipes/*.md
 ```
 
 That directory is operator-managed executable memory.
@@ -178,6 +179,7 @@ Rules:
 - User recipes in `~/.pi/agent/recipes/` are tools by location;
 - Recipe filenames define tool ids;
 - User recipes override same-name lower-priority recipes;
+- Same-id JSON recipes shadow Markdown recipes in the same priority layer;
 - Packaged recipes are standard-library components, not automatically installed operator policy;
 - `register_tool` creates, updates, lists, or deletes user recipe files through the normal agent interface.
 
@@ -220,7 +222,7 @@ Templates support:
 - Retries, recovery, failure policy, delays, and guarded execution;
 - Async run values such as `{run_id}`, `{state_dir}`, `{actor_address}`, `{default_room}`, and `{communication_file}`.
 
-The template owns execution shape. The recipe owns saved metadata, defaults, imports, mailbox, and artifacts. The run actor owns detached lifecycle, state, messages, cancellation, and inspection. File-backed async recipes also provide child `pi -p` actors with a bounded JSONL recipe context bundle by default, including raw entry/import recipe records and a `"you_are_here": true` marker for the recipe node that launched the child. Set `"actor_context": false` or `"off"` in a recipe to suppress that context for minimal prompts.
+The template owns execution shape. The recipe owns saved metadata, defaults, imports, mailbox, and artifacts. JSON is the canonical precise recipe format; Markdown recipes use frontmatter plus fenced `template`/`json recipe` blocks for literate authoring and compile into the same model. The run actor owns detached lifecycle, state, messages, cancellation, and inspection. File-backed async recipes also provide child `pi -p` actors with a bounded JSONL recipe context bundle by default, including raw entry/import recipe records and a `"you_are_here": true` marker for the recipe node that launched the child. Set `"actor_context": false` or `"off"` in a recipe to suppress that context for minimal prompts.
 
 ## Recipe Library
 
@@ -248,6 +250,10 @@ Use `room:<run>` when multiple actors in the same run need shared context, roste
 Use artifacts when outputs should survive context compression.
 
 Use mailbox declarations when an actor has a stable conversational surface.
+
+## Platform Support
+
+Core actor state, inspection, foreground tools, and basic async runs are portable Node.js behavior. Run-local messaging and stop/kill use a platform adapter under the same `message` API: Unix-compatible recipes can use their existing local control endpoint, while native Windows recipes can expose a Windows-native endpoint in run state. Some packaged scripts still depend on Unix tools and are WSL/Linux/macOS-only until migrated; their public recipe surface should stay `spawn` / `message` / `inspect` either way.
 
 ## Safety Boundary
 

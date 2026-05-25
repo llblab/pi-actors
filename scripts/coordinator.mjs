@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createConnection } from "node:net";
 
 function arg(name, fallback = "") {
   const prefix = `--${name}=`;
@@ -102,10 +103,34 @@ async function acquireBranchInboxLock(runId, branchName) {
   return acquireStateLock(`${runStateDir(runId)}/branches/${branchName}`, ".inbox.lock", `Branch inbox ${branchName}`);
 }
 
+async function readLockerControl(locker) {
+  const controlJson = `${locker.stateDir}/control.json`;
+  await waitForPath(controlJson);
+  return JSON.parse(await readFile(controlJson, "utf8"));
+}
+
+function writeNamedPipeLine(path, line) {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(path);
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve();
+    };
+    socket.on("error", finish);
+    socket.on("connect", () => socket.end(line, () => finish()));
+  });
+}
+
 async function writeLockerMessage(locker, message) {
   if (!locker) return;
-  await waitForPath(locker.controlPath);
-  await writeFile(locker.controlPath, `${JSON.stringify(message)}\n`, { flag: "a" });
+  const control = locker.control ?? await readLockerControl(locker);
+  locker.control = control;
+  const line = `${JSON.stringify(message)}\n`;
+  if (control.type === "named-pipe") await writeNamedPipeLine(control.path, line);
+  else await writeFile(control.path, line, { flag: "a" });
   await sleep(50);
 }
 
@@ -125,8 +150,8 @@ async function startLocker(config) {
   });
   child.stdout.on("data", (chunk) => process.stdout.write(`[locker] ${chunk}`));
   child.stderr.on("data", (chunk) => process.stderr.write(`[locker] ${chunk}`));
-  const locker = { child, controlPath: `${lockerStateDir}/control.fifo`, stateDir: lockerStateDir };
-  await waitForPath(locker.controlPath);
+  const locker = { child, stateDir: lockerStateDir };
+  locker.control = await readLockerControl(locker);
   await writeLockerMessage(locker, {
     type: "lock.enqueue",
     body: { id: "coordinator-artifact", task: "Own final artifact synthesis", resources: [config.artifactPath || "artifact"] },
@@ -230,11 +255,23 @@ async function writeInboxMessages(inboxPath, messages) {
   await writeFile(inboxPath, messages.map((message) => JSON.stringify(message)).join("\n") + "\n", "utf8");
 }
 
-async function claimQueuedInboxMessages(runId, branchName) {
+async function mutateBranchInbox(runId, branchName, mutate, fallback) {
   const inboxPath = `${runStateDir(runId)}/branches/${branchName}/inbox.jsonl`;
   const releaseLock = await acquireBranchInboxLock(runId, branchName);
   try {
     const messages = await readInboxLines(inboxPath);
+    const result = mutate(messages);
+    if (result.messages) await writeInboxMessages(inboxPath, result.messages);
+    return result.value;
+  } catch {
+    return fallback;
+  } finally {
+    await releaseLock();
+  }
+}
+
+async function claimQueuedInboxMessages(runId, branchName) {
+  return mutateBranchInbox(runId, branchName, (messages) => {
     const claimedAt = new Date().toISOString();
     const queuedMessages = [];
     const updated = messages.map((msg, index) => {
@@ -248,31 +285,22 @@ async function claimQueuedInboxMessages(runId, branchName) {
       queuedMessages.push(claimed);
       return claimed;
     });
-    if (queuedMessages.length > 0) await writeInboxMessages(inboxPath, updated);
-    return queuedMessages;
-  } catch {
-    return [];
-  } finally {
-    await releaseLock();
-  }
+    return {
+      messages: queuedMessages.length > 0 ? updated : undefined,
+      value: queuedMessages,
+    };
+  }, []);
 }
 
 async function updateInboxMessagesStatus(runId, branchName, ids, status) {
-  const inboxPath = `${runStateDir(runId)}/branches/${branchName}/inbox.jsonl`;
-  const releaseLock = await acquireBranchInboxLock(runId, branchName);
-  try {
-    const messages = await readInboxLines(inboxPath);
+  await mutateBranchInbox(runId, branchName, (messages) => {
     const idSet = new Set(ids);
     const updated = messages.map((msg) => {
       if (!msg.id || !idSet.has(msg.id)) return msg;
       return { ...msg, [`${status}_at`]: new Date().toISOString(), status };
     });
-    await writeInboxMessages(inboxPath, updated);
-  } catch {
-    // Best-effort write
-  } finally {
-    await releaseLock();
-  }
+    return { messages: updated, value: undefined };
+  });
 }
 
 async function executeParticipantPrompt(role, basePrompt, config) {
@@ -421,6 +449,13 @@ async function runPool(config, locker) {
   }));
 }
 
+const coordinatorModes = {
+  consensus: runConsensus,
+  fanout: runFanout,
+  pipeline: runPipeline,
+  pool: runPool,
+};
+
 async function readJsonFile(path) {
   try {
     return JSON.parse(await readFile(path, "utf8"));
@@ -464,16 +499,9 @@ const failures = [];
 const locker = await startLocker(config);
 
 try {
-  if (config.mode === "pipeline") {
-    await runPipeline(config, locker);
-  } else if (config.mode === "fanout") {
-    await runFanout(config, locker);
-  } else if (config.mode === "pool") {
-    await runPool(config, locker);
-  } else {
-    // default: consensus / swarm
-    await runConsensus(config, locker);
-  }
+  const runMode = coordinatorModes[config.mode];
+  if (!runMode) throw new Error(`Unknown coordinator mode: ${config.mode}`);
+  await runMode(config, locker);
   await synthesize(config, locker);
 } catch (globalError) {
   failures.push(`Global coordinator error: ${globalError.message}`);

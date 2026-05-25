@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+## 0.21.0: Native Windows Actor Control and Literate Recipes
+
+- `[Async Runs]` Added a platform-adapted run-control path: Unix FIFO behavior remains backward-compatible, native Windows can target named-pipe run-control endpoints recorded in run state, and run message receipts still update events and inbox state through the same actor-message path.
+- `[Async Runs]` Added Windows process-tree termination planning for cancel/kill through `taskkill`, while preserving Unix process-group signaling semantics.
+- `[Scripts]` Migrated `locker.mjs` and coordinator locker calls to platform-adapted control metadata: Unix still uses `control.fifo`, while native Windows can use a deterministic named-pipe endpoint with the same message protocol.
+- `[Branch Messages]` Added bounded branch-inbox terminal retention during status transitions, preserving active queued/claimed work while compacting older handled/failed records for long-lived branch runners.
+- `[Recipe Discovery]` Tightened trust-boundary diagnostics so combined short shell/eval flags such as `bash -lc` and nested recipe command-template objects are surfaced, including the packaged validation wrapper's trusted shell boundary.
+- `[Rooms]` Recorded the backend decision to keep the current file-backed room adapter until real workflows need live subscriptions/fanout or shared mutable state, backed by a mixed room/direct-branch workload regression.
+- `[Recipes]` Added Markdown-authored recipe loading for `.md` files with frontmatter metadata and fenced executable recipe/template blocks, with same-id JSON shadowing Markdown in the same priority layer.
+- `[Retirement]` Extended run summaries to discover nested child async-run state dirs, blocks opt-in retirement while nested children are still running, surfaces child/terminal child counts on candidates, and has the session watcher retire ready candidates with one graceful stop attempt plus owned cancellation fallback. Added an integration smoke where an idle supervisor stops after its nested child is terminal while a non-opt-in service remains running.
+- `[Coordinator]` Consolidated direct branch inbox claim/finalize rewrites behind one locked mutation helper and moved room-swarm mode dispatch behind an explicit mode registry. Unknown coordinator modes now fail closed, and `pipeline-room-swarm` exposes the supported mode enum.
+- `[Docs]` Documented the local Actor OS smoke matrix covered by `npm test`, spanning room coordination, direct branch delivery, inbox claim/handle transitions, inspector navigation, recipe context injection, persistence suggestions, and opt-in retirement smoke.
+- `[Docs/Tests]` Documented native Windows support scope and added regression coverage for Windows endpoint metadata, mocked named-pipe sends, Windows process-control planning, unchanged Unix FIFO behavior, locker control metadata, branch inbox compaction, mixed room/direct workloads, Markdown recipe loading/discovery/validation, nested child-run retirement gating, and packaged recipe trust diagnostics.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.21.0` for the minor release.
+
 ## 0.20.2: Installed Extension Entrypoint Hotfix
 
 - `[Packaging]` Added a JavaScript extension entrypoint wrapper and changed package metadata to load `./index.js`, so npm-installed packages import compiled `dist/index.js` instead of asking Node to strip `index.ts` under `node_modules`. Source checkouts still fall back to `index.ts` before a local build exists.

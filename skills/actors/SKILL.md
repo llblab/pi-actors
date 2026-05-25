@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.20.2
+  version: 0.21.0
 ---
 
 # Actors (pi-actors)
@@ -228,11 +228,11 @@ Priority for same-id recipes:
 1. No recipe: no capability.
 2. Packaged pi-actors recipe: standard-library declarative actor component.
 3. Explicit ad hoc user recipe file outside `~/.pi/agent/recipes`.
-4. User recipe in `~/.pi/agent/recipes/*.json`: highest-priority operator tool surface.
+4. User recipe in `~/.pi/agent/recipes/*.json` or `*.md`: highest-priority operator tool surface.
 
-Only matching filename ids compete. Higher priority shadows lower priority. An invalid or `disabled: true` higher-priority recipe blocks fallback so the agent does not silently run standard-library behavior when a user override is broken or intentionally disabled.
+Only matching filename ids compete. Higher priority shadows lower priority; within one priority layer, same-id JSON shadows Markdown. An invalid or `disabled: true` higher-priority recipe blocks fallback so the agent does not silently run standard-library behavior when a user override is broken or intentionally disabled.
 
-Muscle-memory lens: `~/.pi/agent/recipes/*.json` is the agent's capability memory. Every recipe in that directory becomes an easy-to-call tool automatically and survives into later sessions. Agents grow this memory either by calling `register_tool`, which writes recipe files there under the hood, or by deliberately editing those recipe files. Treat this directory like `MEMORY.md` for executable habits: useful local patterns belong there; packaged recipes elsewhere are reusable components, not tools.
+Muscle-memory lens: `~/.pi/agent/recipes/*.json` and `*.md` are the agent's capability memory. Every recipe in that directory becomes an easy-to-call tool automatically and survives into later sessions. Agents grow this memory either by calling `register_tool`, which writes recipe files there under the hood, or by deliberately editing those recipe files. Treat this directory like `MEMORY.md` for executable habits: useful local patterns belong there; packaged recipes elsewhere are reusable components, not tools.
 
 Usage lens: user recipes may carry extension-maintained launch metadata such as `usage.calls` and `usage.last_called`. The extension increments the counter when it starts that concrete recipe; agents should not hand-edit counters as part of normal recipe maintenance. Treat usage as evidence for usefulness analysis: heavily used recipes are good candidates for promotion, documentation, or stronger tests; unused recipes are cleanup candidates. Do not use failure counts as a primary usefulness signal because failures may reflect bad caller judgment rather than bad recipes. Do not delete or demote solely from counters without operator approval.
 
@@ -240,7 +240,7 @@ Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memo
 
 ## Registered Tools
 
-`register_tool` persists trusted local capabilities as recipe files in `~/.pi/agent/recipes/*.json`.
+`register_tool` persists trusted local capabilities as recipe files in `~/.pi/agent/recipes/*.json`; hand-authored Markdown recipes in the same directory are also discovered as tools.
 
 Use it when a command/template/recipe should become durable agent muscle memory. Prefer typed args or placeholder-derived args; use `update=true` for replacement and `template=null` or `template=""` for deletion. `register_tool` should create/update/delete recipe files in the user recipe root; direct file editing is allowed but is the lower-level path.
 
@@ -250,7 +250,7 @@ Tool templates may be:
 - A file-backed recipe name/path.
 - A complete recipe body, optionally `async: true`.
 
-The user recipe root is the default tool set by location; packaged recipes are lower-priority standard-library components and are not tools unless copied or registered into the agent recipe root. Ideal runtime behavior is reactive: create/edit/delete recipe files, validate them, then connect valid tools or surface diagnostics without requiring agents to hand-maintain a separate registry.
+The user recipe root is the default tool set by location. It accepts canonical JSON recipes and literate Markdown recipes with frontmatter plus fenced `template`/`json recipe` blocks; same-id JSON shadows Markdown in the same priority layer. Packaged recipes are lower-priority standard-library components and are not tools unless copied or registered into the agent recipe root. Ideal runtime behavior is reactive: create/edit/delete recipe files, validate them, then connect valid tools or surface diagnostics without requiring agents to hand-maintain a separate registry.
 
 ## Recipe Navigator
 
@@ -258,8 +258,8 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 
 ### Coordination and Services
 
-- [`coordinator-locker`](../../recipes/coordinator-locker.json): queue + acquire/renew/release lease locks + journaled coordinator messages.
-- [`locker`](../../recipes/locker.json): modular queue + acquire/renew/release lease locks + journaled locker messages.
+- [`coordinator-locker`](../../recipes/coordinator-locker.json): queue + acquire/renew/release lease locks + journaled coordinator messages + platform-adapted control metadata.
+- [`locker`](../../recipes/locker.json): modular queue + acquire/renew/release lease locks + journaled locker messages + platform-adapted control metadata.
 - [`utility-coordinator-lock-snapshot`](../../recipes/utility-coordinator-lock-snapshot.json): one-shot JSON snapshot of a coordinator-locker state directory.
 - [`music-player`](../../recipes/music-player.json): background local/URL/directory/playlist playback actor controlled by messages.
 
@@ -280,7 +280,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 - [`pipeline-docs-maintenance`](../../recipes/pipeline-docs-maintenance.json): docs index/review/planning → maintenance artifact.
 - Artifacts: [`pipeline-artifact-report`](../../recipes/pipeline-artifact-report.json), [`pipeline-artifact-write`](../../recipes/pipeline-artifact-write.json), [`pipeline-artifact-bundle`](../../recipes/pipeline-artifact-bundle.json).
 - Review gates: [`pipeline-quorum-review`](../../recipes/pipeline-quorum-review.json), [`pipeline-review-readiness`](../../recipes/pipeline-review-readiness.json).
-- Task-first workflows: [`pipeline-architect-coordinator`](../../recipes/pipeline-architect-coordinator.json), [`pipeline-research-synthesis`](../../recipes/pipeline-research-synthesis.json), [`pipeline-development-tasking`](../../recipes/pipeline-development-tasking.json), [`pipeline-checkpoint-continuation`](../../recipes/pipeline-checkpoint-continuation.json), [`pipeline-media-library`](../../recipes/pipeline-media-library.json), [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json). For room swarms, prefer `roles_path` for custom role JSON and keep role `name` ASCII-safe for branch addresses. Use `locker=true` when the swarm needs a coordinator-locker-backed artifact lock and journal.
+- Task-first workflows: [`pipeline-architect-coordinator`](../../recipes/pipeline-architect-coordinator.json), [`pipeline-research-synthesis`](../../recipes/pipeline-research-synthesis.json), [`pipeline-development-tasking`](../../recipes/pipeline-development-tasking.json), [`pipeline-checkpoint-continuation`](../../recipes/pipeline-checkpoint-continuation.json), [`pipeline-media-library`](../../recipes/pipeline-media-library.json), [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json). For room swarms, choose `mode` from `consensus`, `pipeline`, `fanout`, or `pool`; prefer `roles_path` for custom role JSON and keep role `name` ASCII-safe for branch addresses. Use `locker=true` when the swarm needs a coordinator-locker-backed artifact lock and journal.
 
 ### Utilities
 
@@ -339,6 +339,7 @@ Keep the split clean: methodology chooses coordination shape; pi-actors supplies
 - Sending domain messages without checking `mailbox`.
 - Expecting current room messages to wake prompt-only subagents; use direct branch messages or a runner protocol for initiating work.
 - Reading only stdout and missing actor messages/artifacts.
+- Assuming every packaged message-controlled script is native-Windows-ready; core run control is platform-adapted, but Unix-tool scripts must be migrated recipe by recipe.
 - Baking local absolute paths into published docs or reusable recipes.
 - Creating recipes that perform external side effects without explicit operator gates.
 - Letting project insights live only in chat instead of updating BACKLOG/CHANGELOG/docs and, when agent behavior changes, the packaged skill or prompt guidance.

@@ -166,12 +166,23 @@ test("Command template repeat expands numbered defaults", () => {
 
 test("Command templates detect high-risk trusted executable shapes", () => {
   const warnings = getCommandTemplateWarnings({
-    template: ["bash -c {script}", "node -e {code}", "rm -rf {work_dir}"],
+    template: [
+      "bash -c {script}",
+      "node -e {code}",
+      "python3 -Ic {code}",
+      "rm -rf {work_dir}",
+    ],
   });
-  assert.equal(warnings.length, 3);
+  assert.equal(warnings.length, 4);
   assert.match(warnings[0], /bash/);
   assert.match(warnings[1], /eval/);
-  assert.match(warnings[2], /removes filesystem paths/);
+  assert.match(warnings[2], /code-eval/);
+  assert.match(warnings[3], /removes filesystem paths/);
+
+  assert.match(
+    getCommandTemplateWarnings("bash -lc {script}").join("\n"),
+    /shell command strings/,
+  );
 });
 
 test("Command templates resolve typed inline placeholders", () => {

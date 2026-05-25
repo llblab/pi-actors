@@ -12,6 +12,7 @@ import test from "node:test";
 import {
   appendRunOutboxEvent,
   cancelRun,
+  getRunProcessSignalPlan,
   getRunStatus,
   killRun,
   listRuns,
@@ -20,6 +21,7 @@ import {
   startRun,
   tailRun,
 } from "../lib/async-runs.ts";
+import { executeRunRetirements, summarizeRuns } from "../lib/observability.ts";
 
 async function waitForResult(
   stateDir: string,
@@ -384,6 +386,36 @@ test("Async runs can start from recipe files with overrides", async () => {
   }
 });
 
+test("Async runs can start from Markdown recipe files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-md-"));
+  const stateDir = join(root, "md-run");
+  const file = join(root, "say-md.md");
+  try {
+    await writeFile(
+      file,
+      [
+        "---",
+        `state_dir: ${stateDir}`,
+        "defaults:",
+        "  greeting: hello",
+        "---",
+        "",
+        "```template",
+        `${process.execPath} -e "console.log(process.argv[1])" {greeting}`,
+        "```",
+        "",
+      ].join("\n"),
+    );
+    const meta = startRun({ file }, process.cwd());
+    assert.equal(meta.recipe, "say-md");
+    const result = await waitForResult(stateDir);
+    assert.equal(result.code, 0);
+    assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /hello/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async runs persist recipe context bundles for file-backed recipes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-context-"));
   const stateDir = join(root, "context-run");
@@ -605,7 +637,7 @@ test(
         process.cwd(),
       );
       await waitForFile(readyFile);
-      const result = sendRunMessage(stateDir, "next");
+      const result = await sendRunMessage(stateDir, "next");
       assert.equal(result.sent, true);
       assert.equal(result.control, "control.fifo");
       await waitForFile(messageFile);
@@ -643,7 +675,7 @@ test(
         process.cwd(),
       );
       await waitForFile(readyFile);
-      sendRunMessage(
+      await sendRunMessage(
         stateDir,
         JSON.stringify({
           body: "private hello",
@@ -664,6 +696,69 @@ test(
     }
   },
 );
+
+test("Async runs can send messages to a Windows named-pipe control endpoint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-winpipe-"));
+  const stateDir = join(root, "controlled-winpipe");
+  const pipePath = "\\\\.\\pipe\\pi-actors-test-controlled-winpipe";
+  let sentPayload = "";
+  try {
+    startRun(
+      {
+        run_id: "controlled-winpipe",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    const runJsonPath = join(stateDir, "run.json");
+    const meta = JSON.parse(await readFile(runJsonPath, "utf8"));
+    await writeFile(
+      runJsonPath,
+      `${JSON.stringify({ ...meta, control: { path: pipePath, type: "named-pipe" } }, null, 2)}\n`,
+    );
+    const result = await sendRunMessage(
+      stateDir,
+      JSON.stringify({
+        body: "hello windows",
+        from: "coordinator",
+        to: "run:controlled-winpipe",
+        type: "control.note",
+      }),
+      {
+        namedPipeSend: async (_path, payload) => {
+          sentPayload = payload;
+          return Buffer.byteLength(payload);
+        },
+        platform: "win32",
+      },
+    );
+    assert.equal(result.sent, true);
+    assert.equal(result.control, pipePath);
+    assert.equal(result.control_type, "named-pipe");
+    assert.match(sentPayload, /hello windows/);
+    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
+    assert.equal(inbox.body, "hello windows");
+    assert.match(tailRun(stateDir), /run\.message/);
+  } finally {
+    killRun(stateDir);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run process control maps Windows force kill to taskkill tree", () => {
+  assert.deepEqual(getRunProcessSignalPlan(1234, "SIGKILL", "win32"), {
+    args: ["/PID", "1234", "/T", "/F"],
+    command: "taskkill",
+    signalTarget: "processTree",
+  });
+  assert.deepEqual(getRunProcessSignalPlan(1234, "SIGTERM", "win32"), {
+    args: ["/PID", "1234", "/T"],
+    command: "taskkill",
+    signalTarget: "processTree",
+  });
+});
 
 test("Async run cancel terminates matching running runs", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
@@ -759,6 +854,77 @@ test("Async run kill terminates matching stuck runs", async () => {
     });
     assert.match(tailRun(stateDir), /run\.kill/);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run retirement smoke stops supervisor after nested child is terminal", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-retire-smoke-"));
+  const supervisorDir = join(root, "supervisor");
+  const childDir = join(supervisorDir, "child");
+  const serviceDir = join(root, "service");
+  try {
+    startRun(
+      {
+        run_id: "supervisor",
+        state_dir: supervisorDir,
+        retire_when: "children_terminal",
+        template: `${process.execPath} -e "setInterval(() => {}, 1000)"`,
+      },
+      process.cwd(),
+    );
+    startRun(
+      {
+        run_id: "child",
+        state_dir: childDir,
+        template: `${process.execPath} -e "console.log('child done')"`,
+      },
+      process.cwd(),
+    );
+    startRun(
+      {
+        run_id: "service",
+        state_dir: serviceDir,
+        template: `${process.execPath} -e "setInterval(() => {}, 1000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForResult(childDir);
+    await writeFile(
+      join(supervisorDir, "progress.json"),
+      JSON.stringify({ activeSubagents: 0, completed: 1, failures: [], updatedAt: new Date().toISOString() }),
+    );
+    const summary = summarizeRuns(root);
+    assert.deepEqual(
+      summary.runs.map((run) => run.run).sort(),
+      ["child", "service", "supervisor"],
+    );
+    const results = await executeRunRetirements(summary, {
+      cancelRun: (candidate) => cancelRun(candidate.stateDir),
+      sendStop: (candidate) => sendRunMessage(candidate.stateDir, "stop"),
+    });
+    assert.deepEqual(results, [
+      { action: "cancel", run: "supervisor", stateDir: supervisorDir },
+    ]);
+    for (let index = 0; index < 40; index += 1) {
+      if (getRunStatus(supervisorDir).status === "cancelled") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(getRunStatus(supervisorDir).status, "cancelled");
+    assert.equal(getRunStatus(childDir).status, "done");
+    assert.equal(getRunStatus(serviceDir).status, "running");
+    assert.match(tailRun(supervisorDir), /run\.cancel/);
+  } finally {
+    try {
+      cancelRun(supervisorDir);
+    } catch {
+      // Best-effort cleanup for the long-running supervisor process.
+    }
+    try {
+      cancelRun(serviceDir);
+    } catch {
+      // Best-effort cleanup for the non-retiring service process.
+    }
     await rm(root, { recursive: true, force: true });
   }
 });

@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
@@ -52,9 +52,25 @@ export interface RunSummary {
 
 export interface RunRetirementCandidate {
   activeSubagents: number;
+  childRuns: number;
   descendantSubagents: number;
   run: string;
   stateDir: string;
+  terminalChildRuns: number;
+}
+
+export interface RunRetirementExecution {
+  action: "stop" | "cancel" | "skip" | "failed";
+  error?: string;
+  run: string;
+  stateDir: string;
+}
+
+export interface RunRetirementExecutorOptions {
+  attempted?: Set<string>;
+  cancelRun: (candidate: RunRetirementCandidate) => Record<string, unknown>;
+  notify?: (message: string, level: "info" | "warning" | "error") => void;
+  sendStop: (candidate: RunRetirementCandidate) => Promise<unknown>;
 }
 
 export interface RunTransition {
@@ -93,6 +109,7 @@ const TERMINAL = new Set<RunObservedStatus>([
   "killed",
 ]);
 const PROC_DESCENDANT_SCAN_TTL_MS = 1000;
+const RUN_STATE_DISCOVERY_MAX_DEPTH = 8;
 
 const procDescendantScanCache = new Map<
   string,
@@ -118,6 +135,30 @@ function getUpdatedAt(status: Record<string, unknown>): string | undefined {
     : typeof status.createdAt === "string"
       ? status.createdAt
       : undefined;
+}
+
+function listRunStateDirs(
+  stateRoot: string,
+  depth = 0,
+  seen = new Set<string>(),
+): string[] {
+  if (!existsSync(stateRoot) || seen.has(stateRoot)) return [];
+  seen.add(stateRoot);
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(stateRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const result: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const child = join(stateRoot, entry.name);
+    if (existsSync(join(child, "run.json"))) result.push(child);
+    if (depth + 1 < RUN_STATE_DISCOVERY_MAX_DEPTH)
+      result.push(...listRunStateDirs(child, depth + 1, seen));
+  }
+  return result;
 }
 
 function observeRun(stateDir: string): RunObservation | undefined {
@@ -178,9 +219,8 @@ export function summarizeRuns(
       total: 0,
     };
   }
-  const runs = readdirSync(stateRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => observeRun(join(stateRoot, entry.name)))
+  const runs = listRunStateDirs(stateRoot)
+    .map((stateDir) => observeRun(stateDir))
     .filter((run): run is RunObservation => Boolean(run))
     .filter((run) => ownerId === undefined || run.ownerId === ownerId)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
@@ -242,7 +282,7 @@ function getRunningRunPidMap(stateRoot: string, ownerId?: string): Map<string, s
   const pids = new Map<string, string>();
   for (const run of summarizeRunsWithoutSubagents(stateRoot, ownerId).runs) {
     if (run.status !== "running") continue;
-    const status = AsyncRuns.getRunStatus(join(stateRoot, run.run));
+    const status = AsyncRuns.getRunStatus(run.stateDir ?? join(stateRoot, run.run));
     const pid = Number(status.pid || 0);
     if (pid > 0) pids.set(String(pid), run.run);
   }
@@ -264,9 +304,8 @@ function summarizeRunsWithoutSubagents(
       runs: [],
       total: 0,
     };
-  const runs = readdirSync(stateRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => observeRun(join(stateRoot, entry.name)))
+  const runs = listRunStateDirs(stateRoot)
+    .map((stateDir) => observeRun(stateDir))
     .filter((run): run is RunObservation => Boolean(run))
     .filter((run) => ownerId === undefined || run.ownerId === ownerId)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
@@ -370,26 +409,100 @@ export function renderRunStatus(
   return renderSubagentStatus(summary.runningSubagents, frame);
 }
 
+function isNestedStateDir(parent: string, child: string): boolean {
+  const path = relative(parent, child);
+  return Boolean(path) && !path.startsWith("..") && !isAbsolute(path);
+}
+
 export function findRunRetirementCandidates(
   summary: RunSummary,
 ): RunRetirementCandidate[] {
   return summary.runs
-    .filter((run) => {
+    .map((run) => {
       const activeSubagents = Math.max(0, Math.floor(run.activeSubagents ?? 0));
       const descendantSubagents = Math.max(0, Math.floor(run.descendantSubagents ?? 0));
-      return (
-        run.status === "running" &&
-        run.retireWhen === "children_terminal" &&
-        run.stateDir &&
-        activeSubagents + descendantSubagents <= 0
-      );
+      const childRuns = run.stateDir
+        ? summary.runs.filter(
+            (child) =>
+              child.stateDir !== undefined &&
+              child.stateDir !== run.stateDir &&
+              isNestedStateDir(run.stateDir!, child.stateDir),
+          )
+        : [];
+      const runningChildRuns = childRuns.filter((child) => child.status === "running").length;
+      return {
+        activeSubagents,
+        childRuns: childRuns.length,
+        descendantSubagents,
+        ready:
+          run.status === "running" &&
+          run.retireWhen === "children_terminal" &&
+          run.stateDir !== undefined &&
+          !run.terminalHandled &&
+          activeSubagents + descendantSubagents + runningChildRuns <= 0,
+        run,
+        terminalChildRuns: childRuns.filter((child) => TERMINAL.has(child.status)).length,
+      };
     })
-    .map((run) => ({
-      activeSubagents: Math.max(0, Math.floor(run.activeSubagents ?? 0)),
-      descendantSubagents: Math.max(0, Math.floor(run.descendantSubagents ?? 0)),
-      run: run.run,
-      stateDir: run.stateDir!,
+    .filter((item) => item.ready)
+    .map((item) => ({
+      activeSubagents: item.activeSubagents,
+      childRuns: item.childRuns,
+      descendantSubagents: item.descendantSubagents,
+      run: item.run.run,
+      stateDir: item.run.stateDir!,
+      terminalChildRuns: item.terminalChildRuns,
     }));
+}
+
+export async function executeRunRetirements(
+  summary: RunSummary,
+  options: RunRetirementExecutorOptions,
+): Promise<RunRetirementExecution[]> {
+  const results: RunRetirementExecution[] = [];
+  for (const candidate of findRunRetirementCandidates(summary)) {
+    if (options.attempted?.has(candidate.stateDir)) {
+      results.push({ action: "skip", run: candidate.run, stateDir: candidate.stateDir });
+      continue;
+    }
+    options.attempted?.add(candidate.stateDir);
+    try {
+      await options.sendStop(candidate);
+      options.notify?.(
+        `Retiring actor ${candidate.run} after child runs reached terminal state`,
+        "info",
+      );
+      results.push({ action: "stop", run: candidate.run, stateDir: candidate.stateDir });
+      continue;
+    } catch (error) {
+      try {
+        const cancelResult = options.cancelRun(candidate);
+        const cancelled = Boolean((cancelResult as { cancelled?: unknown }).cancelled);
+        options.notify?.(
+          cancelled
+            ? `Retiring actor ${candidate.run} by cancellation after graceful stop failed`
+            : `Actor retirement skipped for ${candidate.run}: ${error instanceof Error ? error.message : String(error)}`,
+          cancelled ? "warning" : "error",
+        );
+        results.push({
+          action: cancelled ? "cancel" : "skip",
+          ...(cancelled ? {} : { error: error instanceof Error ? error.message : String(error) }),
+          run: candidate.run,
+          stateDir: candidate.stateDir,
+        });
+      } catch (cancelError) {
+        const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
+        options.notify?.(`Actor retirement failed for ${candidate.run}: ${message}`, "error");
+        results.push({
+          action: "failed",
+          error: message,
+          run: candidate.run,
+          stateDir: candidate.stateDir,
+        });
+      }
+    }
+  }
+  return results;
 }
 
 export function detectRunTransitions(

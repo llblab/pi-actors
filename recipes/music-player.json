@@ -6,7 +6,7 @@
     "source:string",
     "loop:bool",
     "volume:int",
-    "player:enum(auto,mpv,ffplay,cvlc,play)",
+    "player:enum(auto,mpv,afplay,ffplay,cvlc,play,wmp)",
     "state_dir:path"
   ],
   "defaults": {

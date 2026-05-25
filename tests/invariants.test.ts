@@ -13,6 +13,10 @@ const indexSource = await readFile(
   new URL("../index.ts", import.meta.url),
   "utf8",
 );
+const changelogSource = await readFile(
+  new URL("../CHANGELOG.md", import.meta.url),
+  "utf8",
+);
 
 function listFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -95,4 +99,54 @@ test("Operator guidance avoids direct inbox and outbox wording", () => {
       `${file} should describe actor messages instead of inbox/outbox routing`,
     );
   }
+});
+
+test("Operator guidance avoids stale FIFO queue wording", () => {
+  for (const file of operatorGuidanceFiles) {
+    const content = readFileSync(file, "utf8");
+    assert.doesNotMatch(
+      content,
+      /FIFO queue|queued FIFO/i,
+      `${file} should describe queued mailbox work, not FIFO queues`,
+    );
+  }
+});
+
+test("Unreleased changelog items avoid version literals", () => {
+  const unreleased = changelogSource.match(
+    /^## Unreleased\n(?<body>[\s\S]*?)(?=^## \d+\.\d+\.\d+)/m,
+  )?.groups?.body ?? "";
+  for (const line of unreleased.split("\n").filter((line) => line.startsWith("- `"))) {
+    assert.doesNotMatch(
+      line,
+      /\b\d+\.\d+\.\d+\b/,
+      "Unreleased changelog item should rely on the section heading for versioning",
+    );
+  }
+});
+
+test("Music player backend enum stays aligned across recipe docs and script", () => {
+  const recipe = JSON.parse(readFileSync("recipes/music-player.json", "utf8"));
+  const recipePlayers = recipe.args
+    .find((arg: string) => arg.startsWith("player:enum("))
+    ?.match(/^player:enum\((?<values>[^)]+)\)$/)?.groups?.values.split(",");
+  assert.deepEqual(recipePlayers, [
+    "auto",
+    "mpv",
+    "afplay",
+    "ffplay",
+    "cvlc",
+    "play",
+    "wmp",
+  ]);
+
+  const docs = readFileSync("docs/recipe-library.md", "utf8");
+  const docsPlayers = docs
+    .match(/player:enum\((?<values>[^)]+)\)=auto/)?.groups?.values.split(",");
+  assert.deepEqual(docsPlayers, recipePlayers);
+
+  const script = readFileSync("scripts/music-player.mjs", "utf8");
+  const usagePlayers = script
+    .match(/Supported players: (?<values>[^.]+)\./)?.groups?.values.split(", ");
+  assert.deepEqual(usagePlayers, recipePlayers);
 });

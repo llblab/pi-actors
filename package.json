@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -33,7 +33,6 @@
     "prepack": "npm run build"
   },
   "files": [
-    "index.js",
     "index.ts",
     "lib",
     "scripts",
@@ -49,7 +48,7 @@
   ],
   "pi": {
     "extensions": [
-      "./index.js"
+      "./dist/index.js"
     ],
     "skills": [
       "./skills/actors/SKILL.md",

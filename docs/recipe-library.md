@@ -136,12 +136,12 @@ Files:
 
 Purpose: start a local or URL audio source as an async run so the agent can continue working while playback runs in the background. The running script exposes a run-local mailbox, so addressed `message` calls can control playback without a second recipe.
 
-Requirements: Linux, macOS, or WSL, Node.js, and one of `mpv`, `ffplay`, `cvlc`, or SoX `play`. Native Windows is not supported by the standard wrapper; use WSL or a platform-specific recipe transport.
+Requirements: Node.js and one playback backend. Supported backends are `mpv`, macOS `afplay`, `ffplay`, `cvlc`, SoX `play`, or `wmp` on native Windows through the legacy Windows Media Player COM control exposed by `powershell.exe`. The `wmp` backend validates `wmplayer.exe` under `Program Files/Windows Media Player` or `Program Files (x86)/Windows Media Player`; it does not target the newer UWP/Store Media Player. Playback format support depends on the selected player; the actor control path itself uses the portable mailbox/wake runtime layer.
 
 The required `source` arg accepts:
 
 - A single local file or URL.
-- A directory containing audio files; the wrapper scans `.mp3`, `.ogg`, `.wav`, `.flac`, and `.m4a` files.
+- A directory containing audio files; the wrapper scans `.aac`, `.aif`, `.aiff`, `.flac`, `.m4a`, `.mp3`, `.ogg`, and `.wav` files.
 - An `.m3u`, `.m3u8`, or `.txt` playlist file.
 - A `|`-separated inline list of local files or URLs.
 
@@ -158,7 +158,7 @@ Register playback:
 register_tool name=music_player \
   description="Start async music player playback through the Node.js wrapper" \
   template="music-player.json" \
-  args="source:string,loop:bool=true,volume:int=70,player:enum(auto,mpv,ffplay,cvlc,play)=auto"
+  args="source:string,loop:bool=true,volume:int=70,player:enum(auto,mpv,afplay,ffplay,cvlc,play,wmp)=auto"
 ```
 
 Start playback:
@@ -185,7 +185,14 @@ The wrapper also accepts control commands directly when a caller already has the
 scripts/music-player.mjs next ~/.pi/agent/tmp/pi-actors/runs/music
 ```
 
-Message body is adapted to the recipe's run-local control channel. The script writes `status.txt`, `player.json`, and track-change actor messages in the same state dir. Track-change messages stay diagnostic by default; interactive recipes should define a small command vocabulary for addressed messages, emit semantic actor messages for decision points, and let the coordinator react to messages rather than sleep-polling state.
+Message body is queued in the recipe's run-local mailbox and reconciled by the player loop. The loop treats `wake.jsonl` and `fs.watch` as advisory signals, then verifies the durable inbox signature before taking the inbox lock so unchanged mailboxes are not reread on every tick. On Unix-like hosts, child players run in their own process group so pause/resume/next/stop controls can signal the playback subtree directly. The script writes `status.txt`, `player.json`, and track-change actor messages in the same state dir. Track-change messages stay diagnostic by default; interactive recipes should define a small command vocabulary for addressed messages, emit semantic actor messages for decision points, and let the coordinator react to messages rather than sleep-polling state.
+
+Cross-platform smoke checklist:
+
+- Linux: install one backend such as `mpv` or `ffplay`; start `music_player source="~/Music" run_id=music`, send `pause`, `play`, `next`, and `stop`, then inspect `run:music` status/mailbox.
+- macOS: verify `player=auto` selects `afplay` when no preferred CLI backend is installed, then run the same addressed message controls.
+- Native Windows: verify `player=wmp` detects `wmplayer.exe`, starts playback through Windows Media Player COM, handles `pause`/`play`/`next`/`previous`/`stop`, and leaves handled mailbox records visible through `inspect target=run:music view=mailbox`.
+- All hosts: confirm missed wake resilience by checking that queued mailbox commands are eventually claimed without relying on a transport-specific endpoint.
 
 ## Safety Notes
 

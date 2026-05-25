@@ -1,19 +1,17 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   accessSync,
-  closeSync,
   constants,
   existsSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
-  readSync,
   rmSync,
   statSync,
+  watch,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import {
@@ -26,7 +24,16 @@ import {
   resolve,
 } from "node:path";
 
-const AUDIO_EXTENSIONS = new Set([".mp3", ".ogg", ".wav", ".flac", ".m4a"]);
+const AUDIO_EXTENSIONS = new Set([
+  ".aac",
+  ".aif",
+  ".aiff",
+  ".flac",
+  ".m4a",
+  ".mp3",
+  ".ogg",
+  ".wav",
+]);
 const PLAYLIST_EXTENSIONS = new Set([".m3u", ".m3u8", ".txt"]);
 const CONTROL_COMMANDS = new Set([
   "play",
@@ -47,24 +54,15 @@ function usage() {
   music-player.mjs control <state-dir> <play|pause|toggle|next|previous|stop|status>
 
 Runs a small foreground music player so pi-actors can own it as an actor run.
-Actor message bodies are adapted to newline-delimited commands at <state-dir>/control.fifo.
+Actor message bodies are adapted to queued mailbox commands in <state-dir>/inbox.jsonl.
 Prefer message to=run:<run> type=player.<command> body=<command>, or use direct control commands below.
-Supported players: auto, mpv, ffplay, cvlc, play.
+Supported players: auto, mpv, afplay, ffplay, cvlc, play, wmp.
 `);
 }
 
 function fail(message, code = 1) {
   console.error(`music-player: ${message}`);
   process.exit(code);
-}
-
-function ensureUnixFifoSupport() {
-  if (process.platform === "win32") {
-    fail(
-      "Unix FIFO controls are not available on native Windows; use WSL/Linux/macOS or a recipe-specific Windows transport.",
-      70,
-    );
-  }
 }
 
 function sleep(ms) {
@@ -100,15 +98,6 @@ function isDirectory(path) {
 function isFile(path) {
   try {
     return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function isFifo(path) {
-  try {
-    const mode = statSync(path).mode & constants.S_IFMT;
-    return mode === constants.S_IFIFO;
   } catch {
     return false;
   }
@@ -158,15 +147,61 @@ function normalizeVolume(value) {
   return Math.min(Number(value), 100);
 }
 
+function powershellCommand() {
+  return have("powershell") ? "powershell.exe" : undefined;
+}
+
+function windowsMediaPlayerExecutable() {
+  if (process.platform !== "win32") return undefined;
+  const roots = [
+    process.env.ProgramFiles,
+    process.env["ProgramFiles(x86)"],
+    process.env.SystemDrive ? join(process.env.SystemDrive, "Program Files") : undefined,
+    process.env.SystemDrive
+      ? join(process.env.SystemDrive, "Program Files (x86)")
+      : undefined,
+  ];
+  for (const root of roots.filter(Boolean)) {
+    const candidate = join(root, "Windows Media Player", "wmplayer.exe");
+    if (exists(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function havePlayer(player) {
+  if (player === "wmp") {
+    return (
+      process.platform === "win32" &&
+      Boolean(powershellCommand()) &&
+      Boolean(windowsMediaPlayerExecutable())
+    );
+  }
+  return have(player);
+}
+
 function selectPlayer(requested) {
   let selected = requested;
   if (selected === "auto") {
-    selected = ["mpv", "ffplay", "cvlc", "play"].find(have) || selected;
+    let candidates;
+    if (process.platform === "win32") {
+      candidates = ["wmp", "mpv", "ffplay", "cvlc"];
+    } else if (process.platform === "darwin") {
+      candidates = ["mpv", "afplay", "ffplay", "cvlc", "play"];
+    } else {
+      candidates = ["mpv", "ffplay", "cvlc", "play"];
+    }
+    selected = candidates.find(havePlayer) || selected;
   }
-  if (!["mpv", "ffplay", "cvlc", "play"].includes(selected)) {
+  if (!["mpv", "afplay", "ffplay", "cvlc", "play", "wmp"].includes(selected)) {
     fail(`unsupported player: ${requested}`, 2);
   }
-  if (!have(selected)) fail(`player not found: ${selected}`, 127);
+  if (selected === "wmp" && !havePlayer(selected)) {
+    fail(
+      "player not found: wmp requires native Windows, powershell.exe, and wmplayer.exe under Program Files/Windows Media Player",
+      127,
+    );
+  }
+  if (!havePlayer(selected)) fail(`player not found: ${selected}`, 127);
   return selected;
 }
 
@@ -232,7 +267,63 @@ function loadPlaylist(source) {
   return tracks;
 }
 
-function playerCommand(player, volume, track) {
+function windowsMediaPlayerCommand(ctx, volume, track) {
+  const command = powershellCommand();
+  const wmplayer = windowsMediaPlayerExecutable();
+  if (!command || !wmplayer) {
+    fail(
+      "Windows Media Player backend requires powershell.exe and wmplayer.exe",
+      127,
+    );
+  }
+  const script = String.raw`
+$ErrorActionPreference = 'Stop'
+$track = $args[0]
+$volume = [int]$args[1]
+$controlFile = $args[2]
+$wmplayerExe = $args[3]
+if (-not (Test-Path -LiteralPath $wmplayerExe)) { throw "wmplayer.exe not found: $wmplayerExe" }
+$player = New-Object -ComObject WMPlayer.OCX
+$player.settings.volume = [Math]::Min([Math]::Max($volume, 0), 100)
+$player.URL = $track
+$player.controls.play()
+try {
+  while ($true) {
+    Start-Sleep -Milliseconds 100
+    if (Test-Path -LiteralPath $controlFile) {
+      $control = (Get-Content -LiteralPath $controlFile -Raw -ErrorAction SilentlyContinue).Trim().ToLowerInvariant()
+      Clear-Content -LiteralPath $controlFile -ErrorAction SilentlyContinue
+      switch ($control) {
+        'play' { $player.controls.play() }
+        'pause' { $player.controls.pause() }
+        'stop' { $player.controls.stop(); break }
+      }
+    }
+    if ($player.playState -eq 1 -or $player.playState -eq 8) { break }
+  }
+} finally {
+  $player.close()
+}
+`;
+  return [
+    command,
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      script,
+      track,
+      String(volume),
+      ctx.playerControlFile,
+      wmplayer,
+    ],
+  ];
+}
+
+function playerCommand(ctx, player, volume, track) {
   switch (player) {
     case "mpv":
       return [
@@ -244,6 +335,11 @@ function playerCommand(player, volume, track) {
           `--volume=${volume}`,
           track,
         ],
+      ];
+    case "afplay":
+      return [
+        "afplay",
+        ["-v", String(Math.min(Math.max(volume / 100, 0), 1)), track],
       ];
     case "ffplay":
       return [
@@ -274,6 +370,8 @@ function playerCommand(player, volume, track) {
       ];
     case "play":
       return ["play", ["-q", track]];
+    case "wmp":
+      return windowsMediaPlayerCommand(ctx, volume, track);
     default:
       fail(`unsupported player: ${player}`, 2);
   }
@@ -342,16 +440,36 @@ function setState(ctx, state) {
 function sendSignalToCurrent(ctx, signal) {
   const pid = Number(readText(ctx.pidFile).trim());
   if (!Number.isInteger(pid) || pid <= 0) return;
-  try {
-    process.kill(pid, signal);
-    return;
-  } catch {
-    // Fall through to process-group fallback.
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // Fall through to the direct child fallback.
+    }
   }
   try {
-    process.kill(-pid, signal);
+    process.kill(pid, signal);
   } catch {
     // Best effort control signal.
+  }
+}
+
+function controlCurrentPlayback(ctx, command) {
+  if (ctx.current?.player === "wmp") {
+    writeText(ctx.playerControlFile, command);
+    return;
+  }
+  switch (command) {
+    case "play":
+      sendSignalToCurrent(ctx, "SIGCONT");
+      break;
+    case "pause":
+      sendSignalToCurrent(ctx, "SIGSTOP");
+      break;
+    case "stop":
+      sendSignalToCurrent(ctx, "SIGTERM");
+      break;
   }
 }
 
@@ -366,85 +484,279 @@ function handleControl(ctx, input) {
     case "play":
     case "resume":
       setState(ctx, "playing");
-      sendSignalToCurrent(ctx, "SIGCONT");
+      controlCurrentPlayback(ctx, "play");
       break;
     case "pause":
       setState(ctx, "paused");
-      sendSignalToCurrent(ctx, "SIGSTOP");
+      controlCurrentPlayback(ctx, "pause");
       break;
     case "toggle": {
       const current = readText(ctx.stateFile).trim();
       if (current === "paused") {
         setState(ctx, "playing");
-        sendSignalToCurrent(ctx, "SIGCONT");
+        controlCurrentPlayback(ctx, "play");
       } else {
         setState(ctx, "paused");
-        sendSignalToCurrent(ctx, "SIGSTOP");
+        controlCurrentPlayback(ctx, "pause");
       }
       break;
     }
     case "next":
       writeText(ctx.commandFile, "next");
-      sendSignalToCurrent(ctx, "SIGTERM");
+      controlCurrentPlayback(ctx, "stop");
       break;
     case "previous":
     case "prev":
       writeText(ctx.commandFile, "previous");
-      sendSignalToCurrent(ctx, "SIGTERM");
+      controlCurrentPlayback(ctx, "stop");
       break;
     case "stop":
       writeText(ctx.commandFile, "stop");
-      sendSignalToCurrent(ctx, "SIGTERM");
+      controlCurrentPlayback(ctx, "stop");
       break;
     case "status":
       break;
   }
 }
 
-function makeFifo(path) {
-  rmSync(path, { force: true });
-  const result = spawnSync("mkfifo", [path], { encoding: "utf8" });
-  if (result.status !== 0) {
-    const error =
-      result.stderr.trim() || result.error?.message || "mkfifo failed";
-    fail(error, result.status || 1);
+function runJsonFile(ctx) {
+  return join(ctx.stateDir, "run.json");
+}
+
+function readJsonFile(path, fallback) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonFile(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function updateRunControlMetadata(ctx) {
+  const path = runJsonFile(ctx);
+  const run = readJsonFile(path, undefined);
+  if (!run || typeof run !== "object") return;
+  writeJsonFile(path, {
+    ...run,
+    control: { path: ctx.inboxFile, type: "mailbox" },
+  });
+}
+
+function acquireInboxLock(ctx) {
+  const lockDir = join(ctx.stateDir, ".inbox.lock");
+  const started = Date.now();
+  while (true) {
+    try {
+      mkdirSync(lockDir);
+      writeJsonFile(join(lockDir, "owner.json"), {
+        created_at: new Date().toISOString(),
+        pid: process.pid,
+      });
+      return () => rmSync(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      try {
+        const stat = statSync(lockDir);
+        if (Date.now() - stat.mtimeMs > 5 * 60 * 1000) {
+          rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() - started > 5000) throw error;
+    }
+  }
+}
+
+function readInboxMessages(ctx) {
+  if (!exists(ctx.inboxFile)) return [];
+  return readFileSync(ctx.inboxFile, "utf8")
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return undefined;
+      }
+    })
+    .filter(Boolean);
+}
+
+function writeInboxMessages(ctx, messages) {
+  writeFileSync(
+    ctx.inboxFile,
+    messages.length
+      ? `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`
+      : "",
+    "utf8",
+  );
+}
+
+function commandFromInboxMessage(message) {
+  if (
+    typeof message.body === "string" &&
+    CONTROL_COMMANDS.has(message.body.trim())
+  ) {
+    return message.body.trim();
+  }
+  if (message.body && typeof message.body === "object") {
+    const command = String(message.body.command ?? "").trim();
+    if (CONTROL_COMMANDS.has(command)) return command;
+  }
+  if (typeof message.type === "string") {
+    if (message.type === "control.stop" || message.type === "control.cancel")
+      return "stop";
+    const match = /^player\.(.+)$/.exec(message.type);
+    if (match && CONTROL_COMMANDS.has(match[1])) return match[1];
+  }
+  return undefined;
+}
+
+function runtimeWakeFile(ctx) {
+  return join(ctx.stateDir, "wake.jsonl");
+}
+
+function notifyMailboxWake(ctx, reason = "run.message") {
+  try {
+    writeText(
+      runtimeWakeFile(ctx),
+      `${JSON.stringify({
+        actor: `run:${basename(ctx.stateDir)}`,
+        id: randomUUID(),
+        metadata: { command: "music-player" },
+        reason,
+        state_dir: ctx.stateDir,
+        ts: new Date().toISOString(),
+      })}\n`,
+      "a",
+    );
+  } catch {
+    // Wake records are advisory; the inbox remains the durable source of truth.
+  }
+}
+
+function appendInboxCommand(ctx, command) {
+  const release = acquireInboxLock(ctx);
+  try {
+    const ts = new Date().toISOString();
+    const messages = readInboxMessages(ctx);
+    messages.push({
+      body: command,
+      from: "coordinator",
+      id: randomUUID(),
+      queued_at: ts,
+      received_at: ts,
+      status: "queued",
+      to: `run:${basename(ctx.stateDir)}`,
+      type: `player.${command}`,
+    });
+    writeInboxMessages(ctx, messages);
+  } finally {
+    release();
+  }
+  notifyMailboxWake(ctx);
+}
+
+function claimInboxCommands(ctx) {
+  const release = acquireInboxLock(ctx);
+  try {
+    const messages = readInboxMessages(ctx);
+    const commands = [];
+    let changed = false;
+    const claimedAt = new Date().toISOString();
+    for (const message of messages) {
+      if (message.status !== "queued") continue;
+      const command = commandFromInboxMessage(message);
+      if (!command) {
+        message.failed_at = claimedAt;
+        message.status = "failed";
+        message.error = "Unsupported music-player command";
+        changed = true;
+        continue;
+      }
+      message.claimed_at = claimedAt;
+      message.claimed_by = `run:${basename(ctx.stateDir)}`;
+      message.status = "claimed";
+      commands.push({ command, id: message.id });
+      changed = true;
+    }
+    if (changed) writeInboxMessages(ctx, messages);
+    return commands;
+  } finally {
+    release();
+  }
+}
+
+function finalizeInboxCommand(ctx, id, status, error) {
+  if (!id) return;
+  const release = acquireInboxLock(ctx);
+  try {
+    const messages = readInboxMessages(ctx);
+    const timestamp = new Date().toISOString();
+    let changed = false;
+    for (const message of messages) {
+      if (message.id !== id) continue;
+      message.status = status;
+      if (status === "handled") message.handled_at = timestamp;
+      else message.failed_at = timestamp;
+      if (error) message.error = error;
+      changed = true;
+    }
+    if (changed) writeInboxMessages(ctx, messages);
+  } finally {
+    release();
+  }
+}
+
+function inboxSignature(ctx) {
+  try {
+    const stat = statSync(ctx.inboxFile);
+    return `${stat.size}:${stat.mtimeMs}`;
+  } catch {
+    return "missing";
   }
 }
 
 function startControlLoop(ctx) {
-  makeFifo(ctx.controlFifo);
-  const fd = openSync(ctx.controlFifo, constants.O_RDWR | constants.O_NONBLOCK);
-  let carry = "";
   let closed = false;
+  let dirty = true;
+  let watcher;
+  try {
+    watcher = watch(ctx.stateDir, { persistent: false }, (_eventType, file) => {
+      const name = file ? String(file) : "";
+      if (!name || name === basename(ctx.inboxFile) || name === basename(runtimeWakeFile(ctx))) {
+        dirty = true;
+      }
+    });
+  } catch {
+    // fs.watch is advisory; the signature poll below is the portable fallback.
+  }
   const close = () => {
-    if (closed) return;
     closed = true;
-    try {
-      closeSync(fd);
-    } catch {}
+    watcher?.close();
   };
   const promise = (async () => {
-    const buffer = Buffer.alloc(4096);
-    while (!ctx.stopping) {
-      try {
-        const bytes = readSync(fd, buffer, 0, buffer.length, null);
-        if (bytes > 0) {
-          carry += buffer.subarray(0, bytes).toString("utf8");
-          const lines = carry.split("\n");
-          carry = lines.pop() || "";
-          for (const line of lines) handleControl(ctx, line);
-        } else {
-          await sleep(50);
+    let lastSignature = "";
+    while (!ctx.stopping && !closed) {
+      const signature = inboxSignature(ctx);
+      if (dirty || signature !== lastSignature) {
+        dirty = false;
+        for (const { command, id } of claimInboxCommands(ctx)) {
+          try {
+            handleControl(ctx, command);
+            finalizeInboxCommand(ctx, id, "handled");
+          } catch (error) {
+            finalizeInboxCommand(ctx, id, "failed", error.message);
+          }
         }
-      } catch (error) {
-        if (ctx.stopping || closed) break;
-        if (["EAGAIN", "EWOULDBLOCK"].includes(error.code)) {
-          await sleep(50);
-          continue;
-        }
-        console.error(`music-player: control loop error: ${error.message}`);
-        await sleep(250);
+        lastSignature = inboxSignature(ctx);
+        continue;
       }
+      await sleep(250);
     }
   })();
   return { close, promise };
@@ -452,9 +764,11 @@ function startControlLoop(ctx) {
 
 function playOne(ctx, player, volume, track, index, count) {
   return new Promise((resolveDone) => {
-    const [command, args] = playerCommand(player, volume, track);
+    rmSync(ctx.playerControlFile, { force: true });
+    const [command, args] = playerCommand(ctx, player, volume, track);
     writeStatus(ctx, "playing", index, count, track, player, "");
     const child = spawn(command, args, {
+      detached: process.platform !== "win32",
       stdio: ["ignore", "inherit", "inherit"],
     });
     ctx.child = child;
@@ -483,7 +797,6 @@ function readAndClearCommand(ctx) {
 }
 
 async function playMain(args) {
-  ensureUnixFifoSupport();
   const [
     sourceArg,
     loopArg = "true",
@@ -505,19 +818,20 @@ async function playMain(args) {
   mkdirSync(stateDir, { recursive: true });
   const ctx = {
     commandFile: join(stateDir, "command.txt"),
-    controlFifo: join(stateDir, "control.fifo"),
     current: undefined,
     eventFile: join(stateDir, "outbox.jsonl"),
+    inboxFile: join(stateDir, "inbox.jsonl"),
     pidFile: join(stateDir, "current.pid"),
+    playerControlFile: join(stateDir, "player-control.txt"),
     stateDir,
     stateFile: join(stateDir, "player-state.txt"),
     statusFile: join(stateDir, "status.txt"),
     statusJsonFile: join(stateDir, "player.json"),
     stopping: false,
   };
-  rmSync(ctx.controlFifo, { force: true });
   rmSync(ctx.commandFile, { force: true });
   rmSync(ctx.pidFile, { force: true });
+  rmSync(ctx.playerControlFile, { force: true });
   const loop = parseBool(loopArg);
   const volume = normalizeVolume(volumeArg);
   const player = selectPlayer(playerArg);
@@ -533,7 +847,7 @@ async function playMain(args) {
     }
     controlLoop?.close();
     rmSync(ctx.pidFile, { force: true });
-    rmSync(ctx.controlFifo, { force: true });
+    rmSync(ctx.playerControlFile, { force: true });
   };
   process.once("SIGTERM", () => {
     cleanup();
@@ -548,6 +862,7 @@ async function playMain(args) {
     process.exit(129);
   });
   try {
+    updateRunControlMetadata(ctx);
     controlLoop = startControlLoop(ctx);
     setState(ctx, "playing");
     console.error(
@@ -600,19 +915,11 @@ function controlMain(args) {
     );
     return;
   }
-  ensureUnixFifoSupport();
-  const fifo = join(stateDir, "control.fifo");
-  if (!isFifo(fifo)) fail(`control fifo not found: ${fifo}`, 75);
-  let fd;
-  try {
-    fd = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
-    writeSync(fd, command.endsWith("\n") ? command : `${command}\n`);
-  } catch (error) {
-    fail(`control fifo is not ready: ${fifo}: ${error.message}`, 75);
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
-  console.log(`music-player: command=${command} sent state_dir=${stateDir}`);
+  appendInboxCommand(
+    { inboxFile: join(stateDir, "inbox.jsonl"), stateDir },
+    command,
+  );
+  console.log(`music-player: command=${command} queued state_dir=${stateDir}`);
 }
 
 const [mode, ...rest] = process.argv.slice(2);

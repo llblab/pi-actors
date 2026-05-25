@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.22.0: Cross-Platform Runtime Notification Layer
+
+- `[Runtime]` Started the cross-platform notification layer with a file-backed advisory wake notifier (`wake.jsonl`), explicit initial/wake/poll reconciliation callbacks, periodic reconciliation fallback, and run-message/room-message/branch-inbox wake records. Run messages now persist a canonical inbox record before optional endpoint delivery, can accept mailbox-only control endpoints without FIFO/named-pipe transport, mark delivered endpoint messages `sent`, expose recent run inbox entries through `inspect view=mailbox`, and provide locked run-inbox claim/handle/fail helpers for runtime reconciliation loops. Files remain the canonical mailbox/event state for inspection and crash recovery.
+- `[Docs/Tests]` Documented the "wake, not queue" runtime model, added cross-platform music-player smoke guidance, and added coverage for persisted wake events, missed `fs.watch` recovery through polling, and Windows named-pipe message wakes.
+- `[Packaging]` Removed the root JavaScript entrypoint wrapper from packaged files and pointed extension metadata directly at the compiled `dist/index.js` output. Source checkouts keep `index.ts` as the only root entrypoint while installed packages load compiled JavaScript from `dist`.
+- `[Docs/Prompts]` Removed stale FIFO-queue wording from branch-direct message docs and coordinator prompt injection so queued mailbox work is described consistently with the notification/runtime model. Clarified that worker-backed direct branch messages are runner-owned prompt steering, not coordinator follow-ups, while one-shot prompt children do not consume branch inbox records automatically.
+- `[Recipes]` Migrated the packaged music-player control path from Unix FIFO commands to queued mailbox commands, preserving addressed `message` control while making the script align with mailbox-only runtime endpoints.
+- `[Recipes]` Added a native Windows `wmp` music-player backend that drives legacy Windows Media Player through `powershell.exe`/COM, verifies `wmplayer.exe` in the standard Program Files locations, and includes mailbox-backed play, pause, next, previous, and stop controls.
+- `[Recipes]` Reduced music-player mailbox overhead by using advisory wake records, `fs.watch` where available, and inbox file signatures so the loop avoids repeatedly locking and rereading an unchanged mailbox.
+- `[Recipes]` Improved Unix-like playback by adding the macOS-native `afplay` backend, scanning additional common audio extensions, and running child players in their own process group so controls can signal the playback subtree directly.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata for the minor release.
+
 ## 0.21.0: Native Windows Actor Control and Literate Recipes
 
 - `[Async Runs]` Added a platform-adapted run-control path: Unix FIFO behavior remains backward-compatible, native Windows can target named-pipe run-control endpoints recorded in run state, and run message receipts still update events and inbox state through the same actor-message path.
@@ -15,7 +27,7 @@
 - `[Coordinator]` Consolidated direct branch inbox claim/finalize rewrites behind one locked mutation helper and moved room-swarm mode dispatch behind an explicit mode registry. Unknown coordinator modes now fail closed, and `pipeline-room-swarm` exposes the supported mode enum.
 - `[Docs]` Documented the local Actor OS smoke matrix covered by `npm test`, spanning room coordination, direct branch delivery, inbox claim/handle transitions, inspector navigation, recipe context injection, persistence suggestions, and opt-in retirement smoke.
 - `[Docs/Tests]` Documented native Windows support scope and added regression coverage for Windows endpoint metadata, mocked named-pipe sends, Windows process-control planning, unchanged Unix FIFO behavior, locker control metadata, branch inbox compaction, mixed room/direct workloads, Markdown recipe loading/discovery/validation, nested child-run retirement gating, and packaged recipe trust diagnostics.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.21.0` for the minor release.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata for the minor release.
 
 ## 0.20.2: Installed Extension Entrypoint Hotfix
 

@@ -14,14 +14,23 @@ import {
   cancelRun,
   getRunProcessSignalPlan,
   getRunStatus,
+  claimRunInboxMessage,
   killRun,
   listRuns,
+  processRunInboxMessages,
   readRunEvents,
+  readRunInboxMessages,
   sendRunMessage,
   startRun,
   tailRun,
 } from "../lib/async-runs.ts";
 import { executeRunRetirements, summarizeRuns } from "../lib/observability.ts";
+import {
+  createFileRuntimeNotifier,
+  notifyRuntimeWake,
+  readRuntimeWakeEvents,
+  runtimeWakeFile,
+} from "../lib/runtime-notifier.ts";
 
 async function waitForResult(
   stateDir: string,
@@ -44,6 +53,17 @@ async function waitForFile(path: string): Promise<void> {
     }
   }
   throw new Error(`file did not appear: ${path}`);
+}
+
+async function waitForWakeCount(
+  observed: unknown[],
+  expected: number,
+): Promise<void> {
+  for (let i = 0; i < 40; i++) {
+    if (observed.length >= expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`wake events did not reach count: ${expected}`);
 }
 
 async function waitForStatus(
@@ -615,6 +635,108 @@ test("Async runs expose script-authored outbox events", async () => {
   }
 });
 
+test("Runtime notifier persists advisory wake events", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-"));
+  const stateDir = join(root, "notified");
+  const observed: unknown[] = [];
+  try {
+    const notifier = createFileRuntimeNotifier(stateDir, {
+      pollIntervalMs: 25,
+      watch: false,
+    });
+    const subscription = notifier.subscribe("run:notified", (event) => {
+      observed.push(event);
+    });
+    try {
+      const event = notifier.notify({
+        actor: "run:notified",
+        metadata: { source: "test" },
+        reason: "mailbox.update",
+      });
+      assert.equal(event.actor, "run:notified");
+      assert.equal(event.reason, "mailbox.update");
+      assert.equal(runtimeWakeFile(stateDir), join(stateDir, "wake.jsonl"));
+      await waitForWakeCount(observed, 1);
+      const events = readRuntimeWakeEvents(stateDir);
+      assert.equal(events.length, 1);
+      assert.equal(events[0].id, event.id);
+      assert.deepEqual(events[0].metadata, { source: "test" });
+    } finally {
+      subscription.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime notifier emits reconciliation callbacks without wakes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-reconcile-"));
+  const stateDir = join(root, "notified-reconcile");
+  const reconciles: Array<{ actor: string; reason: string }> = [];
+  try {
+    const notifier = createFileRuntimeNotifier(stateDir, {
+      pollIntervalMs: 25,
+      watch: false,
+    });
+    const subscription = notifier.subscribe(
+      "run:notified-reconcile",
+      () => {},
+      {
+        onReconcile: (event) => {
+          reconciles.push(event);
+        },
+      },
+    );
+    try {
+      await waitForWakeCount(reconciles, 2);
+      assert.equal(reconciles[0].reason, "initial");
+      assert.equal(reconciles[0].actor, "run:notified-reconcile");
+      assert.equal(reconciles.some((event) => event.reason === "poll"), true);
+    } finally {
+      subscription.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime notifier periodic fallback observes missed fs watch events", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-fallback-"));
+  const stateDir = join(root, "notified-fallback");
+  const observed: unknown[] = [];
+  try {
+    const notifier = createFileRuntimeNotifier(stateDir, {
+      pollIntervalMs: 25,
+      watch: false,
+    });
+    const reconciles: Array<{ actor: string; reason: string }> = [];
+    const subscription = notifier.subscribe(
+      "run:notified-fallback",
+      (event) => {
+        observed.push(event);
+      },
+      {
+        onReconcile: (event) => {
+          reconciles.push(event);
+        },
+      },
+    );
+    try {
+      notifyRuntimeWake(stateDir, {
+        actor: "run:notified-fallback",
+        reason: "mailbox.update",
+      });
+      await waitForWakeCount(observed, 1);
+      assert.equal(readRuntimeWakeEvents(stateDir)[0].actor, "run:notified-fallback");
+      assert.equal(reconciles.some((event) => event.reason === "wake"), true);
+    } finally {
+      subscription.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test(
   "Async runs can send line messages to a run control FIFO",
   { skip: process.platform === "win32" },
@@ -740,7 +862,202 @@ test("Async runs can send messages to a Windows named-pipe control endpoint", as
     assert.match(sentPayload, /hello windows/);
     const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
     assert.equal(inbox.body, "hello windows");
+    const wakeEvents = readRuntimeWakeEvents(stateDir);
+    assert.equal(wakeEvents.length, 1);
+    assert.equal(wakeEvents[0].actor, "run:controlled-winpipe");
+    assert.equal(wakeEvents[0].reason, "run.message");
+    assert.equal(typeof wakeEvents[0].metadata?.inbox_id, "string");
+    assert.deepEqual(
+      {
+        bytes: wakeEvents[0].metadata?.bytes,
+        control_type: wakeEvents[0].metadata?.control_type,
+      },
+      {
+        bytes: Buffer.byteLength(sentPayload),
+        control_type: "named-pipe",
+      },
+    );
     assert.match(tailRun(stateDir), /run\.message/);
+  } finally {
+    killRun(stateDir);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async runs can accept messages through mailbox-only control endpoint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-mailbox-control-"));
+  const stateDir = join(root, "controlled-mailbox");
+  try {
+    startRun(
+      {
+        run_id: "controlled-mailbox",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    const runJsonPath = join(stateDir, "run.json");
+    const meta = JSON.parse(await readFile(runJsonPath, "utf8"));
+    await writeFile(
+      runJsonPath,
+      `${JSON.stringify({ ...meta, control: { path: join(stateDir, "inbox.jsonl"), type: "mailbox" } }, null, 2)}\n`,
+    );
+    const result = await sendRunMessage(
+      stateDir,
+      JSON.stringify({
+        body: "hello mailbox",
+        from: "coordinator",
+        to: "run:controlled-mailbox",
+        type: "control.note",
+      }),
+      { platform: "win32" },
+    );
+    assert.equal(result.sent, true);
+    assert.equal(result.queued, true);
+    assert.equal(result.control_type, "mailbox");
+    assert.equal(result.control_path, join(stateDir, "inbox.jsonl"));
+    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
+    assert.equal(inbox.body, "hello mailbox");
+    assert.equal(inbox.status, "queued");
+    const [wake] = readRuntimeWakeEvents(stateDir);
+    assert.equal(wake.actor, "run:controlled-mailbox");
+    assert.equal(wake.metadata?.control_type, "mailbox");
+    assert.equal(wake.metadata?.inbox_id, inbox.id);
+  } finally {
+    killRun(stateDir);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run messages persist mailbox wake before endpoint delivery failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-wake-before-endpoint-"));
+  const stateDir = join(root, "controlled-missing-endpoint");
+  try {
+    startRun(
+      {
+        run_id: "controlled-missing-endpoint",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    await assert.rejects(
+      () => sendRunMessage(
+        stateDir,
+        JSON.stringify({
+          body: "queued despite missing endpoint",
+          from: "coordinator",
+          to: "run:controlled-missing-endpoint",
+          type: "control.note",
+        }),
+      ),
+      /Run control FIFO not found/,
+    );
+    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
+    assert.equal(inbox.body, "queued despite missing endpoint");
+    assert.equal(inbox.status, "queued");
+    assert.match(inbox.queued_at, /\d{4}-\d{2}-\d{2}T/);
+    const [wake] = readRuntimeWakeEvents(stateDir);
+    assert.equal(wake.actor, "run:controlled-missing-endpoint");
+    assert.equal(wake.reason, "run.message");
+    assert.equal(wake.metadata?.inbox_id, inbox.id);
+  } finally {
+    killRun(stateDir);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run inbox messages can be claimed and handled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-inbox-process-"));
+  const stateDir = join(root, "inbox-process");
+  try {
+    startRun(
+      {
+        run_id: "inbox-process",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    await assert.rejects(
+      () => sendRunMessage(
+        stateDir,
+        JSON.stringify({
+          body: "claim me",
+          from: "coordinator",
+          to: "run:inbox-process",
+          type: "control.note",
+        }),
+      ),
+      /Run control FIFO not found/,
+    );
+    const claimed = claimRunInboxMessage(stateDir, "test-worker");
+    assert.equal(claimed?.body, "claim me");
+    assert.equal(claimed?.status, "claimed");
+    assert.equal(claimed?.claimed_by, "test-worker");
+    assert.equal(claimRunInboxMessage(stateDir, "other-worker"), undefined);
+    await processRunInboxMessages(
+      stateDir,
+      () => {
+        throw new Error("should not see claimed messages by default");
+      },
+      { owner: "other-worker" },
+    );
+    const afterClaim = readRunInboxMessages(stateDir, 1)[0];
+    assert.equal(afterClaim.status, "claimed");
+  } finally {
+    killRun(stateDir);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run inbox processor marks handled and failed messages", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-inbox-handler-"));
+  const stateDir = join(root, "inbox-handler");
+  try {
+    startRun(
+      {
+        run_id: "inbox-handler",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    for (const body of ["ok", "bad"]) {
+      await assert.rejects(
+        () => sendRunMessage(
+          stateDir,
+          JSON.stringify({
+            body,
+            from: "coordinator",
+            to: "run:inbox-handler",
+            type: "control.note",
+          }),
+        ),
+        /Run control FIFO not found/,
+      );
+    }
+    const result = await processRunInboxMessages(
+      stateDir,
+      (message) => {
+        if (message.body === "bad") throw new Error("handler failed");
+      },
+      { limit: 2, owner: "handler" },
+    );
+    assert.deepEqual(result, { claimed: 2, failed: 1, handled: 1 });
+    const messages = readRunInboxMessages(stateDir, 2);
+    assert.deepEqual(
+      messages.map((message) => message.status),
+      ["handled", "failed"],
+    );
+    assert.equal(messages[0].claimed_by, "handler");
+    assert.match(String(messages[0].handled_at ?? ""), /\d{4}-\d{2}-\d{2}T/);
+    assert.match(String(messages[1].failed_at ?? ""), /\d{4}-\d{2}-\d{2}T/);
+    assert.equal(messages[1].error, "handler failed");
   } finally {
     killRun(stateDir);
     await rm(root, { recursive: true, force: true });

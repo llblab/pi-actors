@@ -31,7 +31,6 @@ async function prepareInstalledPackage(root: string): Promise<string> {
     await symlink(join(process.cwd(), "node_modules", "@earendil-works", peer), join(peersDir, peer), "dir");
   }
   await cp(join(process.cwd(), "package.json"), join(packageDir, "package.json"));
-  await cp(join(process.cwd(), "index.js"), join(packageDir, "index.js"));
   await cp(join(process.cwd(), "dist"), join(packageDir, "dist"), { recursive: true });
   await cp(join(process.cwd(), "lib"), join(packageDir, "lib"), { recursive: true });
   await cp(join(process.cwd(), "scripts"), join(packageDir, "scripts"), { recursive: true });
@@ -39,7 +38,7 @@ async function prepareInstalledPackage(root: string): Promise<string> {
   return packageDir;
 }
 
-test("installed extension entrypoint from package metadata imports compiled runtime", async () => {
+test("installed extension entrypoint imports compiled dist runtime", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-entry-"));
   try {
     const packageDir = await prepareInstalledPackage(root);
@@ -62,6 +61,28 @@ test("installed extension entrypoint from package metadata imports compiled runt
     ]);
     assert.match(stdout, /installed extension ok/);
     assert.doesNotMatch(stderr, /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("music-player direct control queues mailbox commands", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-music-control-"));
+  const stateDir = join(root, "music");
+  try {
+    const { stdout } = await execFileAsync(process.execPath, [
+      join(process.cwd(), "scripts", "music-player.mjs"),
+      "next",
+      stateDir,
+    ]);
+    assert.match(stdout, /command=next queued/);
+    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
+    assert.equal(inbox.body, "next");
+    assert.equal(inbox.status, "queued");
+    assert.equal(inbox.type, "player.next");
+    const wake = JSON.parse(await readFile(join(stateDir, "wake.jsonl"), "utf8"));
+    assert.equal(wake.actor, "run:music");
+    assert.equal(wake.reason, "run.message");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -2,16 +2,19 @@
 
 ## Unreleased
 
+## 0.22.3: Idempotent GitHub Release Workflow Hotfix
+
+- `[Release]` Made the tag-triggered GitHub Release workflow idempotent: existing releases are edited with the generated title and notes instead of failing when an operator already created the release for the tag.
+- `[Context]` Added a changelog signal rule to project context and removed release-bookkeeping-only bullets from changelog history so future entries describe meaningful behavior rather than package-version metadata.
+
 ## 0.22.2: Portable Recipe Tool Exposure Hotfix
 
 - `[Registry]` Stopped writing redundant exposure metadata during registration and aligned docs/tests around location-based tool exposure so recipes remain portable between user, ad hoc, and packaged roots.
 - `[Skills]` Generalized the actors-skill tool-registration lenses and added existing recipe surfaces, including skill-local recipes, as first candidates for promotion into durable tools.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata for the hotfix release.
 
 ## 0.22.1: Tool Registration Lens Hotfix
 
 - `[Skills]` Added tool-registration lenses to the packaged actors skill so agents prefer persistent tools for error-prone workflows, safe preflights around dangerous operations, and context-affordance shortcuts that should be visible in future sessions.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata for the hotfix release.
 
 ## 0.22.0: Cross-Platform Runtime Notification Layer
 
@@ -23,7 +26,6 @@
 - `[Recipes]` Added a native Windows `wmp` music-player backend that drives legacy Windows Media Player through `powershell.exe`/COM, verifies `wmplayer.exe` in the standard Program Files locations, and includes mailbox-backed play, pause, next, previous, and stop controls.
 - `[Recipes]` Reduced music-player mailbox overhead by using advisory wake records, `fs.watch` where available, and inbox file signatures so the loop avoids repeatedly locking and rereading an unchanged mailbox.
 - `[Recipes]` Improved Unix-like playback by adding the macOS-native `afplay` backend, scanning additional common audio extensions, and running child players in their own process group so controls can signal the playback subtree directly.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata for the minor release.
 
 ## 0.21.0: Native Windows Actor Control and Literate Recipes
 
@@ -38,7 +40,6 @@
 - `[Coordinator]` Consolidated direct branch inbox claim/finalize rewrites behind one locked mutation helper and moved room-swarm mode dispatch behind an explicit mode registry. Unknown coordinator modes now fail closed, and `pipeline-room-swarm` exposes the supported mode enum.
 - `[Docs]` Documented the local Actor OS smoke matrix covered by `npm test`, spanning room coordination, direct branch delivery, inbox claim/handle transitions, inspector navigation, recipe context injection, persistence suggestions, and opt-in retirement smoke.
 - `[Docs/Tests]` Documented native Windows support scope and added regression coverage for Windows endpoint metadata, mocked named-pipe sends, Windows process-control planning, unchanged Unix FIFO behavior, locker control metadata, branch inbox compaction, mixed room/direct workloads, Markdown recipe loading/discovery/validation, nested child-run retirement gating, and packaged recipe trust diagnostics.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata for the minor release.
 
 ## 0.20.2: Installed Extension Entrypoint Hotfix
 
@@ -46,13 +47,11 @@
 - `[Build]` Extended the compiled runtime build to emit `dist/index.js` alongside `dist/lib/*.js`, keeping extension entrypoint imports and script runtime imports on the same installed-package path model.
 - `[Rooms]` Fixed immediate room append results to report the true persisted room message count after long timelines instead of the default 40-message preview length; `appendRoomMessage`, existing-member room joins, and `getRoomStatus()` now share the same line-count helper.
 - `[Tests]` Added installed-package coverage that imports the extension entrypoint from package metadata without TypeScript stripping, plus room-count regression coverage beyond the default preview limit.
-- `[Package]` Bumped package metadata and packaged skill metadata to `0.20.2` for the hotfix release.
 
 ## 0.20.1: Installed Packaged Recipe Root Hotfix
 
 - `[Recipe Imports]` Fixed installed compiled runtime path resolution so bare user recipe imports can fall back to the packaged standard-library `recipes/` directory instead of looking for a non-existent `dist/recipes` directory.
 - `[Tests]` Added installed-package validation coverage for a user recipe that imports a packaged recipe by bare name, preserving the documented priority order for user, adjacent, and packaged recipes.
-- `[Package]` Bumped package metadata and packaged skill metadata to `0.20.1` for the hotfix release.
 
 ## 0.20.0: Compiled Runtime Entrypoints
 
@@ -60,33 +59,32 @@
 - `[Async Runs]` Replaced the emergency installed-package copy workaround in `scripts/async-runner.mjs` with dist-first imports. Installed npm packages now execute the async runner against compiled JS without relying on Node native type stripping for `.ts` files under `node_modules`; source checkouts still fall back to TypeScript imports for local development.
 - `[Scripts]` Updated `scripts/validate-recipe.mjs` to use the same dist-first import path, so packaged recipe validation also runs from compiled JS when installed from npm.
 - `[Tests]` Updated installed-package smoke coverage to simulate `node_modules/@llblab/pi-actors` with `dist`, execute scripts without `--experimental-strip-types`, and assert the old `.type-strip-lib` workaround is not used.
-- `[Package]` Changed the package description to `Local Actor Kernel for Pi`, added `tsconfig.build.json`, included `dist` in the published package, and bumped package/skill metadata to `0.20.0`.
+- `[Package]` Changed the package description to `Local Actor Kernel for Pi`, added `tsconfig.build.json`, and included `dist` in the published package.
 
 ## 0.19.11: Installed Async Runner Hotfix
 
 - `[Async Runs]` Fixed installed npm package async recipe launches on Node 22 by avoiding direct runtime imports of raw `.ts` files from under `node_modules` in `scripts/async-runner.mjs`. Installed runners now copy the package `lib` sources into the run state before importing them, keeping Node native type stripping outside the blocked `node_modules` path.
 - `[Scripts]` Applied the same installed-package import guard to `scripts/validate-recipe.mjs`, so the packaged recipe validator works when invoked from an installed `@llblab/pi-actors` package.
 - `[Tests]` Added installed-package script smoke coverage that copies `lib`/`scripts` under a temporary `node_modules/@llblab/pi-actors` path and verifies both async runner execution and recipe validation avoid `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.11` for the hotfix release.
 
 ## 0.19.10: Legacy Branch Message Claim IDs
 
 - `[Branch Messages]` Coordinator claim handling now assigns IDs to older/manual queued branch inbox entries that lack `id`, so injected direct messages can still transition to `handled` or `failed` and do not repeat forever.
 - `[Tests]` Extended direct branch inbox coordinator coverage to include a legacy no-ID message and assert both claimed/handled timestamps are recorded.
-- `[Docs/Context]` Updated actor-message docs, durable project context, package metadata, lockfile metadata, and packaged skill metadata to `0.19.10`.
+- `[Docs/Context]` Updated actor-message docs and durable project context for legacy branch message claim IDs.
 
 ## 0.19.9: Locked Branch Inbox Mutations
 
 - `[Branch Messages]` Added lock-guarded append and status rewrites for branch-local direct-message inbox files so concurrent direct delivery and coordinator claim/handle transitions do not overwrite each other.
 - `[Coordinator]` Made room-swarm branch prompt execution atomically claim queued direct messages before injection, then mark claimed messages as `handled` or `failed` after the child prompt exits.
 - `[Tests]` Added concurrent branch inbox append coverage and asserted coordinator direct-message handling records both `claimed_at` and `handled_at`.
-- `[Docs/Context]` Updated actor-message docs, project context, backlog safeguards, package metadata, lockfile metadata, and packaged skill metadata to `0.19.9`.
+- `[Docs/Context]` Updated actor-message docs, project context, and backlog safeguards for locked branch inbox mutations.
 
 ## 0.19.8: Efficient Room Status Reads
 
 - `[Rooms]` Changed room status inspection to count JSONL entries and read only the last timeline record instead of parsing the full room timeline into actor-envelope objects.
 - `[Inspector]` Preserved the existing `inspect room:<run> view=status` shape while reducing storage/read amplification for large room transcripts.
-- `[Docs/Context]` Updated actor-message docs, backlog safeguards, project context, package metadata, lockfile metadata, and skill metadata for `0.19.8`.
+- `[Docs/Context]` Updated actor-message docs, backlog safeguards, and project context for efficient room status reads.
 - `[Tests]` Added regression coverage that room status preserves message count and last-message metadata across longer timelines.
 
 ## 0.19.7: Burst-Safe Roster Writes
@@ -95,7 +93,6 @@
 - `[Runtime IO]` Added `PI_ACTORS_ROOM_ROSTER_MIN_MS` as the roster-only debounce interval, mirroring the existing communication snapshot debounce approach without changing public `room:<run>` message or inspect semantics.
 - `[Docs/Context]` Updated actor-message docs, project context, and the remaining rooms backlog scope to preserve the new burst-safe roster invariant during future storage/backend changes.
 - `[Tests]` Added regression coverage for roster rewrite debounce and immediate semantic roster updates.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.7` for the hotfix release.
 
 ## 0.19.6: Conservative Retirement Candidates
 
@@ -103,7 +100,6 @@
 - `[Retirement]` Tightened opt-in `retire_when: "children_terminal"` candidate detection so supervisors are not considered retirement-ready while command-template progress or descendant `pi -p` workers are still active.
 - `[Docs/Context]` Updated async-run docs, project context, and the remaining retirement backlog scope to reflect the conservative candidate baseline and the remaining child async-run/output-flush work.
 - `[Tests]` Added regression coverage that blocks retirement candidates with descendant subagents.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.6` for the hotfix release.
 
 ## 0.19.5: Branch Inbox Inspector Filters
 
@@ -111,7 +107,6 @@
 - `[Actor Inspector]` Added `/actors-inspector-filter unread`, `/actors-inspector-filter branch <name>`, and `/actors-inspector-filter current-branch <name>` to focus queued branch inbox work and one branch's room/direct/inbox traffic without exposing full payloads by default.
 - `[Docs/Skills]` Updated README and the packaged actors skill with the new inspector filters and branch-inbox preview behavior.
 - `[Backlog]` Closed the high-priority actor communication TUI preview item now that unread/current-branch navigation is implemented with branch read-state semantics.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.5` for the hotfix release.
 
 ## 0.19.4: User Recipe Collection Suggestions
 
@@ -119,7 +114,6 @@
 - `[Runtime]` Preserved the ask-first boundary and suppression for recipes already in the user recipe root, so pi-actors grows operator muscle memory without silently writing user recipe files.
 - `[Docs/Prompt]` Updated README, async-run docs, actors skill, onboarding prompt, and project context to frame `~/.pi/agent/recipes` as the everyday per-machine collection of reusable actor recipes/tools.
 - `[Tests]` Added coverage for successful external recipe suggestions, while keeping user-owned recipe suppression covered.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.4` for the hotfix release.
 
 ## 0.19.3: Spawn Recipe Persistence Suggestions
 
@@ -127,20 +121,17 @@
 - `[Runtime]` Recorded `launch_source` metadata for actor starts so observability can distinguish direct spawns from registered recipe-tool runs and avoid prompting for actors already backed by user-owned recipes.
 - `[Docs/Prompt]` Updated onboarding prompt guidance, README, async-run docs, and project context around ask-first recipe persistence after successful transient actors.
 - `[Tests]` Added regression coverage for successful transient spawn suggestions and suppression when the run already came from a saved user recipe.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.3` for the hotfix release.
 
 ## 0.19.2: Actor Recipe Context Bundle
 
 - `[Actor Context]` Added a recipe context bundle for file-backed async recipes. The runtime now collects the raw authored entry recipe and resolved imports into deterministic JSONL records with filename-derived `name`, import alias/path metadata, role/depth, and raw recipe JSON so spawned LLM actors can understand the workflow composition behind their prompt.
 - `[Actor Context]` Annotated command-template leaves with actor recipe context and appends the JSONL bundle to child `pi -p` prompts. The recipe record that launched the current child receives `"you_are_here": true` plus path metadata, enabling actors to give advisory feedback on their own recipe/composition fit; recipes can opt out with `"actor_context": false` / `"off"` when a minimal prompt is required.
 - `[Tests]` Added coverage for raw recipe context record generation, import identity, `you_are_here` JSONL marking, prompt injection for `pi -p`, execution-time context propagation, async-run persistence, and recipe opt-out behavior.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.2` for the hotfix release.
 
 ## 0.19.1: Actor Inspector Hotfix
 
 - `[Actor Inspector]` Fixed the live communications roster and row numbering controls after real swarm usage. `/actors-inspector-toggle <rows>` now keeps the room preview cap aligned with the requested row count, current-run sequence numbers are assigned before row limiting so the visible tail keeps its full-log positions, and roster role labels use concise `name/role` text instead of slugifying full role descriptions.
 - `[Coordinator]` Preserved explicit `--thinking off` forwarding in `scripts/coordinator.mjs` so packaged room-swarm launches keep caller-selected thinking policy instead of silently relying on CLI defaults.
-- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata to `0.19.1` for the hotfix release.
 
 ## 0.19.0: Modular Coordination And Active Mailboxes
 
@@ -156,14 +147,12 @@
 - `[Observability]` Reduced long-session overhead by pruning stale run observation state, caching active-subagent process scans, and expanding ambient run triangles with descendant `pi -p` workers launched by coordinators. Impact: terminal status remains useful during long actor sessions without retaining completed-run bookkeeping, repeatedly scanning `/proc` on every refresh, or showing one coordinator triangle when a visible worker tree is still running.
 - `[Recipes]` Strengthened the recipe registry as a local capability surface. Recipe loading now rejects oversized files and excessive import depth, reports risky executable shapes and unsafe recipe-root permissions, exposes an integrity manifest, warns when the recipe-root watcher fails, derives recipe identity from filenames, resolves bare import names by recipe-root priority, and makes tool exposure location-derived: user recipe-root files are tools, packaged/ad hoc recipes are components. Impact: recipes are easier to audit, easier to compose from the standard library, harder to misuse accidentally, and no longer depend on redundant `name` / `tool` JSON fields for identity or exposure.
 - `[Docs/Skills/Context]` Updated the README, actor-message/template-recipe/command-template docs, recipe-library/task-first docs, actors/swarm skills, onboarding prompt, and project context to reflect the hardened runtime, room/inspector controls, filename-derived recipes, location-derived tools, consensus-first build orchestration, shell-placeholder boundaries, and the rule that recurring multi-agent scenarios should grow packaged recipes/pipelines instead of task-local orchestration scripts. `BACKLOG.md` now stays focused on completable future work while durable operating principles live in project context.
-- `[Package]` Bumped package and packaged skill metadata to `0.18.0`; promoted the release from a hotfix to a minor release because the scope now includes actor runtime hardening, room/TUI behavior, recipe guardrails, observability cleanup, and agent-facing guidance updates.
 
 ## 0.17.1: Inspector Hotfix And Room Swarm Hardening
 
 - `[TUI]` Fixed actor inspector line bounding to use `visibleWidth()` for direction/type/summary/body width math, replaced the verbose two-line preview with a hidden-by-default numbered table, made bare `/actors-inspector-toggle` open 12 rows from closed state, removed the verbosity toggle, made `/actors-inspector-toggle <rows>` update the live row count, upgraded `/actors-inspect <number>` to show a separated two-column header plus all preview-object properties as aligned two-space key/value columns, and added a styled wide-character regression. Impact: room previews with wide text no longer crash Pi, actor logs stay dense while preserving message type visibility, operators can tune visible row count without persistent inspector settings, and they can drill into one visible row then toggle back to the table.
 - `[Recipe Library]` Added `pipeline-room-swarm` backed by `scripts/room-swarm.mjs`: repeated room-aware participants join `room:<run>`, coordinate over multiple room-visible rounds, leave cleanly, and synthesize the room transcript into a Markdown artifact. Roles can be supplied via `roles_path` to avoid raw JSON placeholders, default roles use plain actor names, room rosters preserve display metadata, and `locker=true` composes a local coordinator-locker cell for artifact locks and decision journaling with regression coverage. Direct branch delivery remains available for worker protocols that consume parent-run branch envelopes, but the packaged swarm no longer relies on it for peer coordination. Impact: the DeepSeek room-swarm experiment is now represented as a policy-light packaged scenario while concrete model choice remains caller/operator policy.
 - `[Docs]` Reconciled `BACKLOG.md` back to future-only open work, removing completed hotfix implementation notes and version-scoped backlog language now captured in this changelog. Refreshed README and project context around the packaged room-swarm/coordinator-locker library surface and actor-inspector TUI ownership.
-- `[Package]` Bumped package and packaged skill metadata to `0.17.1` for the hotfix release.
 
 ## 0.17.0: Actor Rooms And Inspector
 
@@ -171,32 +160,27 @@
 - `[TUI]` Added the hidden-by-default actor inspector widget with `/actors-inspector-toggle` and `/actors-inspector-verbosity-toggle`, compact and verbose layouts, current-run scoping, chronological sequence numbers, owner filtering, JSONL-tolerant preview reads, mobile-width and wide-character-aware truncation, and transparent/dark row striping. Impact: operators can see the current actor conversation at a glance without flooding the prompt or leaking unrelated session previews.
 - `[Registry]` Added usage metadata and operator-gated cleanup recommendations to recipe registry summaries, removed stale public references to the old tool config filename, removed recipe content exposure markers from repository recipes/docs/fixtures, and fixed the 0.17 registry model around location-derived tool exposure: every recipe in `~/.pi/agent/recipes/*.json` is an agent tool, `register_tool` creates recipe files there under the hood, and packaged/ad hoc recipes outside that root are components. Impact: the sticky agent tool surface is explicit executable muscle memory, maintained like capability state rather than configured through per-recipe exposure flags.
 - `[Docs]` Updated README, actor-message docs, async-run docs, recipe-library docs, actors skill, backlog, and project context around the room/roster protocol, inspector behavior, release-artifact hygiene, and the persistent-backlog-implementer protocol. The implementer workflow remains future recipe-composition work around reusable cells such as `coordinator-locker`, not bespoke release scripts.
-- `[Package]` Bumped package and packaged skill metadata to `0.17.0`; validated with `npm run validate` and context validation. PR #42 tracks the squashed `actor-rooms-017` branch as one release commit against `main` with green checks.
 
 ## 0.16.4: Recipe Usage Fingerprints
 
 - `[Recipe Usage]` Added content fingerprints to user recipe usage metadata. Impact: when a recipe file is edited and its authored meaning changes, the next launch resets `usage.calls`, records `usage.reset_at`, and starts counting usage for the current recipe content.
 - `[Docs]` Documented fingerprint-backed usage reset semantics in the template recipe and tool registry docs.
-- `[Package]` Bumped package and packaged skill metadata to `0.16.4` for the hotfix release.
 
 ## 0.16.3: Recipe Import Path Placeholders
 
 - `[Template Recipes]` Added static `{repo}` and `{agent}` expansion for recipe paths, including `imports` and `from` bindings. Impact: recipes can import sibling packaged/user recipes without hard-coded absolute paths while keeping imports load-time deterministic.
 - `[Docs]` Documented `{repo}` and `{agent}` import path placeholders in the template recipe standard.
-- `[Package]` Bumped package and packaged skill metadata to `0.16.3` for the hotfix release.
 
 ## 0.16.2: Recipe Registry Diagnostics Hotfix
 
 - `[Schema]` Derived recipe tool arguments without expanding runtime-dependent repeat nodes. Impact: valid recipes using repeat expressions such as `{lenses.length}` can be exposed as tools instead of being skipped during startup schema generation.
 - `[Runtime]` Replaced the dense semicolon warning with grouped recipe registry diagnostics and explicit spacing. Impact: startup diagnostics are easier to scan and do not visually run into adjacent text.
 - `[Recipes]` Added a packaged `lens-swarm` recipe that composes the review coordinator without concrete model-version defaults. Impact: the standard library includes the general multi-lens review launcher instead of relying only on operator-local copies.
-- `[Package]` Bumped package and packaged skill metadata to `0.16.2` for the hotfix release.
 
 ## 0.16.1: Recipe Registry Hotfix
 
 - `[Runtime]` Prevented invalid user recipe files from aborting extension startup when tool-schema generation fails, surfacing a warning and skipping the offending tool instead. Impact: one bad recipe in `~/.pi/agent/recipes` no longer takes down the pi-actors extension.
 - `[Recipe Discovery]` Excluded the legacy migration report file from recipe discovery. Impact: legacy migration reports no longer appear as broken recipe/tool candidates after migration.
-- `[Package]` Bumped package and packaged skill metadata to `0.16.1` for the hotfix release.
 
 ## 0.16.0: File-Discovered Recipe Registry Migration
 

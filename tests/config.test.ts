@@ -175,21 +175,6 @@ test("Stored tool normalization accepts co-located template recipes", () => {
   });
 });
 
-test("Stored tool normalization rejects co-located template recipes with tool", () => {
-  const result = normalizeStoredTool(
-    "review_launcher",
-    {
-      description: "Start review run",
-      name: "review-docs",
-      template: "review {scope}",
-      tool: "review_tool",
-    },
-    reserved,
-  );
-  assert.equal(result.cfg, undefined);
-  assert.match(result.warning ?? "", /cannot define tool/);
-});
-
 test("Stored tool normalization derives args from existing template recipe files", async () => {
   const path = join(
     homedir(),

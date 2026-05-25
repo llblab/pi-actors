@@ -233,11 +233,6 @@ function isMutableUsageRecipeFile(file: string): boolean {
 function readRecipeFile(file: string): AsyncRunStartParams {
   const path = resolveRecipeFile(file);
   const raw = RecipeReferences.readRawRecipeConfig(path);
-  if (raw && Object.hasOwn(raw, "tool")) {
-    throw new Error(
-      `Template recipe cannot define tool; use template in ${path}`,
-    );
-  }
   const includeActorRecipeContext =
     raw?.actor_context !== false && raw?.actor_context !== "off";
   const config = RecipeReferences.readResolvedRecipeConfig(path, [], {

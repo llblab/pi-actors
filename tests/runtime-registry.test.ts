@@ -79,7 +79,6 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       template: "echo {scope}",
     });
     await writeRecipe(recipeRoot, "recipe-only", {
-      tool: false,
       description: "Recipe only",
       template: "echo hidden",
     });
@@ -88,9 +87,8 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       template: "echo component",
     });
     await writeRecipe(packagedRecipeRoot, "stdlib-tool", {
-      tool: true,
-      description: "Packaged tool",
-      template: "echo tool",
+      description: "Packaged component",
+      template: "echo component",
     });
 
     const registered: string[] = [];

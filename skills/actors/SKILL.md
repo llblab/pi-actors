@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.22.1
+  version: 0.22.2
 ---
 
 # Actors (pi-actors)
@@ -244,13 +244,16 @@ Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memo
 
 Use it when a command/template/recipe should become durable agent muscle memory. Prefer typed args or placeholder-derived args; use `update=true` for replacement and `template=null` or `template=""` for deletion. `register_tool` should create/update/delete recipe files in the user recipe root; direct file editing is allowed but is the lower-level path.
 
-Tool-registration lenses:
+Tool-registration lenses are open-ended prompts for deciding what deserves durable tool status:
 
-1. **Error-prone operation lens**: register wrappers for workflows agents often mis-sequence or under-check, such as release preflights, tag verification, package version checks, and context validation.
-2. **Dangerous operation safety lens**: prefer safe read-only or preflight tools around irreversible actions (`push`, `merge`, `tag`, `publish`, destructive cleanup). The tool should make the risky state visible and should not perform the irreversible step unless that is explicitly its guarded purpose.
-3. **Context-affordance lens**: register tools that should be injected as visible capabilities because their presence changes agent behavior for the better. A named tool like `release_preflight` makes the safe path more salient than a remembered shell incantation.
+1. **Reliability lens**: register wrappers for operations where agents commonly omit checks, run steps out of order, pass ambiguous inputs, or recover poorly from partial failure.
+2. **Safety lens**: prefer read-only diagnostics, dry-runs, preflights, confirmations, or bounded adapters around high-impact operations before registering direct action tools.
+3. **Context-affordance lens**: register tools whose mere presence in the injected capability list should steer agents toward the right operational habit.
+4. **Existing-recipe lens**: scan already-authored recipes before inventing a new tool. Packaged recipes, ad hoc project recipes, and recipes co-located under skill directories are often the first candidates to copy/register into the user recipe root when they match a recurring local workflow.
+5. **Composition lens**: register small semantic entrypoints over reusable recipe components instead of baking one large scenario-specific shell command into a tool.
+6. **Portability lens**: keep recipe files transportable; make tool exposure a consequence of placement in `~/.pi/agent/recipes`, not recipe-owned markers or machine-local assumptions.
 
-Default bias: register diagnostic/preflight tools before action tools. A good persistent tool shrinks the chance of a subtle operational mistake, not just the number of keystrokes.
+Default bias: register diagnostic/preflight tools before action tools, and promote existing recipes before writing new orchestration. A good persistent tool shrinks the chance of a subtle operational mistake, not just the number of keystrokes.
 
 Tool templates may be:
 

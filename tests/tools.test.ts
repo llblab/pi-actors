@@ -102,10 +102,10 @@ test("Inspect tool reads recipe registry summaries", async () => {
       join(userRecipes, "user-tool.json"),
       JSON.stringify({ description: "User", template: "echo user" }),
     );
-    await writeFile(join(userRecipes, "broken.json"), JSON.stringify({ tool: true }));
+    await writeFile(join(userRecipes, "broken.json"), JSON.stringify({}));
     await writeFile(
       join(packagedRecipes, "stdlib.json"),
-      JSON.stringify({ tool: true, description: "Stdlib", template: "echo stdlib" }),
+      JSON.stringify({ description: "Stdlib", template: "echo stdlib" }),
     );
 
     const definition = createInspectToolDefinition({

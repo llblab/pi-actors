@@ -57,9 +57,12 @@ test("Registry mutations register template-backed tools", async () => {
     const stored = JSON.parse(
       await readFile(join(dirname(harness.deps.configPath), "recipes", "transcribe.json"), "utf8"),
     );
-    assert.equal(stored.tool, true);
-    assert.equal(stored.description, "Transcribe audio");
-    assert.equal(stored.template, "~/bin/transcribe {file} {lang}");
+    assert.deepEqual(stored, {
+      description: "Transcribe audio",
+      args: ["file", "lang"],
+      defaults: { lang: "ru" },
+      template: "~/bin/transcribe {file} {lang}",
+    });
     assert.deepEqual(harness.runtimeRegistered, ["transcribe"]);
     assert.match(result.content[0].text, /Registered tool "transcribe"/);
   } finally {

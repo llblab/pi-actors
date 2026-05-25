@@ -220,7 +220,7 @@ The valid chain is:
 tool → template reference → recipe → run → template
 ```
 
-A recipe must define `template` directly. A recipe must not define `tool`, because recipes are saved command-template definitions, not tool indirection layers.
+A recipe must define `template` directly. Tool exposure comes from where the recipe is stored, so the same recipe remains transportable across user, ad hoc, and packaged roots.
 
 A recipe may live in a file or be co-located inside a registered tool entry. Both are storage variants of the same graph.
 

@@ -189,7 +189,6 @@ test("Template recipes derive recipe identity from filename", async () => {
       recipe,
       JSON.stringify({
         name: "ignored-name",
-        tool: true,
         description: "File identity recipe",
         template: "echo ok",
       }),

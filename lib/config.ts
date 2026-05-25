@@ -120,12 +120,6 @@ export function normalizeStoredTool(
       warning: `Tool "${name}" uses unsupported script config. Use template because pi-actors cannot load script entries.`,
     };
   }
-  if (Object.hasOwn(record, "tool")) {
-    return {
-      changed: false,
-      warning: `Tool "${name}" cannot define tool; use template directly.`,
-    };
-  }
   if (record.job !== undefined || record.recipe !== undefined) {
     return {
       changed: false,

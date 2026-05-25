@@ -6,7 +6,7 @@ This document is the local adaptation of the portable [Command Template Standard
 
 ## Registry Model
 
-The registry source is location-discovered recipes, not a live tool-only JSON file and not a recipe-owned boolean:
+The registry source is location-discovered recipes, not a live tool-only JSON file and not recipe content flags:
 
 - `~/.pi/agent/recipes/*.json` and `*.md` are the highest-priority user recipe root and the operator-managed tool set.
 - Recipes in that root are tools by location.

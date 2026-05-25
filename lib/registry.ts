@@ -103,7 +103,6 @@ function persistToolRecipe<TContext>(
   mkdirSync(dirname(path), { recursive: true });
   writeJsonAtomic(path, {
     description: cfg.description,
-    tool: true,
     ...(cfg.recipe?.async !== undefined ? { async: cfg.recipe.async } : {}),
     ...(cfg.recipe?.state_dir ? { state_dir: cfg.recipe.state_dir } : {}),
     ...(cfg.storedArgs ? { args: cfg.storedArgs } : {}),

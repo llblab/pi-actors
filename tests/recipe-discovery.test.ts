@@ -22,7 +22,6 @@ test("Recipe discovery exposes tool recipes by location and filename identity", 
   try {
     await writeRecipe(root, "docs-review", {
       name: "ignored-docs-review",
-      tool: false,
       description: "Docs review",
       template: "echo review",
     });
@@ -96,16 +95,15 @@ test("Recipe discovery exposes user recipe roots as tools by location", async ()
       description: "Default tool recipe",
       template: "echo default",
     });
-    await writeRecipe(root, "recipe-owned-flag", {
-      tool: false,
-      description: "Tool flag is ignored",
+    await writeRecipe(root, "location-tool", {
+      description: "Tool exposure comes from location",
       template: "echo recipe-only",
     });
 
     const result = discoverRecipeSources([{ root, defaultTool: true, mutableUsage: true }]);
     assert.equal(result.active.get("default-tool")?.tool, true);
     assert.equal(result.active.get("default-tool")?.mutableUsage, true);
-    assert.equal(result.active.get("recipe-owned-flag")?.tool, true);
+    assert.equal(result.active.get("location-tool")?.tool, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -116,12 +114,10 @@ test("Recipe discovery gives higher-priority roots shadowing control", async () 
   const low = await mkdtemp(join(tmpdir(), "pi-actors-discovery-low-"));
   try {
     await writeRecipe(low, "repo-health", {
-      tool: true,
       description: "Packaged repo health",
       template: "echo low",
     });
     await writeRecipe(high, "repo-health", {
-      tool: false,
       description: "User repo health override",
       template: "echo high",
     });
@@ -160,9 +156,8 @@ test("Recipe discovery invalid high-priority recipe blocks lower fallback", asyn
   const high = await mkdtemp(join(tmpdir(), "pi-actors-discovery-high-"));
   const low = await mkdtemp(join(tmpdir(), "pi-actors-discovery-low-"));
   try {
-    await writeFile(join(high, "repo-health.json"), JSON.stringify({ tool: true }));
+    await writeFile(join(high, "repo-health.json"), JSON.stringify({}));
     await writeRecipe(low, "repo-health", {
-      tool: true,
       description: "Packaged repo health",
       template: "echo low",
     });
@@ -186,20 +181,17 @@ test("Recipe discovery priority models user recipes over ad hoc files over packa
   try {
     const adHocFile = join(adHocRoot, "same-name.json");
     await writeRecipe(packagedRoot, "same-name", {
-      tool: true,
       description: "Packaged standard library recipe",
       template: "echo packaged",
     });
     await writeFile(
       adHocFile,
       JSON.stringify({
-        tool: true,
         description: "Ad hoc selected recipe",
         template: "echo adhoc",
       }),
     );
     await writeRecipe(agentRecipes, "same-name", {
-      tool: true,
       description: "Agent recipe override",
       template: "echo agent",
     });
@@ -223,7 +215,7 @@ test("Recipe discovery summary exposes active shadowed invalid and disabled entr
   const high = await mkdtemp(join(tmpdir(), "pi-actors-discovery-high-"));
   const low = await mkdtemp(join(tmpdir(), "pi-actors-discovery-low-"));
   try {
-    await writeFile(join(high, "broken.json"), JSON.stringify({ tool: true }));
+    await writeFile(join(high, "broken.json"), JSON.stringify({}));
     await writeRecipe(high, "disabled-one", {
       disabled: true,
       template: "echo disabled",
@@ -281,7 +273,6 @@ test("Recipe discovery disabled recipe blocks lower fallback", async () => {
       template: "echo disabled",
     });
     await writeRecipe(low, "repo-health", {
-      tool: true,
       description: "Packaged repo health",
       template: "echo low",
     });

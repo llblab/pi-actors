@@ -588,22 +588,6 @@ test("Recipe imports execute under repeated parallel parent nodes", async () => 
   }
 });
 
-test("Recipe files reject tool references", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
-  const file = join(root, "tool-run.json");
-  try {
-    await writeFile(
-      file,
-      JSON.stringify({ name: "tool-run", tool: "hello_tool" }, null, 2),
-    );
-    assert.throws(
-      () => startRun({ file }, process.cwd()),
-      /Template recipe cannot define tool/,
-    );
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
 
 test("Async runs expose script-authored outbox events", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));

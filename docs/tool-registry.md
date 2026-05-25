@@ -1,6 +1,6 @@
 # Tool Registry
 
-`pi-actors` stores persistent agent tools as recipe files under `~/.pi/agent/recipes/*.json` and registers the active tool set automatically on session start.
+`pi-actors` stores persistent agent tools as recipe files under `~/.pi/agent/recipes/*.json` or `*.md` and registers the active tool set automatically on session start.
 
 This document is the local adaptation of the portable [Command Template Standard](./command-templates.md) and the recipe-file runtime described in [Template Recipe Standard](./template-recipes.md).
 
@@ -8,11 +8,12 @@ This document is the local adaptation of the portable [Command Template Standard
 
 The registry source is location-discovered recipes, not a live tool-only JSON file and not a recipe-owned boolean:
 
-- `~/.pi/agent/recipes/*.json` is the highest-priority user recipe root and the operator-managed tool set.
+- `~/.pi/agent/recipes/*.json` and `*.md` are the highest-priority user recipe root and the operator-managed tool set.
 - Recipes in that root are tools by location.
 - Packaged pi-actors recipes are the lower-priority standard library of declarative actor config components, not automatically registered tools.
 - Ad hoc recipe files outside the user recipe root are components unless explicitly registered/copied into `~/.pi/agent/recipes`.
-- Recipe identity is the filename basename; `~/.pi/agent/recipes/docs_review.json` has id/tool name `docs_review`.
+- Recipe identity is the filename basename; `~/.pi/agent/recipes/docs_review.json` and `docs_review.md` both have id/tool name `docs_review`.
+- Same-id JSON shadows Markdown in the same priority layer.
 
 
 Because the user recipe directory is sticky agent muscle memory, runtime launches update `usage.calls`, `usage.last_called`, and a content `usage.fingerprint` on user-owned recipe files. If authored recipe content changes, the next launch resets `usage.calls` and records `usage.reset_at` before counting the launch, so usage evidence follows the current recipe meaning rather than an older file history. `inspect target=recipes view=summary verbose=true` includes usage metadata and operator-gated cleanup recommendations for invalid, shadowed, disabled, component-only, unused, or overriding recipes. Recommended actions stay explicit: keep as a tool/component, enable, merge, fix, delete, or archive. The extension does not maintain a failure counter and agents should not silently clean tools during unrelated work.

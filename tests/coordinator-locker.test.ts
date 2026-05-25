@@ -82,6 +82,32 @@ test("room-swarm optional locker records artifact coordination", async () => {
   }
 });
 
+test("coordinator rejects unknown modes before running default consensus", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-mode-"));
+  try {
+    const result = spawnSync(roomSwarmScript, [
+      "--run-id=unknown-mode-test",
+      "--mode=typo",
+      "--mission=mode boundary",
+      "--model=fake-model",
+      "--thinking=off",
+      "--rounds=0",
+      "--delay=0",
+    ], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PI_CODING_AGENT_DIR: root,
+      },
+      timeout: 10000,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Unknown coordinator mode: typo/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("coordinator processes and handles direct inbox messages", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-direct-inbox-"));
   try {
@@ -176,7 +202,13 @@ test("coordinator-locker queues, assigns, locks, and stops", async () => {
   });
   try {
     const control = join(stateDir, "control.fifo");
+    const controlJson = join(stateDir, "control.json");
     await waitForPath(control);
+    await waitForPath(controlJson);
+    assert.deepEqual(JSON.parse(await readFile(controlJson, "utf8")), {
+      path: control,
+      type: "fifo",
+    });
     await sendLine(control, {
       type: "coord.enqueue",
       body: { id: "task-1", task: "Edit docs", resources: ["file:README.md"] },

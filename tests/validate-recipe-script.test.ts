@@ -1,6 +1,6 @@
 /**
  * Recipe validator script regression tests
- * Covers file and directory validation for template recipe JSON definitions.
+ * Covers file and directory validation for template recipe JSON/Markdown definitions.
  */
 
 import assert from "node:assert/strict";
@@ -61,11 +61,12 @@ test("validate-recipe validates recipe directories with --all", async () => {
     await mkdir(join(root, "recipes"));
     await writeFile(join(root, "recipes", "a.json"), JSON.stringify({ template: "echo a" }));
     await writeFile(join(root, "recipes", "b.json"), JSON.stringify({ template: ["echo b", "wc -c"] }));
+    await writeFile(join(root, "recipes", "c.md"), "---\ndescription: Markdown\n---\n\n```template\necho c\n```\n");
     const { stdout } = await execFileAsync(process.execPath, [...nodeArgs, join(root, "recipes"), "--all"]);
     const report = JSON.parse(stdout);
     assert.equal(report.ok, true);
-    assert.equal(report.total, 2);
-    assert.deepEqual(report.results.map((result: { ok: boolean }) => result.ok), [true, true]);
+    assert.equal(report.total, 3);
+    assert.deepEqual(report.results.map((result: { ok: boolean }) => result.ok), [true, true, true]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -204,6 +204,59 @@ test("Template recipes derive recipe identity from filename", async () => {
   }
 });
 
+test("Markdown recipes compile frontmatter and fenced templates", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-md-"));
+  try {
+    const child = join(root, "child.md");
+    const parent = join(root, "parent.md");
+    await writeFile(
+      child,
+      `---
+description: Markdown child
+args:
+  - word:string
+defaults:
+  suffix: "!"
+mailbox:
+  accepts:
+    - control.stop
+---
+
+Human notes are advisory.
+
+\`\`\`template
+printf {word}{suffix}
+\`\`\`
+`,
+    );
+    await writeFile(
+      parent,
+      `---
+imports:
+  child: child
+---
+
+\`\`\`json recipe
+{
+  "template": { "name": "child", "values": { "word": "hello" } }
+}
+\`\`\`
+`,
+    );
+
+    const config = readResolvedRecipeConfig(parent)!;
+    assert.equal(getRecipeIdFromPath(child), "child");
+    assert.deepEqual(config.imports, { child: "child" });
+    assert.deepEqual(config.template, {
+      args: ["word:string"],
+      defaults: { suffix: "!", word: "hello" },
+      template: "printf {word}{suffix}",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Template recipes reject unknown named import nodes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {

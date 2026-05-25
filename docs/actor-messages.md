@@ -44,6 +44,8 @@ An alternate implementation shape is a dedicated non-LLM communication actor: a 
 
 That actor-backed shape can also reduce direct file storage. Instead of every protocol feature owning JSON files as primary state, a helper actor can keep live room/roster structures in memory or another local structure and write files only as snapshots, audit logs, artifacts, or recovery checkpoints. The decision boundary is practical: keep files when durability and inspectability are the main value; prefer actor-owned structures when live coordination, subscriptions, fanout, unread state, or mutation consistency becomes the main value.
 
+Current backend decision: keep the file-backed adapter for now. The covered workload is append-heavy room coordination plus direct branch inbox queueing/claiming, where durable local files are still the useful source of truth for recovery and `inspect`. A communication helper should be introduced only when a real workflow needs long-lived subscriptions, live fanout policy, or shared mutable room state beyond the current lock/debounce/compaction safeguards.
+
 Package-specific endpoints may still exist, but the envelope stays the same.
 
 ## Message Envelope
@@ -94,7 +96,7 @@ Transports differ, but the public contract does not:
 
 - `to: run:<id>` routes through the run-local control channel selected by that recipe or runtime adapter.
 - `to: coordinator` routes to the runtime attention path when `from` names a run actor. `to: session:<id>` uses the same actor-message path only when the sender run is owned by that session, making explicit session-directed checkpoints possible without exposing runtime delivery knobs. Generic async-runner `command.done` messages and explicit coordinator/session-bound messages include the actor envelope fields alongside runtime metadata.
-- `to: branch:<run>/<branch>` currently routes through the parent run mailbox with the full envelope preserved so the run or recipe-specific worker protocol can dispatch branch-local control. It also persists a queued branch-local copy under `branches/<branch>/inbox.jsonl`, inspectable with `inspect branch:<run>/<branch> view=mailbox`; compact inspection includes the inbox message `id`, status, route, type, and timestamps so worker protocols can correlate claims/retries. Branch-local inbox append and status rewrites are guarded by a small lock so direct delivery and coordinator claims do not overwrite each other during bursts. Coordinator claim handling also assigns an ID to older/manual queued records that do not have one so they can still transition to `handled` or `failed` instead of repeating forever. It is not a broadcast room and it does not make an arbitrary prompt process consume the message automatically. Target direction: direct branch messages should become initiating inbox work for long-lived branch runners, delivered into the recipient's next prompt/context as soon as the runner can accept work.
+- `to: branch:<run>/<branch>` currently routes through the parent run mailbox with the full envelope preserved so the run or recipe-specific worker protocol can dispatch branch-local control. It also persists a queued branch-local copy under `branches/<branch>/inbox.jsonl`, inspectable with `inspect branch:<run>/<branch> view=mailbox`; compact inspection includes the inbox message `id`, status, route, type, and timestamps so worker protocols can correlate claims/retries. Branch-local inbox append and status rewrites are guarded by a small lock so direct delivery and coordinator claims do not overwrite each other during bursts. Status transitions preserve active queued/claimed records and compact older handled/failed terminal records with bounded retention, so persistent runners do not accumulate unbounded completed inbox history. Coordinator claim handling also assigns an ID to older/manual queued records that do not have one so they can still transition to `handled` or `failed` instead of repeating forever. It is not a broadcast room and it does not make an arbitrary prompt process consume the message automatically. Target direction: direct branch messages should become initiating inbox work for long-lived branch runners, delivered into the recipient's next prompt/context as soon as the runner can accept work.
 - `to: room:<run>` appends the full envelope to the room timeline, updates room state for room-control types such as `actor.join` and `actor.leave`, and can route selected-recipient multicast when `metadata.recipients` contains same-run `branch:<run>/<branch>` addresses.
 - `to: tool:<name>` invokes an executable pi tool by name. Object bodies become tool parameters; primitive bodies are passed as `{ "input": body }`.
 
@@ -205,6 +207,7 @@ Runtime operations use the actor/message vocabulary:
 create detached work -> spawn
 run-local control    -> message to run:<id>
 run stop/kill        -> message type control.stop/control.kill
+platform control     -> internal adapter selected from run state
 coordinator signal   -> message to coordinator/session
 tool execution       -> message to tool:<name>
 intentional observe  -> inspect

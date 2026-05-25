@@ -13,6 +13,7 @@ import {
   countRunningSubagents,
   detectRunOutboxEvents,
   detectRunTransitions,
+  executeRunRetirements,
   findRunRetirementCandidates,
   pruneRunObservationState,
   formatRunOutboxMessage,
@@ -101,6 +102,45 @@ test("Run observability summarizes state root", async () => {
     assert.equal(summary.killed, 1);
     assert.equal(summary.runningSubagents, 1);
     assert.equal(renderRunStatus(summary), "▶");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability discovers nested child async runs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-nested-"));
+  try {
+    await writeRun(root, "supervisor", "running", [], 0, undefined, "children_terminal");
+    const childDir = join(root, "supervisor", "child");
+    await mkdir(childDir, { recursive: true });
+    await writeFile(
+      join(childDir, "run.json"),
+      JSON.stringify({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        cwd: process.cwd(),
+        pid: 999999999,
+        run: "child",
+        state_dir: childDir,
+      }),
+    );
+    await writeFile(
+      join(childDir, "progress.json"),
+      JSON.stringify({ activeSubagents: 0, completed: 1, failures: [], updatedAt: "2026-01-01T00:00:09.000Z" }),
+    );
+    await writeFile(join(childDir, "result.json"), JSON.stringify({ code: 0 }));
+
+    const summary = summarizeRuns(root);
+    assert.deepEqual(summary.runs.map((run) => run.run), ["child", "supervisor"]);
+    assert.deepEqual(findRunRetirementCandidates(summary), [
+      {
+        activeSubagents: 0,
+        childRuns: 1,
+        descendantSubagents: 0,
+        run: "supervisor",
+        stateDir: join(root, "supervisor"),
+        terminalChildRuns: 1,
+      },
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -471,9 +511,184 @@ test("Run observability blocks retirement candidates with descendant subagents",
   assert.deepEqual(candidates, [
     {
       activeSubagents: 0,
+      childRuns: 0,
       descendantSubagents: 0,
       run: "supervisor-idle",
       stateDir: "/tmp/supervisor-idle",
+      terminalChildRuns: 0,
+    },
+  ]);
+});
+
+test("Run observability skips already handled retirement stops", () => {
+  const candidates = findRunRetirementCandidates({
+    cancelled: 0,
+    done: 0,
+    exited: 0,
+    failed: 0,
+    killed: 0,
+    running: 1,
+    runningSubagents: 1,
+    runs: [
+      {
+        activeSubagents: 0,
+        retireWhen: "children_terminal",
+        run: "supervisor",
+        stateDir: "/tmp/supervisor",
+        status: "running",
+        terminalHandled: true,
+      },
+    ],
+    total: 1,
+  });
+  assert.deepEqual(candidates, []);
+});
+
+test("Run observability executes retirement through graceful stop once", async () => {
+  const attempted = new Set<string>();
+  const calls: string[] = [];
+  const notifications: string[] = [];
+  const summary = {
+    cancelled: 0,
+    done: 1,
+    exited: 0,
+    failed: 0,
+    killed: 0,
+    running: 1,
+    runningSubagents: 1,
+    runs: [
+      {
+        activeSubagents: 0,
+        retireWhen: "children_terminal",
+        run: "supervisor",
+        stateDir: "/tmp/supervisor",
+        status: "running" as const,
+      },
+      {
+        run: "child-done",
+        stateDir: "/tmp/supervisor/child-done",
+        status: "done" as const,
+      },
+    ],
+    total: 2,
+  };
+  const first = await executeRunRetirements(summary, {
+    attempted,
+    cancelRun: () => ({ cancelled: true }),
+    notify: (message, level) => notifications.push(`${level}:${message}`),
+    sendStop: async (candidate) => calls.push(candidate.run),
+  });
+  const second = await executeRunRetirements(summary, {
+    attempted,
+    cancelRun: () => ({ cancelled: true }),
+    sendStop: async (candidate) => calls.push(candidate.run),
+  });
+  assert.deepEqual(first, [{ action: "stop", run: "supervisor", stateDir: "/tmp/supervisor" }]);
+  assert.deepEqual(second, [{ action: "skip", run: "supervisor", stateDir: "/tmp/supervisor" }]);
+  assert.deepEqual(calls, ["supervisor"]);
+  assert.match(notifications[0], /^info:Retiring actor supervisor/);
+});
+
+test("Run observability falls back to cancellation when graceful retirement stop fails", async () => {
+  const results = await executeRunRetirements(
+    {
+      cancelled: 0,
+      done: 0,
+      exited: 0,
+      failed: 0,
+      killed: 0,
+      running: 1,
+      runningSubagents: 1,
+      runs: [
+        {
+          activeSubagents: 0,
+          retireWhen: "children_terminal",
+          run: "supervisor",
+          stateDir: "/tmp/supervisor",
+          status: "running" as const,
+        },
+      ],
+      total: 1,
+    },
+    {
+      cancelRun: () => ({ cancelled: true }),
+      sendStop: async () => {
+        throw new Error("no endpoint");
+      },
+    },
+  );
+  assert.deepEqual(results, [{ action: "cancel", run: "supervisor", stateDir: "/tmp/supervisor" }]);
+});
+
+test("Run observability blocks retirement candidates with running child async runs", () => {
+  const candidates = findRunRetirementCandidates({
+    cancelled: 0,
+    done: 1,
+    exited: 0,
+    failed: 0,
+    killed: 0,
+    running: 2,
+    runningSubagents: 2,
+    runs: [
+      {
+        activeSubagents: 0,
+        retireWhen: "children_terminal",
+        run: "supervisor",
+        stateDir: "/tmp/supervisor",
+        status: "running",
+      },
+      {
+        run: "child-running",
+        stateDir: "/tmp/supervisor/child-running",
+        status: "running",
+      },
+      {
+        run: "child-done",
+        stateDir: "/tmp/supervisor/child-done",
+        status: "done",
+      },
+    ],
+    total: 3,
+  });
+  assert.deepEqual(candidates, []);
+
+  const ready = findRunRetirementCandidates({
+    cancelled: 0,
+    done: 2,
+    exited: 0,
+    failed: 0,
+    killed: 0,
+    running: 1,
+    runningSubagents: 1,
+    runs: [
+      {
+        activeSubagents: 0,
+        retireWhen: "children_terminal",
+        run: "supervisor",
+        stateDir: "/tmp/supervisor",
+        status: "running",
+      },
+      {
+        run: "child-done-a",
+        stateDir: "/tmp/supervisor/child-done-a",
+        status: "done",
+      },
+      {
+        run: "child-done-b",
+        stateDir: "/tmp/supervisor/child-done-b",
+        status: "failed",
+      },
+    ],
+    total: 3,
+  });
+  assert.deepEqual(ready, [
+    {
+      activeSubagents: 0,
+      childRuns: 2,
+      descendantSubagents: 0,
+      run: "supervisor",
+      stateDir: "/tmp/supervisor",
+      terminalChildRuns: 2,
     },
   ]);
 });

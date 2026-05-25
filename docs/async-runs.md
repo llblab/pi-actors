@@ -158,7 +158,7 @@ The actor-level surface is:
 - `message`: send one typed envelope to `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `tool:<name>`, `coordinator`, or `session:<id>`.
 - `inspect`: intentionally read owned `run:<id>` status, tail, messages, artifacts, files, mailbox metadata, or communication snapshot; read `room:<run>` status, messages, previews, roster, or contacts; read current `coordinator` run inventory only when a coordinator session is known; read `session:<id>` or `session:all` run inventory with optional status filtering when the session is explicit; read `tool:<name>` status or schema for registered tool actors.
 
-Opt-in supervisor retirement uses `retire_when: "children_terminal"` as lifecycle metadata. Candidate detection is conservative: a supervisor is not retirement-ready while command-template progress or descendant `pi -p` worker processes are still active; future retirement execution must also verify child async-run state and flushed outputs before stopping the supervisor.
+Opt-in supervisor retirement uses `retire_when: "children_terminal"` as lifecycle metadata. Run summaries discover nested child run state dirs under the visible state root so bounded supervisor trees are observable. Candidate detection is conservative: a supervisor is not retirement-ready while command-template progress, descendant `pi -p` worker processes, or nested child async runs under the supervisor state dir are still active. Candidate metadata includes observed child-run counts. When the session watcher observes a ready candidate, it sends a graceful `stop` control message once; if the run has no ready control endpoint, it falls back to owned-run cancellation and records the terminal action through normal run events. Persistent or non-opt-in runs are not retirement candidates.
 
 Low-level async actions map into the actor surface instead of forming a second public model:
 
@@ -185,7 +185,7 @@ Some recipes expose a run-local control channel. When present, a caller can send
 
 For `run:<id>`, `message` adapts the body to the recipe's run-local control channel. For `branch:<run>/<branch>`, it sends the full envelope through the parent run mailbox and records a queued branch-local inbox entry at `branches/<branch>/inbox.jsonl` so the run can dispatch branch-local control. Current consumers are recipe-specific worker protocols that read the parent run mailbox or branch inbox; independent one-shot prompt processes do not automatically consume branch inbox entries. For `tool:<name>`, object bodies become the target tool parameters and primitive bodies are passed as `{ "input": body }`. The generic runtime records control messages but does not interpret arbitrary run mailbox content. For example, a music player may accept `play`, `pause`, `next`, and `stop`, while a collaborative agent recipe may accept `continue`, `revise:<note>`, `approve`, or `abort`. Recipes may treat terminal control messages such as `stop` as synchronously handled so the later process exit does not generate a duplicate async follow-up.
 
-The standard run-local transport is Unix-oriented. Use WSL/Linux/macOS for packaged message-controlled recipes, or let a Windows-specific recipe expose its own transport such as a Windows named pipe or localhost socket.
+Run-local control uses a platform adapter under the same `message` API. Unix recipes may keep the existing FIFO endpoint, and native Windows recipes can expose a named-pipe endpoint in run state. Recipe authors should document message vocabulary through `mailbox.accepts`, not through transport arguments. Packaged scripts that still create Unix-only endpoints remain WSL/Linux/macOS-only until migrated.
 
 ## Coordinator Notifications
 
@@ -219,7 +219,7 @@ Use coordinator/session-bound messages for completion and decision points, not f
 
 An async run belongs to the current user, cwd, and launching agent session at start time. Send, cancellation, and force-kill target only the recorded runner pid when command line and cwd still match the recorded owner data. Stale pid reuse must fail closed.
 
-On Unix-like systems, cancel and kill signal the runner process group when available, then fall back to the runner pid. The runner starts command-template children in that process group, so long-running descendants such as audio players stop with the run instead of becoming orphaned background processes. After the process exits, status reflects the operator action as `cancelled` or `killed` instead of a generic `exited`.
+On Unix-like systems, cancel and kill signal the runner process group when available, then fall back to the runner pid. On native Windows, cancel and kill use Windows process-tree termination through the platform adapter. The runner starts command-template children in the owned process tree, so long-running descendants such as audio players should stop with the run instead of becoming orphaned background processes. After the process exits, status reflects the operator action as `cancelled` or `killed` instead of a generic `exited`.
 
 State is append-only where practical. Final result writes should be atomic. Recipe-local control endpoints and actor-message logs may live in the state dir. pi-actors core owns the generic run-local message adapter and runtime attention policy; command and message vocabularies belong to the recipe/script.
 

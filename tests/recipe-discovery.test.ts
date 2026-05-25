@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { getPackagedRecipeRoot } from "../lib/paths.ts";
 import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, summarizeDiscovery } from "../lib/recipe-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
@@ -55,6 +56,16 @@ test("Recipe discovery surfaces risky recipe diagnostics", async () => {
     await chmod(root, 0o700).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Recipe discovery flags packaged validation wrapper as trusted shell boundary", () => {
+  const result = discoverRecipeSources([
+    { root: getPackagedRecipeRoot(), defaultTool: true },
+  ]);
+  const diagnostics =
+    result.active.get("utility-validation-wrapper")?.diagnostics.join("\n") ?? "";
+  assert.match(diagnostics, /invokes bash/);
+  assert.match(diagnostics, /trusted executable content/);
 });
 
 test("Recipe discovery exposes an integrity manifest", async () => {
@@ -124,6 +135,24 @@ test("Recipe discovery gives higher-priority roots shadowing control", async () 
   } finally {
     await rm(high, { recursive: true, force: true });
     await rm(low, { recursive: true, force: true });
+  }
+});
+
+test("Recipe discovery loads Markdown recipes and lets same-id JSON shadow Markdown", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-md-"));
+  try {
+    await writeFile(join(root, "literate.md"), "---\ndescription: Literate\n---\n\n```template\necho md\n```\n");
+    await writeFile(join(root, "same.md"), "---\ndescription: Markdown\n---\n\n```template\necho md\n```\n");
+    await writeRecipe(root, "same", { description: "JSON", template: "echo json" });
+
+    const result = discoverRecipeSources([{ root, defaultTool: true }]);
+    assert.equal(result.active.get("literate")?.config?.template, "echo md");
+    assert.equal(result.active.get("same")?.path, join(root, "same.json"));
+    const shadow = result.entries.find((entry) => entry.path === join(root, "same.md"));
+    assert.equal(shadow?.shadowed, true);
+    assert.match(shadow?.diagnostics.join("\n") ?? "", /shadowed by JSON/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

@@ -88,11 +88,11 @@ function listRecipeFiles(root: string): string[] {
     .filter(
       (entry) =>
         entry.isFile() &&
-        entry.name.endsWith(".json") &&
+        (entry.name.endsWith(".json") || entry.name.endsWith(".md")) &&
         entry.name !== "legacy-tool-registry-migration-report.json",
     )
     .map((entry) => join(root, entry.name))
-    .sort();
+    .sort((a, b) => a.replace(/\.md$/, ".json").localeCompare(b.replace(/\.md$/, ".json")) || (a.endsWith(".json") ? -1 : 1));
 }
 
 function getRecipeConfigDiagnostics(
@@ -100,9 +100,15 @@ function getRecipeConfigDiagnostics(
   config: TemplateRecipeConfig | undefined,
 ): string[] {
   if (!config) return [`Invalid recipe: ${file}`];
+  const commandTemplateConfig =
+    typeof config.template === "object" && config.template !== null
+      ? config.template
+      : config;
   return CommandTemplates.getCommandTemplateWarnings(
-    typeof config.template === "string" ? config.template : { template: config.template },
-  ).map((warning) => `Recipe ${file}: ${warning}`);
+    commandTemplateConfig as CommandTemplates.CommandTemplateConfig,
+  ).map(
+    (warning) => `Recipe ${file}: ${warning}`,
+  );
 }
 
 function readDiscoveredRecipe(
@@ -218,13 +224,22 @@ export function discoverRecipeSources(
   const diagnostics: string[] = getRecipeRootDiagnostics(sources);
   for (const [id, bucket] of byId) {
     bucket.sort(
-      (a, b) => a.priority - b.priority || a.path.localeCompare(b.path),
+      (a, b) =>
+        a.priority - b.priority ||
+        a.path.replace(/\.md$/, ".json").localeCompare(b.path.replace(/\.md$/, ".json")) ||
+        (a.path.endsWith(".json") ? -1 : 1),
     );
     const winner = bucket[0];
     winner.active = true;
     winner.shadows = bucket.slice(1).map((entry) => entry.path);
     active.set(id, winner);
-    for (const shadow of bucket.slice(1)) shadow.shadowed = true;
+    for (const shadow of bucket.slice(1)) {
+      shadow.shadowed = true;
+      if (winner.path.endsWith(".json") && shadow.path.endsWith(".md"))
+        shadow.diagnostics.push(
+          `Markdown recipe ${shadow.path} is shadowed by JSON recipe ${winner.path}`,
+        );
+    }
     if (winner.invalid)
       diagnostics.push(
         `Recipe ${id} is invalid and blocks lower-priority recipes`,

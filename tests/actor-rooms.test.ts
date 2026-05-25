@@ -126,6 +126,51 @@ test("Actor rooms track branch inbox handling state", async () => {
   }
 });
 
+test("Actor rooms compact terminal branch inbox records after status transitions", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-inbox-retain-"));
+  const previous = process.env.PI_ACTORS_BRANCH_INBOX_TERMINAL_RETAINED;
+  process.env.PI_ACTORS_BRANCH_INBOX_TERMINAL_RETAINED = "2";
+  try {
+    const ids: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      appendBranchInboxMessage(stateDir, "demo", "branch:demo/a", {
+        body: `done-${index}`,
+        from: "branch:demo/b",
+        to: "branch:demo/a",
+        type: "task.assign",
+      });
+      const latest = readBranchInboxMessages(stateDir, "demo", "branch:demo/a").at(-1);
+      ids.push(latest!.id!);
+      updateBranchInboxMessageStatus(
+        stateDir,
+        "demo",
+        "branch:demo/a",
+        latest!.id!,
+        "handled",
+      );
+    }
+    appendBranchInboxMessage(stateDir, "demo", "branch:demo/a", {
+      body: "active",
+      from: "branch:demo/b",
+      to: "branch:demo/a",
+      type: "task.assign",
+    });
+    const messages = readBranchInboxMessages(stateDir, "demo", "branch:demo/a", 10);
+    assert.deepEqual(
+      messages.map((message) => message.id),
+      [ids[3], ids[4], messages.at(-1)!.id],
+    );
+    assert.deepEqual(
+      messages.map((message) => message.status),
+      ["handled", "handled", "queued"],
+    );
+  } finally {
+    if (previous === undefined) delete process.env.PI_ACTORS_BRANCH_INBOX_TERMINAL_RETAINED;
+    else process.env.PI_ACTORS_BRANCH_INBOX_TERMINAL_RETAINED = previous;
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Actor rooms debounce roster rewrites when only last_seen changes", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-state-"));
   const previous = process.env.PI_ACTORS_ROOM_ROSTER_MIN_MS;
@@ -346,6 +391,57 @@ test("Actor rooms preserve concurrent multi-process appends", async () => {
     assert.equal(messages.length, 12);
     assert.equal(Object.keys(roster).length, 12);
     assert.equal(snapshot?.rooms[0].members?.length, 12);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor rooms keep mixed room and direct-branch workload coherent", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-direct-workload-"));
+  try {
+    ensureDefaultRoom(stateDir, "demo");
+    for (let index = 0; index < 60; index += 1) {
+      const worker = `worker-${index % 4}`;
+      appendRoomMessage(stateDir, "main", {
+        body: { index, worker },
+        from: `branch:demo/${worker}`,
+        summary: `round ${index}`,
+        to: "room:demo",
+        type: index < 4 ? "actor.join" : "chat.message",
+      });
+      appendBranchInboxMessage(stateDir, "demo", `branch:demo/${worker}`, {
+        body: { index },
+        from: "run:demo",
+        to: `branch:demo/${worker}`,
+        type: "task.assign",
+      });
+    }
+
+    const workerInbox = readBranchInboxMessages(stateDir, "demo", "branch:demo/worker-0", 20);
+    for (const message of workerInbox.slice(0, 3)) {
+      assert.equal(
+        updateBranchInboxMessageStatus(
+          stateDir,
+          "demo",
+          "branch:demo/worker-0",
+          message.id!,
+          "handled",
+          { claimed_by: "worker-0" },
+        ),
+        true,
+      );
+    }
+
+    const status = getRoomStatus(stateDir, "main");
+    const roster = readRoomRoster(stateDir, "main");
+    const snapshot = readCommunicationSnapshot(stateDir);
+    const updatedInbox = readBranchInboxMessages(stateDir, "demo", "branch:demo/worker-0", 20);
+    assert.equal(status.message_count, 61);
+    assert.equal(status.last_message_from, "branch:demo/worker-3");
+    assert.equal(Object.keys(roster).length, 5);
+    assert.equal(snapshot?.rooms[0].members?.length, 5);
+    assert.equal(updatedInbox.filter((message) => message.status === "handled").length, 3);
+    assert.equal(updatedInbox.filter((message) => message.status === "queued").length, 12);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

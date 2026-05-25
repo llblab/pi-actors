@@ -13,6 +13,7 @@ import type { ActorMessage } from "./actor-messages.ts";
 const STATE_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
 const STATE_LOCK_TIMEOUT_MS = 5000;
 const DEFAULT_ROOM_MAX_MESSAGES = 10000;
+const DEFAULT_BRANCH_INBOX_TERMINAL_RETAINED = 2000;
 const DEFAULT_SNAPSHOT_MIN_INTERVAL_MS = 250;
 
 export interface RoomMember {
@@ -386,6 +387,26 @@ export function readBranchInboxMessages(
   }
 }
 
+export function getBranchInboxTerminalRetainLimit(): number {
+  const value = Number(process.env.PI_ACTORS_BRANCH_INBOX_TERMINAL_RETAINED ?? "");
+  return Number.isInteger(value) && value >= 0
+    ? value
+    : DEFAULT_BRANCH_INBOX_TERMINAL_RETAINED;
+}
+
+function compactBranchInboxMessages<T extends { status?: string }>(
+  messages: T[],
+): T[] {
+  const retainTerminal = getBranchInboxTerminalRetainLimit();
+  const active = messages.filter(
+    (message) => message.status !== "handled" && message.status !== "failed",
+  );
+  const terminal = messages.filter(
+    (message) => message.status === "handled" || message.status === "failed",
+  );
+  return [...terminal.slice(-retainTerminal), ...active];
+}
+
 export function appendBranchInboxMessage(
   stateDir: string,
   run: string,
@@ -428,7 +449,8 @@ export function updateBranchInboxMessageStatus(
       return { ...message, ...metadata, [timestampKey]: new Date().toISOString(), status };
     });
     if (!changed) return false;
-    fs.writeFileSync(file, `${updated.map((message) => JSON.stringify(message)).join("\n")}\n`);
+    const compacted = compactBranchInboxMessages(updated);
+    fs.writeFileSync(file, `${compacted.map((message) => JSON.stringify(message)).join("\n")}\n`);
     return true;
   } finally {
     releaseLock();

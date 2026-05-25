@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.22.0
+  version: 0.22.1
 ---
 
 # Actors (pi-actors)
@@ -243,6 +243,14 @@ Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memo
 `register_tool` persists trusted local capabilities as recipe files in `~/.pi/agent/recipes/*.json`; hand-authored Markdown recipes in the same directory are also discovered as tools.
 
 Use it when a command/template/recipe should become durable agent muscle memory. Prefer typed args or placeholder-derived args; use `update=true` for replacement and `template=null` or `template=""` for deletion. `register_tool` should create/update/delete recipe files in the user recipe root; direct file editing is allowed but is the lower-level path.
+
+Tool-registration lenses:
+
+1. **Error-prone operation lens**: register wrappers for workflows agents often mis-sequence or under-check, such as release preflights, tag verification, package version checks, and context validation.
+2. **Dangerous operation safety lens**: prefer safe read-only or preflight tools around irreversible actions (`push`, `merge`, `tag`, `publish`, destructive cleanup). The tool should make the risky state visible and should not perform the irreversible step unless that is explicitly its guarded purpose.
+3. **Context-affordance lens**: register tools that should be injected as visible capabilities because their presence changes agent behavior for the better. A named tool like `release_preflight` makes the safe path more salient than a remembered shell incantation.
+
+Default bias: register diagnostic/preflight tools before action tools. A good persistent tool shrinks the chance of a subtle operational mistake, not just the number of keystrokes.
 
 Tool templates may be:
 

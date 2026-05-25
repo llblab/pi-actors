@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.22.1: Tool Registration Lens Hotfix
+
+- `[Skills]` Added tool-registration lenses to the packaged actors skill so agents prefer persistent tools for error-prone workflows, safe preflights around dangerous operations, and context-affordance shortcuts that should be visible in future sessions.
+- `[Package]` Bumped package metadata, lockfile metadata, and packaged skill metadata for the hotfix release.
+
 ## 0.22.0: Cross-Platform Runtime Notification Layer
 
 - `[Runtime]` Started the cross-platform notification layer with a file-backed advisory wake notifier (`wake.jsonl`), explicit initial/wake/poll reconciliation callbacks, periodic reconciliation fallback, and run-message/room-message/branch-inbox wake records. Run messages now persist a canonical inbox record before optional endpoint delivery, can accept mailbox-only control endpoints without FIFO/named-pipe transport, mark delivered endpoint messages `sent`, expose recent run inbox entries through `inspect view=mailbox`, and provide locked run-inbox claim/handle/fail helpers for runtime reconciliation loops. Files remain the canonical mailbox/event state for inspection and crash recovery.

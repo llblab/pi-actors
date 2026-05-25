@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -7,10 +9,8 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
+import { dirname, join, resolve } from "node:path";
 import readline from "node:readline";
 
 function parseArgs(argv) {
@@ -53,14 +53,18 @@ function writeJson(path, value) {
 }
 function getControlEndpoint() {
   if (process.platform !== "win32") return { path: controlPath, type: "fifo" };
-  const hash = createHash("sha256").update(resolve(stateDir)).digest("hex").slice(0, 20);
+  const hash = createHash("sha256")
+    .update(resolve(stateDir))
+    .digest("hex")
+    .slice(0, 20);
   return { path: `\\\\.\\pipe\\pi-actors-locker-${hash}`, type: "named-pipe" };
 }
 function writeControlEndpoint(endpoint) {
   writeJson(join(stateDir, "control.json"), endpoint);
   const runPath = join(stateDir, "run.json");
   const run = readJson(runPath, undefined);
-  if (run && typeof run === "object") writeJson(runPath, { ...run, control: endpoint });
+  if (run && typeof run === "object")
+    writeJson(runPath, { ...run, control: endpoint });
 }
 function journal(event, data = {}) {
   appendFileSync(
@@ -218,9 +222,19 @@ function handle(message) {
     if (!resource) throw new Error("lock.renew body.resource is required");
     const current = locks[resource];
     if (!current) {
-      outbox("lock.denied", `Lock renew denied ${resource}`, { resource, owner, reason: "missing" }, "warning");
+      outbox(
+        "lock.denied",
+        `Lock renew denied ${resource}`,
+        { resource, owner, reason: "missing" },
+        "warning",
+      );
     } else if (current.owner !== owner) {
-      outbox("lock.denied", `Lock renew denied ${resource}`, { resource, owner, current }, "warning");
+      outbox(
+        "lock.denied",
+        `Lock renew denied ${resource}`,
+        { resource, owner, current },
+        "warning",
+      );
     } else {
       locks[resource] = { ...current, expiresAt: now() + leaseMs };
       outbox("lock.renewed", `Lock renewed ${resource}`, { resource, owner });
@@ -235,8 +249,15 @@ function handle(message) {
     outbox("lock.released", `Lock released ${resource}`, { resource });
     return;
   }
-  if (type === "lock.complete" || type === "lock.fail" || type === "coord.complete" || type === "coord.fail") {
-    const eventType = type.startsWith("coord.") ? type.replace("coord.", "lock.") : type;
+  if (
+    type === "lock.complete" ||
+    type === "lock.fail" ||
+    type === "coord.complete" ||
+    type === "coord.fail"
+  ) {
+    const eventType = type.startsWith("coord.")
+      ? type.replace("coord.", "lock.")
+      : type;
     journal(eventType, body);
     outbox(
       eventType,

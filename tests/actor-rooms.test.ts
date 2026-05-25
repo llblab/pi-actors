@@ -20,6 +20,7 @@ import {
   updateBranchInboxMessageStatus,
   writeCommunicationSnapshot,
 } from "../lib/actor-rooms.ts";
+import { readRuntimeWakeEvents } from "../lib/runtime-notifier.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -121,6 +122,48 @@ test("Actor rooms track branch inbox handling state", async () => {
     const claimedRecord: Record<string, unknown> = { ...claimed };
     assert.equal(claimedRecord.claimed_by, "worker-a");
     assert.match(String(claimedRecord.claimed_at ?? ""), /\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor rooms emit advisory wakes for room and branch mailbox changes", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-wake-"));
+  try {
+    appendRoomMessage(stateDir, "main", {
+      from: "branch:demo/a",
+      to: "room:demo",
+      type: "actor.join",
+    });
+    appendBranchInboxMessage(stateDir, "demo", "branch:demo/a", {
+      from: "branch:demo/b",
+      to: "branch:demo/a",
+      type: "task.assign",
+    });
+    const [queued] = readBranchInboxMessages(stateDir, "demo", "branch:demo/a");
+    assert.equal(
+      updateBranchInboxMessageStatus(
+        stateDir,
+        "demo",
+        "branch:demo/a",
+        queued.id!,
+        "claimed",
+      ),
+      true,
+    );
+    const wakes = readRuntimeWakeEvents(stateDir);
+    assert.deepEqual(
+      wakes.map((event) => [event.actor, event.reason]),
+      [
+        ["room:demo", "room.message"],
+        ["branch:demo/a", "branch.message"],
+        ["branch:demo/a", "branch.inbox.status"],
+      ],
+    );
+    assert.deepEqual(wakes[0].metadata, {
+      from: "branch:demo/a",
+      type: "actor.join",
+    });
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

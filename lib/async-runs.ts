@@ -4,6 +4,7 @@
  * Owns detached run state, observation, log tailing, listing, and cancellation safety
  */
 
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
@@ -33,14 +34,16 @@ import { writeJsonAtomic } from "./file-state.ts";
 import * as Paths from "./paths.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as RecipeUsage from "./recipe-usage.ts";
+import { notifyRuntimeWake } from "./runtime-notifier.ts";
 
 const START_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
+const RUN_INBOX_LOCK_TIMEOUT_MS = 5000;
 
 export type AsyncRunLaunchSource = "spawn" | "tool";
 
 export interface AsyncRunControlEndpoint {
   path: string;
-  type: "fifo" | "named-pipe";
+  type: "fifo" | "mailbox" | "named-pipe";
 }
 
 export interface AsyncRunStartParams {
@@ -662,6 +665,193 @@ export function readRunEvents(runOrDir: string, lines = 40): RunOutboxEvent[] {
     .filter((event): event is RunOutboxEvent => Boolean(event));
 }
 
+export type RunInboxStatus =
+  | "queued"
+  | "sent"
+  | "claimed"
+  | "handled"
+  | "failed";
+
+export type RunInboxMessage = Record<string, unknown> & {
+  id?: string;
+  status?: RunInboxStatus | string;
+};
+
+export interface ProcessRunInboxResult {
+  claimed: number;
+  failed: number;
+  handled: number;
+}
+
+function runInboxFile(stateDir: string): string {
+  return join(stateDir, "inbox.jsonl");
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function acquireRunInboxLock(stateDir: string): () => void {
+  const lockDir = join(stateDir, ".inbox.lock");
+  const started = Date.now();
+  while (true) {
+    try {
+      mkdirSync(lockDir, { recursive: false });
+      writeFileSync(
+        join(lockDir, "owner.json"),
+        `${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() })}\n`,
+        "utf8",
+      );
+      return () => rmSync(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      try {
+        const stat = statSync(lockDir);
+        if (Date.now() - stat.mtimeMs > START_LOCK_MAX_AGE_MS) {
+          rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() - started > RUN_INBOX_LOCK_TIMEOUT_MS) {
+        throw new Error("Run inbox lock timed out.", { cause: error });
+      }
+      sleepSync(10);
+    }
+  }
+}
+
+function parseRunInboxLine(line: string): RunInboxMessage | undefined {
+  try {
+    return JSON.parse(line) as RunInboxMessage;
+  } catch {
+    return undefined;
+  }
+}
+
+function readRunInboxMessagesFromStateDir(stateDir: string): RunInboxMessage[] {
+  const file = runInboxFile(stateDir);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line.trim())
+    .map(parseRunInboxLine)
+    .filter((message): message is RunInboxMessage => Boolean(message));
+}
+
+function writeRunInboxMessages(
+  stateDir: string,
+  messages: RunInboxMessage[],
+): void {
+  writeFileSync(
+    runInboxFile(stateDir),
+    messages.length
+      ? `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`
+      : "",
+    "utf8",
+  );
+}
+
+export function readRunInboxMessages(
+  runOrDir: string,
+  lines = 40,
+): RunInboxMessage[] {
+  const status = getRunStatus(runOrDir);
+  const stateDir = String(status.state_dir);
+  return tailLines(runInboxFile(stateDir), lines)
+    .map(parseRunInboxLine)
+    .filter((message): message is RunInboxMessage => Boolean(message));
+}
+
+export function updateRunInboxMessageStatus(
+  runOrDir: string,
+  id: string,
+  nextStatus: RunInboxStatus,
+  metadata: Record<string, unknown> = {},
+): boolean {
+  const status = getRunStatus(runOrDir);
+  const stateDir = String(status.state_dir);
+  const releaseLock = acquireRunInboxLock(stateDir);
+  try {
+    const messages = readRunInboxMessagesFromStateDir(stateDir);
+    const timestampKey = `${nextStatus}_at`;
+    let changed = false;
+    const updated = messages.map((message) => {
+      if (message.id !== id) return message;
+      changed = true;
+      return {
+        ...message,
+        ...metadata,
+        [timestampKey]: new Date().toISOString(),
+        status: nextStatus,
+      };
+    });
+    if (changed) writeRunInboxMessages(stateDir, updated);
+    return changed;
+  } finally {
+    releaseLock();
+  }
+}
+
+export function claimRunInboxMessage(
+  runOrDir: string,
+  owner = "runtime",
+  statuses: string[] = ["queued"],
+): RunInboxMessage | undefined {
+  const status = getRunStatus(runOrDir);
+  const stateDir = String(status.state_dir);
+  const releaseLock = acquireRunInboxLock(stateDir);
+  try {
+    const messages = readRunInboxMessagesFromStateDir(stateDir);
+    const index = messages.findIndex((message) =>
+      statuses.includes(String(message.status ?? "queued")),
+    );
+    if (index < 0) return undefined;
+    const claimed = {
+      ...messages[index],
+      claimed_at: new Date().toISOString(),
+      claimed_by: owner,
+      id: typeof messages[index].id === "string" ? messages[index].id : randomUUID(),
+      status: "claimed",
+    } satisfies RunInboxMessage;
+    messages[index] = claimed;
+    writeRunInboxMessages(stateDir, messages);
+    return claimed;
+  } finally {
+    releaseLock();
+  }
+}
+
+export async function processRunInboxMessages(
+  runOrDir: string,
+  handler: (message: RunInboxMessage) => Promise<void> | void,
+  options: { limit?: number; owner?: string; statuses?: string[] } = {},
+): Promise<ProcessRunInboxResult> {
+  const result: ProcessRunInboxResult = { claimed: 0, failed: 0, handled: 0 };
+  const limit = Math.max(1, Number(options.limit ?? 1));
+  const owner = options.owner ?? "runtime";
+  for (let index = 0; index < limit; index += 1) {
+    const message = claimRunInboxMessage(runOrDir, owner, options.statuses);
+    if (!message?.id) break;
+    result.claimed += 1;
+    try {
+      await handler(message);
+      if (updateRunInboxMessageStatus(runOrDir, message.id, "handled")) {
+        result.handled += 1;
+      }
+    } catch (error) {
+      if (
+        updateRunInboxMessageStatus(runOrDir, message.id, "failed", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      ) {
+        result.failed += 1;
+      }
+    }
+  }
+  return result;
+}
+
 export function appendRunOutboxEvent(
   runOrDir: string,
   event: {
@@ -725,7 +915,9 @@ function getRunControlEndpoint(
   if (control && typeof control === "object" && !Array.isArray(control)) {
     const record = control as Record<string, unknown>;
     if (
-      (record.type === "fifo" || record.type === "named-pipe") &&
+      (record.type === "fifo" ||
+        record.type === "mailbox" ||
+        record.type === "named-pipe") &&
       typeof record.path === "string" &&
       record.path.trim()
     ) {
@@ -735,10 +927,36 @@ function getRunControlEndpoint(
   return { path: join(stateDir, "control.fifo"), type: "fifo" };
 }
 
+function appendRunInboxMessage(stateDir: string, message: string): string {
+  const id = randomUUID();
+  const ts = new Date().toISOString();
+  let record: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(message) as unknown;
+    record = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : { body: parsed, type: "run.message" };
+  } catch {
+    record = { body: message, type: "run.message" };
+  }
+  const releaseLock = acquireRunInboxLock(stateDir);
+  try {
+    writeFileSync(
+      runInboxFile(stateDir),
+      `${JSON.stringify({ ...record, id, queued_at: ts, received_at: ts, status: "queued" })}\n`,
+      { flag: "a" },
+    );
+  } finally {
+    releaseLock();
+  }
+  return id;
+}
+
 function writeRunMessageReceipt(
   stateDir: string,
   message: string,
   bytes: number,
+  inboxId: string,
 ): void {
   const trimmedMessage = message.trim().toLowerCase();
   const terminalMessage = ["stop", "cancel", "quit", "exit"].includes(
@@ -747,19 +965,10 @@ function writeRunMessageReceipt(
   const ts = new Date().toISOString();
   writeFileSync(
     join(stateDir, "events.jsonl"),
-    `${JSON.stringify({ bytes, event: "run.message", terminal: terminalMessage || undefined, ts })}\n`,
+    `${JSON.stringify({ bytes, event: "run.message", inbox_id: inboxId, terminal: terminalMessage || undefined, ts })}\n`,
     { flag: "a" },
   );
-  try {
-    const envelope = JSON.parse(message) as Record<string, unknown>;
-    writeFileSync(
-      join(stateDir, "inbox.jsonl"),
-      `${JSON.stringify({ ...envelope, received_at: ts })}\n`,
-      { flag: "a" },
-    );
-  } catch {
-    // Plain control lines are already represented in events.jsonl.
-  }
+  updateRunInboxMessageStatus(stateDir, inboxId, "sent", { bytes });
   if (terminalMessage) {
     markTerminalHandled(stateDir, {
       event: "run.message",
@@ -784,6 +993,25 @@ function sendRunMessageToFifo(
     return writeSync(fd, payload);
   } finally {
     if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function notifyRunMessageWake(
+  stateDir: string,
+  run: string,
+  bytes: number,
+  endpoint: AsyncRunControlEndpoint,
+  inboxId: string,
+): Record<string, unknown> | undefined {
+  try {
+    const event = notifyRuntimeWake(stateDir, {
+      actor: `run:${run}`,
+      metadata: { bytes, control_type: endpoint.type, inbox_id: inboxId },
+      reason: "run.message",
+    });
+    return { wake: "wake.jsonl", wake_id: event.id };
+  } catch {
+    return undefined;
   }
 }
 
@@ -832,7 +1060,23 @@ export async function sendRunMessage(
     throw new Error(`Run pid owner mismatch: ${run}`);
   const endpoint = getRunControlEndpoint(status, stateDir);
   const payload = message.endsWith("\n") ? message : `${message}\n`;
+  const payloadBytes = Buffer.byteLength(payload);
+  const inboxId = appendRunInboxMessage(stateDir, message);
+  const wake = notifyRunMessageWake(stateDir, run, payloadBytes, endpoint, inboxId);
   const runtimePlatform = options.platform ?? process.platform;
+  if (endpoint.type === "mailbox") {
+    return {
+      ...(wake ?? {}),
+      bytes: payloadBytes,
+      control: "inbox.jsonl",
+      control_path: endpoint.path,
+      control_type: endpoint.type,
+      queued: true,
+      run,
+      sent: true,
+      state_dir: stateDir,
+    };
+  }
   try {
     if (endpoint.type === "fifo") {
       if (runtimePlatform === "win32") {
@@ -841,8 +1085,9 @@ export async function sendRunMessage(
         );
       }
       const bytes = sendRunMessageToFifo(endpoint, payload);
-      writeRunMessageReceipt(stateDir, message, bytes);
+      writeRunMessageReceipt(stateDir, message, bytes, inboxId);
       return {
+        ...(wake ?? {}),
         bytes,
         control: "control.fifo",
         control_path: endpoint.path,
@@ -857,8 +1102,9 @@ export async function sendRunMessage(
       payload,
       options.namedPipeSend,
     );
-    writeRunMessageReceipt(stateDir, message, bytes);
+    writeRunMessageReceipt(stateDir, message, bytes, inboxId);
     return {
+      ...(wake ?? {}),
       bytes,
       control: endpoint.path,
       control_path: endpoint.path,

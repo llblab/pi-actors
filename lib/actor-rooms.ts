@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import * as path from "node:path";
 
 import type { ActorMessage } from "./actor-messages.ts";
+import { notifyRuntimeWake } from "./runtime-notifier.ts";
 
 const STATE_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
 const STATE_LOCK_TIMEOUT_MS = 5000;
@@ -179,6 +180,19 @@ function readJsonFile<T>(file: string, fallback: T): T {
 function writeJsonFile(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function notifyActorWake(
+  stateDir: string,
+  actor: string,
+  reason: string,
+  metadata: Record<string, unknown> = {},
+): void {
+  try {
+    notifyRuntimeWake(stateDir, { actor, metadata, reason });
+  } catch {
+    // Runtime wakes are advisory; durable room/inbox state remains canonical.
+  }
 }
 
 function positiveEnvInt(name: string, fallback: number): number {
@@ -422,6 +436,10 @@ export function appendBranchInboxMessage(
       `${JSON.stringify({ ...message, id: randomUUID(), queued_at: new Date().toISOString(), status: "queued" })}\n`,
       { flag: "a" },
     );
+    notifyActorWake(stateDir, address, "branch.message", {
+      ...(message.from ? { from: message.from } : {}),
+      type: message.type,
+    });
   } finally {
     releaseLock();
   }
@@ -451,6 +469,7 @@ export function updateBranchInboxMessageStatus(
     if (!changed) return false;
     const compacted = compactBranchInboxMessages(updated);
     fs.writeFileSync(file, `${compacted.map((message) => JSON.stringify(message)).join("\n")}\n`);
+    notifyActorWake(stateDir, address, "branch.inbox.status", { id, status });
     return true;
   } finally {
     releaseLock();
@@ -472,6 +491,10 @@ export function appendRoomMessage(
     const run = runFromRoomAddress(message.to);
     if (run) {
       writeCommunicationSnapshot(stateDir, run);
+      notifyActorWake(stateDir, message.to, "room.message", {
+        ...(message.from ? { from: message.from } : {}),
+        type: message.type,
+      });
       if (message.from && branchIdFromAddress(message.from, run)) {
         writeBranchCommunicationSnapshotDebounced(stateDir, run, message.from);
       }

@@ -287,8 +287,11 @@ function compactCommunicationSnapshot(
   return `\nself=${snapshot.self} root=${snapshot.root} rooms=${snapshot.rooms.length} updated_at=${snapshot.updated_at}`;
 }
 
-function compactBranchInbox(messages: Array<Record<string, unknown>>): string {
-  if (messages.length === 0) return "\n(no branch inbox messages)";
+function compactInboxMessages(
+  messages: Array<Record<string, unknown>>,
+  emptyLabel: string,
+): string {
+  if (messages.length === 0) return `\n(no ${emptyLabel} messages)`;
   return `\n${messages
     .map((message) =>
       [
@@ -298,12 +301,25 @@ function compactBranchInbox(messages: Array<Record<string, unknown>>): string {
         `from=${String(message.from ?? "")}`,
         `to=${String(message.to ?? "")}`,
         ...(message.queued_at ? [`queued_at=${String(message.queued_at)}`] : []),
+        ...(message.sent_at ? [`sent_at=${String(message.sent_at)}`] : []),
         ...(message.claimed_at ? [`claimed_at=${String(message.claimed_at)}`] : []),
         ...(message.handled_at ? [`handled_at=${String(message.handled_at)}`] : []),
         ...(message.failed_at ? [`failed_at=${String(message.failed_at)}`] : []),
       ].join(" "),
     )
     .join("\n")}`;
+}
+
+function compactBranchInbox(messages: Array<Record<string, unknown>>): string {
+  return compactInboxMessages(messages, "branch inbox");
+}
+
+function compactRunMailbox(
+  run: string,
+  mailbox: Record<string, unknown>,
+  messages: Array<Record<string, unknown>>,
+): string {
+  return `\nrun=${run} accepts=${Array.isArray(mailbox.accepts) ? mailbox.accepts.join(",") : ""} emits=${Array.isArray(mailbox.emits) ? mailbox.emits.join(",") : ""}${compactInboxMessages(messages, "run inbox")}`;
 }
 
 function compactActorFiles(status: Record<string, unknown>): string {
@@ -984,18 +1000,23 @@ export function createInspectToolDefinition<TContext = unknown>(
         case "mailbox": {
           const status = assertRunAccessibleToContext(runId, ctx);
           const mailbox = asRecord(status.mailbox);
+          const messages = AsyncRuns.readRunInboxMessages(
+            runId,
+            Number(input.lines || 40),
+          );
+          const details = { mailbox, messages };
           return {
             content: [
               {
                 type: "text" as const,
                 text: maybeJsonText(
-                  mailbox,
+                  details,
                   input.verbose === true,
-                  `\nrun=${String(status.run ?? runId)} accepts=${Array.isArray(mailbox.accepts) ? mailbox.accepts.join(",") : ""} emits=${Array.isArray(mailbox.emits) ? mailbox.emits.join(",") : ""}`,
+                  compactRunMailbox(String(status.run ?? runId), mailbox, messages),
                 ),
               },
             ],
-            details: { mailbox },
+            details,
           };
         }
         case "communication": {

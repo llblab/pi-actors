@@ -43,6 +43,15 @@ test("Packaged skills metadata versions match package version", () => {
   }
 });
 
+test("Package extension entrypoint uses compiled dist output", () => {
+  assert.deepEqual(packageJson.pi.extensions, ["./dist/index.js"]);
+  assert.equal(packageJson.files.includes("index.ts"), true);
+  assert.equal(packageJson.files.includes("dist"), true);
+  assert.equal(packageJson.files.includes("index.js"), false);
+  assert.equal(existsSync("index.ts"), true);
+  assert.equal(existsSync("index.js"), false);
+});
+
 test("Packaged skills are registered in package metadata", () => {
   assert.deepEqual(
     packageJson.pi.skills.map((path) => path.replace(/^\.\//, "")).sort(),

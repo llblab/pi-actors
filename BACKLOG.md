@@ -2,6 +2,45 @@
 
 ## Open Work
 
+### Native Windows Smoke and Runtime Notification Follow-up
+
+- Priority: High.
+- Target: Post-0.22.0 validation and hardening.
+- Goal: Validate the cross-platform actor wake/notification layer on native Windows without changing the public actor API or replacing file-backed actor state as the observable source of truth.
+- Decision:
+  - Keep files as durable truth: mailbox/state/event/room files remain canonical for `inspect`, observability, crash recovery, and replay.
+  - Treat runtime notification as an advisory wake layer, not as the queue itself.
+  - Preserve `spawn`, `message`, and `inspect` as the only public actor API; platform transport choices stay internal.
+- Progress:
+  - Prepared the cross-platform runtime notification layer for release with a file-backed runtime notifier boundary using `notify(actor)` / `subscribe(actor, onWake)`, persisted `wake.jsonl` records, `fs.watch` subscription, and periodic fallback coverage.
+  - Notifier subscriptions can now receive explicit reconciliation callbacks for initial scan, wake-triggered scans, and polling fallback.
+  - Run-local `message` delivery now records the durable run inbox entry and advisory wake before attempting the optional live control endpoint; successful endpoint delivery marks the inbox entry `sent`.
+  - Run mailbox inspection now shows recent durable inbox entries alongside recipe-declared mailbox metadata.
+  - Added run inbox claim/handle/fail helpers for runtime loops, including locked claims so reconciliation callbacks can safely dispatch queued mailbox work once.
+  - Added mailbox-only run control endpoints so runtimes can accept `message` through durable inbox/wake state without requiring FIFO or named-pipe delivery.
+  - Migrated the packaged music-player control path to queued mailbox commands as the first concrete script using the mailbox-only runtime direction.
+  - Added a native Windows `wmp` music-player backend using legacy Windows Media Player COM via `powershell.exe`, with `wmplayer.exe` detection in standard Program Files locations and mailbox-backed controls mapped to WMP play/pause/stop operations.
+  - Hardened the music-player mailbox loop to avoid repeated unchanged mailbox reads by combining advisory wake records, `fs.watch`, and inbox signature polling.
+  - Improved Unix-like playback support with the macOS-native `afplay` backend, broader audio extension scanning, and process-group signaling for child playback controls.
+  - Room timeline appends and branch inbox append/status transitions now emit advisory wake records for the addressed room or branch actor.
+- Direction:
+  - Continue wiring mailbox-only endpoints and notifier reconciliation callbacks into concrete packaged actor scripts where file-backed mailbox dispatch should replace transport-specific control loops.
+  - Ensure message delivery writes durable file-backed mailbox/state first, then emits a wake notification.
+  - Require actor runtimes to reconcile mailbox state on wake and also on a periodic fallback so missed notifications do not lose work.
+  - Provide a universal baseline backend using file-system change notification plus periodic reconcile across Linux, macOS, and Windows.
+  - Keep FIFO/named-pipe/socket style endpoints as optional fast wake backends or compatibility paths, not as required durable queues.
+  - Document the model as "wake, not queue": notification wakes a live actor; files remain the queue and audit trail.
+- Windows smoke focus:
+  - Run installed `@llblab/pi-actors@0.22.0` or newer on native Windows.
+  - Verify simple `spawn` / `message` / `inspect` actor communication.
+  - Verify small room-swarm/subagent communication, branch/direct messages, mailbox claim/handled transitions, graceful stop/cancel behavior, and opt-in retirement.
+  - If smoke passes, update docs/release notes from "adapter support" to "Windows smoke-tested subagent communication" for the next release.
+- Exit:
+  - Actor communication works through the cross-platform notifier layer with public API unchanged.
+  - Inspect/observability continue to read canonical file state and do not depend on a live notifier process.
+  - Missed wake notifications are recovered by mailbox reconciliation.
+  - Windows subagent communication smoke is documented with results and any remaining limitations.
+
 ### Consensus-First Build Recipe
 
 - Priority: Medium.

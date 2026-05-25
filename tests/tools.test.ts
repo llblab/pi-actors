@@ -1079,6 +1079,53 @@ test("Inspect tool reads run mailbox metadata", async () => {
   }
 });
 
+test("Inspect tool reads run mailbox inbox entries", async () => {
+  const inspect = createInspectToolDefinition();
+  const message = createActorMessageToolDefinition();
+  let stateDir = "";
+  const runId = `mailbox-inbox-${process.pid}-${Date.now()}`;
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      () => message.execute(
+        "call-run-mailbox-note",
+        { body: "queue me", to: `run:${runId}`, type: "control.note" },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /Run control FIFO not found/,
+    );
+    const inspected = await inspect.execute(
+      "call-inspect-run-mailbox-inbox",
+      { target: `run:${runId}`, view: "mailbox" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(inspected.content[0].text, /status=queued/);
+    assert.match(inspected.content[0].text, /type=run\.message/);
+    assert.equal(inspected.details.messages.length, 1);
+    assert.equal(inspected.details.messages[0].body, "queue me");
+  } finally {
+    if (stateDir) {
+      try {
+        cancelRun(stateDir);
+      } catch {
+        // Best-effort cleanup.
+      }
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("Actor tools start, inspect, and stop run actors", async () => {
   const spawn = createSpawnToolDefinition();
   const inspect = createInspectToolDefinition();

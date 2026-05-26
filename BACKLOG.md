@@ -153,6 +153,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Make installed scripts prefer `dist` runtime modules and avoid importing `.ts` from `node_modules`.
   - Preserve source-tree developer ergonomics without requiring global install.
   - Expose compiled JS as the default Node-compatible extension entrypoint and source TS as optional metadata for TypeScript-native runtimes.
+  - Treat `dist/` as the JS-only distributive tree: mirror runtime assets (`scripts/`, `recipes/`, `fixtures/`, and `skills/`) there during build.
   - Track each converted script with a compiled module existence regression so shim drift is caught before packaging.
 - Acceptance:
   - `npm run build` covers packaged script logic, not only extension library code.

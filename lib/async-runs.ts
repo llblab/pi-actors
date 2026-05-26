@@ -4,8 +4,8 @@
  * Owns detached run state, observation, log tailing, listing, and cancellation safety
  */
 
-import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -133,7 +133,10 @@ const DEFAULT_RECIPE_ROOT = Paths.getRecipeRoot();
 
 function packageRoot(): string {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
-  if (basename(moduleDir) === "lib" && basename(dirname(moduleDir)) === "dist") {
+  if (
+    basename(moduleDir) === "lib" &&
+    basename(dirname(moduleDir)) === "dist"
+  ) {
     return dirname(dirname(moduleDir));
   }
   return dirname(moduleDir);
@@ -409,84 +412,88 @@ export function startRun(
   try {
     assertNoActiveRunState(stateDir);
     prepareStateDirForStart(stateDir);
-  const stdout = join(stateDir, "stdout.log");
-  const stderr = join(stateDir, "stderr.log");
-  const recipeFile = startParams.file
-    ? resolveRecipeFile(startParams.file)
-    : undefined;
-  const recipe = startParams.name || getRunIdFromFile(recipeFile);
-  const includeActorRecipeContext =
-    startParams.actor_context !== false && startParams.actor_context !== "off";
-  const recipeContextRecords = recipeFile && includeActorRecipeContext
-    ? RecipeReferences.buildRecipeContextRecords(recipeFile)
-    : undefined;
-  if (recipeFile && isMutableUsageRecipeFile(recipeFile)) {
-    RecipeUsage.recordRecipeLaunch(recipeFile);
-  }
-  const outFd = openSync(stdout, "a");
-  const errFd = openSync(stderr, "a");
-  const argv = asyncRunnerArgv(stateDir);
-  const values = {
-    ...(startParams.values || {}),
-    actor_address: `run:${run}`,
-    communication_file: join(stateDir, "communication.json"),
-    default_room: `room:${run}`,
-    run_id: run,
-    state_dir: stateDir,
-  };
-  const outputValues = {
-    ...(startParams.defaults || {}),
-    ...values,
-  };
-  const artifacts = resolveArtifactPaths(startParams.artifacts, outputValues);
-  const meta: AsyncRunMeta = {
-    argv: [process.execPath, ...argv],
-    createdAt: new Date().toISOString(),
-    cwd,
-    ...(startParams.launch_source ? { launch_source: startParams.launch_source } : {}),
-    ...(startParams.ownerId ? { ownerId: startParams.ownerId } : {}),
-    pid: 0,
-    ...(recipe ? { recipe } : {}),
-    ...(recipeFile ? { recipe_file: recipeFile } : {}),
-    run,
-    state_dir: stateDir,
-    status: "running",
-    ...(startParams.tool ? { tool: startParams.tool } : {}),
-    template: resolved.template,
-    values,
-    ...(artifacts ? { artifacts } : {}),
-    ...(startParams.control ? { control: startParams.control } : {}),
-    ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
-    ...(recipeContextRecords && recipeContextRecords.length > 0
-      ? { recipe_context_records: recipeContextRecords }
-      : {}),
-    ...(startParams.retire_when === "children_terminal"
-      ? { retire_when: "children_terminal" as const }
-      : {}),
-  };
-  writeJsonAtomic(join(stateDir, "run.json"), meta);
-  const child = spawn(process.execPath, argv, {
-    cwd,
-    detached: true,
-    stdio: ["ignore", outFd, errFd],
-  });
-  closeSync(outFd);
-  closeSync(errFd);
-  meta.pid = child.pid ?? 0;
-  writeJsonAtomic(join(stateDir, "run.json"), meta);
-  writeJsonAtomic(join(stateDir, "progress.json"), {
-    completed: 0,
-    failures: [],
-    phase: "starting",
-    updatedAt: new Date().toISOString(),
-  });
-  writeFileSync(
-    join(stateDir, "events.jsonl"),
-    `${JSON.stringify({ event: "run.start", run, pid: meta.pid, ts: new Date().toISOString() })}\n`,
-    { flag: "a" },
-  );
-  child.unref();
-  return meta;
+    const stdout = join(stateDir, "stdout.log");
+    const stderr = join(stateDir, "stderr.log");
+    const recipeFile = startParams.file
+      ? resolveRecipeFile(startParams.file)
+      : undefined;
+    const recipe = startParams.name || getRunIdFromFile(recipeFile);
+    const includeActorRecipeContext =
+      startParams.actor_context !== false &&
+      startParams.actor_context !== "off";
+    const recipeContextRecords =
+      recipeFile && includeActorRecipeContext
+        ? RecipeReferences.buildRecipeContextRecords(recipeFile)
+        : undefined;
+    if (recipeFile && isMutableUsageRecipeFile(recipeFile)) {
+      RecipeUsage.recordRecipeLaunch(recipeFile);
+    }
+    const outFd = openSync(stdout, "a");
+    const errFd = openSync(stderr, "a");
+    const argv = asyncRunnerArgv(stateDir);
+    const values = {
+      ...(startParams.values || {}),
+      actor_address: `run:${run}`,
+      communication_file: join(stateDir, "communication.json"),
+      default_room: `room:${run}`,
+      run_id: run,
+      state_dir: stateDir,
+    };
+    const outputValues = {
+      ...(startParams.defaults || {}),
+      ...values,
+    };
+    const artifacts = resolveArtifactPaths(startParams.artifacts, outputValues);
+    const meta: AsyncRunMeta = {
+      argv: [process.execPath, ...argv],
+      createdAt: new Date().toISOString(),
+      cwd,
+      ...(startParams.launch_source
+        ? { launch_source: startParams.launch_source }
+        : {}),
+      ...(startParams.ownerId ? { ownerId: startParams.ownerId } : {}),
+      pid: 0,
+      ...(recipe ? { recipe } : {}),
+      ...(recipeFile ? { recipe_file: recipeFile } : {}),
+      run,
+      state_dir: stateDir,
+      status: "running",
+      ...(startParams.tool ? { tool: startParams.tool } : {}),
+      template: resolved.template,
+      values,
+      ...(artifacts ? { artifacts } : {}),
+      ...(startParams.control ? { control: startParams.control } : {}),
+      ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
+      ...(recipeContextRecords && recipeContextRecords.length > 0
+        ? { recipe_context_records: recipeContextRecords }
+        : {}),
+      ...(startParams.retire_when === "children_terminal"
+        ? { retire_when: "children_terminal" as const }
+        : {}),
+    };
+    writeJsonAtomic(join(stateDir, "run.json"), meta);
+    const child = spawn(process.execPath, argv, {
+      cwd,
+      detached: true,
+      stdio: ["ignore", outFd, errFd],
+    });
+    closeSync(outFd);
+    closeSync(errFd);
+    meta.pid = child.pid ?? 0;
+    writeJsonAtomic(join(stateDir, "run.json"), meta);
+    writeJsonAtomic(join(stateDir, "progress.json"), {
+      completed: 0,
+      failures: [],
+      phase: "starting",
+      updatedAt: new Date().toISOString(),
+    });
+    writeFileSync(
+      join(stateDir, "events.jsonl"),
+      `${JSON.stringify({ event: "run.start", run, pid: meta.pid, ts: new Date().toISOString() })}\n`,
+      { flag: "a" },
+    );
+    child.unref();
+    return meta;
   } finally {
     releaseStartLock();
   }
@@ -806,7 +813,10 @@ export function claimRunInboxMessage(
       ...messages[index],
       claimed_at: new Date().toISOString(),
       claimed_by: owner,
-      id: typeof messages[index].id === "string" ? messages[index].id : randomUUID(),
+      id:
+        typeof messages[index].id === "string"
+          ? messages[index].id
+          : randomUUID(),
       status: "claimed",
     } satisfies RunInboxMessage;
     messages[index] = claimed;
@@ -928,9 +938,10 @@ function appendRunInboxMessage(stateDir: string, message: string): string {
   let record: Record<string, unknown>;
   try {
     const parsed = JSON.parse(message) as unknown;
-    record = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : { body: parsed, type: "run.message" };
+    record =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : { body: parsed, type: "run.message" };
   } catch {
     record = { body: message, type: "run.message" };
   }
@@ -1057,7 +1068,13 @@ export async function sendRunMessage(
   const payload = message.endsWith("\n") ? message : `${message}\n`;
   const payloadBytes = Buffer.byteLength(payload);
   const inboxId = appendRunInboxMessage(stateDir, message);
-  const wake = notifyRunMessageWake(stateDir, run, payloadBytes, endpoint, inboxId);
+  const wake = notifyRunMessageWake(
+    stateDir,
+    run,
+    payloadBytes,
+    endpoint,
+    inboxId,
+  );
   const runtimePlatform = options.platform ?? process.platform;
   if (endpoint.type === "mailbox") {
     return {
@@ -1066,6 +1083,7 @@ export async function sendRunMessage(
       control: "inbox.jsonl",
       control_path: endpoint.path,
       control_type: endpoint.type,
+      inbox_id: inboxId,
       queued: true,
       run,
       sent: true,
@@ -1087,6 +1105,7 @@ export async function sendRunMessage(
         control: "control.fifo",
         control_path: endpoint.path,
         control_type: endpoint.type,
+        inbox_id: inboxId,
         run,
         sent: true,
         state_dir: stateDir,
@@ -1104,13 +1123,28 @@ export async function sendRunMessage(
       control: endpoint.path,
       control_path: endpoint.path,
       control_type: endpoint.type,
+      inbox_id: inboxId,
       run,
       sent: true,
       state_dir: stateDir,
     };
   } catch (error) {
-    throw new Error(
-      `Run control endpoint is not ready: ${endpoint.path}: ${error instanceof Error ? error.message : String(error)}`,
+    const deliveryError =
+      error instanceof Error ? error.message : String(error);
+    throw Object.assign(
+      new Error(
+        `Run control endpoint is not ready: ${endpoint.path}: ${deliveryError}`,
+      ),
+      {
+        control_path: endpoint.path,
+        control_type: endpoint.type,
+        delivery_error: deliveryError,
+        inbox_id: inboxId,
+        queued: true,
+        run,
+        sent: false,
+        state_dir: stateDir,
+      },
     );
   }
 }
@@ -1150,7 +1184,9 @@ function signalOwnedRunProcess(
     const result = spawnSync(plan.command, plan.args, { encoding: "utf8" });
     if (result.status !== 0) {
       throw new Error(
-        result.stderr?.trim() || result.stdout?.trim() || `${plan.command} failed`,
+        result.stderr?.trim() ||
+          result.stdout?.trim() ||
+          `${plan.command} failed`,
       );
     }
     return plan;

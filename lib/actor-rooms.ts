@@ -383,22 +383,84 @@ function updateRosterForMessage(
   return roster;
 }
 
+export interface BranchInboxRecord extends ActorMessage {
+  id?: string;
+  queued_at?: string;
+  status?: string;
+}
+
+export interface BranchInboxReadResult {
+  corrupted: number;
+  messages: BranchInboxRecord[];
+}
+
+function readBranchInboxFile(
+  stateDir: string,
+  run: string,
+  address: string,
+  limit = 40,
+): BranchInboxReadResult {
+  const branch = branchIdFromAddress(address, run);
+  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  try {
+    const lines = readJsonlTailLines(branchInboxFile(stateDir, branch), limit);
+    const messages: BranchInboxRecord[] = [];
+    let corrupted = 0;
+    for (const line of lines) {
+      try {
+        messages.push(JSON.parse(line));
+      } catch {
+        corrupted += 1;
+      }
+    }
+    return { corrupted, messages };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { corrupted: 0, messages: [] };
+    throw error;
+  }
+}
+
+function readAllBranchInboxLines(
+  stateDir: string,
+  run: string,
+  address: string,
+): Array<{ raw: string } | { message: BranchInboxRecord }> {
+  const branch = branchIdFromAddress(address, run);
+  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  try {
+    const content = fs.readFileSync(branchInboxFile(stateDir, branch), "utf8");
+    return content
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        try {
+          return { message: JSON.parse(line) as BranchInboxRecord };
+        } catch {
+          return { raw: line };
+        }
+      });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 export function readBranchInboxMessages(
   stateDir: string,
   run: string,
   address: string,
   limit = 40,
-): Array<ActorMessage & { id?: string; queued_at?: string; status?: string }> {
-  const branch = branchIdFromAddress(address, run);
-  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
-  try {
-    return readJsonlTailLines(branchInboxFile(stateDir, branch), limit).map(
-      (line) => JSON.parse(line),
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
+): BranchInboxRecord[] {
+  return readBranchInboxFile(stateDir, run, address, limit).messages;
+}
+
+export function readBranchInboxDiagnostics(
+  stateDir: string,
+  run: string,
+  address: string,
+  limit = 40,
+): BranchInboxReadResult {
+  return readBranchInboxFile(stateDir, run, address, limit);
 }
 
 export function getBranchInboxTerminalRetainLimit(): number {
@@ -458,17 +520,23 @@ export function updateBranchInboxMessageStatus(
   const releaseLock = acquireBranchInboxLock(stateDir, branch);
   try {
     const file = branchInboxFile(stateDir, branch);
-    const messages = readBranchInboxMessages(stateDir, run, address, Number.MAX_SAFE_INTEGER);
+    const records = readAllBranchInboxLines(stateDir, run, address);
     let changed = false;
     const timestampKey = `${status}_at`;
-    const updated = messages.map((message) => {
-      if (message.id !== id) return message;
+    const updated = records.map((record) => {
+      if (!("message" in record) || record.message.id !== id) return record;
       changed = true;
-      return { ...message, ...metadata, [timestampKey]: new Date().toISOString(), status };
+      return { message: { ...record.message, ...metadata, [timestampKey]: new Date().toISOString(), status } };
     });
     if (!changed) return false;
-    const compacted = compactBranchInboxMessages(updated);
-    fs.writeFileSync(file, `${compacted.map((message) => JSON.stringify(message)).join("\n")}\n`);
+    const validMessages = updated.flatMap((record) => "message" in record ? [record.message] : []);
+    const compactedIds = new Set(compactBranchInboxMessages(validMessages).map((message) => message.id));
+    const lines = updated.flatMap((record) => {
+      if ("raw" in record) return [record.raw];
+      if (record.message.id && !compactedIds.has(record.message.id)) return [];
+      return [JSON.stringify(record.message)];
+    });
+    fs.writeFileSync(file, lines.length ? `${lines.join("\n")}\n` : "");
     notifyActorWake(stateDir, address, "branch.inbox.status", { id, status });
     return true;
   } finally {

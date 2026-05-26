@@ -5,7 +5,14 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
@@ -229,13 +236,25 @@ export function summarizeRuns(
     const descendantSubagents = processSubagentsByRun.get(run.run) ?? 0;
     return descendantSubagents > 0 ? { ...run, descendantSubagents } : run;
   });
-  const runningRuns = runsWithDescendants.filter((run) => run.status === "running");
+  const runningRuns = runsWithDescendants.filter(
+    (run) => run.status === "running",
+  );
   const running = runningRuns.length;
-  const done = runsWithDescendants.filter((run) => run.status === "done").length;
-  const exited = runsWithDescendants.filter((run) => run.status === "exited").length;
-  const failed = runsWithDescendants.filter((run) => run.status === "failed").length;
-  const cancelled = runsWithDescendants.filter((run) => run.status === "cancelled").length;
-  const killed = runsWithDescendants.filter((run) => run.status === "killed").length;
+  const done = runsWithDescendants.filter(
+    (run) => run.status === "done",
+  ).length;
+  const exited = runsWithDescendants.filter(
+    (run) => run.status === "exited",
+  ).length;
+  const failed = runsWithDescendants.filter(
+    (run) => run.status === "failed",
+  ).length;
+  const cancelled = runsWithDescendants.filter(
+    (run) => run.status === "cancelled",
+  ).length;
+  const killed = runsWithDescendants.filter(
+    (run) => run.status === "killed",
+  ).length;
   const progressSubagents = runningRuns.reduce(
     (sum, run) => sum + Math.max(1, Math.floor(run.activeSubagents ?? 0)),
     0,
@@ -244,7 +263,10 @@ export function summarizeRuns(
     (sum, count) => sum + count,
     0,
   );
-  const runningSubagents = Math.max(progressSubagents, running + processSubagents);
+  const runningSubagents = Math.max(
+    progressSubagents,
+    running + processSubagents,
+  );
   return {
     cancelled,
     done,
@@ -278,11 +300,16 @@ function getProcCommand(pid: string): string {
   return (readProcFile(`/proc/${pid}/cmdline`) ?? "").replaceAll("\0", " ");
 }
 
-function getRunningRunPidMap(stateRoot: string, ownerId?: string): Map<string, string> {
+function getRunningRunPidMap(
+  stateRoot: string,
+  ownerId?: string,
+): Map<string, string> {
   const pids = new Map<string, string>();
   for (const run of summarizeRunsWithoutSubagents(stateRoot, ownerId).runs) {
     if (run.status !== "running") continue;
-    const status = AsyncRuns.getRunStatus(run.stateDir ?? join(stateRoot, run.run));
+    const status = AsyncRuns.getRunStatus(
+      run.stateDir ?? join(stateRoot, run.run),
+    );
     const pid = Number(status.pid || 0);
     if (pid > 0) pids.set(String(pid), run.run);
   }
@@ -420,7 +447,10 @@ export function findRunRetirementCandidates(
   return summary.runs
     .map((run) => {
       const activeSubagents = Math.max(0, Math.floor(run.activeSubagents ?? 0));
-      const descendantSubagents = Math.max(0, Math.floor(run.descendantSubagents ?? 0));
+      const descendantSubagents = Math.max(
+        0,
+        Math.floor(run.descendantSubagents ?? 0),
+      );
       const childRuns = run.stateDir
         ? summary.runs.filter(
             (child) =>
@@ -429,7 +459,9 @@ export function findRunRetirementCandidates(
               isNestedStateDir(run.stateDir!, child.stateDir),
           )
         : [];
-      const runningChildRuns = childRuns.filter((child) => child.status === "running").length;
+      const runningChildRuns = childRuns.filter(
+        (child) => child.status === "running",
+      ).length;
       return {
         activeSubagents,
         childRuns: childRuns.length,
@@ -441,7 +473,9 @@ export function findRunRetirementCandidates(
           !run.terminalHandled &&
           activeSubagents + descendantSubagents + runningChildRuns <= 0,
         run,
-        terminalChildRuns: childRuns.filter((child) => TERMINAL.has(child.status)).length,
+        terminalChildRuns: childRuns.filter((child) =>
+          TERMINAL.has(child.status),
+        ).length,
       };
     })
     .filter((item) => item.ready)
@@ -462,7 +496,11 @@ export async function executeRunRetirements(
   const results: RunRetirementExecution[] = [];
   for (const candidate of findRunRetirementCandidates(summary)) {
     if (options.attempted?.has(candidate.stateDir)) {
-      results.push({ action: "skip", run: candidate.run, stateDir: candidate.stateDir });
+      results.push({
+        action: "skip",
+        run: candidate.run,
+        stateDir: candidate.stateDir,
+      });
       continue;
     }
     options.attempted?.add(candidate.stateDir);
@@ -472,12 +510,18 @@ export async function executeRunRetirements(
         `Retiring actor ${candidate.run} after child runs reached terminal state`,
         "info",
       );
-      results.push({ action: "stop", run: candidate.run, stateDir: candidate.stateDir });
+      results.push({
+        action: "stop",
+        run: candidate.run,
+        stateDir: candidate.stateDir,
+      });
       continue;
     } catch (error) {
       try {
         const cancelResult = options.cancelRun(candidate);
-        const cancelled = Boolean((cancelResult as { cancelled?: unknown }).cancelled);
+        const cancelled = Boolean(
+          (cancelResult as { cancelled?: unknown }).cancelled,
+        );
         options.notify?.(
           cancelled
             ? `Retiring actor ${candidate.run} by cancellation after graceful stop failed`
@@ -486,13 +530,23 @@ export async function executeRunRetirements(
         );
         results.push({
           action: cancelled ? "cancel" : "skip",
-          ...(cancelled ? {} : { error: error instanceof Error ? error.message : String(error) }),
+          ...(cancelled
+            ? {}
+            : {
+                error: error instanceof Error ? error.message : String(error),
+              }),
           run: candidate.run,
           stateDir: candidate.stateDir,
         });
       } catch (cancelError) {
-        const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
-        options.notify?.(`Actor retirement failed for ${candidate.run}: ${message}`, "error");
+        const message =
+          cancelError instanceof Error
+            ? cancelError.message
+            : String(cancelError);
+        options.notify?.(
+          `Actor retirement failed for ${candidate.run}: ${message}`,
+          "error",
+        );
         results.push({
           action: "failed",
           error: message,
@@ -505,13 +559,20 @@ export async function executeRunRetirements(
   return results;
 }
 
+function runObservationKey(
+  run: Pick<RunObservation, "run" | "stateDir">,
+): string {
+  return run.stateDir ?? run.run;
+}
+
 export function detectRunTransitions(
   previous: Map<string, RunObservedStatus>,
   summary: RunSummary,
 ): RunTransition[] {
   const transitions: RunTransition[] = [];
   for (const run of summary.runs) {
-    const old = previous.get(run.run);
+    const key = runObservationKey(run);
+    const old = previous.get(key);
     if (old && old !== run.status && TERMINAL.has(run.status)) {
       transitions.push({
         from: old,
@@ -525,7 +586,7 @@ export function detectRunTransitions(
         ...(run.tool ? { tool: run.tool } : {}),
       });
     }
-    previous.set(run.run, run.status);
+    previous.set(key, run.status);
   }
   return transitions;
 }
@@ -599,12 +660,12 @@ export function pruneRunObservationState(
   summary: RunSummary,
   terminalRuns: Iterable<string> = [],
 ): void {
-  const activeRuns = new Set(summary.runs.map((run) => run.run));
+  const activeRuns = new Set(summary.runs.map((run) => runObservationKey(run)));
   const terminalRunSet = new Set(terminalRuns);
   const terminalLineKeys = new Set(
     summary.runs
-      .filter((run) => terminalRunSet.has(run.run))
-      .map((run) => run.stateDir ?? run.run),
+      .filter((run) => terminalRunSet.has(runObservationKey(run)))
+      .map((run) => runObservationKey(run)),
   );
   const activeLineKeys = new Set(
     summary.runs.map((run) => run.stateDir ?? run.run),

@@ -8,9 +8,9 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
 import type { TemplateRecipeConfig } from "./recipe-references.ts";
-import * as CommandTemplates from "./command-templates.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as Schema from "./schema.ts";
 
@@ -61,18 +61,28 @@ function assertToolSafeRepeatConfig(
   argTypes: Record<string, { kind: string }>,
   defaults: Record<string, unknown>,
 ): void {
-  if (typeof config === "string" || config === undefined || config === null) return;
+  if (typeof config === "string" || config === undefined || config === null)
+    return;
   if (Array.isArray(config)) {
-    for (const step of config) assertToolSafeRepeatConfig(step, argTypes, defaults);
+    for (const step of config)
+      assertToolSafeRepeatConfig(step, argTypes, defaults);
     return;
   }
   if (typeof config !== "object") return;
-  const node = config as { repeat?: unknown; template?: unknown; recover?: unknown };
+  const node = config as {
+    repeat?: unknown;
+    template?: unknown;
+    recover?: unknown;
+  };
   if (typeof node.repeat === "string") {
     const trimmed = node.repeat.trim();
     if (!/^\d+$/.test(trimmed)) {
       const match = trimmed.match(/^\{?([A-Za-z_][A-Za-z0-9_-]*)\.length\}?$/);
-      if (!match || (argTypes[match[1]]?.kind !== "array" && !Array.isArray(defaults[match[1]])))
+      if (
+        !match ||
+        (argTypes[match[1]]?.kind !== "array" &&
+          !Array.isArray(defaults[match[1]]))
+      )
         throw new Error(
           "Command template repeat must be a positive integer or {array.length} with an array argument/default.",
         );
@@ -92,23 +102,30 @@ function listRecipeFiles(root: string): string[] {
         entry.name !== "legacy-tool-registry-migration-report.json",
     )
     .map((entry) => join(root, entry.name))
-    .sort((a, b) => a.replace(/\.md$/, ".json").localeCompare(b.replace(/\.md$/, ".json")) || (a.endsWith(".json") ? -1 : 1));
+    .sort(
+      (a, b) =>
+        a
+          .replace(/\.md$/, ".json")
+          .localeCompare(b.replace(/\.md$/, ".json")) ||
+        (a.endsWith(".json") ? -1 : 1),
+    );
 }
 
 function getRecipeConfigDiagnostics(
   file: string,
   config: TemplateRecipeConfig | undefined,
 ): string[] {
-  if (!config) return [`Invalid recipe: ${file}`];
+  if (!config) {
+    const reason = RecipeReferences.diagnoseRawRecipeConfigFailure(file);
+    return [`Invalid recipe: ${file}${reason ? `: ${reason}` : ""}`];
+  }
   const commandTemplateConfig =
     typeof config.template === "object" && config.template !== null
       ? config.template
       : config;
   return CommandTemplates.getCommandTemplateWarnings(
     commandTemplateConfig as CommandTemplates.CommandTemplateConfig,
-  ).map(
-    (warning) => `Recipe ${file}: ${warning}`,
-  );
+  ).map((warning) => `Recipe ${file}: ${warning}`);
 }
 
 function readDiscoveredRecipe(
@@ -158,13 +175,23 @@ function readDiscoveredRecipe(
   }
 }
 
-function filesForSource(
-  source: RecipeDiscoverySource,
-): Array<{ root: string; file: string; defaultTool: boolean; mutableUsage: boolean }> {
+function filesForSource(source: RecipeDiscoverySource): Array<{
+  root: string;
+  file: string;
+  defaultTool: boolean;
+  mutableUsage: boolean;
+}> {
   const defaultTool = source.defaultTool === true;
   const mutableUsage = source.mutableUsage === true;
   if (source.file)
-    return [{ root: source.root ?? source.file, file: source.file, defaultTool, mutableUsage }];
+    return [
+      {
+        root: source.root ?? source.file,
+        file: source.file,
+        defaultTool,
+        mutableUsage,
+      },
+    ];
   return source.root
     ? listRecipeFiles(source.root).map((file) => ({
         root: source.root!,
@@ -226,7 +253,9 @@ export function discoverRecipeSources(
     bucket.sort(
       (a, b) =>
         a.priority - b.priority ||
-        a.path.replace(/\.md$/, ".json").localeCompare(b.path.replace(/\.md$/, ".json")) ||
+        a.path
+          .replace(/\.md$/, ".json")
+          .localeCompare(b.path.replace(/\.md$/, ".json")) ||
         (a.path.endsWith(".json") ? -1 : 1),
     );
     const winner = bucket[0];
@@ -262,14 +291,18 @@ export function discoverRecipes(roots: string[]): RecipeDiscoveryResult {
   return discoverRecipeSources(roots.map((root) => ({ root })));
 }
 
-function recipeUsage(config: TemplateRecipeConfig | undefined): Record<string, unknown> | undefined {
+function recipeUsage(
+  config: TemplateRecipeConfig | undefined,
+): Record<string, unknown> | undefined {
   const usage = (config as { usage?: unknown } | undefined)?.usage;
   return usage && typeof usage === "object" && !Array.isArray(usage)
     ? (usage as Record<string, unknown>)
     : undefined;
 }
 
-function cleanupRecommendation(entry: DiscoveredRecipe): Record<string, unknown> | undefined {
+function cleanupRecommendation(
+  entry: DiscoveredRecipe,
+): Record<string, unknown> | undefined {
   if (entry.invalid) {
     return {
       id: entry.id,
@@ -309,7 +342,13 @@ function cleanupRecommendation(entry: DiscoveredRecipe): Record<string, unknown>
       id: entry.id,
       path: entry.path,
       reason: "user recipe is a component, not an active tool",
-      actions: ["keep component", "move into tool root", "merge", "delete", "archive"],
+      actions: [
+        "keep component",
+        "move into tool root",
+        "merge",
+        "delete",
+        "archive",
+      ],
     };
   }
   if (entry.shadows.length > 0) {
@@ -342,9 +381,78 @@ export function createRecipeIntegrityManifest(
         tool: entry.tool,
       };
     })
-    .sort(
-      (a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path),
+    .sort((a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path));
+}
+
+function diagnosticSeverity(message: string): "info" | "warning" | "error" {
+  if (
+    /invalid|failed to load|not found|cyclic|exceeds|must define|repeat must/i.test(
+      message,
+    )
+  ) {
+    return "error";
+  }
+  if (
+    /world-writable|group-writable|invokes bash|eval|destructive|unsafe/i.test(
+      message,
+    )
+  ) {
+    return "warning";
+  }
+  return "info";
+}
+
+function diagnosticSuggestedAction(message: string): string {
+  if (/must define template/i.test(message))
+    return "add a template field or remove the recipe";
+  if (/JSON|Expected|parse/i.test(message))
+    return "fix recipe syntax or archive the file";
+  if (/Markdown recipe/i.test(message))
+    return "fix frontmatter and add a fenced template or recipe block";
+  if (/cyclic/i.test(message)) return "break the import cycle";
+  if (/exceeds.*size/i.test(message))
+    return "split large prompt or data into separate files";
+  if (/repeat must/i.test(message))
+    return "use a positive repeat count or an array-typed repeat source";
+  if (/world-writable|group-writable/i.test(message))
+    return "tighten recipe root permissions";
+  if (/invokes bash/i.test(message))
+    return "audit the trusted shell boundary or move details to recipe doctor";
+  if (/shadows/i.test(message))
+    return "confirm the active override or rename one recipe";
+  if (/disabled/i.test(message))
+    return "keep disabled intentionally or delete/archive the file";
+  return "inspect the recipe and fix or archive it if unexpected";
+}
+
+function diagnosticDetails(
+  result: RecipeDiscoveryResult,
+): Array<Record<string, unknown>> {
+  const details: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  const push = (message: string, entry?: DiscoveredRecipe): void => {
+    const key = `${entry?.path ?? "root"}\n${message}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    details.push({
+      ...(entry ? { id: entry.id, path: entry.path } : {}),
+      action: diagnosticSuggestedAction(message),
+      message,
+      severity: diagnosticSeverity(message),
+    });
+  };
+  for (const message of result.diagnostics) push(message);
+  for (const entry of result.entries) {
+    for (const message of entry.diagnostics) push(message, entry);
+  }
+  return details.sort((a, b) => {
+    const rank = { error: 0, warning: 1, info: 2 } as const;
+    return (
+      rank[a.severity as keyof typeof rank] -
+        rank[b.severity as keyof typeof rank] ||
+      String(a.message).localeCompare(String(b.message))
     );
+  });
 }
 
 function recommendationForEntry(
@@ -362,29 +470,49 @@ function recommendationForEntry(
   return recommendation;
 }
 
-export function summarizeDiscovery(result: RecipeDiscoveryResult): Record<string, unknown> {
+export function summarizeDiscovery(
+  result: RecipeDiscoveryResult,
+): Record<string, unknown> {
   const recommendations = result.entries
-    .map((entry) => recommendationForEntry(entry, result.active.get(entry.id)?.path))
+    .map((entry) =>
+      recommendationForEntry(entry, result.active.get(entry.id)?.path),
+    )
     .filter((entry): entry is Record<string, unknown> => Boolean(entry))
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)) || String(a.path).localeCompare(String(b.path)));
+    .sort(
+      (a, b) =>
+        String(a.id).localeCompare(String(b.id)) ||
+        String(a.path).localeCompare(String(b.path)),
+    );
   return {
-    active: [...result.active.values()].map((entry) => ({
-      id: entry.id,
-      path: entry.path,
-      description: entry.config?.description,
-      tool: entry.tool,
-      disabled: entry.disabled,
-      invalid: entry.invalid,
-      shadows: entry.shadows,
-      ...(recipeUsage(entry.config) ? { usage: recipeUsage(entry.config) } : {}),
-    })).sort((a, b) => a.id.localeCompare(b.id)),
+    active: [...result.active.values()]
+      .map((entry) => ({
+        id: entry.id,
+        path: entry.path,
+        description: entry.config?.description,
+        tool: entry.tool,
+        disabled: entry.disabled,
+        invalid: entry.invalid,
+        shadows: entry.shadows,
+        ...(recipeUsage(entry.config)
+          ? { usage: recipeUsage(entry.config) }
+          : {}),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
     shadowed: result.entries
       .filter((entry) => entry.shadowed)
-      .map((entry) => ({ id: entry.id, path: entry.path, shadowedBy: result.active.get(entry.id)?.path }))
+      .map((entry) => ({
+        id: entry.id,
+        path: entry.path,
+        shadowedBy: result.active.get(entry.id)?.path,
+      }))
       .sort((a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path)),
     invalid: result.entries
       .filter((entry) => entry.invalid)
-      .map((entry) => ({ id: entry.id, path: entry.path, diagnostics: entry.diagnostics }))
+      .map((entry) => ({
+        id: entry.id,
+        path: entry.path,
+        diagnostics: entry.diagnostics,
+      }))
       .sort((a, b) => a.id.localeCompare(b.id)),
     disabled: result.entries
       .filter((entry) => entry.disabled)
@@ -392,12 +520,16 @@ export function summarizeDiscovery(result: RecipeDiscoveryResult): Record<string
       .sort((a, b) => a.id.localeCompare(b.id)),
     recommendations,
     diagnostics: result.diagnostics,
+    diagnostic_details: diagnosticDetails(result),
     integrity_manifest: createRecipeIntegrityManifest(result),
   };
 }
 
-export function toRegisteredTool(entry: DiscoveredRecipe): RegisteredTool | undefined {
-  if (!entry.tool || entry.invalid || entry.disabled || !entry.config) return undefined;
+export function toRegisteredTool(
+  entry: DiscoveredRecipe,
+): RegisteredTool | undefined {
+  if (!entry.tool || entry.invalid || entry.disabled || !entry.config)
+    return undefined;
   const cfg = entry.config;
   const template = entry.path;
   const description = cfg.description ?? `Execute template recipe: ${entry.id}`;
@@ -407,7 +539,10 @@ export function toRegisteredTool(entry: DiscoveredRecipe): RegisteredTool | unde
       ? {
           ...argTemplate,
           ...(cfg.args !== undefined ? { args: cfg.args } : {}),
-          defaults: { ...(argTemplate.defaults ?? {}), ...(cfg.defaults ?? {}) },
+          defaults: {
+            ...(argTemplate.defaults ?? {}),
+            ...(cfg.defaults ?? {}),
+          },
         }
       : { args: cfg.args, defaults: cfg.defaults ?? {}, template: argTemplate };
   const explicitArgTypes = Object.fromEntries(
@@ -416,7 +551,11 @@ export function toRegisteredTool(entry: DiscoveredRecipe): RegisteredTool | unde
       return [parsed.arg, parsed.type];
     }),
   );
-  assertToolSafeRepeatConfig(argTemplateConfig, explicitArgTypes, cfg.defaults ?? {});
+  assertToolSafeRepeatConfig(
+    argTemplateConfig,
+    explicitArgTypes,
+    cfg.defaults ?? {},
+  );
   const argTypes = Schema.getTemplateArgTypes(argTemplateConfig);
   return {
     name: entry.id,
@@ -425,7 +564,10 @@ export function toRegisteredTool(entry: DiscoveredRecipe): RegisteredTool | unde
     recipe: cfg,
     args: Schema.getToolArgNames(argTemplateConfig),
     defaults: Object.fromEntries(
-      Object.entries(cfg.defaults ?? {}).map(([key, value]) => [key, String(value)]),
+      Object.entries(cfg.defaults ?? {}).map(([key, value]) => [
+        key,
+        String(value),
+      ]),
     ),
     ...(Object.keys(argTypes).length > 0 ? { argTypes } : {}),
     ...(entry.mutableUsage ? { sourcePath: entry.path } : {}),
@@ -433,7 +575,10 @@ export function toRegisteredTool(entry: DiscoveredRecipe): RegisteredTool | unde
     ...(cfg.defaults
       ? {
           storedDefaults: Object.fromEntries(
-            Object.entries(cfg.defaults).map(([key, value]) => [key, String(value)]),
+            Object.entries(cfg.defaults).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
           ),
         }
       : {}),

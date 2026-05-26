@@ -109,7 +109,12 @@ export function resolveRecipePath(
 
 function isBareRecipeName(value: string): boolean {
   const trimmed = value.trim();
-  return Boolean(trimmed) && !trimmed.includes("/") && !trimmed.startsWith("~") && !trimmed.includes("{");
+  return (
+    Boolean(trimmed) &&
+    !trimmed.includes("/") &&
+    !trimmed.startsWith("~") &&
+    !trimmed.includes("{")
+  );
 }
 
 function recipeNameFiles(value: string): string[] {
@@ -118,8 +123,12 @@ function recipeNameFiles(value: string): string[] {
   return [`${trimmed}.json`, `${trimmed}.md`];
 }
 
-function resolveRecipeImportPath(value: string, currentRecipeRoot: string): string {
-  if (!isBareRecipeName(value)) return resolveRecipePath(value, currentRecipeRoot);
+function resolveRecipeImportPath(
+  value: string,
+  currentRecipeRoot: string,
+): string {
+  if (!isBareRecipeName(value))
+    return resolveRecipePath(value, currentRecipeRoot);
   const roots = [
     Paths.getRecipeRoot(),
     currentRecipeRoot,
@@ -266,11 +275,15 @@ function parseMarkdownFrontmatterObject(
   lines: string[],
 ): Record<string, unknown> | unknown[] {
   if (lines.every((line) => /^\s*-\s+/.test(line))) {
-    return lines.map((line) => parseMarkdownScalar(line.replace(/^\s*-\s+/, "")));
+    return lines.map((line) =>
+      parseMarkdownScalar(line.replace(/^\s*-\s+/, "")),
+    );
   }
   const result: Record<string, unknown> = {};
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(/^\s{2}([A-Za-z_][A-Za-z0-9_.-]*):\s*(.*)$/);
+    const match = lines[index].match(
+      /^\s{2}([A-Za-z_][A-Za-z0-9_.-]*):\s*(.*)$/,
+    );
     if (!match) continue;
     if (match[2]) {
       result[match[1]] = parseMarkdownScalar(match[2]);
@@ -331,11 +344,14 @@ function parseMarkdownRecipeConfig(
 ): Record<string, unknown> | undefined {
   const lines = content.split(/\r?\n/);
   if (lines[0]?.trim() !== "---") return undefined;
-  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  const end = lines.findIndex(
+    (line, index) => index > 0 && line.trim() === "---",
+  );
   if (end === -1) return undefined;
   const frontmatter = parseMarkdownFrontmatter(lines.slice(1, end).join("\n"));
   const fence = findMarkdownRecipeFence(lines.slice(end + 1).join("\n"));
-  if (!fence) return Object.hasOwn(frontmatter, "template") ? frontmatter : undefined;
+  if (!fence)
+    return Object.hasOwn(frontmatter, "template") ? frontmatter : undefined;
   const text = fence.body.trim();
   if (!text) return undefined;
   if (
@@ -351,10 +367,48 @@ function parseMarkdownRecipeConfig(
         return { ...frontmatter, ...parsed };
       return { ...frontmatter, template: parsed };
     } catch {
-      if (fence.info.includes("json") || fence.info.includes("recipe")) return undefined;
+      if (fence.info.includes("json") || fence.info.includes("recipe"))
+        return undefined;
     }
   }
   return { ...frontmatter, template: text };
+}
+
+export function diagnoseRawRecipeConfigFailure(
+  path: string,
+): string | undefined {
+  if (!existsSync(path)) return "file does not exist";
+  const size = statSync(path).size;
+  if (size > MAX_RECIPE_FILE_BYTES) {
+    return `file exceeds size limit ${MAX_RECIPE_FILE_BYTES} bytes`;
+  }
+  try {
+    const content = readFileSync(path, "utf8");
+    if (path.endsWith(".md")) {
+      const lines = content.split(/\r?\n/);
+      if (lines[0]?.trim() !== "---") {
+        return "Markdown recipe must start with frontmatter";
+      }
+      const end = lines.findIndex(
+        (line, index) => index > 0 && line.trim() === "---",
+      );
+      if (end === -1) return "Markdown recipe frontmatter is not closed";
+      const parsed = parseMarkdownRecipeConfig(content);
+      if (!parsed)
+        return "Markdown recipe has no executable recipe/template fence";
+      if (!Object.hasOwn(parsed, "template"))
+        return "recipe must define template";
+      return undefined;
+    }
+    const raw = JSON.parse(content) as unknown;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return "JSON recipe must be an object";
+    }
+    if (!Object.hasOwn(raw, "template")) return "recipe must define template";
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 export function readRawRecipeConfig(
@@ -593,7 +647,8 @@ function expandImportNodes(
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
     return value.map(
-      (item) => expandImportNodes(item, imports, options) as CommandTemplateConfig,
+      (item) =>
+        expandImportNodes(item, imports, options) as CommandTemplateConfig,
     );
   }
   const record = value as Record<string, unknown>;
@@ -614,7 +669,11 @@ function expandImportNodes(
       nodeDefaults,
       nodeValues,
     );
-    const expanded = applyDefaultsToTemplate(imported.config.template, defaults, record);
+    const expanded = applyDefaultsToTemplate(
+      imported.config.template,
+      defaults,
+      record,
+    );
     return options.includeActorRecipeContext
       ? withActorRecipeContext(expanded, {
           alias: imported.alias,
@@ -672,8 +731,15 @@ export function readResolvedRecipeConfig(
   if (!raw || !Object.hasOwn(raw, "template")) return undefined;
   const imports: Record<string, ImportedRecipe> = {};
   for (const [alias, binding] of Object.entries(getRecipeImports(raw))) {
-    const importPath = resolveRecipeImportPath(getImportFrom(binding), dirname(path));
-    const config = readResolvedRecipeConfig(importPath, [...stack, path], options);
+    const importPath = resolveRecipeImportPath(
+      getImportFrom(binding),
+      dirname(path),
+    );
+    const config = readResolvedRecipeConfig(
+      importPath,
+      [...stack, path],
+      options,
+    );
     if (!config) throw new Error(`Recipe import not found: ${alias}`);
     const bindingDefaults =
       typeof binding === "string" ? undefined : binding.defaults;
@@ -836,8 +902,16 @@ function collectRecipeContextRecords(
   };
   const imports = getRecipeImports(raw);
   const children = Object.entries(imports).flatMap(([childAlias, binding]) => {
-    const importFile = resolveRecipeImportPath(getImportFrom(binding), dirname(path));
-    return collectRecipeContextRecords(importFile, [...stack, path], [...importPath, childAlias], childAlias);
+    const importFile = resolveRecipeImportPath(
+      getImportFrom(binding),
+      dirname(path),
+    );
+    return collectRecipeContextRecords(
+      importFile,
+      [...stack, path],
+      [...importPath, childAlias],
+      childAlias,
+    );
   });
   return [record, ...children];
 }

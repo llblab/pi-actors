@@ -436,6 +436,7 @@ export function createRegisterToolDefinition<TContext>(
         ),
         template: unionSchema([
           stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template),
+          looseObjectSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template),
           arraySchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateArray),
           nullSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateNull),
         ]),
@@ -483,6 +484,27 @@ function messageBodyToToolParams(
   }
   if (message.body === undefined) return {};
   return { input: message.body };
+}
+
+function formatToolActorFailure(
+  tool: string,
+  message: ActorMessages.ActorMessage,
+  params: Record<string, unknown>,
+  error: unknown,
+): Error {
+  const original = error instanceof Error ? error.message : String(error);
+  const paramsPreview = compactPreview(params, 240) ?? "{}";
+  return Object.assign(
+    new Error(
+      `tool actor ${tool} failed for message type ${message.type}: ${original}; params=${paramsPreview}`,
+    ),
+    {
+      message_type: message.type,
+      original_error: original,
+      params_preview: paramsPreview,
+      tool,
+    },
+  );
 }
 
 function runIdFromActorAddress(
@@ -915,24 +937,25 @@ export function createInspectToolDefinition<TContext = unknown>(
       if (address.kind === "branch") {
         if (view !== "mailbox") throw new Error("inspect branch:<run>/<branch> supports view=mailbox.");
         const status = assertRunAccessibleToContext(runId, ctx);
-        const messages = ActorRooms.readBranchInboxMessages(
+        const branchInbox = ActorRooms.readBranchInboxDiagnostics(
           String(status.state_dir ?? ""),
           runId,
           target,
           Number(input.lines || 40),
         );
+        const messages = branchInbox.messages;
         return {
           content: [
             {
               type: "text" as const,
               text: maybeJsonText(
-                messages,
+                input.verbose === true ? branchInbox : messages,
                 input.verbose === true,
-                compactBranchInbox(messages.map((message) => ({ ...message }))),
+                `${compactBranchInbox(messages.map((message) => ({ ...message })))}${branchInbox.corrupted > 0 ? `\ncorrupted=${branchInbox.corrupted}` : ""}`,
               ),
             },
           ],
-          details: { messages },
+          details: { corrupted: branchInbox.corrupted, messages },
         };
       }
       switch (view) {
@@ -1118,9 +1141,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       } else if (address.kind === "branch" && address.value) {
         const runId = address.value;
         if (message.from) assertMessageSenderBelongsToRun(message, runId, `branch:${runId}/<branch>`);
-        const status = message.from
-          ? assertRunExistsForActorMessage(runId)
-          : assertRunAccessibleToContext(runId, ctx);
+        const status = assertRunAccessibleToContext(runId, ctx);
         const stateDir = String(status.state_dir ?? "");
         if (stateDir && address.branch) {
           const ensureBranchMember = (actorAddress: string) => {
@@ -1159,7 +1180,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       } else if (address.kind === "room" && address.value && address.room) {
         const runId = address.value;
         assertMessageSenderBelongsToRun(message, runId, `room:${runId}`);
-        const status = assertRunExistsForActorMessage(runId);
+        const status = assertRunAccessibleToContext(runId, ctx);
         const stateDir = String(status.state_dir ?? "");
         if (!stateDir) throw new Error(`${message.to} has no run state directory.`);
         const recipients = getRoomMulticastRecipients(message, runId);
@@ -1185,13 +1206,19 @@ export function createActorMessageToolDefinition<TContext = unknown>(
             `tool actor not found or not executable: ${address.value}`,
           );
         }
-        const toolResult = await tool.execute(
-          `message:${message.type}`,
-          messageBodyToToolParams(message),
-          _signal,
-          _onUpdate,
-          ctx,
-        );
+        const toolParams = messageBodyToToolParams(message);
+        let toolResult: unknown;
+        try {
+          toolResult = await tool.execute(
+            `message:${message.type}`,
+            toolParams,
+            _signal,
+            _onUpdate,
+            ctx,
+          );
+        } catch (error) {
+          throw formatToolActorFailure(address.value, message, toolParams, error);
+        }
         result = {
           invoked: true,
           sent: true,

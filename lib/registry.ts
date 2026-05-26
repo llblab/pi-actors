@@ -161,8 +161,14 @@ function getInputTemplate(
       );
     return value;
   }
+  if (value && typeof value === "object") {
+    CommandTemplates.expandCommandTemplateConfigs(
+      value as CommandTemplates.CommandTemplateConfig,
+    );
+    return value as CommandTemplates.CommandTemplateConfig;
+  }
   throw new Error(
-    Output.formatToolText("Tool template must be a string or sequence."),
+    Output.formatToolText("Tool template must be a string, object, or sequence."),
   );
 }
 

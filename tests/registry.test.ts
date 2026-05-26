@@ -189,6 +189,63 @@ test("Registry mutations register command-template sequences", async () => {
   }
 });
 
+test("Registry mutations register object command templates", async () => {
+  const harness = await createHarness();
+  try {
+    await executeRegisterTool(
+      {
+        description: "Run guarded object template",
+        name: "object_tool",
+        template: {
+          parallel: true,
+          recover: "echo recovered",
+          retry: 2,
+          template: [
+            "echo {topic}",
+            { template: "echo done", timeout: 123 },
+          ],
+          timeout: 456,
+        },
+      },
+      {},
+      harness.deps,
+    );
+    assert.deepEqual(harness.tools.get("object_tool")?.template, {
+      parallel: true,
+      recover: "echo recovered",
+      retry: 2,
+      template: [
+        "echo {topic}",
+        { template: "echo done", timeout: 123 },
+      ],
+      timeout: 456,
+    });
+    assert.deepEqual(harness.tools.get("object_tool")?.args, ["topic"]);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("Registry mutations reject invalid object command templates", async () => {
+  const harness = await createHarness();
+  try {
+    await assert.rejects(
+      executeRegisterTool(
+        {
+          description: "Bad object template",
+          name: "bad_object_tool",
+          template: { repeat: 0, template: "echo nope" },
+        },
+        {},
+        harness.deps,
+      ),
+      /repeat must be a positive integer/,
+    );
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("Registry mutations reject overwrites without update=true", async () => {
   const harness = await createHarness();
   harness.tools.set("smoke", {

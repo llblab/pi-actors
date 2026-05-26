@@ -9,6 +9,8 @@ metadata:
 
 `pi-actors` turns trusted local capabilities into addressable actors. This skill is the compact operator/reference layer for the extension itself: tools, nouns, lifecycle, message protocol, recipes, and common edge cases. It is not a multi-agent strategy guide; use a swarm skill for decomposition, quorum design, reviewer lenses, and consensus methodology.
 
+Maintain this skill as the extension's agent-facing manual. When implementation changes reveal new durable mechanics, invariants, warnings, or safer operating patterns, update this skill alongside code/docs so future agents learn the current actor model instead of rediscovering it.
+
 ## Knowledge Surfaces
 
 Context arrives in layers:

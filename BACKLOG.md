@@ -45,6 +45,8 @@ No open hotfix items.
 
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
 
+Passive-active discipline: when implementation produces durable lessons, update `skills/actors/SKILL.md` as the extension's agent-facing manual and `skills/swarm/SKILL.md` as the orchestration standard. Do not carry evergreen skill upkeep as a checkbox item; apply it whenever code, docs, recipes, or validation change the recommended operating model.
+
 ### M-01 State Corruption Recovery
 
 - Priority: High.

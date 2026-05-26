@@ -41,6 +41,17 @@ export interface ActorLoopHandleResult {
   target: ActorLoopTarget;
 }
 
+export interface ActorLoopDrainOptions extends ActorLoopClaimOptions {
+  maxMessages?: number;
+  stopOnControl?: boolean;
+}
+
+export interface ActorLoopDrainResult {
+  handled: number;
+  stopped: boolean;
+  target: ActorLoopTarget;
+}
+
 export function isActorLoopStopMessage(
   message: Pick<ActorLoopMailboxMessage, "type">,
 ): boolean {
@@ -110,4 +121,23 @@ export async function handleActorLoopOnce(
     });
     throw error;
   }
+}
+
+export async function drainActorLoopMessages(
+  target: ActorLoopTarget,
+  handler: (message: ActorLoopMailboxMessage) => Promise<void> | void,
+  options: ActorLoopDrainOptions = {},
+): Promise<ActorLoopDrainResult> {
+  const maxMessages = Math.max(1, Math.floor(options.maxMessages ?? 100));
+  let handled = 0;
+  for (; handled < maxMessages; handled += 1) {
+    const result = await handleActorLoopOnce(target, handler, options);
+    if (!result.handled || !result.message) {
+      return { handled, stopped: false, target };
+    }
+    if (options.stopOnControl !== false && isActorLoopStopMessage(result.message)) {
+      return { handled: handled + 1, stopped: true, target };
+    }
+  }
+  return { handled, stopped: false, target };
 }

@@ -10,7 +10,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { appendBranchInboxMessage, readBranchInboxMessages } from "../lib/actor-rooms.ts";
-import { handleActorLoopOnce, isActorLoopStopMessage } from "../lib/actor-loop.ts";
+import {
+  drainActorLoopMessages,
+  handleActorLoopOnce,
+  isActorLoopStopMessage,
+} from "../lib/actor-loop.ts";
 import { killRun, readRunInboxMessages, sendRunMessage, startRun } from "../lib/async-runs.ts";
 
 async function waitForStatus(stateDir: string, status: string): Promise<void> {
@@ -108,6 +112,48 @@ test("Actor loop recognizes standard stop messages", () => {
   assert.equal(isActorLoopStopMessage({ type: "control.cancel" }), true);
   assert.equal(isActorLoopStopMessage({ type: "control.kill" }), true);
   assert.equal(isActorLoopStopMessage({ type: "task.assign" }), false);
+});
+
+test("Actor loop drains available branch messages until stop", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-drain-"));
+  try {
+    for (const [type, body] of [
+      ["task.assign", "first"],
+      ["control.stop", "stop"],
+      ["task.assign", "after"],
+    ] as const) {
+      appendBranchInboxMessage(stateDir, "demo", "branch:demo/worker", {
+        body,
+        from: "run:demo",
+        to: "branch:demo/worker",
+        type,
+      });
+    }
+
+    const seen: unknown[] = [];
+    const result = await drainActorLoopMessages(
+      {
+        address: "branch:demo/worker",
+        kind: "branch",
+        run: "demo",
+        stateDir,
+      },
+      (message) => seen.push(message.body),
+      { owner: "loop-test" },
+    );
+
+    assert.deepEqual(seen, ["first", "stop"]);
+    assert.equal(result.handled, 2);
+    assert.equal(result.stopped, true);
+    assert.deepEqual(
+      readBranchInboxMessages(stateDir, "demo", "branch:demo/worker").map(
+        (message) => message.status,
+      ),
+      ["handled", "handled", "queued"],
+    );
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("Actor loop handles one branch inbox message", async () => {

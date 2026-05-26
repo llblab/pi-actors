@@ -129,16 +129,17 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
                         style,
                       )) ?? [];
                 const run = previews[0]?.run;
-                const roster = run
-                  ? ActorInspectorTui.renderInspectorRosterPanel(
-                      ActorInspectorTui.readActorInspectorRoster(
-                        RUN_STATE_ROOT,
-                        run,
-                      ),
-                      width,
-                      style,
-                    )
-                  : undefined;
+                const roster =
+                  selectedInspectorSequence === undefined && run
+                    ? ActorInspectorTui.renderInspectorRosterPanel(
+                        ActorInspectorTui.readActorInspectorRoster(
+                          RUN_STATE_ROOT,
+                          run,
+                        ),
+                        width,
+                        style,
+                      )
+                    : undefined;
                 return roster ? [...roster, ...rows] : rows;
               },
             };

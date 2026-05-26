@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.24.2: Actor Inspector Item View Hotfix
+
+- `[Inspector]` Removed the roster panel from selected actor-message item inspection, kept the compact route header styling, added the same left/right gutter used by inspector rows, and renamed the selected-item `body_preview` label to `body`.
+
 ## 0.24.1: Build Script Package Hygiene Hotfix
 
 - `[Backlog]` Added the next focused backlog set for recipe doctor remediation UX, actor worker v2, and dist package contract hardening.

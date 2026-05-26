@@ -464,6 +464,7 @@ function updateRosterForMessage(
 export interface BranchInboxRecord extends ActorMessage {
   claimed_at?: string;
   claimed_by?: string;
+  error?: string;
   failed_at?: string;
   handled_at?: string;
   id?: string;

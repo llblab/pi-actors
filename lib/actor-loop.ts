@@ -41,6 +41,16 @@ export interface ActorLoopHandleResult {
   target: ActorLoopTarget;
 }
 
+export function isActorLoopStopMessage(
+  message: Pick<ActorLoopMailboxMessage, "type">,
+): boolean {
+  return (
+    message.type === "control.stop" ||
+    message.type === "control.cancel" ||
+    message.type === "control.kill"
+  );
+}
+
 function messageId(
   message: ActorLoopMailboxMessage | undefined,
 ): string | undefined {

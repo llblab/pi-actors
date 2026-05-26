@@ -10,7 +10,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { appendBranchInboxMessage, readBranchInboxMessages } from "../lib/actor-rooms.ts";
-import { handleActorLoopOnce } from "../lib/actor-loop.ts";
+import { handleActorLoopOnce, isActorLoopStopMessage } from "../lib/actor-loop.ts";
 import { killRun, readRunInboxMessages, sendRunMessage, startRun } from "../lib/async-runs.ts";
 
 async function waitForStatus(stateDir: string, status: string): Promise<void> {
@@ -67,6 +67,47 @@ test("Actor loop handles one run inbox message", async () => {
     killRun(stateDir);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Actor loop marks failed handler messages", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-failed-"));
+  try {
+    appendBranchInboxMessage(stateDir, "demo", "branch:demo/worker", {
+      body: "bad work",
+      from: "run:demo",
+      to: "branch:demo/worker",
+      type: "task.assign",
+    });
+
+    await assert.rejects(
+      () =>
+        handleActorLoopOnce(
+          {
+            address: "branch:demo/worker",
+            kind: "branch",
+            run: "demo",
+            stateDir,
+          },
+          () => {
+            throw new Error("boom");
+          },
+        ),
+      /boom/,
+    );
+
+    const [message] = readBranchInboxMessages(stateDir, "demo", "branch:demo/worker");
+    assert.equal(message.status, "failed");
+    assert.equal(message.error, "boom");
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor loop recognizes standard stop messages", () => {
+  assert.equal(isActorLoopStopMessage({ type: "control.stop" }), true);
+  assert.equal(isActorLoopStopMessage({ type: "control.cancel" }), true);
+  assert.equal(isActorLoopStopMessage({ type: "control.kill" }), true);
+  assert.equal(isActorLoopStopMessage({ type: "task.assign" }), false);
 });
 
 test("Actor loop handles one branch inbox message", async () => {

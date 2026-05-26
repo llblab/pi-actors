@@ -53,6 +53,8 @@ test("build output mirrors JS runtime assets under dist", async () => {
   await access(join(process.cwd(), "dist", "recipes", "utility-validate-recipe.json"));
   await access(join(process.cwd(), "dist", "fixtures", "protocol", "actor-message-branch.json"));
   await access(join(process.cwd(), "dist", "fixtures", "protocol", "mailbox-contract.json"));
+  await access(join(process.cwd(), "dist", "skills", "actors", "SKILL.md"));
+  await access(join(process.cwd(), "dist", "skills", "swarm", "SKILL.md"));
 });
 
 test("build output includes compiled modules for TypeScript-backed script shims", async () => {

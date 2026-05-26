@@ -3,8 +3,8 @@
 /**
  * Canonical mailbox-backed actor worker demo.
  *
- * Thin process shim. Runtime logic lives in lib/actor-worker-main.ts and is
- * compiled to dist/lib/actor-worker-main.js for installed JS-only packages.
+ * Thin process shim. Runtime logic lives in lib/actor-worker.ts and is
+ * compiled to dist/lib/actor-worker.js for installed JS-only packages.
  */
 
 import { existsSync } from "node:fs";
@@ -17,8 +17,8 @@ function packageRoot() {
 
 function mainModulePath() {
   const root = packageRoot();
-  const compiled = join(root, "dist", "lib", "actor-worker-main.js");
-  return existsSync(compiled) ? compiled : join(root, "lib", "actor-worker-main.ts");
+  const compiled = join(root, "dist", "lib", "actor-worker.js");
+  return existsSync(compiled) ? compiled : join(root, "lib", "actor-worker.ts");
 }
 
 const { runActorWorker } = await import(pathToFileURL(mainModulePath()).href);

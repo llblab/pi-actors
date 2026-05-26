@@ -1,7 +1,7 @@
 {
   "async": true,
   "imports": {
-    "quorum": "subagent-quorum.json",
+    "subagent": "subagent-prompt.json",
     "merger": "subagent-merge.json",
     "judge": "subagent-judge.json",
     "normalizer": "subagent-normalize.json"
@@ -34,12 +34,17 @@
   },
   "template": [
     {
-      "name": "quorum",
-      "values": {
-        "prompt": "{prompt}",
-        "models": "{models}",
-        "tools": "{tools}",
-        "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
+      "parallel": true,
+      "repeat": "{models.length}",
+      "failure": "branch",
+      "template": {
+        "name": "subagent",
+        "values": {
+          "prompt": "{prompt}",
+          "model": "{models[index]}",
+          "tools": "{tools}",
+          "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
+        }
       }
     },
     {

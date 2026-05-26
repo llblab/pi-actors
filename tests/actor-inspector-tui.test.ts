@@ -818,7 +818,7 @@ test("Actor inspector TUI renders selected item view", () => {
   assert.equal(lines?.[1], "");
   assert.equal(lines?.filter(Boolean).every((line) => line.startsWith(" ") && line.endsWith(" ")), true);
   assert.equal(lines?.filter(Boolean).every((line) => visibleWidth(line) === 80), true);
-  assert.match(lines?.[0] ?? "", /^ 7\s{13}mapper # all/);
+  assert.match(lines?.[0] ?? "", /^ 7\s+mapper # all/);
   assert.doesNotMatch(lines?.join("\n") ?? "", /sequence\s+7/);
   assert.match(lines?.join("\n") ?? "", /type\s+chat\.message/);
   assert.match(lines?.join("\n") ?? "", /summary\s+Selected summary/);

@@ -199,6 +199,25 @@ test("Run observability detects script-authored outbox events", async () => {
   }
 });
 
+test("Run observability suppresses duplicate outbox events after line counter reset", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-dedupe-"));
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    await writeFile(
+      join(root, "music", "outbox.jsonl"),
+      `${JSON.stringify({ id: "event-1", event: "player.track", summary: "Now playing", delivery: "followup" })}\n`,
+    );
+    const summary = summarizeRuns(root, "session-a");
+    const previous = new Map<string, number>();
+    const seen = new Map<string, Set<string>>();
+    assert.equal(detectRunOutboxEvents(previous, summary, seen).length, 1);
+    previous.clear();
+    assert.equal(detectRunOutboxEvents(previous, summary, seen).length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Run observability detects terminal transitions", () => {
   const previous = new Map([["review", "running" as const]]);
   const transitions = detectRunTransitions(previous, {

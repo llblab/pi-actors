@@ -665,6 +665,7 @@ export function pruneRunObservationState(
   previousLineCounts: Map<string, number>,
   summary: RunSummary,
   terminalRuns: Iterable<string> = [],
+  seenEventIds: Map<string, Set<string>> = new Map(),
 ): void {
   const activeRuns = new Set(summary.runs.map((run) => runObservationKey(run)));
   const terminalRunSet = new Set(terminalRuns);
@@ -685,11 +686,17 @@ export function pruneRunObservationState(
       previousLineCounts.delete(key);
     }
   }
+  for (const key of seenEventIds.keys()) {
+    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) {
+      seenEventIds.delete(key);
+    }
+  }
 }
 
 export function detectRunOutboxEvents(
   previousLineCounts: Map<string, number>,
   summary: RunSummary,
+  seenEventIds: Map<string, Set<string>> = new Map(),
 ): RunOutboxEvent[] {
   const events: RunOutboxEvent[] = [];
   for (const run of summary.runs) {
@@ -697,11 +704,15 @@ export function detectRunOutboxEvents(
     const lines = readOutboxLines(run);
     const previousCount = previousLineCounts.get(key) ?? 0;
     const start = Math.min(previousCount, lines.length);
+    const seen = seenEventIds.get(key) ?? new Set<string>();
     for (let index = start; index < lines.length; index += 1) {
       const event = parseOutboxLine(lines[index], run, index);
-      if (event) events.push(event);
+      if (!event || seen.has(event.id)) continue;
+      events.push(event);
+      seen.add(event.id);
     }
     previousLineCounts.set(key, lines.length);
+    seenEventIds.set(key, seen);
   }
   return events;
 }

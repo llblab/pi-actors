@@ -109,10 +109,11 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-05 Follow-Up Deduplication Hardening
 
 - Priority: Medium.
+- Status: In progress; outbox follow-ups now dedupe by event id across line-counter resets.
 - Goal: Suppress duplicate terminal transitions and outbox follow-ups across watcher reloads, session restarts, or line-counter resets.
 - Why now: Operator-facing observability should be calm and trustworthy as actor count grows.
 - Direction:
-  - Use event id and stateDir for deduplication where available.
+  - Continue using event id and stateDir for deduplication where available.
   - Preserve terminal handled semantics.
   - Simulate watcher restart in tests.
 - Acceptance:

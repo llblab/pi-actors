@@ -139,6 +139,22 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Mailbox-only recipe works cross-platform.
   - Docs and tests cover the adapter split.
 
+### M-07 Compiled Script Entrypoints
+
+- Priority: Medium.
+- Goal: Bring packaged script entrypoints under the build so installed npm recipes run against compiled runtime code.
+- Why now: Recipes increasingly depend on helper scripts that import extension internals; compiling script logic closes the gap between source-tree development and installed package behavior.
+- Direction:
+  - Keep stable executable recipe paths, preferably through thin `scripts/*.mjs` shims.
+  - Move reusable script logic to TypeScript modules or compiled script entrypoints.
+  - Make installed scripts prefer `dist` runtime modules and avoid importing `.ts` from `node_modules`.
+  - Preserve source-tree developer ergonomics without requiring global install.
+- Acceptance:
+  - `npm run build` covers packaged script logic, not only extension library code.
+  - Installed-script tests prove packaged recipes do not import TypeScript from `node_modules`.
+  - `npm run pack:dry` includes expected compiled/script files.
+  - Recipe paths remain stable or migrations are explicitly documented.
+
 ## Explicitly Deferred
 
 These are valid ideas but not current focus. Reintroduce only with concrete evidence from real actor workflows.

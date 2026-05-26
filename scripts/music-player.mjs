@@ -404,24 +404,37 @@ function readText(path) {
   }
 }
 
-function emitTrackEvent(ctx, index, count, track, player) {
-  const title = track.split(/[\\/]/).filter(Boolean).pop() || track;
+function emitPlayerEvent(ctx, type, summary, body = {}) {
   writeText(
     ctx.eventFile,
     `${JSON.stringify({
-      body: { count, index, player, track },
-      data: { count, index, player, track },
+      body,
+      data: body,
       delivery: "log",
-      event: "player.track",
+      event: type,
       from: `run:${basename(ctx.stateDir)}`,
       level: "info",
-      summary: `Now playing: ${title}`,
+      summary,
       to: "coordinator",
       ts: new Date().toISOString(),
-      type: "player.track",
+      type,
     })}\n`,
     "a",
   );
+}
+
+function emitTrackEvent(ctx, index, count, track, player) {
+  const title = track.split(/[\\/]/).filter(Boolean).pop() || track;
+  emitPlayerEvent(ctx, "player.track", `Now playing: ${title}`, {
+    count,
+    index,
+    player,
+    track,
+  });
+}
+
+function emitStoppedEvent(ctx, reason = "stop") {
+  emitPlayerEvent(ctx, "player.stopped", "Music player stopped", { reason });
 }
 
 function writeStatus(ctx, state, index, count, track, player, pid = "") {
@@ -611,22 +624,26 @@ function writeInboxMessages(ctx, messages) {
   );
 }
 
+function commandFromControlToken(token) {
+  if (CONTROL_COMMANDS.has(token)) return token;
+  if (token === "control.stop" || token === "control.cancel") return "stop";
+  const match = /^player\.(.+)$/.exec(token);
+  if (match && CONTROL_COMMANDS.has(match[1])) return match[1];
+  return undefined;
+}
+
 function commandFromInboxMessage(message) {
-  if (
-    typeof message.body === "string" &&
-    CONTROL_COMMANDS.has(message.body.trim())
-  ) {
-    return message.body.trim();
+  if (typeof message.type === "string") {
+    const command = commandFromControlToken(message.type.trim());
+    if (command) return command;
+  }
+  if (typeof message.body === "string") {
+    const command = message.body.trim();
+    if (CONTROL_COMMANDS.has(command)) return command;
   }
   if (message.body && typeof message.body === "object") {
     const command = String(message.body.command ?? "").trim();
     if (CONTROL_COMMANDS.has(command)) return command;
-  }
-  if (typeof message.type === "string") {
-    if (message.type === "control.stop" || message.type === "control.cancel")
-      return "stop";
-    const match = /^player\.(.+)$/.exec(message.type);
-    if (match && CONTROL_COMMANDS.has(match[1])) return match[1];
   }
   return undefined;
 }
@@ -895,6 +912,7 @@ async function playMain(args) {
       const command = readAndClearCommand(ctx);
       if (command === "stop") {
         writeStatus(ctx, "stopped", index, count, track, player, "");
+        emitStoppedEvent(ctx, "message");
         return;
       }
       if (command === "previous" || command === "prev") {
@@ -913,6 +931,7 @@ async function playMain(args) {
       }
     }
     writeStatus(ctx, "stopped", index, tracks.length, "", player, "");
+    emitStoppedEvent(ctx, "complete");
   } finally {
     cleanup();
     await Promise.race([controlLoop?.promise ?? Promise.resolve(), sleep(100)]);

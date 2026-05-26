@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.24.4: Music Player Message Control Hotfix
+
+- `[Music Player]` Preserve typed actor-message envelopes for run-mailbox delivery so `player.<action>` messages dispatch by message type instead of relying on body payload text.
+- `[Music Player]` Emit `player.stopped` when playback stops so actor inspector and run messages show an explicit domain stop event before terminal completion.
+
 ## 0.24.3: Actor Inspector Body Field Hotfix
 
 - `[Inspector]` Removed the selected-item key-label shim by projecting actor-message detail rows with a real `body` field instead of rendering `body_preview` under an alias.

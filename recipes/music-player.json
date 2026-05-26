@@ -31,7 +31,8 @@
       "player.status"
     ],
     "emits": [
-      "player.track"
+      "player.track",
+      "player.stopped"
     ]
   },
   "template": "{repo}/scripts/music-player.mjs {command} {source} {loop} {volume} {player} {state_dir}"

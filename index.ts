@@ -174,7 +174,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       observedRuns,
       observedRunEventLines,
       summary,
-      transitions.map((transition) => transition.run),
+      transitions.map((transition) => transition.stateDir ?? transition.run),
     );
     for (const event of outboxEvents) {
       if (!Observability.shouldNotifyRunOutboxEvent(event)) continue;

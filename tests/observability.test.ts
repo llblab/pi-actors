@@ -233,11 +233,46 @@ test("Run observability detects terminal transitions", () => {
   assert.equal(previous.get("review"), "done");
 });
 
+test("Run observability keys transitions by state directory", () => {
+  const previous = new Map([
+    ["/tmp/parent/review", "running" as const],
+    ["/tmp/parent/child/review", "running" as const],
+  ]);
+  const transitions = detectRunTransitions(previous, {
+    cancelled: 0,
+    done: 1,
+    exited: 0,
+    failed: 1,
+    killed: 0,
+    running: 0,
+    runningSubagents: 0,
+    runs: [
+      { run: "review", stateDir: "/tmp/parent/review", status: "done" },
+      { run: "review", stateDir: "/tmp/parent/child/review", status: "failed" },
+    ],
+    total: 2,
+  });
+  assert.deepEqual(
+    transitions.map((transition) => ({
+      from: transition.from,
+      run: transition.run,
+      stateDir: transition.stateDir,
+      to: transition.to,
+    })),
+    [
+      { from: "running", run: "review", stateDir: "/tmp/parent/review", to: "done" },
+      { from: "running", run: "review", stateDir: "/tmp/parent/child/review", to: "failed" },
+    ],
+  );
+  assert.equal(previous.get("/tmp/parent/review"), "done");
+  assert.equal(previous.get("/tmp/parent/child/review"), "failed");
+});
+
 test("Run observability suggests persistence for successful transient spawns", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
     await writeRun(root, "scratch", "running");
-    const previous = new Map([["scratch", "running" as const]]);
+    const previous = new Map([[join(root, "scratch"), "running" as const]]);
     await writeRun(root, "scratch", "done", [], 0, undefined, undefined, "spawn");
     const [transition] = detectRunTransitions(previous, summarizeRuns(root));
     assert.equal(shouldSuggestRecipePersistence(transition), true);
@@ -383,9 +418,9 @@ test("Run observability suppresses duplicate handled terminal transitions", () =
 
 test("Run observability prunes terminal and stale map entries", () => {
   const statuses = new Map([
-    ["done-run", "done" as const],
-    ["missing-run", "running" as const],
-    ["live-run", "running" as const],
+    ["/tmp/done", "done" as const],
+    ["/tmp/missing", "running" as const],
+    ["/tmp/live", "running" as const],
   ]);
   const lineCounts = new Map([
     ["/tmp/done", 3],
@@ -409,9 +444,9 @@ test("Run observability prunes terminal and stale map entries", () => {
       ],
       total: 2,
     },
-    ["done-run"],
+    ["/tmp/done"],
   );
-  assert.deepEqual([...statuses.keys()], ["live-run"]);
+  assert.deepEqual([...statuses.keys()], ["/tmp/live"]);
   assert.deepEqual([...lineCounts.keys()], ["/tmp/live"]);
 });
 

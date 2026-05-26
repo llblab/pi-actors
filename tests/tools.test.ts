@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -241,6 +241,41 @@ test(
   },
 );
 
+test("Actor message tool rejects cross-run branch senders before inbox writes", async () => {
+  const definition = createActorMessageToolDefinition();
+  const meta = startRun(
+    {
+      run_id: `branch-safety-${process.pid}-${Date.now()}`,
+      template: "true",
+    },
+    process.cwd(),
+  );
+  try {
+    await assert.rejects(
+      () =>
+        definition.execute(
+          "call-branch-cross-run-sender",
+          {
+            body: "wrong run",
+            from: "branch:other/builder",
+            to: `branch:${meta.run}/reviewer`,
+            type: "chat.message",
+          },
+          undefined,
+          undefined,
+          undefined,
+        ),
+      new RegExp(`message to branch:${meta.run}/<branch> requires from=run:${meta.run} or branch:${meta.run}/<branch>`),
+    );
+    await assert.rejects(
+      () => readFile(join(meta.state_dir, "branches", "reviewer", "inbox.jsonl"), "utf8"),
+      /ENOENT/,
+    );
+  } finally {
+    await rm(meta.state_dir, { recursive: true, force: true });
+  }
+});
+
 test("Actor message and inspect tools support room timelines and rosters", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-room-"));
   let stateDir = "";
@@ -470,6 +505,40 @@ test(
   }
 });
 
+test("Actor message tool rejects cross-run room senders before timeline writes", async () => {
+  const definition = createActorMessageToolDefinition();
+  const meta = startRun(
+    {
+      run_id: `room-safety-${process.pid}-${Date.now()}`,
+      template: "true",
+    },
+    process.cwd(),
+  );
+  try {
+    await assert.rejects(
+      () =>
+        definition.execute(
+          "call-room-cross-run-sender",
+          {
+            from: "branch:other/planner",
+            to: `room:${meta.run}`,
+            type: "chat.message",
+          },
+          undefined,
+          undefined,
+          undefined,
+        ),
+      new RegExp(`message to room:${meta.run} requires from=run:${meta.run} or branch:${meta.run}/<branch>`),
+    );
+    await assert.rejects(
+      () => readFile(join(meta.state_dir, "rooms", "main", "messages.jsonl"), "utf8"),
+      /ENOENT/,
+    );
+  } finally {
+    await rm(meta.state_dir, { recursive: true, force: true });
+  }
+});
+
 test("Actor message tool rejects room multicast outside the run", async () => {
   const definition = createActorMessageToolDefinition();
   const meta = startRun(
@@ -501,7 +570,42 @@ test("Actor message tool rejects room multicast outside the run", async () => {
   }
 });
 
-test("Actor message tool allows same-run branch room posts across coordinator sessions", async () => {
+test("Actor message tool rejects non-branch room multicast recipients before timeline writes", async () => {
+  const definition = createActorMessageToolDefinition();
+  const meta = startRun(
+    {
+      run_id: `room-multicast-nonbranch-${process.pid}-${Date.now()}`,
+      template: "true",
+    },
+    process.cwd(),
+  );
+  try {
+    await assert.rejects(
+      () =>
+        definition.execute(
+          "call-room-multicast-nonbranch",
+          {
+            from: `branch:${meta.run}/planner`,
+            metadata: { recipients: [`run:${meta.run}`] },
+            to: `room:${meta.run}`,
+            type: "chat.message",
+          },
+          undefined,
+          undefined,
+          undefined,
+        ),
+      /room multicast recipient must be branch:/,
+    );
+    await assert.rejects(
+      () => readFile(join(meta.state_dir, "rooms", "main", "messages.jsonl"), "utf8"),
+      /ENOENT/,
+    );
+  } finally {
+    await rm(meta.state_dir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects same-run branch room posts across session ownership", async () => {
   const definition = createActorMessageToolDefinition();
   const meta = startRun(
     {
@@ -512,22 +616,56 @@ test("Actor message tool allows same-run branch room posts across coordinator se
     process.cwd(),
   );
   try {
-    const result = await definition.execute(
-      "call-room-nested-session",
-      {
-        from: `branch:${meta.run}/implementer`,
-        summary: "Claim first backlog task",
-        to: `room:${meta.run}`,
-        type: "task.claim",
-      },
-      undefined,
-      undefined,
-      { sessionManager: { getSessionId: () => "nested-subagent-session" } },
+    await assert.rejects(
+      () => definition.execute(
+        "call-room-nested-session",
+        {
+          from: `branch:${meta.run}/implementer`,
+          summary: "Claim first backlog task",
+          to: `room:${meta.run}`,
+          type: "task.claim",
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "nested-subagent-session" } },
+      ),
+      /owned by session:parent-session; current session is nested-subagent-session/,
     );
-    assert.match(result.content[0].text, /message=sent/);
-    assert.match(result.content[0].text, /type=task\.claim/);
   } finally {
     await rm(meta.state_dir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects branch messages across session ownership", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `branch-owner-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "other-session",
+        template: "true",
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      () => definition.execute(
+        "call-branch-message-mismatch",
+        {
+          from: `branch:${runId}/sender`,
+          to: `branch:${runId}/recipient`,
+          type: "task.assign",
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "current-session" } },
+      ),
+      /owned by session:other-session; current session is current-session/,
+    );
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }
 });
 
@@ -637,6 +775,43 @@ test("Actor message tool routes tool actors to executable tools", async () => {
   assert.deepEqual(calls[0].params, { text: "hello" });
   assert.equal(calls[0].ctx, ctx);
   assert.equal(result.details.result.tool, "echo");
+});
+
+test("Actor message tool preserves target tool failure shape", async () => {
+  const definition = createActorMessageToolDefinition({
+    getTool: (name) =>
+      name === "explode"
+        ? {
+            execute: async () => {
+              throw new Error("boom cause");
+            },
+          }
+        : undefined,
+  });
+  await assert.rejects(
+    () => definition.execute(
+      "call-tool-message-fail",
+      {
+        body: { text: "x".repeat(500) },
+        to: "tool:explode",
+        type: "tool.call",
+      },
+      undefined,
+      undefined,
+      undefined,
+    ),
+    (error: unknown) => {
+      const record = error as Record<string, unknown>;
+      assert.match(String(record.message), /tool actor explode failed for message type tool\.call/);
+      assert.match(String(record.message), /boom cause/);
+      assert.equal(record.tool, "explode");
+      assert.equal(record.message_type, "tool.call");
+      assert.equal(record.original_error, "boom cause");
+      assert.equal(String(record.params_preview).length <= 240, true);
+      assert.match(String(record.params_preview), /text/);
+      return true;
+    },
+  );
 });
 
 test("Actor message tool routes coordinator messages through run outboxes", async () => {
@@ -778,6 +953,39 @@ test("Actor message tool rejects run messages across session ownership", async (
           body: "stop",
           to: `run:${runId}`,
           type: "control.stop",
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "current-session" } },
+      ),
+      /owned by session:other-session; current session is current-session/,
+    );
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor message tool rejects kill control across session ownership", async () => {
+  const definition = createActorMessageToolDefinition();
+  const runId = `kill-owner-mismatch-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        ownerId: "other-session",
+        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      definition.execute(
+        "call-kill-message-mismatch",
+        {
+          to: `run:${runId}`,
+          type: "control.kill",
         },
         undefined,
         undefined,
@@ -1123,6 +1331,50 @@ test("Inspect tool reads run mailbox inbox entries", async () => {
       }
       await rm(stateDir, { recursive: true, force: true });
     }
+  }
+});
+
+test("Inspect branch mailbox reports corrupted inbox record counts", async () => {
+  const inspect = createInspectToolDefinition();
+  const message = createActorMessageToolDefinition();
+  const runId = `branch-corrupt-inspect-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const meta = startRun(
+      {
+        run_id: runId,
+        template: "true",
+      },
+      process.cwd(),
+    );
+    stateDir = meta.state_dir;
+    await assert.rejects(
+      () => message.execute(
+        "call-branch-corrupt-seed",
+        {
+          from: `branch:${runId}/sender`,
+          to: `branch:${runId}/recipient`,
+          type: "task.assign",
+        },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /Run control FIFO not found/,
+    );
+    await appendFile(join(stateDir, "branches", "recipient", "inbox.jsonl"), "bad json\n");
+    const result = await inspect.execute(
+      "call-branch-corrupt-inspect",
+      { target: `branch:${runId}/recipient`, view: "mailbox" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /corrupted=1/);
+    assert.equal(result.details.corrupted, 1);
+    assert.equal(result.details.messages.length, 1);
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }
 });
 

@@ -132,10 +132,32 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
     assert.deepEqual(registered.sort(), ["recipe-only", "user-tool", "user-tool"]);
 
+    await writeRecipe(packagedRecipeRoot, "fallback", {
+      description: "Packaged fallback",
+      template: "echo packaged",
+    });
+    await writeRecipe(recipeRoot, "fallback", {
+      description: "Broken user winner",
+      template: "echo broken",
+      repeat: 0,
+    });
+    const warnings: string[] = [];
+    runtime.loadTools({ hasUI: true, ui: { notify: (message) => warnings.push(message) } });
+    assert.equal(runtime.getTools().has("fallback"), false);
+    assert.match(warnings.join("\n"), /blocks lower-priority recipes/);
+
+    await writeRecipe(recipeRoot, "fallback", {
+      description: "Recovered user winner",
+      template: "echo recovered {topic}",
+    });
+    runtime.loadTools({ hasUI: false, ui: { notify() {} } });
+    assert.equal(runtime.getTools().get("fallback")?.description, "Recovered user winner");
+    assert.deepEqual(runtime.getTools().get("fallback")?.args, ["topic"]);
+
     await unlink(join(recipeRoot, "user-tool.json"));
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
     assert.equal(runtime.getTools().has("user-tool"), false);
-    assert.deepEqual(activeTools.sort(), ["read", "recipe-only"]);
+    assert.deepEqual(activeTools.sort(), ["fallback", "read", "recipe-only"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

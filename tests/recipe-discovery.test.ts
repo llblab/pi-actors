@@ -152,6 +152,23 @@ test("Recipe discovery loads Markdown recipes and lets same-id JSON shadow Markd
   }
 });
 
+test("Recipe discovery diagnostics keep invalid recipe causes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-invalid-"));
+  try {
+    await writeFile(join(root, "bad-json.json"), "{ nope");
+    await writeFile(join(root, "missing-template.json"), JSON.stringify({ description: "No template" }));
+    await writeFile(join(root, "bad-md.md"), "---\ndescription: Bad\n---\n\nNo executable fence.\n");
+
+    const result = discoverRecipeSources([{ root, defaultTool: true }]);
+    const diagnostics = result.diagnostics.join("\n");
+    assert.match(diagnostics, /bad-json\.json.*Expected property name|bad-json\.json.*JSON/);
+    assert.match(diagnostics, /missing-template\.json: recipe must define template/);
+    assert.match(diagnostics, /bad-md\.md: Markdown recipe has no executable recipe\/template fence/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Recipe discovery invalid high-priority recipe blocks lower fallback", async () => {
   const high = await mkdtemp(join(tmpdir(), "pi-actors-discovery-high-"));
   const low = await mkdtemp(join(tmpdir(), "pi-actors-discovery-low-"));
@@ -171,6 +188,28 @@ test("Recipe discovery invalid high-priority recipe blocks lower fallback", asyn
   } finally {
     await rm(high, { recursive: true, force: true });
     await rm(low, { recursive: true, force: true });
+  }
+});
+
+test("Recipe discovery keeps ad hoc recipe files as components", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-adhoc-"));
+  try {
+    const file = join(root, "selected.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        description: "Ad hoc selected recipe",
+        template: "echo adhoc",
+      }),
+    );
+
+    const result = discoverRecipeSources([{ file }]);
+    const active = result.active.get("selected")!;
+    assert.equal(active.path, file);
+    assert.equal(active.tool, false);
+    assert.equal(active.active, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -208,6 +247,22 @@ test("Recipe discovery priority models user recipes over ad hoc files over packa
     await rm(agentRecipes, { recursive: true, force: true });
     await rm(adHocRoot, { recursive: true, force: true });
     await rm(packagedRoot, { recursive: true, force: true });
+  }
+});
+
+test("Recipe discovery summary exposes structured diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-diagnostics-"));
+  try {
+    await writeFile(join(root, "broken.json"), "{ nope");
+    const result = discoverRecipeSources([{ root, defaultTool: true }]);
+    const summary = summarizeDiscovery(result);
+    const details = summary.diagnostic_details as Array<Record<string, unknown>>;
+    assert.ok(details.length > 0);
+    assert.equal(details.some((item) => item.severity === "error"), true);
+    assert.equal(details.some((item) => String(item.path).endsWith("broken.json")), true);
+    assert.equal(details.every((item) => typeof item.action === "string"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

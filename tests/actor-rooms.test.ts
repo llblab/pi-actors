@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, access, stat } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, access, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import {
   appendRoomMessage,
   ensureDefaultRoom,
   getRoomStatus,
+  readBranchInboxDiagnostics,
   readBranchInboxMessages,
   readCommunicationSnapshot,
   readRoomContacts,
@@ -164,6 +165,44 @@ test("Actor rooms emit advisory wakes for room and branch mailbox changes", asyn
       from: "branch:demo/a",
       type: "actor.join",
     });
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor rooms preserve malformed branch inbox lines during status rewrites", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-corrupt-inbox-"));
+  try {
+    appendBranchInboxMessage(stateDir, "demo", "branch:demo/a", {
+      from: "branch:demo/b",
+      to: "branch:demo/a",
+      type: "task.assign",
+    });
+    await appendFile(join(stateDir, "branches", "a", "inbox.jsonl"), "{not json\n");
+    appendBranchInboxMessage(stateDir, "demo", "branch:demo/a", {
+      body: "second",
+      from: "branch:demo/b",
+      to: "branch:demo/a",
+      type: "task.assign",
+    });
+    const before = readBranchInboxDiagnostics(stateDir, "demo", "branch:demo/a", 10);
+    assert.equal(before.corrupted, 1);
+    assert.equal(before.messages.length, 2);
+    assert.equal(
+      updateBranchInboxMessageStatus(
+        stateDir,
+        "demo",
+        "branch:demo/a",
+        before.messages[1].id!,
+        "handled",
+      ),
+      true,
+    );
+    const raw = await readFile(join(stateDir, "branches", "a", "inbox.jsonl"), "utf8");
+    assert.match(raw, /\{not json/);
+    const after = readBranchInboxDiagnostics(stateDir, "demo", "branch:demo/a", 10);
+    assert.equal(after.corrupted, 1);
+    assert.deepEqual(after.messages.map((message) => message.status), ["queued", "handled"]);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

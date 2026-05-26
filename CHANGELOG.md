@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.22.4: Actor Isolation and Registry Diagnostics Hotfix
+
+- `[Tests]` Added explicit regression coverage that ad hoc recipe files outside the user recipe root remain recipe components rather than automatically exposed tools, reinforcing the location-based tool exposure invariant.
+- `[Registry]` Improved invalid recipe diagnostics for discovery summaries so JSON parse failures, missing templates, and malformed Markdown recipes keep actionable causes, structured severity, and suggested actions instead of collapsing to a generic invalid recipe message.
+- `[Observability]` Keyed run transition observation by state directory instead of display run id so nested child runs or reused run names do not collide in terminal follow-ups and pruning state.
+- `[Async Runs]` Normalized run-message delivery failures after durable inbox append: failures now preserve queued state details such as `queued`, `inbox_id`, and `delivery_error`, while successful FIFO, named-pipe, and mailbox-only deliveries also expose the inbox id.
+- `[Tests]` Added explicit cross-session kill-control regression coverage so run ownership boundaries stay fail-closed for destructive actor controls as well as ordinary messages and inspection.
+- `[Tests]` Added branch and room routing safety regressions for cross-run senders and invalid multicast recipients, including assertions that failed validation does not create branch inbox or room timeline records.
+- `[Actor Rooms]` Hardened branch inbox reads and status rewrites against malformed JSONL lines; valid messages continue to update while corrupted record counts surface through branch mailbox inspection.
+- `[Tests]` Added async lifecycle regression coverage for missing-result terminal status inference, preserving `cancelled`/`killed` over generic `exited`, and tail behavior when only event logs exist.
+- `[Registry]` Allowed `register_tool` to persist object command-template configs with composition flags, aligning it with recipes and `spawn`, while preserving precise validation errors for invalid object templates.
+- `[Registry]` Added deterministic live-reload regressions for invalid user updates blocking lower-priority fallback recipes and valid recovery refreshing the active tool schema without restart.
+- `[Tools]` Preserved target tool failure shape through `message to=tool:<name>` by including the tool name, message type, bounded params preview, and original error on routed failures.
+- `[Actors]` Tightened branch and room routing isolation so session-owned runs reject branch/room messages from a different current Pi session, keeping room state scoped to the owning actor tree.
+- `[Tests]` Added executable protocol-example coverage for public actor-message, room join/leave, mailbox, spawn, and inspect examples so documentation drift fails in CI.
+
 ## 0.22.3: Idempotent GitHub Release Workflow Hotfix
 
 - `[Release]` Made the tag-triggered GitHub Release workflow idempotent: existing releases are edited with the generated title and notes instead of failing when an operator already created the release for the tag.

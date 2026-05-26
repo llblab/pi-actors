@@ -177,6 +177,41 @@ test("Async runs write state files and finish", async () => {
   }
 });
 
+test("Async lifecycle status files preserve terminal semantics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-lifecycle-"));
+  const exitedDir = join(root, "exited-before-result");
+  const cancelledDir = join(root, "cancelled-before-result");
+  const killedDir = join(root, "killed-before-result");
+  try {
+    await mkdir(exitedDir, { recursive: true });
+    await writeFile(
+      join(exitedDir, "run.json"),
+      JSON.stringify({ pid: 0, run: "exited-before-result", state_dir: exitedDir }),
+    );
+    await writeFile(join(exitedDir, "events.jsonl"), `${JSON.stringify({ event: "run.start" })}\n`);
+    assert.equal(getRunStatus(exitedDir).status, "exited");
+    assert.match(tailRun(exitedDir), /run\.start/);
+
+    await mkdir(cancelledDir, { recursive: true });
+    await writeFile(
+      join(cancelledDir, "run.json"),
+      JSON.stringify({ pid: 0, run: "cancelled-before-result", state_dir: cancelledDir }),
+    );
+    await writeFile(join(cancelledDir, "events.jsonl"), `${JSON.stringify({ event: "run.cancel" })}\n`);
+    assert.equal(getRunStatus(cancelledDir).status, "cancelled");
+
+    await mkdir(killedDir, { recursive: true });
+    await writeFile(
+      join(killedDir, "run.json"),
+      JSON.stringify({ pid: 0, run: "killed-before-result", state_dir: killedDir }),
+    );
+    await writeFile(join(killedDir, "events.jsonl"), `${JSON.stringify({ event: "run.kill" })}\n`);
+    assert.equal(getRunStatus(killedDir).status, "killed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async runs emit command completion outbox events", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "command-outbox");
@@ -746,6 +781,7 @@ test(
       const result = await sendRunMessage(stateDir, "next");
       assert.equal(result.sent, true);
       assert.equal(result.control, "control.fifo");
+      assert.equal(typeof result.inbox_id, "string");
       await waitForFile(messageFile);
       assert.equal(await readFile(messageFile, "utf8"), "next");
       assert.equal((await waitForResult(stateDir)).code, 0);
@@ -843,6 +879,7 @@ test("Async runs can send messages to a Windows named-pipe control endpoint", as
     assert.equal(result.sent, true);
     assert.equal(result.control, pipePath);
     assert.equal(result.control_type, "named-pipe");
+    assert.equal(typeof result.inbox_id, "string");
     assert.match(sentPayload, /hello windows/);
     const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
     assert.equal(inbox.body, "hello windows");
@@ -862,6 +899,62 @@ test("Async runs can send messages to a Windows named-pipe control endpoint", as
       },
     );
     assert.match(tailRun(stateDir), /run\.message/);
+  } finally {
+    killRun(stateDir);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run named-pipe timeout keeps durable queued message details", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-winpipe-timeout-"));
+  const stateDir = join(root, "controlled-winpipe-timeout");
+  const pipePath = "\\\\.\\pipe\\pi-actors-test-timeout";
+  try {
+    startRun(
+      {
+        run_id: "controlled-winpipe-timeout",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    const runJsonPath = join(stateDir, "run.json");
+    const meta = JSON.parse(await readFile(runJsonPath, "utf8"));
+    await writeFile(
+      runJsonPath,
+      `${JSON.stringify({ ...meta, control: { path: pipePath, type: "named-pipe" } }, null, 2)}\n`,
+    );
+    await assert.rejects(
+      () => sendRunMessage(
+        stateDir,
+        JSON.stringify({
+          body: "queued despite pipe timeout",
+          from: "coordinator",
+          to: "run:controlled-winpipe-timeout",
+          type: "control.note",
+        }),
+        {
+          namedPipeSend: async () => {
+            throw new Error("named pipe connection timed out");
+          },
+          platform: "win32",
+        },
+      ),
+      (error: unknown) => {
+        const record = error as Record<string, unknown>;
+        assert.equal(record.queued, true);
+        assert.equal(record.sent, false);
+        assert.equal(record.control_type, "named-pipe");
+        assert.equal(record.control_path, pipePath);
+        assert.equal(typeof record.inbox_id, "string");
+        assert.equal(record.delivery_error, "named pipe connection timed out");
+        return true;
+      },
+    );
+    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
+    assert.equal(inbox.body, "queued despite pipe timeout");
+    assert.equal(inbox.status, "queued");
   } finally {
     killRun(stateDir);
     await rm(root, { recursive: true, force: true });
@@ -901,6 +994,7 @@ test("Async runs can accept messages through mailbox-only control endpoint", asy
     assert.equal(result.queued, true);
     assert.equal(result.control_type, "mailbox");
     assert.equal(result.control_path, join(stateDir, "inbox.jsonl"));
+    assert.equal(typeof result.inbox_id, "string");
     const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
     assert.equal(inbox.body, "hello mailbox");
     assert.equal(inbox.status, "queued");
@@ -937,7 +1031,15 @@ test("Async run messages persist mailbox wake before endpoint delivery failure",
           type: "control.note",
         }),
       ),
-      /Run control FIFO not found/,
+      (error: unknown) => {
+        const record = error as Record<string, unknown>;
+        assert.match(String(record.message), /Run control FIFO not found/);
+        assert.equal(record.queued, true);
+        assert.equal(record.sent, false);
+        assert.equal(typeof record.inbox_id, "string");
+        assert.match(String(record.delivery_error), /Run control FIFO not found/);
+        return true;
+      },
     );
     const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
     assert.equal(inbox.body, "queued despite missing endpoint");

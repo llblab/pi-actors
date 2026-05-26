@@ -45,12 +45,10 @@ No open hotfix items.
 
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
 
-Passive-active discipline: when implementation produces durable lessons, update `skills/actors/SKILL.md` as the extension's agent-facing manual and `skills/swarm/SKILL.md` as the orchestration standard. Do not carry evergreen skill upkeep as a checkbox item; apply it whenever code, docs, recipes, or validation change the recommended operating model.
-
 ### M-01 State Corruption Recovery
 
 - Priority: High.
-- Status: In progress; first slices centralize resilient state readers and route room, inspector, runtime wake, and run inbox reads through them.
+- Status: In progress.
 - Goal: Keep `inspect` useful when file-backed run, room, branch, or recipe state is partially corrupted.
 - Why now: The extension's core promise is local, inspectable, durable actor state. Corrupt JSON/JSONL should degrade visibility, not break the operator membrane.
 - Direction:
@@ -65,7 +63,7 @@ Passive-active discipline: when implementation produces durable lessons, update 
 ### M-02 Actor Loop Helper Minimal Core
 
 - Priority: High.
-- Status: In progress; first slice adds shared run/branch claim-and-handle primitives in `lib/actor-loop.ts`.
+- Status: In progress.
 - Goal: Provide one small reusable mailbox-consuming actor loop so recipe authors do not duplicate claim/handle/wake/poll logic.
 - Why now: Long-lived actors and worker recipes are the natural center of `pi-actors`; a minimal helper consolidates behavior without adding a broker or scheduler DSL.
 - Files:
@@ -112,7 +110,7 @@ Passive-active discipline: when implementation produces durable lessons, update 
 ### M-05 Follow-Up Deduplication Hardening
 
 - Priority: Medium.
-- Status: In progress; outbox follow-ups now dedupe by event id across line-counter resets.
+- Status: In progress.
 - Goal: Suppress duplicate terminal transitions and outbox follow-ups across watcher reloads, session restarts, or line-counter resets.
 - Why now: Operator-facing observability should be calm and trustworthy as actor count grows.
 - Direction:

@@ -48,7 +48,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-01 State Corruption Recovery
 
 - Priority: High.
-- Status: In progress.
+- Status: Done.
 - Goal: Keep `inspect` useful when file-backed run, room, branch, or recipe state is partially corrupted.
 - Why now: The extension's core promise is local, inspectable, durable actor state. Corrupt JSON/JSONL should degrade visibility, not break the operator membrane.
 - Direction:

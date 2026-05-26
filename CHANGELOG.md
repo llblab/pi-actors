@@ -4,7 +4,7 @@
 
 - `[Prompts]` Clarified that recipe registry warnings are actionable maintenance: invalid or blocking recipes should be fixed, removed, or disabled rather than ignored.
 - `[Backlog]` Pruned and refocused the backlog around reliability, mailbox-loop consolidation, protocol fixtures, follow-up deduplication, and portability reality checks.
-- `[State]` Added resilient JSON/JSONL state reader helpers and routed room, inspector, runtime wake, run inbox, and observability outbox reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts.
+- `[State]` Added resilient JSON/JSONL state reader helpers and routed room, inspector, runtime wake, run inbox, and observability outbox reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts and reader degradation behavior has direct regression coverage.
 - `[Observability]` Deduplicated run outbox events by stable event id so line-counter resets do not replay already-seen follow-ups; stale dedupe state is pruned with terminal and missing runs.
 - `[Mailbox Loop]` Added initial run/branch mailbox claim-and-handle helpers plus branch inbox claiming support, failed-handler transitions, standard stop-message detection, bounded message drains, duplicate-claim coverage, and a packaged `actor-worker` demo recipe for canonical mailbox loops.
 - `[Scripts]` Added installed-package coverage proving the packaged `actor-worker` script uses compiled `dist` runtime modules instead of importing TypeScript from `node_modules`; `npm run build` now cleans stale `dist` output and syntax-checks packaged script entrypoints.

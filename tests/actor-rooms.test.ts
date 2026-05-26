@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { appendFile, mkdtemp, readFile, rm, access, stat } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, access, stat, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,6 +61,33 @@ test("Actor rooms persist timelines, rosters, and communication snapshots", asyn
     assert.equal(branchSnapshot.self, "branch:demo/reviewer");
     assert.equal(branchSnapshot.parent, "run:demo");
     assert.equal(branchSnapshot.contacts[0].address, "run:demo");
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Actor room reads skip malformed timeline records and corrupt snapshots", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-corrupt-state-"));
+  try {
+    appendRoomMessage(stateDir, "main", {
+      body: "valid",
+      from: "branch:demo/a",
+      to: "room:demo",
+      type: "chat.message",
+    });
+    await appendFile(join(stateDir, "rooms", "main", "messages.jsonl"), "{bad json\n");
+    await writeFile(join(stateDir, "rooms", "main", "compaction.json"), "{bad json\n");
+    await writeFile(join(stateDir, "communication.json"), "{bad json\n");
+
+    const messages = readRoomMessages(stateDir, "main");
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].type, "chat.message");
+    assert.equal(readRoomMessagePreviews(stateDir, "main").length, 1);
+    const status = getRoomStatus(stateDir, "main");
+    assert.equal(status.diagnostics_count, 2);
+    assert.match(status.diagnostics?.join("\n") ?? "", /messages\.jsonl:2/);
+    assert.match(status.diagnostics?.join("\n") ?? "", /compaction\.json/);
+    assert.equal(readCommunicationSnapshot(stateDir), undefined);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

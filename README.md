@@ -43,6 +43,8 @@ Or from git:
 pi install git:github.com/llblab/pi-actors
 ```
 
+The npm package is dist-first for JavaScript-only runtimes: default Pi metadata points at compiled `dist/` entrypoints and mirrored runtime assets. Source TypeScript and source skills remain in the package for TypeScript-native runtimes through optional source metadata.
+
 ## Address Surface
 
 Actors and coordination endpoints are addressed with compact route strings:
@@ -254,6 +256,17 @@ Use mailbox declarations when an actor has a stable conversational surface.
 ## Platform Support
 
 Core actor state, inspection, foreground tools, and basic async runs are portable Node.js behavior. Run-local messaging and stop/kill use a platform adapter under the same `message` API: Unix-compatible recipes can use their existing local control endpoint, while native Windows recipes can expose a Windows-native endpoint in run state. Some packaged scripts still depend on Unix tools and are WSL/Linux/macOS-only until migrated; their public recipe surface should stay `spawn` / `message` / `inspect` either way.
+
+| Surface | Linux/macOS/WSL | Native Windows |
+| --- | --- | --- |
+| Foreground tools, recipe discovery, inspect | Supported | Supported |
+| Async runs and file-backed state | Supported | Supported |
+| Mailbox-only actors and worker recipe | Supported | Supported |
+| FIFO control endpoints | Supported | Not supported; use mailbox or named pipe |
+| Named-pipe control endpoints | Not needed | Supported when recipe exposes one |
+| Process cancel/kill | Process group signal with pid fallback | Windows process-tree adapter |
+
+Packaged recipes should prefer mailbox/wake behavior for portable control. Recipes that require FIFO, Unix shell tools, or platform-specific media backends should make that limitation visible in docs or diagnostics before launch.
 
 ## Safety Boundary
 

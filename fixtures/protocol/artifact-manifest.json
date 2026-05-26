@@ -1,0 +1,9 @@
+{
+  "report": {
+    "path": "{state_dir}/report.md",
+    "kind": "markdown",
+    "media_type": "text/markdown",
+    "required": true
+  },
+  "journal": "{state_dir}/journal.jsonl"
+}

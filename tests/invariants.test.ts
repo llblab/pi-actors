@@ -112,6 +112,14 @@ test("Operator guidance avoids stale FIFO queue wording", () => {
   }
 });
 
+test("Platform guidance makes native Windows FIFO limits visible", () => {
+  const readme = readFileSync("README.md", "utf8");
+  const asyncRuns = readFileSync("docs/async-runs.md", "utf8");
+  assert.match(readme, /FIFO control endpoints[\s\S]*Not supported; use mailbox or named pipe/);
+  assert.match(asyncRuns, /FIFO endpoint[\s\S]*Rejected before delivery/);
+  assert.match(asyncRuns, /Mailbox-only endpoint[\s\S]*Use for cross-platform workers/);
+});
+
 test("Unreleased changelog items avoid version literals", () => {
   const unreleased = changelogSource.match(
     /^## Unreleased\n(?<body>[\s\S]*?)(?=^## \d+\.\d+\.\d+)/m,

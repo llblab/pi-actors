@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -37,6 +37,50 @@ async function prepareInstalledPackage(root: string): Promise<string> {
   await cp(join(process.cwd(), "recipes"), join(packageDir, "recipes"), { recursive: true });
   return packageDir;
 }
+
+test("package metadata exposes compiled and source extension entrypoints", async () => {
+  const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
+  assert.deepEqual(pkg.pi.extensions, ["./dist/index.js"]);
+  assert.deepEqual(pkg.pi.sourceExtensions, ["./index.ts"]);
+  assert.deepEqual(pkg.pi.skills, [
+    "./dist/skills/actors/SKILL.md",
+    "./dist/skills/swarm/SKILL.md",
+  ]);
+  assert.deepEqual(pkg.pi.sourceSkills, [
+    "./skills/actors/SKILL.md",
+    "./skills/swarm/SKILL.md",
+  ]);
+  await access(join(process.cwd(), pkg.pi.extensions[0]));
+  await access(join(process.cwd(), pkg.pi.sourceExtensions[0]));
+});
+
+test("build output mirrors JS runtime assets under dist", async () => {
+  await access(join(process.cwd(), "dist", "scripts", "actor-worker.mjs"));
+  await access(join(process.cwd(), "dist", "scripts", "async-runner.mjs"));
+  await access(join(process.cwd(), "dist", "scripts", "build-dist.mjs"));
+  await access(join(process.cwd(), "dist", "recipes", "actor-worker.json"));
+  await access(join(process.cwd(), "dist", "recipes", "utility-validate-recipe.json"));
+  await access(join(process.cwd(), "dist", "fixtures", "protocol", "actor-message-branch.json"));
+  await access(join(process.cwd(), "dist", "fixtures", "protocol", "mailbox-contract.json"));
+  await access(join(process.cwd(), "dist", "skills", "actors", "SKILL.md"));
+  await access(join(process.cwd(), "dist", "skills", "swarm", "SKILL.md"));
+});
+
+test("build output includes compiled modules for TypeScript-backed script shims", async () => {
+  for (const module of [
+    "actor-worker",
+    "async-runner",
+    "coordinator",
+    "conformance",
+    "build-dist",
+    "locker",
+    "recipe-utils",
+    "validate-recipe",
+  ]) {
+    await access(join(process.cwd(), "dist", "lib", `${module}.js`));
+    await access(join(process.cwd(), "dist", "lib", `${module}.d.ts`));
+  }
+});
 
 test("installed extension entrypoint imports compiled dist runtime", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-entry-"));
@@ -123,7 +167,42 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
       /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/,
     );
     assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /installed async ok/);
+    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "async-runner.ts")), "");
     assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "execution.ts")), "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installed actor-worker avoids importing TypeScript from node_modules", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-worker-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const stateDir = join(root, "worker-state");
+    await mkdir(stateDir, { recursive: true });
+
+    const worker = execFile(
+      process.execPath,
+      [
+        join(packageDir, "scripts", "actor-worker.mjs"),
+        "--state-dir",
+        stateDir,
+        "--run",
+        "installed-worker",
+        "--branch",
+        "worker",
+        "--poll-ms",
+        "50",
+      ],
+      { timeout: 2000 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    worker.kill("SIGTERM");
+
+    const journal = await readTextIfExists(join(stateDir, "worker-events.jsonl"));
+    assert.match(journal, /worker.started/);
+    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "actor-worker.ts")), "");
+    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "mailbox-loop.ts")), "");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -143,6 +222,7 @@ test("installed validate-recipe avoids importing TypeScript from node_modules", 
     const report = JSON.parse(stdout);
     assert.equal(report.ok, true);
     assert.equal(report.passed, 1);
+    assert.equal(await readTextIfExists(join(root, ".type-strip-lib", "validate-recipe.ts")), "");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

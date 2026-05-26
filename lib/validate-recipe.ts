@@ -1,0 +1,110 @@
+/**
+ * Template recipe validator CLI logic.
+ * Zones: recipe validation, installed script entrypoint
+ */
+
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+
+import { readResolvedRecipeConfig } from "./recipe-references.ts";
+
+export function validateRecipeUsage(): string {
+  return `Usage:
+  validate-recipe.mjs <recipe-file-or-dir> [--all]
+
+Validates one template recipe file, or all *.json/*.md files in a directory when --all is set.`;
+}
+
+function expandPath(value: string): string {
+  return resolve(
+    String(value).replace(/^~(?=\/|$)/, process.env.HOME ?? homedir()),
+  );
+}
+
+function templateKind(template: unknown): string {
+  if (typeof template === "string") return "leaf";
+  if (Array.isArray(template)) return "sequence";
+  if (template && typeof template === "object") {
+    const node = template as Record<string, unknown>;
+    if (typeof node.template === "string") return "leaf";
+    if (Array.isArray(node.template))
+      return node.parallel === true ? "parallel" : "sequence";
+    if (node.parallel === true) return "parallel";
+    return "object";
+  }
+  return "unknown";
+}
+
+function recipeFiles(target: string, all: boolean): string[] {
+  if (!existsSync(target)) throw new Error(`Recipe path not found: ${target}`);
+  const stat = statSync(target);
+  if (stat.isFile()) return [target];
+  if (!stat.isDirectory())
+    throw new Error(`Recipe path is not a file or directory: ${target}`);
+  if (!all) throw new Error("Directory validation requires --all.");
+  return readdirSync(target)
+    .filter((file) => file.endsWith(".json") || file.endsWith(".md"))
+    .sort((a, b) => a.localeCompare(b))
+    .map((file) => resolve(target, file));
+}
+
+function validateFile(file: string): Record<string, unknown> {
+  try {
+    const config = readResolvedRecipeConfig(file);
+    if (!config?.template)
+      throw new Error("Recipe must define a non-empty template.");
+    return {
+      file,
+      ok: true,
+      name: config.name ?? "",
+      async: Boolean(config.async),
+      args: Array.isArray(config.args) ? config.args : [],
+      defaults:
+        config.defaults && typeof config.defaults === "object"
+          ? Object.keys(config.defaults).sort()
+          : [],
+      imports:
+        config.imports && typeof config.imports === "object"
+          ? Object.keys(config.imports).sort()
+          : [],
+      mailbox:
+        config.mailbox && typeof config.mailbox === "object"
+          ? {
+              accepts: Array.isArray(config.mailbox.accepts)
+                ? config.mailbox.accepts
+                : [],
+              emits: Array.isArray(config.mailbox.emits)
+                ? config.mailbox.emits
+                : [],
+            }
+          : undefined,
+      template: templateKind(config.template),
+    };
+  } catch (error) {
+    return {
+      file,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function validateRecipes(argv: string[]): Record<string, unknown> {
+  const targetArg = argv.find((arg) => !arg.startsWith("-"));
+  const all = argv.includes("--all");
+  if (!targetArg || argv.includes("--help") || argv.includes("-h")) {
+    return { help: true, ok: Boolean(targetArg), usage: validateRecipeUsage() };
+  }
+
+  const files = recipeFiles(expandPath(targetArg), all);
+  const results = files.map(validateFile);
+  const failed = results.filter((result) => !result.ok).length;
+  return {
+    ok: failed === 0,
+    total: results.length,
+    passed: results.length - failed,
+    failed,
+    results,
+  };
+}

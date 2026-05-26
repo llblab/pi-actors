@@ -188,6 +188,17 @@ For `run:<id>`, `message` adapts the body to the recipe's run-local control chan
 
 Run-local control uses a platform adapter under the same `message` API. Unix recipes may keep the existing FIFO endpoint, and native Windows recipes can expose a named-pipe endpoint in run state. Recipe authors should document message vocabulary through `mailbox.accepts`, not through transport arguments. Packaged scripts that still create Unix-only endpoints remain WSL/Linux/macOS-only until migrated.
 
+Portable control matrix:
+
+| Control surface | Linux/macOS/WSL | Native Windows | Guidance |
+| --- | --- | --- | --- |
+| File-backed run inbox + wake | Supported | Supported | Preferred durable baseline. |
+| Mailbox-only endpoint | Supported | Supported | Use for cross-platform workers. |
+| FIFO endpoint | Supported | Rejected before delivery | Keep only for Unix-compatible recipes. |
+| Named-pipe endpoint | Optional | Supported | Use for native Windows live delivery. |
+| Cancel/kill | Process group signal with pid fallback | Process-tree adapter | Same public `message` API. |
+
+
 Runtime wake notifications are now modeled separately from durable queues. Message handling records canonical state in file-backed mailbox/event files before attempting optional live endpoint delivery. Runs may expose a mailbox-only control endpoint when durable inbox plus wake notification is the intended delivery path; FIFO and named-pipe endpoints remain compatibility/fast-wake paths rather than the durable queue itself. Successful FIFO or named-pipe delivery marks the run inbox entry `sent`; mailbox-only delivery leaves the entry queued for the runtime to claim. `wake.jsonl` is an advisory doorbell that lets a live runtime subscribe through file-system notifications plus explicit initial, wake-triggered, and polling reconciliation callbacks. A missed wake must not lose work because actors can re-read the canonical mailbox state. Runtime loops that consume the file-backed mailbox should claim queued run inbox entries, then mark them `handled` or `failed`; the helper path uses a small lock so concurrent reconciliation callbacks do not process the same entry twice.
 
 ## Coordinator Notifications

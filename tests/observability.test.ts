@@ -199,6 +199,43 @@ test("Run observability detects script-authored outbox events", async () => {
   }
 });
 
+test("Run observability suppresses duplicate outbox events after line counter reset", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-dedupe-"));
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    await writeFile(
+      join(root, "music", "outbox.jsonl"),
+      `${JSON.stringify({ id: "event-1", event: "player.track", summary: "Now playing", delivery: "followup" })}\n`,
+    );
+    const summary = summarizeRuns(root, "session-a");
+    const previous = new Map<string, number>();
+    const seen = new Map<string, Set<string>>();
+    assert.equal(detectRunOutboxEvents(previous, summary, seen).length, 1);
+    previous.clear();
+    assert.equal(detectRunOutboxEvents(previous, summary, seen).length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability skips malformed outbox records", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-corrupt-outbox-"));
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    await writeFile(
+      join(root, "music", "outbox.jsonl"),
+      `{bad json\n${JSON.stringify({ id: "event-1", event: "player.track", summary: "Now playing", delivery: "followup" })}\n`,
+    );
+    const summary = summarizeRuns(root, "session-a");
+    const previous = new Map<string, number>();
+    const events = detectRunOutboxEvents(previous, summary);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].id, "event-1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Run observability detects terminal transitions", () => {
   const previous = new Map([["review", "running" as const]]);
   const transitions = detectRunTransitions(previous, {
@@ -427,6 +464,11 @@ test("Run observability prunes terminal and stale map entries", () => {
     ["/tmp/missing", 4],
     ["/tmp/live", 5],
   ]);
+  const seenEventIds = new Map([
+    ["/tmp/done", new Set(["done-event"])],
+    ["/tmp/missing", new Set(["missing-event"])],
+    ["/tmp/live", new Set(["live-event"])],
+  ]);
   pruneRunObservationState(
     statuses,
     lineCounts,
@@ -445,9 +487,11 @@ test("Run observability prunes terminal and stale map entries", () => {
       total: 2,
     },
     ["/tmp/done"],
+    seenEventIds,
   );
   assert.deepEqual([...statuses.keys()], ["/tmp/live"]);
   assert.deepEqual([...lineCounts.keys()], ["/tmp/live"]);
+  assert.deepEqual([...seenEventIds.keys()], ["/tmp/live"]);
 });
 
 test("Run observability renders animated subagent triangles", () => {

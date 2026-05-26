@@ -1,0 +1,9 @@
+{
+  "id": "inbox-001",
+  "status": "queued",
+  "queued_at": "2026-05-26T00:00:00.000Z",
+  "to": "run:demo",
+  "from": "coordinator",
+  "type": "control.continue",
+  "body": "continue"
+}

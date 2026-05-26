@@ -1,0 +1,13 @@
+{
+  "to": "branch:demo/reviewer",
+  "from": "run:demo",
+  "type": "task.assign",
+  "summary": "Review the current slice",
+  "body": {
+    "task": "Check mailbox loop semantics"
+  },
+  "correlation_id": "task-001",
+  "metadata": {
+    "requires_response": true
+  }
+}

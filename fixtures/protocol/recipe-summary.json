@@ -1,0 +1,16 @@
+{
+  "id": "actor-worker",
+  "path": "recipes/actor-worker.json",
+  "location": "packaged",
+  "active": true,
+  "args": [
+    "run",
+    "branch",
+    "poll_ms",
+    "state_dir"
+  ],
+  "mailbox": {
+    "kind": "branch",
+    "accepts": ["task.assign", "control.stop"]
+  }
+}

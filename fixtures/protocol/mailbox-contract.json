@@ -1,0 +1,15 @@
+{
+  "accepts": [
+    "task.assign",
+    {
+      "type": "control.stop",
+      "description": "Request graceful worker shutdown"
+    }
+  ],
+  "emits": [
+    "task.claim",
+    "task.result",
+    "awaiting_assignment",
+    "actor.leave"
+  ]
+}

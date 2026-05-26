@@ -2,12 +2,14 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.23.0
+  version: 0.24.0
 ---
 
 # Actors (pi-actors)
 
 `pi-actors` turns trusted local capabilities into addressable actors. This skill is the compact operator/reference layer for the extension itself: tools, nouns, lifecycle, message protocol, recipes, and common edge cases. It is not a multi-agent strategy guide; use a swarm skill for decomposition, quorum design, reviewer lenses, and consensus methodology.
+
+Maintain this skill as the extension's agent-facing manual. When implementation changes reveal new durable mechanics, invariants, warnings, or safer operating patterns, update this skill alongside code/docs so future agents learn the current actor model instead of rediscovering it.
 
 ## Knowledge Surfaces
 
@@ -63,7 +65,7 @@ Rules:
 
 - Use `file`/`recipe` for saved recipes; bare names resolve under `~/.pi/agent/recipes`.
 - Use inline `template` for one-off experiments; promote useful repeats to recipes.
-- When a successful actor follow-up suggests persistence, offer to save or register the pattern under `~/.pi/agent/recipes`; ask before writing the user recipe root.
+- When a successful actor follow-up suggests persistence, decide whether the pattern deserves durable tool memory; call `register_tool` yourself only when the evidence is strong, and ask before writing the user recipe root.
 - Use stable `as` names when you will inspect or message the actor later.
 - `async: true` on the recipe is the detached run switch.
 
@@ -150,7 +152,7 @@ When using actors as backlog implementers, avoid one-shot subagents that exit af
 4. Actor posts `task.result` and `awaiting_assignment`.
 5. Actor stays alive until the coordinator sends another `task.assign` or an explicit `control.stop`.
 
-Use `front`/`back` actors for opposite backlog ends when reducing overlap. Implementer workflows should be packaged as reusable recipe composition, not bespoke scripts: use `coordinator-locker` for queue/assignment/locking, subagent launcher recipes for execution cells, and actor-message utility recipes for structured handoffs. If the existing recipe library cannot express the scenario, add missing reusable component recipes first, then compose the higher-level workflow from them. Supervisors should route coordinator assignments by `body.actor`, preserve the assignment as an object rather than a JSON string, and keep stopped-worker summaries tied to the original actor list.
+Use `front`/`back` actors for opposite backlog ends when reducing overlap. Implementer workflows should be packaged as reusable recipe composition, not bespoke scripts: use `coordinator-locker` for queue/assignment/locking, subagent launcher recipes for execution cells, actor-message utility recipes for structured handoffs, and `lib/mailbox-loop.ts` helpers when writing mailbox-consuming workers. Mailbox loops should claim one run or branch inbox message at a time, mark success as `handled`, mark exceptions as `failed`, and treat `control.stop` / `control.cancel` / `control.kill` as standard stop messages; bounded drains may process available work until a stop message or max-message guard. If the existing recipe library cannot express the scenario, add missing reusable component recipes first, then compose the higher-level workflow from them. Supervisors should route coordinator assignments by `body.actor`, preserve the assignment as an object rather than a JSON string, and keep stopped-worker summaries tied to the original actor list.
 
 Current packaged building blocks:
 
@@ -236,6 +238,8 @@ Muscle-memory lens: `~/.pi/agent/recipes/*.json` and `*.md` are the agent's capa
 
 Usage lens: user recipes may carry extension-maintained launch metadata such as `usage.calls` and `usage.last_called`. The extension increments the counter when it starts that concrete recipe; agents should not hand-edit counters as part of normal recipe maintenance. Treat usage as evidence for usefulness analysis: heavily used recipes are good candidates for promotion, documentation, or stronger tests; unused recipes are cleanup candidates. Do not use failure counts as a primary usefulness signal because failures may reflect bad caller judgment rather than bad recipes. Do not delete or demote solely from counters without operator approval.
 
+Promotion lens: successful transient/ad hoc actor runs are evidence, not commands. If the run was repeatable, parameterized, safe enough, and likely useful later, the agent may promote it by calling `register_tool` with a concise name, typed args/defaults, and a reviewed template or recipe path. Do not wait for UI buttons; do not auto-register every success; do not persist temp paths, secrets, one-off prompts, or project-private assumptions without normalization and approval.
+
 Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memory set. For each stale, duplicate, too-specific, or low-value recipe, choose one explicit action: keep as a tool, move it out of the agent recipe root to retain recipe-only memory, merge into a better recipe, or delete/archive the file. Prefer moving over deletion when the recipe may still be useful as a component. Never silently remove tools during unrelated work.
 
 ## Registered Tools
@@ -273,6 +277,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 - [`locker`](../../recipes/locker.json): modular queue + acquire/renew/release lease locks + journaled locker messages + platform-adapted control metadata.
 - [`utility-coordinator-lock-snapshot`](../../recipes/utility-coordinator-lock-snapshot.json): one-shot JSON snapshot of a coordinator-locker state directory.
 - [`music-player`](../../recipes/music-player.json): background local/URL/directory/playlist playback actor controlled by messages.
+- [`actor-worker`](../../recipes/actor-worker.json): canonical mailbox-backed branch worker demo that claims branch inbox work, emits room-visible task lifecycle messages, and stops on standard control messages.
 
 ### Subagent Atoms
 

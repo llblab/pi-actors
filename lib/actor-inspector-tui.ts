@@ -478,6 +478,11 @@ function propertyValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function itemViewKeyLabel(key: string): string {
+  if (key === "body_preview") return "body";
+  return key;
+}
+
 function displayWidth(value: string): number {
   return visibleWidth(value);
 }
@@ -727,6 +732,9 @@ export function renderInspectorItemView(
   const preview = previews.find((item) => item.sequence === options.sequence);
   if (!preview) return undefined;
   const safeWidth = Math.max(1, width);
+  const prefix = " ";
+  const suffix = " ";
+  const contentWidth = Math.max(8, safeWidth - prefix.length - suffix.length);
   const orderedKeys = [
     "channel",
     "run",
@@ -754,21 +762,22 @@ export function renderInspectorItemView(
   const route = routeText(preview);
   const visibleRoute = boundedLine(
     route,
-    Math.max(0, safeWidth - keyWidth - headerSeparator.length),
+    Math.max(0, contentWidth - keyWidth - headerSeparator.length),
   );
   const headerPlain = `${sequenceText}${sequencePadding}${headerSeparator}${visibleRoute}`;
   const header = `${style(styles.muted, sequenceText)}${sequencePadding}${headerSeparator}${style(styles.target, visibleRoute)}`;
-  const headerPadding = Math.max(0, safeWidth - visibleWidth(headerPlain));
-  const lines = [`${header}${" ".repeat(headerPadding)}`, ""];
+  const headerPadding = Math.max(0, contentWidth - visibleWidth(headerPlain));
+  const lines = [`${prefix}${header}${" ".repeat(headerPadding)}${suffix}`, ""];
   for (const [key, value] of entries) {
-    const keyPadding = " ".repeat(Math.max(0, keyWidth - displayWidth(key)));
+    const label = itemViewKeyLabel(key);
+    const keyPadding = " ".repeat(Math.max(0, keyWidth - displayWidth(label)));
     const separator = "  ";
-    const valueWidth = Math.max(0, safeWidth - keyWidth - separator.length);
+    const valueWidth = Math.max(0, contentWidth - keyWidth - separator.length);
     const visibleValue = boundedLine(value, valueWidth);
-    const plain = `${key}${keyPadding}${separator}${visibleValue}`;
-    const rendered = `${style(styles.muted, key)}${keyPadding}${separator}${style(styles.preview, visibleValue)}`;
-    const padding = Math.max(0, safeWidth - visibleWidth(plain));
-    lines.push(`${rendered}${" ".repeat(padding)}`);
+    const plain = `${label}${keyPadding}${separator}${visibleValue}`;
+    const rendered = `${style(styles.muted, label)}${keyPadding}${separator}${style(styles.preview, visibleValue)}`;
+    const padding = Math.max(0, contentWidth - visibleWidth(plain));
+    lines.push(`${prefix}${rendered}${" ".repeat(padding)}${suffix}`);
   }
   return lines;
 }

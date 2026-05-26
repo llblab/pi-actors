@@ -816,11 +816,14 @@ test("Actor inspector TUI renders selected item view", () => {
   );
   assert.ok(lines);
   assert.equal(lines?.[1], "");
-  assert.match(lines?.[0] ?? "", /^7\s{13}mapper # all/);
+  assert.equal(lines?.filter(Boolean).every((line) => line.startsWith(" ") && line.endsWith(" ")), true);
+  assert.equal(lines?.filter(Boolean).every((line) => visibleWidth(line) === 80), true);
+  assert.match(lines?.[0] ?? "", /^ 7\s{13}mapper # all/);
   assert.doesNotMatch(lines?.join("\n") ?? "", /sequence\s+7/);
   assert.match(lines?.join("\n") ?? "", /type\s+chat\.message/);
   assert.match(lines?.join("\n") ?? "", /summary\s+Selected summary/);
-  assert.match(lines?.join("\n") ?? "", /body_preview\s+full-ish selected body/);
+  assert.match(lines?.join("\n") ?? "", /body\s+full-ish selected body/);
+  assert.doesNotMatch(lines?.join("\n") ?? "", /body_preview/);
   assert.match(lines?.join("\n") ?? "", /timestamp\s+2026-01-01T00:00:00\.000Z/);
 });
 

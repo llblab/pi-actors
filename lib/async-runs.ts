@@ -5,7 +5,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -14,7 +14,9 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  cpSync,
   readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -65,7 +67,7 @@ export interface AsyncRunStartParams {
   timeout?: number | string;
   delay?: number | string;
   output?: string;
-  artifacts?: Record<string, string>;
+  artifacts?: Record<string, RunArtifactDeclaration>;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
   retire_when?: "children_terminal";
   retry?: number | string;
@@ -121,7 +123,7 @@ export interface AsyncRunMeta {
   tool?: string;
   template: CommandTemplateValue;
   values: Record<string, unknown>;
-  artifacts?: Record<string, string>;
+  artifacts?: Record<string, RunArtifactDeclaration>;
   control?: AsyncRunControlEndpoint;
   mailbox?: RecipeReferences.TemplateRecipeMailbox;
   recipe_context_records?: RecipeReferences.TemplateRecipeContextRecord[];
@@ -160,21 +162,91 @@ function safeRunId(value: string | undefined): string {
   return run;
 }
 
+export type RunArtifactDeclaration =
+  | string
+  | { path: string; kind?: string; media_type?: string; required?: boolean };
+
+export interface RunArtifactManifestEntry {
+  exists: boolean;
+  kind?: string;
+  media_type?: string;
+  path: string;
+  required?: boolean;
+  sha256?: string;
+  size?: number;
+}
+
 function resolveArtifactPaths(
-  artifacts: Record<string, string> | undefined,
+  artifacts: Record<string, RunArtifactDeclaration> | undefined,
   values: Record<string, unknown>,
-): Record<string, string> | undefined {
+): Record<string, RunArtifactDeclaration> | undefined {
   if (!artifacts) return undefined;
-  const resolved: Record<string, string> = {};
+  const resolved: Record<string, RunArtifactDeclaration> = {};
   for (const [key, value] of Object.entries(artifacts)) {
     if (!key.trim()) continue;
-    resolved[key] = substituteCommandTemplateToken(
-      value,
-      values,
-      `recipe artifacts.${key}`,
-    );
+    if (typeof value === "string") {
+      resolved[key] = substituteCommandTemplateToken(
+        value,
+        values,
+        `recipe artifacts.${key}`,
+      );
+    } else if (
+      value &&
+      typeof value === "object" &&
+      typeof value.path === "string"
+    ) {
+      resolved[key] = {
+        ...value,
+        path: substituteCommandTemplateToken(
+          value.path,
+          values,
+          `recipe artifacts.${key}.path`,
+        ),
+      };
+    }
   }
   return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
+export function resolveArtifactManifest(
+  artifacts: Record<string, RunArtifactDeclaration> | undefined,
+): Record<string, RunArtifactManifestEntry> | undefined {
+  if (!artifacts) return undefined;
+  const manifest: Record<string, RunArtifactManifestEntry> = {};
+  for (const [name, artifact] of Object.entries(artifacts)) {
+    const declaration =
+      typeof artifact === "string" ? { path: artifact } : artifact;
+    if (!declaration?.path) continue;
+    try {
+      const content = readFileSync(declaration.path);
+      manifest[name] = {
+        exists: true,
+        ...(declaration.kind ? { kind: declaration.kind } : {}),
+        ...(declaration.media_type
+          ? { media_type: declaration.media_type }
+          : {}),
+        path: declaration.path,
+        ...(declaration.required !== undefined
+          ? { required: declaration.required }
+          : {}),
+        sha256: createHash("sha256").update(content).digest("hex"),
+        size: content.byteLength,
+      };
+    } catch {
+      manifest[name] = {
+        exists: false,
+        ...(declaration.kind ? { kind: declaration.kind } : {}),
+        ...(declaration.media_type
+          ? { media_type: declaration.media_type }
+          : {}),
+        path: declaration.path,
+        ...(declaration.required !== undefined
+          ? { required: declaration.required }
+          : {}),
+      };
+    }
+  }
+  return Object.keys(manifest).length > 0 ? manifest : undefined;
 }
 
 function resolveRunTemplate(params: AsyncRunStartParams): {
@@ -426,7 +498,11 @@ export function startRun(
         ? RecipeReferences.buildRecipeContextRecords(recipeFile)
         : undefined;
     if (recipeFile && isMutableUsageRecipeFile(recipeFile)) {
-      RecipeUsage.recordRecipeLaunch(recipeFile);
+      RecipeUsage.recordRecipeLaunch(
+        recipeFile,
+        new Date(),
+        startParams.launch_source === "tool" ? "tool" : "spawn",
+      );
     }
     const outFd = openSync(stdout, "a");
     const errFd = openSync(stderr, "a");
@@ -611,6 +687,16 @@ export function getRunStatus(runOrDir: string): Record<string, unknown> {
   };
 }
 
+export interface RunStateIndexEntry {
+  ownerId?: string;
+  recipe?: string;
+  run: string;
+  state_dir: string;
+  status: AsyncRunStatus;
+  tool?: string;
+  updated_at?: string;
+}
+
 function matchesStatusFilter(
   status: unknown,
   filter: string | undefined,
@@ -621,30 +707,125 @@ function matchesStatusFilter(
   return status === filter;
 }
 
+export function listRunStateDirs(
+  stateRoot = DEFAULT_STATE_ROOT,
+  depth = 0,
+  seen = new Set<string>(),
+): string[] {
+  if (!existsSync(stateRoot) || seen.has(resolve(stateRoot))) return [];
+  seen.add(resolve(stateRoot));
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(stateRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const result: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const child = join(stateRoot, entry.name);
+    if (existsSync(join(child, "run.json"))) result.push(child);
+    if (depth + 1 < 8) result.push(...listRunStateDirs(child, depth + 1, seen));
+  }
+  return result;
+}
+
+function runIndexPath(stateRoot: string): string {
+  return join(stateRoot, "index.json");
+}
+
+function indexEntryFromStatus(
+  status: Record<string, unknown>,
+): RunStateIndexEntry {
+  const progress =
+    status.progress && typeof status.progress === "object"
+      ? (status.progress as Record<string, unknown>)
+      : {};
+  return {
+    ...(typeof status.ownerId === "string" ? { ownerId: status.ownerId } : {}),
+    ...(typeof status.recipe === "string" ? { recipe: status.recipe } : {}),
+    run: String(status.run),
+    state_dir: String(status.state_dir),
+    status: status.status as AsyncRunStatus,
+    ...(typeof status.tool === "string" ? { tool: status.tool } : {}),
+    updated_at:
+      typeof progress.updatedAt === "string"
+        ? progress.updatedAt
+        : typeof status.createdAt === "string"
+          ? status.createdAt
+          : new Date(0).toISOString(),
+  };
+}
+
+export function rebuildRunStateIndex(
+  stateRoot = DEFAULT_STATE_ROOT,
+): RunStateIndexEntry[] {
+  mkdirSync(stateRoot, { recursive: true });
+  const entries = listRunStateDirs(stateRoot)
+    .flatMap((stateDir) => {
+      try {
+        return [indexEntryFromStatus(getRunStatus(stateDir))];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+  writeJsonAtomic(runIndexPath(stateRoot), {
+    entries,
+    rebuilt_at: new Date().toISOString(),
+  });
+  return entries;
+}
+
+export function readRunStateIndex(
+  stateRoot = DEFAULT_STATE_ROOT,
+): RunStateIndexEntry[] | undefined {
+  const index = readJson(runIndexPath(stateRoot));
+  if (!index || typeof index !== "object") return undefined;
+  const entries = (index as Record<string, unknown>).entries;
+  if (!Array.isArray(entries)) return undefined;
+  const valid = entries.filter((entry): entry is RunStateIndexEntry => {
+    const record =
+      entry && typeof entry === "object"
+        ? (entry as Record<string, unknown>)
+        : {};
+    return (
+      typeof record.run === "string" &&
+      typeof record.state_dir === "string" &&
+      typeof record.status === "string"
+    );
+  });
+  if (valid.some((entry) => !existsSync(join(entry.state_dir, "run.json"))))
+    return undefined;
+  return valid;
+}
+
 export function listRuns(
   stateRoot = DEFAULT_STATE_ROOT,
   statusFilter?: string,
 ): Array<Record<string, unknown>> {
   if (!existsSync(stateRoot)) return [];
-  const runs: Array<Record<string, unknown>> = [];
-  for (const entry of readdirSync(stateRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    try {
-      const stateDir = join(stateRoot, entry.name);
-      const status = getRunStatus(stateDir);
-      if (!matchesStatusFilter(status.status, statusFilter)) continue;
-      runs.push({
-        run: status.run,
-        state_dir: stateDir,
-        status: status.status,
-        ...(typeof status.tool === "string" ? { tool: status.tool } : {}),
-        ...(typeof status.recipe === "string" ? { recipe: status.recipe } : {}),
-      });
-    } catch {
-      // Ignore malformed run dirs.
-    }
+  const indexed = readRunStateIndex(stateRoot);
+  if (indexed) {
+    return indexed
+      .filter((entry) => matchesStatusFilter(entry.status, statusFilter))
+      .map((entry) => ({
+        run: entry.run,
+        state_dir: entry.state_dir,
+        status: entry.status,
+        ...(entry.tool ? { tool: entry.tool } : {}),
+        ...(entry.recipe ? { recipe: entry.recipe } : {}),
+      }));
   }
-  return runs;
+  return rebuildRunStateIndex(stateRoot)
+    .filter((entry) => matchesStatusFilter(entry.status, statusFilter))
+    .map((entry) => ({
+      run: entry.run,
+      state_dir: entry.state_dir,
+      status: entry.status,
+      ...(entry.tool ? { tool: entry.tool } : {}),
+      ...(entry.recipe ? { recipe: entry.recipe } : {}),
+    }));
 }
 
 export function tailRun(runOrDir: string, lines = 40): string {
@@ -879,12 +1060,19 @@ export function appendRunOutboxEvent(
   const run = String(status.run ?? runOrDir);
   const type = event.type || event.event || "run.message";
   const to = event.to || "coordinator";
+  const metadata = event.metadata ?? {};
+  const requiresResponse = metadata.requires_response === true;
   const payload = {
     ...(event.body !== undefined ? { body: event.body } : {}),
     ...(event.correlation_id ? { correlation_id: event.correlation_id } : {}),
     ...(event.data !== undefined ? { data: event.data } : {}),
     delivery: normalizeRunOutboxDelivery(
-      event.delivery ?? (to === "coordinator" ? "followup" : "log"),
+      event.delivery ??
+        (requiresResponse
+          ? "followup"
+          : to === "coordinator"
+            ? "notify"
+            : "log"),
     ),
     event: type,
     from: event.from || `run:${run}`,
@@ -1240,6 +1428,77 @@ export function cancelRun(runOrDir: string): Record<string, unknown> {
   return Object.hasOwn(result, "stopped")
     ? { cancelled: result.stopped, ...result }
     : result;
+}
+
+function assertTerminalRun(runOrDir: string): Record<string, unknown> {
+  const status = getRunStatus(runOrDir);
+  if (status.status === "running") {
+    throw new Error("Only terminal runs can be archived or pruned.");
+  }
+  return status;
+}
+
+function archivePathFor(run: string, stateDir: string): string {
+  const archiveRoot = join(dirname(stateDir), "archived");
+  mkdirSync(archiveRoot, { recursive: true });
+  return join(
+    archiveRoot,
+    `${safeRunId(run)}-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+  );
+}
+
+export function archiveRun(runOrDir: string): Record<string, unknown> {
+  const status = assertTerminalRun(runOrDir);
+  const stateDir = String(status.state_dir);
+  const run = String(status.run ?? basename(stateDir));
+  const archiveDir = archivePathFor(run, stateDir);
+  renameSync(stateDir, archiveDir);
+  mkdirSync(stateDir, { recursive: true });
+  const tombstone = {
+    archived: true,
+    archive_dir: archiveDir,
+    original_state_dir: stateDir,
+    run,
+    status: status.status,
+    ts: new Date().toISOString(),
+  };
+  writeJsonAtomic(join(stateDir, "archive-tombstone.json"), tombstone);
+  return tombstone;
+}
+
+export function pruneRun(
+  runOrDir: string,
+  options: { preserveArtifacts?: boolean } = {},
+): Record<string, unknown> {
+  const status = assertTerminalRun(runOrDir);
+  const stateDir = String(status.state_dir);
+  const run = String(status.run ?? basename(stateDir));
+  const manifest = resolveArtifactManifest(
+    status.artifacts as Record<string, RunArtifactDeclaration> | undefined,
+  );
+  const preserved: Record<string, string> = {};
+  if (options.preserveArtifacts && manifest) {
+    const preserveRoot = join(
+      dirname(stateDir),
+      "preserved-artifacts",
+      safeRunId(run),
+    );
+    mkdirSync(preserveRoot, { recursive: true });
+    for (const [name, artifact] of Object.entries(manifest)) {
+      if (!artifact.exists) continue;
+      const target = join(preserveRoot, basename(artifact.path));
+      cpSync(artifact.path, target, { force: true });
+      preserved[name] = target;
+    }
+  }
+  rmSync(stateDir, { recursive: true, force: true });
+  return {
+    pruned: true,
+    preserved_artifacts: preserved,
+    run,
+    state_dir: stateDir,
+    ts: new Date().toISOString(),
+  };
 }
 
 export function killRun(runOrDir: string): Record<string, unknown> {

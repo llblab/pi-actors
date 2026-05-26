@@ -1,4 +1,17 @@
 #!/usr/bin/env node
+
+/**
+ * Local coordination locker service.
+ *
+ * This script owns a small file-backed lock/task state directory and exposes a
+ * Unix-socket command surface for coordinators. It can serve live lock requests,
+ * queue work items, hand out task leases, renew/release resource locks, and emit
+ * compact snapshots for inspection.
+ *
+ * Keep it generic: no project policy, no recipe-specific prompts, and no actor
+ * orchestration decisions belong in this layer.
+ */
+
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {

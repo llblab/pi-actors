@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as Limits from "../lib/limits.ts";
 import {
   formatFailureOutput,
   formatOutput,
@@ -36,5 +37,11 @@ test("Failure formatter includes stderr and stdout sections", () => {
 test("Tail truncation reports byte truncation", () => {
   const truncation = truncateTailContent("x".repeat(60 * 1024));
   assert.equal(truncation.truncated, true);
-  assert.equal(truncation.outputBytes <= 50 * 1024, true);
+  assert.equal(truncation.outputBytes <= Limits.TOOL_OUTPUT_MAX_BYTES, true);
+});
+
+test("Output and inspect limits are centralized", () => {
+  assert.equal(Limits.DEFAULT_INSPECT_LINES, 40);
+  assert.equal(Limits.TOOL_OUTPUT_MAX_LINES, 2_000);
+  assert.equal(Limits.INSPECTOR_BODY_PREVIEW_CHARS, Limits.ROOM_MESSAGE_PREVIEW_CHARS);
 });

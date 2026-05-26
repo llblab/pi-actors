@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.22.5",
+  "version": "0.23.0",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -26,6 +26,7 @@
   },
   "scripts": {
     "check": "node --experimental-strip-types -e \"await import('./index.ts'); console.log('pi-actors: extension import ok')\"",
+    "conformance": "node scripts/conformance.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "pack:dry": "npm pack --dry-run",
     "validate": "npx tsc --noEmit && npm run build && npm run check && npm test && npm run pack:dry",

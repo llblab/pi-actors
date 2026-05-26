@@ -11,6 +11,7 @@ import test from "node:test";
 
 import {
   appendRunOutboxEvent,
+  archiveRun,
   cancelRun,
   getRunProcessSignalPlan,
   getRunStatus,
@@ -18,7 +19,10 @@ import {
   killRun,
   listRuns,
   processRunInboxMessages,
+  pruneRun,
   readRunEvents,
+  readRunStateIndex,
+  rebuildRunStateIndex,
   readRunInboxMessages,
   sendRunMessage,
   startRun,
@@ -311,6 +315,23 @@ test("Async runs append actor messages to outbox", async () => {
     assert.equal(events[0].delivery, "followup");
     assert.deepEqual(events[0].metadata, { checkpoint: "ready" });
     assert.deepEqual(events[0].body, { ok: true });
+
+    appendRunOutboxEvent(stateDir, {
+      event: "progress.update",
+      metadata: { percent: 50 },
+      summary: "Halfway",
+      to: "coordinator",
+    });
+    appendRunOutboxEvent(stateDir, {
+      event: "checkpoint.needs_input",
+      metadata: { reason: "scope", requires_response: true },
+      summary: "Need scope",
+      to: "coordinator",
+    });
+    const updatedEvents = readRunEvents(stateDir, 3);
+    assert.equal(updatedEvents[1].delivery, "notify");
+    assert.equal(updatedEvents[2].delivery, "followup");
+    assert.deepEqual(updatedEvents[2].metadata, { reason: "scope", requires_response: true });
   } finally {
     try {
       cancelRun(stateDir);
@@ -1348,6 +1369,99 @@ test("Async run cancel fails closed for completed runs", async () => {
     const result = cancelRun(stateDir);
     assert.equal(result.cancelled, false);
     assert.equal(result.reason, "not running");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run state index rebuilds and corrupt index falls back", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-index-"));
+  const parentDir = join(root, "parent");
+  const childDir = join(parentDir, "child");
+  try {
+    startRun(
+      {
+        ownerId: "session-a",
+        run_id: `index-parent-${process.pid}-${Date.now()}`,
+        state_dir: parentDir,
+        template: `${process.execPath} -e "console.log('parent')"`,
+        tool: "parent-tool",
+      },
+      process.cwd(),
+    );
+    startRun(
+      {
+        ownerId: "session-a",
+        run_id: `index-child-${process.pid}-${Date.now()}`,
+        state_dir: childDir,
+        template: `${process.execPath} -e "console.log('child')"`,
+        name: "child-recipe",
+      },
+      process.cwd(),
+    );
+    await waitForResult(parentDir);
+    await waitForResult(childDir);
+    const index = rebuildRunStateIndex(root);
+    assert.equal(index.length, 2);
+    assert.deepEqual(index.map((entry) => entry.state_dir).sort(), [childDir, parentDir].sort());
+    assert.equal(readRunStateIndex(root)?.length, 2);
+    assert.equal(listRuns(root, "done").length, 2);
+    await writeFile(join(root, "index.json"), "not-json");
+    assert.equal(listRuns(root, "done").length, 2);
+    assert.equal(readRunStateIndex(root)?.length, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run archive and prune only allow terminal run state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-retention-"));
+  const activeDir = join(root, "active");
+  const doneDir = join(root, "done");
+  const pruneDir = join(root, "prune");
+  try {
+    startRun(
+      {
+        run_id: `active-${process.pid}-${Date.now()}`,
+        state_dir: activeDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 3000)"`,
+      },
+      process.cwd(),
+    );
+    assert.throws(() => archiveRun(activeDir), /Only terminal runs/);
+    assert.throws(() => pruneRun(activeDir), /Only terminal runs/);
+    killRun(activeDir);
+
+    startRun(
+      {
+        run_id: `archive-${process.pid}-${Date.now()}`,
+        state_dir: doneDir,
+        template: `${process.execPath} -e "console.log('done')"`,
+      },
+      process.cwd(),
+    );
+    await waitForResult(doneDir);
+    const archived = archiveRun(doneDir);
+    assert.equal(archived.archived, true);
+    await readFile(join(doneDir, "archive-tombstone.json"), "utf8");
+    await readFile(join(String(archived.archive_dir), "run.json"), "utf8");
+
+    startRun(
+      {
+        artifacts: { report: { path: "{state_dir}/report.txt", required: true } },
+        run_id: `prune-${process.pid}-${Date.now()}`,
+        state_dir: pruneDir,
+        template: `${process.execPath} -e "console.log('done')"`,
+      },
+      process.cwd(),
+    );
+    await waitForResult(pruneDir);
+    await writeFile(join(pruneDir, "report.txt"), "report");
+    const pruned = pruneRun(pruneDir, { preserveArtifacts: true });
+    assert.equal(pruned.pruned, true);
+    assert.equal(typeof (pruned.preserved_artifacts as Record<string, string>).report, "string");
+    await readFile((pruned.preserved_artifacts as Record<string, string>).report, "utf8");
+    assert.throws(() => getRunStatus(pruneDir), /Run not found/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

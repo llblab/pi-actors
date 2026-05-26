@@ -355,6 +355,11 @@ test("Actor rooms compact long room timelines", async () => {
     assert.equal(messages.length, 3);
     assert.deepEqual(messages.map((message) => (message.body as { index: number }).index), [2, 3, 4]);
     await access(join(stateDir, "rooms", "main", "compaction.json"));
+    const status = getRoomStatus(stateDir, "main");
+    assert.equal(status.compaction?.dropped_count, 1);
+    assert.equal(status.compaction?.max_messages, 3);
+    assert.equal(status.compaction?.first_kept_at, messages[0].received_at);
+    assert.equal(status.compaction?.last_kept_at, messages[2].received_at);
   } finally {
     if (previous === undefined) delete process.env.PI_ACTORS_ROOM_MAX_MESSAGES;
     else process.env.PI_ACTORS_ROOM_MAX_MESSAGES = previous;

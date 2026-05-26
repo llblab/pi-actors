@@ -27,11 +27,14 @@ test("Recipe usage launch counter increments inline metadata", async () => {
       }),
     );
 
-    assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-02T03:04:05.000Z")), true);
-    assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-03T03:04:05.000Z")), true);
+    assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-02T03:04:05.000Z"), "spawn"), true);
+    assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-03T03:04:05.000Z"), "tool"), true);
 
     const updated = await readJson(recipe);
     assert.equal((updated.usage as Record<string, unknown>).calls, 2);
+    assert.equal((updated.usage as Record<string, unknown>).spawn_calls, 1);
+    assert.equal((updated.usage as Record<string, unknown>).tool_calls, 1);
+    assert.equal((updated.usage as Record<string, unknown>).launch_kind, "tool");
     assert.equal((updated.usage as Record<string, unknown>).last_called, "2026-01-03T03:04:05.000Z");
     assert.equal(typeof (updated.usage as Record<string, unknown>).fingerprint, "string");
     assert.equal(updated.template, "echo ok");
@@ -63,6 +66,7 @@ test("Recipe usage counter resets after recipe content changes", async () => {
     assert.equal(usage.calls, 1);
     assert.equal(usage.last_called, "2026-01-03T03:04:05.000Z");
     assert.equal(usage.reset_at, "2026-01-03T03:04:05.000Z");
+    assert.equal(usage.reset_reason, "recipe content fingerprint changed");
     assert.notEqual(usage.fingerprint, beforeUsage.fingerprint);
   } finally {
     await rm(root, { recursive: true, force: true });

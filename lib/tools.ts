@@ -10,6 +10,7 @@ import * as AsyncRuns from "./async-runs.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
 import * as Execution from "./execution.ts";
+import * as Limits from "./limits.ts";
 import * as Paths from "./paths.ts";
 import * as Prompts from "./prompts.ts";
 import * as RecipeDiscovery from "./recipe-discovery.ts";
@@ -164,7 +165,8 @@ function compactAsyncRunStatus(value: unknown): string {
   ];
   if (status.tool) tokens.push(`tool=${String(status.tool)}`);
   if (status.recipe) tokens.push(`recipe=${String(status.recipe)}`);
-  if (status.retire_when) tokens.push(`retire_when=${String(status.retire_when)}`);
+  if (status.retire_when)
+    tokens.push(`retire_when=${String(status.retire_when)}`);
   if (Number(status.pid) > 0) tokens.push(`pid=${Number(status.pid)}`);
   if (progress.phase && progress.phase !== status.status)
     tokens.push(`phase=${String(progress.phase)}`);
@@ -194,7 +196,10 @@ function compactRunMessages(messages: AsyncRuns.RunOutboxEvent[]): string {
     .join("\n")}`;
 }
 
-function compactPreview(value: unknown, maxLength = 80): string | undefined {
+function compactPreview(
+  value: unknown,
+  maxLength = Limits.COMPACT_PREVIEW_CHARS,
+): string | undefined {
   if (value === undefined) return undefined;
   const text =
     typeof value === "string" ? value : JSON.stringify(value, undefined, 0);
@@ -204,7 +209,9 @@ function compactPreview(value: unknown, maxLength = 80): string | undefined {
     : compact;
 }
 
-function compactRoomPreviews(previews: ActorRooms.RoomMessagePreview[]): string {
+function compactRoomPreviews(
+  previews: ActorRooms.RoomMessagePreview[],
+): string {
   if (previews.length === 0) return "\n(no room message previews)";
   return `\n${previews
     .map((preview) =>
@@ -214,7 +221,9 @@ function compactRoomPreviews(previews: ActorRooms.RoomMessagePreview[]): string 
         `to=${preview.to}`,
         `type=${preview.type}`,
         preview.summary ? `summary=${compactPreview(preview.summary)}` : "",
-        preview.body_preview ? `body=${compactPreview(preview.body_preview)}` : "",
+        preview.body_preview
+          ? `body=${compactPreview(preview.body_preview)}`
+          : "",
       ]
         .filter(Boolean)
         .join(" "),
@@ -232,7 +241,9 @@ function compactRoomMessages(messages: ActorRooms.RoomTimelineEntry[]): string {
         `to=${message.to}`,
         `type=${message.type}`,
         `summary=${String(message.summary ?? "").replaceAll(/\s+/g, "_")}`,
-        compactPreview(message.body) ? `body=${compactPreview(message.body)}` : "",
+        compactPreview(message.body)
+          ? `body=${compactPreview(message.body)}`
+          : "",
       ]
         .filter(Boolean)
         .join(" "),
@@ -248,8 +259,12 @@ function compactRoomContacts(contacts: ActorRooms.RoomContact[]): string {
         `address=${contact.address}`,
         contact.role !== undefined ? `role=${String(contact.role)}` : "",
         contact.parent !== undefined ? `parent=${String(contact.parent)}` : "",
-        contact.caps !== undefined ? `caps=${Array.isArray(contact.caps) ? contact.caps.join(",") : String(contact.caps)}` : "",
-        contact.claim !== undefined ? `claim=${String(contact.claim).replaceAll(/\s+/g, "_")}` : "",
+        contact.caps !== undefined
+          ? `caps=${Array.isArray(contact.caps) ? contact.caps.join(",") : String(contact.caps)}`
+          : "",
+        contact.claim !== undefined
+          ? `claim=${String(contact.claim).replaceAll(/\s+/g, "_")}`
+          : "",
         contact.status !== undefined ? `status=${String(contact.status)}` : "",
       ]
         .filter(Boolean)
@@ -258,7 +273,9 @@ function compactRoomContacts(contacts: ActorRooms.RoomContact[]): string {
     .join("\n")}`;
 }
 
-function compactRoomRoster(roster: Record<string, ActorRooms.RoomMember>): string {
+function compactRoomRoster(
+  roster: Record<string, ActorRooms.RoomMember>,
+): string {
   const members = Object.values(roster);
   if (members.length === 0) return "\n(no room members)";
   return `\n${members
@@ -267,8 +284,12 @@ function compactRoomRoster(roster: Record<string, ActorRooms.RoomMember>): strin
         `address=${member.address}`,
         `role=${String(member.role ?? "")}`,
         member.parent !== undefined ? `parent=${String(member.parent)}` : "",
-        member.caps !== undefined ? `caps=${Array.isArray(member.caps) ? member.caps.join(",") : String(member.caps)}` : "",
-        member.claim !== undefined ? `claim=${String(member.claim).replaceAll(/\s+/g, "_")}` : "",
+        member.caps !== undefined
+          ? `caps=${Array.isArray(member.caps) ? member.caps.join(",") : String(member.caps)}`
+          : "",
+        member.claim !== undefined
+          ? `claim=${String(member.claim).replaceAll(/\s+/g, "_")}`
+          : "",
         `status=${String(member.status ?? "")}`,
         `last_seen=${member.last_seen}`,
       ].join(" "),
@@ -300,11 +321,19 @@ function compactInboxMessages(
         `type=${String(message.type ?? "")}`,
         `from=${String(message.from ?? "")}`,
         `to=${String(message.to ?? "")}`,
-        ...(message.queued_at ? [`queued_at=${String(message.queued_at)}`] : []),
+        ...(message.queued_at
+          ? [`queued_at=${String(message.queued_at)}`]
+          : []),
         ...(message.sent_at ? [`sent_at=${String(message.sent_at)}`] : []),
-        ...(message.claimed_at ? [`claimed_at=${String(message.claimed_at)}`] : []),
-        ...(message.handled_at ? [`handled_at=${String(message.handled_at)}`] : []),
-        ...(message.failed_at ? [`failed_at=${String(message.failed_at)}`] : []),
+        ...(message.claimed_at
+          ? [`claimed_at=${String(message.claimed_at)}`]
+          : []),
+        ...(message.handled_at
+          ? [`handled_at=${String(message.handled_at)}`]
+          : []),
+        ...(message.failed_at
+          ? [`failed_at=${String(message.failed_at)}`]
+          : []),
       ].join(" "),
     )
     .join("\n")}`;
@@ -314,12 +343,64 @@ function compactBranchInbox(messages: Array<Record<string, unknown>>): string {
   return compactInboxMessages(messages, "branch inbox");
 }
 
+function normalizeMailboxEntry(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (typeof value === "string") return { type: value };
+  const record = asRecord(value);
+  if (typeof record.type !== "string" || !record.type.trim()) return undefined;
+  return {
+    type: record.type.trim(),
+    ...(record.body_schema !== undefined
+      ? { body_schema: record.body_schema }
+      : {}),
+    ...(record.ack !== undefined ? { ack: record.ack } : {}),
+    ...(typeof record.idempotency === "string"
+      ? { idempotency: record.idempotency }
+      : {}),
+    ...(typeof record.level === "string" ? { level: record.level } : {}),
+    ...(record.requires_response === true ? { requires_response: true } : {}),
+    ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+  };
+}
+
+function normalizeMailboxContracts(
+  mailbox: Record<string, unknown>,
+): Record<string, unknown[]> {
+  const accepts = Array.isArray(mailbox.accepts)
+    ? mailbox.accepts
+        .map(normalizeMailboxEntry)
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    : [];
+  const emits = Array.isArray(mailbox.emits)
+    ? mailbox.emits
+        .map(normalizeMailboxEntry)
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    : [];
+  return { accepts, emits };
+}
+
+function mailboxTypes(entries: unknown[]): string[] {
+  return entries.flatMap((entry) =>
+    typeof asRecord(entry).type === "string"
+      ? [String(asRecord(entry).type)]
+      : [],
+  );
+}
+
 function compactRunMailbox(
   run: string,
   mailbox: Record<string, unknown>,
   messages: Array<Record<string, unknown>>,
 ): string {
-  return `\nrun=${run} accepts=${Array.isArray(mailbox.accepts) ? mailbox.accepts.join(",") : ""} emits=${Array.isArray(mailbox.emits) ? mailbox.emits.join(",") : ""}${compactInboxMessages(messages, "run inbox")}`;
+  const normalized = normalizeMailboxContracts(mailbox);
+  return `\nrun=${run} accepts=${mailboxTypes(normalized.accepts).join(",")} emits=${mailboxTypes(normalized.emits).join(",")}${compactInboxMessages(messages, "run inbox")}`;
+}
+
+function compactArtifactPath(value: unknown): string {
+  if (typeof value === "string") return value;
+  const record = asRecord(value);
+  return String(record.path ?? "<missing>");
 }
 
 function compactActorFiles(status: Record<string, unknown>): string {
@@ -330,12 +411,14 @@ function compactActorFiles(status: Record<string, unknown>): string {
     status.stderrLog,
     status.eventsFile,
     status.outboxFile,
-    status.state_dir ? `${String(status.state_dir)}/communication.json` : undefined,
+    status.state_dir
+      ? `${String(status.state_dir)}/communication.json`
+      : undefined,
     status.state_dir ? `${String(status.state_dir)}/result.json` : undefined,
   ].filter((file): file is string => typeof file === "string");
   const artifactText = Object.keys(artifacts).length
     ? ` artifacts=${Object.entries(artifacts)
-        .map(([key, value]) => `${key}:${String(value)}`)
+        .map(([key, value]) => `${key}:${compactArtifactPath(value)}`)
         .join(",")}`
     : "";
   return `\nrun=${run}${artifactText}${files.length ? ` files=${files.join(",")}` : ""}`;
@@ -353,7 +436,8 @@ function compactSessionRuns(
         `status=${String(run.status ?? "")}`,
       ];
       if (run.recipe) tokens.push(`recipe=${String(run.recipe)}`);
-      if (run.retire_when) tokens.push(`retire_when=${String(run.retire_when)}`);
+      if (run.retire_when)
+        tokens.push(`retire_when=${String(run.retire_when)}`);
       return tokens.join(" ");
     })
     .join("\n")}`;
@@ -368,11 +452,53 @@ function compactToolActor(name: string, tool: Record<string, unknown>): string {
   return `\ntool=${name} description=${String(tool.description ?? "").replaceAll(/\s+/g, "_")} args=${Object.keys(properties).join(",")} required=${required}`;
 }
 
+function compactRecipeImports(summary: Record<string, unknown>): string {
+  const active = Array.isArray(summary.active)
+    ? summary.active as Array<Record<string, unknown>>
+    : [];
+  const lines = active.flatMap((entry) => {
+    const imports = asRecord(entry.imports);
+    return Object.entries(imports).map(([alias, value]) => {
+      const binding = typeof value === "string" ? { from: value } : asRecord(value);
+      return `recipe=${String(entry.id ?? "<unknown>")} alias=${alias} from=${String(binding.from ?? value)}`;
+    });
+  });
+  return lines.length ? `\n${lines.join("\n")}` : "\n(no recipe imports)";
+}
+
+function compactRecipeDoctor(summary: Record<string, unknown>): string {
+  const details = Array.isArray(summary.diagnostic_details)
+    ? (summary.diagnostic_details as Array<Record<string, unknown>>)
+    : [];
+  const recommendations = Array.isArray(summary.recommendations)
+    ? (summary.recommendations as Array<Record<string, unknown>>)
+    : [];
+  const counts = { error: 0, info: 0, warning: 0 };
+  for (const detail of details) {
+    const severity = String(detail.severity ?? "info");
+    if (severity === "error" || severity === "warning" || severity === "info")
+      counts[severity] += 1;
+  }
+  const lines = [
+    `recipes doctor errors=${counts.error} warnings=${counts.warning} info=${counts.info} recommendations=${recommendations.length}`,
+  ];
+  for (const detail of details.slice(0, 8)) {
+    lines.push(
+      `${String(detail.severity ?? "info")} id=${String(detail.id ?? "root")} action=${compactPreview(detail.action, Limits.DOCTOR_ACTION_PREVIEW_CHARS) ?? "inspect"}`,
+    );
+  }
+  return `\n${lines.join("\n")}`;
+}
+
 function compactRecipeRegistry(summary: Record<string, unknown>): string {
   const active = Array.isArray(summary.active) ? summary.active.length : 0;
-  const shadowed = Array.isArray(summary.shadowed) ? summary.shadowed.length : 0;
+  const shadowed = Array.isArray(summary.shadowed)
+    ? summary.shadowed.length
+    : 0;
   const invalid = Array.isArray(summary.invalid) ? summary.invalid.length : 0;
-  const disabled = Array.isArray(summary.disabled) ? summary.disabled.length : 0;
+  const disabled = Array.isArray(summary.disabled)
+    ? summary.disabled.length
+    : 0;
   const diagnostics = Array.isArray(summary.diagnostics)
     ? summary.diagnostics.length
     : 0;
@@ -537,6 +663,23 @@ function assertMessageSenderBelongsToRun(
   }
 }
 
+async function routeBranchEnvelope(
+  stateDir: string,
+  runId: string,
+  recipient: string,
+  message: ActorMessages.ActorMessage,
+  _options: { source: "direct" | "room-multicast" },
+): Promise<Record<string, unknown>> {
+  const branchMessage = { ...message, to: recipient };
+  ActorRooms.appendBranchInboxMessage(
+    stateDir,
+    runId,
+    recipient,
+    branchMessage,
+  );
+  return AsyncRuns.sendRunMessage(runId, JSON.stringify(branchMessage));
+}
+
 function getRoomMulticastRecipients(
   message: ActorMessages.ActorMessage,
   run: string,
@@ -622,13 +765,21 @@ export function createSpawnToolDefinition<
           state_dir:
             typeof input.state_dir === "string" ? input.state_dir : undefined,
           ...(input.template !== undefined
-            ? { template: input.template as AsyncRuns.AsyncRunStartParams["template"] }
+            ? {
+                template:
+                  input.template as AsyncRuns.AsyncRunStartParams["template"],
+              }
             : {}),
           values: asRecord(input.values),
           ...(input.artifacts &&
           typeof input.artifacts === "object" &&
           !Array.isArray(input.artifacts)
-            ? { artifacts: input.artifacts as Record<string, string> }
+            ? {
+                artifacts: input.artifacts as Record<
+                  string,
+                  AsyncRuns.RunArtifactDeclaration
+                >,
+              }
             : {}),
         },
         ctx.cwd,
@@ -688,7 +839,9 @@ function assertRunAccessibleToContext(
   return status;
 }
 
-function assertRunExistsForActorMessage(runId: string): Record<string, unknown> {
+function assertRunExistsForActorMessage(
+  runId: string,
+): Record<string, unknown> {
   return AsyncRuns.getRunStatus(runId);
 }
 
@@ -729,11 +882,17 @@ export function createInspectToolDefinition<TContext = unknown>(
       const target = String(input.target ?? "");
       const view = String(input.view ?? "");
       if (target === "recipes" || target === "recipe-registry") {
-        if (view !== "status" && view !== "summary") {
-          throw new Error("inspect recipes supports view=status or view=summary.");
+        if (view !== "status" && view !== "summary" && view !== "doctor" && view !== "imports") {
+          throw new Error(
+            "inspect recipes supports view=status, view=summary, view=doctor, or view=imports.",
+          );
         }
         const discovered = RecipeDiscovery.discoverRecipeSources([
-          { root: deps.recipeRoot ?? Paths.getRecipeRoot(), defaultTool: true, mutableUsage: true },
+          {
+            root: deps.recipeRoot ?? Paths.getRecipeRoot(),
+            defaultTool: true,
+            mutableUsage: true,
+          },
           { root: deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot() },
         ]);
         const summary = RecipeDiscovery.summarizeDiscovery(discovered);
@@ -744,7 +903,11 @@ export function createInspectToolDefinition<TContext = unknown>(
               text: maybeJsonText(
                 summary,
                 input.verbose === true,
-                compactRecipeRegistry(summary),
+                view === "doctor"
+                  ? compactRecipeDoctor(summary)
+                  : view === "imports"
+                    ? compactRecipeImports(summary)
+                    : compactRecipeRegistry(summary),
               ),
             },
           ],
@@ -838,7 +1001,8 @@ export function createInspectToolDefinition<TContext = unknown>(
       if (address.kind === "room" && address.value && address.room) {
         const status = assertRunAccessibleToContext(address.value, ctx);
         const stateDir = String(status.state_dir ?? "");
-        if (!stateDir) throw new Error(`room:${address.value} has no run state directory.`);
+        if (!stateDir)
+          throw new Error(`room:${address.value} has no run state directory.`);
         if (view === "status") {
           const status = ActorRooms.getRoomStatus(stateDir, address.room);
           return {
@@ -859,7 +1023,7 @@ export function createInspectToolDefinition<TContext = unknown>(
           const previews = ActorRooms.readRoomMessagePreviews(
             stateDir,
             address.room,
-            Number(input.lines || 40),
+            Number(input.lines || Limits.DEFAULT_INSPECT_LINES),
           );
           return {
             content: [
@@ -879,7 +1043,7 @@ export function createInspectToolDefinition<TContext = unknown>(
           const messages = ActorRooms.readRoomMessages(
             stateDir,
             address.room,
-            Number(input.lines || 40),
+            Number(input.lines || Limits.DEFAULT_INSPECT_LINES),
           );
           return {
             content: [
@@ -927,21 +1091,29 @@ export function createInspectToolDefinition<TContext = unknown>(
             details: { roster },
           };
         }
-        throw new Error("inspect room:<run> supports view=status, view=messages, view=previews, view=roster, or view=contacts.");
+        throw new Error(
+          "inspect room:<run> supports view=status, view=messages, view=previews, view=roster, or view=contacts.",
+        );
       }
-      const runId = address.kind === "run" || address.kind === "branch" ? address.value : undefined;
+      const runId =
+        address.kind === "run" || address.kind === "branch"
+          ? address.value
+          : undefined;
       if (!runId)
         throw new Error(
           "inspect target must be run:<id>, branch:<run>/<branch>, coordinator, session:<id>, or tool:<name>.",
         );
       if (address.kind === "branch") {
-        if (view !== "mailbox") throw new Error("inspect branch:<run>/<branch> supports view=mailbox.");
+        if (view !== "mailbox")
+          throw new Error(
+            "inspect branch:<run>/<branch> supports view=mailbox.",
+          );
         const status = assertRunAccessibleToContext(runId, ctx);
         const branchInbox = ActorRooms.readBranchInboxDiagnostics(
           String(status.state_dir ?? ""),
           runId,
           target,
-          Number(input.lines || 40),
+          Number(input.lines || Limits.DEFAULT_INSPECT_LINES),
         );
         const messages = branchInbox.messages;
         return {
@@ -977,7 +1149,10 @@ export function createInspectToolDefinition<TContext = unknown>(
         }
         case "tail": {
           assertRunAccessibleToContext(runId, ctx);
-          const text = AsyncRuns.tailRun(runId, Number(input.lines || 40));
+          const text = AsyncRuns.tailRun(
+            runId,
+            Number(input.lines || Limits.DEFAULT_INSPECT_LINES),
+          );
           return {
             content: [{ type: "text" as const, text: `\n${text}` }],
             details: {},
@@ -987,7 +1162,7 @@ export function createInspectToolDefinition<TContext = unknown>(
           assertRunAccessibleToContext(runId, ctx);
           const messages = AsyncRuns.readRunEvents(
             runId,
-            Number(input.lines || 40),
+            Number(input.lines || Limits.DEFAULT_INSPECT_LINES),
           );
           return {
             content: [
@@ -1006,28 +1181,14 @@ export function createInspectToolDefinition<TContext = unknown>(
         case "artifacts":
         case "files": {
           const status = assertRunAccessibleToContext(runId, ctx);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: maybeJsonText(
-                  status,
-                  input.verbose === true,
-                  compactActorFiles(status),
-                ),
-              },
-            ],
-            details: status,
-          };
-        }
-        case "mailbox": {
-          const status = assertRunAccessibleToContext(runId, ctx);
-          const mailbox = asRecord(status.mailbox);
-          const messages = AsyncRuns.readRunInboxMessages(
-            runId,
-            Number(input.lines || 40),
+          const artifactManifest = AsyncRuns.resolveArtifactManifest(
+            status.artifacts as
+              | Record<string, AsyncRuns.RunArtifactDeclaration>
+              | undefined,
           );
-          const details = { mailbox, messages };
+          const details = artifactManifest
+            ? { ...status, artifact_manifest: artifactManifest }
+            : status;
           return {
             content: [
               {
@@ -1035,7 +1196,38 @@ export function createInspectToolDefinition<TContext = unknown>(
                 text: maybeJsonText(
                   details,
                   input.verbose === true,
-                  compactRunMailbox(String(status.run ?? runId), mailbox, messages),
+                  compactActorFiles(status),
+                ),
+              },
+            ],
+            details,
+          };
+        }
+        case "mailbox": {
+          const status = assertRunAccessibleToContext(runId, ctx);
+          const mailbox = asRecord(status.mailbox);
+          const normalizedMailbox = normalizeMailboxContracts(mailbox);
+          const messages = AsyncRuns.readRunInboxMessages(
+            runId,
+            Number(input.lines || Limits.DEFAULT_INSPECT_LINES),
+          );
+          const details = {
+            mailbox,
+            normalized_mailbox: normalizedMailbox,
+            messages,
+          };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  details,
+                  input.verbose === true,
+                  compactRunMailbox(
+                    String(status.run ?? runId),
+                    mailbox,
+                    messages,
+                  ),
                 ),
               },
             ],
@@ -1124,7 +1316,17 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       const address = ActorMessages.parseActorAddress(message.to);
       let result: Record<string, unknown>;
       if (address.kind === "run" && address.value) {
-        assertRunAccessibleToContext(address.value, ctx);
+        const status = assertRunAccessibleToContext(address.value, ctx);
+        const normalizedMailbox = normalizeMailboxContracts(
+          asRecord(status.mailbox),
+        );
+        const acceptedTypes = new Set(mailboxTypes(normalizedMailbox.accepts));
+        const advisoryWarnings =
+          acceptedTypes.size > 0 && !acceptedTypes.has(message.type)
+            ? [
+                `Message type ${message.type} is not declared in mailbox.accepts for run:${address.value}.`,
+              ]
+            : [];
         if (
           message.type === "control.stop" ||
           message.type === "control.cancel"
@@ -1132,15 +1334,31 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           result = AsyncRuns.cancelRun(address.value);
         } else if (message.type === "control.kill") {
           result = AsyncRuns.killRun(address.value);
+        } else if (message.type === "control.archive") {
+          result = AsyncRuns.archiveRun(address.value);
+        } else if (message.type === "control.prune") {
+          const body = asRecord(message.body);
+          result = AsyncRuns.pruneRun(address.value, {
+            preserveArtifacts:
+              body.preserve_artifacts === true ||
+              body.preserveArtifacts === true,
+          });
         } else {
           result = await AsyncRuns.sendRunMessage(
             address.value,
             messageBodyToRunLine(message),
           );
         }
+        if (advisoryWarnings.length > 0)
+          result = { ...result, warnings: advisoryWarnings };
       } else if (address.kind === "branch" && address.value) {
         const runId = address.value;
-        if (message.from) assertMessageSenderBelongsToRun(message, runId, `branch:${runId}/<branch>`);
+        if (message.from)
+          assertMessageSenderBelongsToRun(
+            message,
+            runId,
+            `branch:${runId}/<branch>`,
+          );
         const status = assertRunAccessibleToContext(runId, ctx);
         const stateDir = String(status.state_dir ?? "");
         if (stateDir && address.branch) {
@@ -1171,26 +1389,34 @@ export function createActorMessageToolDefinition<TContext = unknown>(
             }
           }
           ActorRooms.writeCommunicationSnapshot(stateDir, runId);
-          ActorRooms.appendBranchInboxMessage(stateDir, runId, message.to, message);
         }
-        result = await AsyncRuns.sendRunMessage(
-          address.value,
-          JSON.stringify(message),
+        result = await routeBranchEnvelope(
+          stateDir,
+          runId,
+          message.to,
+          message,
+          {
+            source: "direct",
+          },
         );
       } else if (address.kind === "room" && address.value && address.room) {
         const runId = address.value;
         assertMessageSenderBelongsToRun(message, runId, `room:${runId}`);
         const status = assertRunAccessibleToContext(runId, ctx);
         const stateDir = String(status.state_dir ?? "");
-        if (!stateDir) throw new Error(`${message.to} has no run state directory.`);
+        if (!stateDir)
+          throw new Error(`${message.to} has no run state directory.`);
         const recipients = getRoomMulticastRecipients(message, runId);
-        const roomResult = ActorRooms.appendRoomMessage(stateDir, address.room, message);
+        const roomResult = ActorRooms.appendRoomMessage(
+          stateDir,
+          address.room,
+          message,
+        );
         await Promise.all(
           recipients.map((recipient) =>
-            AsyncRuns.sendRunMessage(
-              runId,
-              JSON.stringify({ ...message, to: recipient }),
-            ),
+            routeBranchEnvelope(stateDir, runId, recipient, message, {
+              source: "room-multicast",
+            }),
           ),
         );
         result = {
@@ -1217,7 +1443,12 @@ export function createActorMessageToolDefinition<TContext = unknown>(
             ctx,
           );
         } catch (error) {
-          throw formatToolActorFailure(address.value, message, toolParams, error);
+          throw formatToolActorFailure(
+            address.value,
+            message,
+            toolParams,
+            error,
+          );
         }
         result = {
           invoked: true,
@@ -1251,7 +1482,11 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         result = AsyncRuns.appendRunOutboxEvent(sender.value, {
           body: message.body,
           correlation_id: message.correlation_id,
-          delivery: address.kind === "session" ? "followup" : undefined,
+          delivery:
+            message.metadata?.requires_response === true ||
+            address.kind === "session"
+              ? "followup"
+              : undefined,
           event: message.type,
           from: message.from,
           metadata: message.metadata,
@@ -1340,7 +1575,8 @@ export function createRuntimeToolDefinition(
       ctx: AsyncRunToolContext,
     ) {
       try {
-        if (cfg.sourcePath) RecipeUsage.recordRecipeLaunch(cfg.sourcePath);
+        if (cfg.sourcePath)
+          RecipeUsage.recordRecipeLaunch(cfg.sourcePath, new Date(), "tool");
         if (isAsyncRecipe) {
           const input = params as Record<string, unknown>;
           const { run_id, ...values } = input;
@@ -1364,7 +1600,10 @@ export function createRuntimeToolDefinition(
             ctx.cwd,
           );
           ActorRooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
-          ActorRooms.writeCommunicationSnapshot(meta.state_dir, String(meta.run));
+          ActorRooms.writeCommunicationSnapshot(
+            meta.state_dir,
+            String(meta.run),
+          );
           return {
             content: [
               { type: "text" as const, text: compactAsyncRunStatus(meta) },

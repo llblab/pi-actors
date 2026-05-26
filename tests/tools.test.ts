@@ -99,8 +99,12 @@ test("Inspect tool reads recipe registry summaries", async () => {
       ]),
     );
     await writeFile(
+      join(userRecipes, "base.json"),
+      JSON.stringify({ description: "Base", template: "echo base" }),
+    );
+    await writeFile(
       join(userRecipes, "user-tool.json"),
-      JSON.stringify({ description: "User", template: "echo user" }),
+      JSON.stringify({ description: "User", imports: { base: "base.json" }, template: "echo user" }),
     );
     await writeFile(join(userRecipes, "broken.json"), JSON.stringify({}));
     await writeFile(
@@ -120,9 +124,38 @@ test("Inspect tool reads recipe registry summaries", async () => {
       undefined,
     );
 
-    assert.match(result.content[0].text, /recipes active=3/);
+    assert.match(result.content[0].text, /recipes active=4/);
     assert.match(result.content[0].text, /invalid=1/);
-    assert.equal((result.details.active as unknown[]).length, 3);
+    assert.equal((result.details.active as unknown[]).length, 4);
+
+    const doctor = await definition.execute(
+      "call-inspect-recipes-doctor",
+      { target: "recipes", view: "doctor" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(doctor.content[0].text, /recipes doctor errors=\d+/);
+    assert.match(doctor.content[0].text, /action=/);
+    assert.equal(
+      (doctor.details.diagnostic_details as Array<Record<string, unknown>>).some(
+        (detail) => detail.severity === "error" && detail.id === "broken",
+      ),
+      true,
+    );
+
+    const imports = await definition.execute(
+      "call-inspect-recipes-imports",
+      { target: "recipes", view: "imports" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(imports.content[0].text, /recipe=user-tool alias=base from=base\.json/);
+    assert.deepEqual(
+      ((imports.details.active as Array<Record<string, unknown>>).find((entry) => entry.id === "user-tool")?.imports),
+      { base: "base.json" },
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -492,6 +525,16 @@ test(
       inbox.map((message) => message.to),
       [`branch:${meta.run}/builder`, `branch:${meta.run}/reviewer`],
     );
+    const builderInbox = JSON.parse(
+      (await readFile(join(meta.state_dir, "branches", "builder", "inbox.jsonl"), "utf8")).trim(),
+    );
+    const reviewerInbox = JSON.parse(
+      (await readFile(join(meta.state_dir, "branches", "reviewer", "inbox.jsonl"), "utf8")).trim(),
+    );
+    assert.equal(builderInbox.to, `branch:${meta.run}/builder`);
+    assert.equal(reviewerInbox.to, `branch:${meta.run}/reviewer`);
+    assert.equal(builderInbox.status, "queued");
+    assert.equal(reviewerInbox.status, "queued");
     const roomMessages = await readFile(
       join(meta.state_dir, "rooms", "main", "messages.jsonl"),
       "utf8",
@@ -847,9 +890,30 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
     assert.equal(event.to, "coordinator");
     assert.equal(event.from, "run:sender");
     assert.equal(event.type, "checkpoint.ready");
-    assert.equal(event.delivery, "followup");
+    assert.equal(event.delivery, "notify");
     assert.deepEqual(event.body, { ready: true });
     assert.deepEqual(event.metadata, { checkpoint: "ready" });
+
+    const followupResult = await definition.execute(
+      "call-coordinator-message-response-required",
+      {
+        from: "run:sender",
+        metadata: { requires_response: true, reason: "approval" },
+        summary: "Approval needed",
+        to: "coordinator",
+        type: "checkpoint.needs_input",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(followupResult.content[0].text, /to=coordinator/);
+    const outbox = (await readFile(join(stateDir, "outbox.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(outbox[1].delivery, "followup");
+    assert.deepEqual(outbox[1].metadata, { requires_response: true, reason: "approval" });
     await waitForFile(join(stateDir, "result.json"));
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
@@ -1069,37 +1133,59 @@ test("Actor message tool rejects session messages from unowned runs", async () =
 test("Spawn tool starts run actors with artifact metadata", async () => {
   const definition = createSpawnToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-"));
-  const stateDir = join(root, "spawned");
+  let stateDir = "";
   try {
+    const runId = `spawned-${process.pid}-${Date.now()}`;
     const result = await definition.execute(
       "call-spawn",
       {
-        artifacts: { report: "{state_dir}/report.md" },
-        as: "run:spawned",
-        state_dir: stateDir,
+        artifacts: {
+          missing: { path: "{state_dir}/missing.md", required: true },
+          report: { path: "{state_dir}/report.md", kind: "markdown", media_type: "text/markdown", required: true },
+        },
+        as: `run:${runId}`,
         template: `${process.execPath} -e "console.log('spawned')"`,
       },
       undefined,
       undefined,
       { cwd: process.cwd() },
     );
-    assert.match(result.content[0].text, /run=spawned/);
-    assert.deepEqual(result.details.artifacts, { report: `${stateDir}/report.md` });
+    stateDir = String(result.details.state_dir);
+    assert.match(result.content[0].text, /run=spawned-/);
+    assert.deepEqual(result.details.artifacts, {
+      missing: { path: `${stateDir}/missing.md`, required: true },
+      report: { path: `${stateDir}/report.md`, kind: "markdown", media_type: "text/markdown", required: true },
+    });
+    await writeFile(join(stateDir, "report.md"), "# Report\n");
+    const inspect = createInspectToolDefinition();
+    const artifacts = await inspect.execute(
+      "call-inspect-artifacts",
+      { target: `run:${runId}`, view: "artifacts", verbose: true },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+    assert.equal(artifacts.details.artifact_manifest.report.exists, true);
+    assert.equal(artifacts.details.artifact_manifest.report.size, 9);
+    assert.equal(typeof artifacts.details.artifact_manifest.report.sha256, "string");
+    assert.equal(artifacts.details.artifact_manifest.missing.exists, false);
+    assert.equal(artifacts.details.artifact_manifest.missing.required, true);
     const roster = JSON.parse(
       await readFile(join(stateDir, "rooms", "main", "roster.json"), "utf8"),
     );
-    assert.equal(roster["run:spawned"].role, "run");
+    assert.equal(roster[`run:${runId}`].role, "run");
     const snapshot = JSON.parse(
       await readFile(join(stateDir, "communication.json"), "utf8"),
     );
-    assert.equal(snapshot.root, "run:spawned");
-    assert.equal(snapshot.self, "run:spawned");
+    assert.equal(snapshot.root, `run:${runId}`);
+    assert.equal(snapshot.self, `run:${runId}`);
     assert.match(snapshot.updated_at, /\d{4}-\d{2}-\d{2}T/);
-    assert.equal(snapshot.rooms[0].address, "room:spawned");
-    assert.equal(snapshot.rooms[0].members[0].address, "run:spawned");
+    assert.equal(snapshot.rooms[0].address, `room:${runId}`);
+    assert.equal(snapshot.rooms[0].members[0].address, `run:${runId}`);
 
     await waitForFile(join(stateDir, "result.json"));
   } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1262,7 +1348,10 @@ test("Inspect tool reads run mailbox metadata", async () => {
     const meta = startRun(
       {
         run_id: "mailbox",
-        mailbox: { accepts: ["control.continue"], emits: ["run.done"] },
+        mailbox: {
+          accepts: ["control.continue", { type: "task.assign", requires_response: true, summary: "Assign work" }],
+          emits: [{ type: "run.done", level: "info" }],
+        },
         template: `${process.execPath} -e "console.log('ok')"`,
       },
       process.cwd(),
@@ -1275,11 +1364,14 @@ test("Inspect tool reads run mailbox metadata", async () => {
       undefined,
       undefined,
     );
-    assert.match(result.content[0].text, /accepts=control\.continue/);
+    assert.match(result.content[0].text, /accepts=control\.continue,task\.assign/);
     assert.match(result.content[0].text, /emits=run\.done/);
-    assert.deepEqual(result.details.mailbox, {
-      accepts: ["control.continue"],
-      emits: ["run.done"],
+    assert.deepEqual(result.details.normalized_mailbox, {
+      accepts: [
+        { type: "control.continue" },
+        { type: "task.assign", requires_response: true, summary: "Assign work" },
+      ],
+      emits: [{ type: "run.done", level: "info" }],
     });
     await waitForFile(join(stateDir, "result.json"));
   } finally {
@@ -1295,22 +1387,25 @@ test("Inspect tool reads run mailbox inbox entries", async () => {
   try {
     const meta = startRun(
       {
+        mailbox: { accepts: ["control.allowed"] },
         run_id: runId,
         template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
     stateDir = meta.state_dir;
-    await assert.rejects(
-      () => message.execute(
-        "call-run-mailbox-note",
-        { body: "queue me", to: `run:${runId}`, type: "control.note" },
-        undefined,
-        undefined,
-        undefined,
-      ),
-      /Run control FIFO not found/,
+    await writeFile(
+      join(stateDir, "run.json"),
+      `${JSON.stringify({ ...meta, control: { path: join(stateDir, "inbox.jsonl"), type: "mailbox" } }, null, 2)}\n`,
     );
+    const sent = await message.execute(
+      "call-run-mailbox-note",
+      { body: "queue me", to: `run:${runId}`, type: "control.note" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(String(sent.details.result.warnings?.[0]), /not declared in mailbox\.accepts/);
     const inspected = await inspect.execute(
       "call-inspect-run-mailbox-inbox",
       { target: `run:${runId}`, view: "mailbox" },

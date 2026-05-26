@@ -60,6 +60,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   let actorInspectorUnreadOnly = false;
   let actorInspectorRoomLimitPerRun = 12;
   let selectedInspectorSequence: number | undefined;
+  const actorInspectorReadKeys = new Set<string>();
   let recipeWatcherFailureNotified = false;
   const getRunOwnerId = (ctx: ExtensionContext): string =>
     ctx.sessionManager.getSessionId();
@@ -108,6 +109,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
                     branch: actorInspectorBranch,
                     mention: actorInspectorMention,
                     ownerId,
+                    readKeys: actorInspectorReadKeys,
                     roomLimitPerRun: actorInspectorRoomLimitPerRun,
                     unreadOnly: actorInspectorUnreadOnly,
                   },
@@ -414,6 +416,22 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
         ctx.ui.notify("Usage: /actors-inspect <number>", "warning");
         return;
       }
+      const previews = ActorInspectorTui.readActorInspectorPreviews(
+        RUN_STATE_ROOT,
+        actorInspectorRows,
+        {
+          channels: actorInspectorChannels,
+          currentRunOnly: true,
+          branch: actorInspectorBranch,
+          mention: actorInspectorMention,
+          ownerId: getRunOwnerId(ctx),
+          readKeys: actorInspectorReadKeys,
+          roomLimitPerRun: actorInspectorRoomLimitPerRun,
+          unreadOnly: actorInspectorUnreadOnly,
+        },
+      );
+      const preview = previews.find((item) => item.sequence === sequence);
+      if (preview) actorInspectorReadKeys.add(ActorInspectorTui.inspectorPreviewReadKey(preview));
       selectedInspectorSequence = sequence;
       communicationWidgetVisible = true;
       updateRunUi(ctx);

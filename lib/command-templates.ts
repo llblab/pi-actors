@@ -193,7 +193,7 @@ function getLeafCommandTemplateWarnings(
       ? "shell command strings"
       : "shell scripts";
     warnings.push(
-      `${config.label ?? command}: invokes ${command}; ${shellContent} are trusted executable content and are not sandboxed by command-template argv splitting.`,
+      `${config.label ?? command}: invokes ${command}; ${shellContent} are trusted executable content and are not sandboxed by command-template argv splitting. Mitigation: keep scripts local, reviewed, and parameterized with explicit placeholders.`,
     );
   }
   if (
@@ -201,7 +201,7 @@ function getLeafCommandTemplateWarnings(
     hasAnyFlag(args, ["-e", "--eval"])
   ) {
     warnings.push(
-      `${config.label ?? command}: invokes ${command} eval mode; code strings are trusted executable content and are not sandboxed.`,
+      `${config.label ?? command}: invokes ${command} eval mode; code strings are trusted executable content and are not sandboxed. Mitigation: prefer a checked-in script file or keep eval input fixed and reviewed.`,
     );
   }
   if (
@@ -209,7 +209,7 @@ function getLeafCommandTemplateWarnings(
     hasAnyFlag(args, ["-c", "-e"])
   ) {
     warnings.push(
-      `${config.label ?? command}: invokes ${command} code-eval mode; code strings are trusted executable content and are not sandboxed.`,
+      `${config.label ?? command}: invokes ${command} code-eval mode; code strings are trusted executable content and are not sandboxed. Mitigation: prefer a checked-in script file or keep eval input fixed and reviewed.`,
     );
   }
   if (
@@ -218,12 +218,12 @@ function getLeafCommandTemplateWarnings(
       hasRiskyPathArg(args))
   ) {
     warnings.push(
-      `${config.label ?? command}: removes filesystem paths; verify placeholders and paths before running trusted destructive commands.`,
+      `${config.label ?? command}: removes filesystem paths; verify placeholders and paths before running trusted destructive commands. Mitigation: constrain path placeholders and consider dry-run or explicit confirmation.`,
     );
   }
   if (["mv", "cp", "rsync"].includes(command) && hasRiskyPathArg(args)) {
     warnings.push(
-      `${config.label ?? command}: mutates broad filesystem paths; verify placeholders and paths before running trusted commands.`,
+      `${config.label ?? command}: mutates broad filesystem paths; verify placeholders and paths before running trusted commands. Mitigation: constrain path placeholders and prefer narrow source/destination paths.`,
     );
   }
   return warnings;

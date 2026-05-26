@@ -1,4 +1,17 @@
 #!/usr/bin/env node
+
+/**
+ * Multi-actor coordinator helper.
+ *
+ * This script is the local orchestration process behind packaged swarm and
+ * worker-pool recipes. It starts child actors, assigns work through room and
+ * branch mailboxes, records progress artifacts, and coordinates optional locker
+ * state without owning project-specific policy.
+ *
+ * Keep reusable coordination mechanics here; keep caller goals, prompts, model
+ * choices, and release/project policy in recipes or invocation arguments.
+ */
+
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";

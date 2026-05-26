@@ -7,6 +7,7 @@ import test from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 import {
+  inspectorPreviewReadKey,
   readActorInspectorPreviews,
   readActorInspectorRoster,
   renderInspectorItemView,
@@ -317,6 +318,8 @@ test("Actor inspector TUI filters previews by channel and mention", async () => 
       `${JSON.stringify({
         body: "private beta",
         from: "branch:demo/a",
+        id: "evt-beta",
+        metadata: { requires_response: true },
         received_at: "2026-01-01T00:00:01.000Z",
         to: "branch:demo/b",
         type: "chat.message",
@@ -328,6 +331,10 @@ test("Actor inspector TUI filters previews by channel and mention", async () => 
     const mention = readActorInspectorPreviews(root, 10, { mention: "beta" });
     assert.equal(mention.length, 1);
     assert.equal(mention[0].channel, "direct");
+    assert.equal(mention[0].event_id, "evt-beta");
+    assert.equal(mention[0].needs_response, true);
+    assert.match(renderInspectorWidget(mention, 80)?.[0] ?? "", /! a → b/);
+    assert.match(renderInspectorItemView(mention, 80, {}, { sequence: 1 })?.join("\n") ?? "", /needs_response\s+true/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -387,6 +394,14 @@ test("Actor inspector TUI reads branch inbox previews and filters unread branch 
         (preview) => preview.message_id,
       ),
       ["front-1", "back-1"],
+    );
+    const firstUnread = readActorInspectorPreviews(root, 10, { unreadOnly: true })[0];
+    assert.deepEqual(
+      readActorInspectorPreviews(root, 10, {
+        readKeys: [inspectorPreviewReadKey(firstUnread)],
+        unreadOnly: true,
+      }).map((preview) => preview.message_id),
+      ["back-1"],
     );
   } finally {
     await rm(root, { recursive: true, force: true });

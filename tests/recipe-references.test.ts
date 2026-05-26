@@ -354,8 +354,8 @@ test("Template recipes preserve mailbox declarations", async () => {
       JSON.stringify({
         imports: { base: "base.json" },
         mailbox: {
-          accepts: ["control.approve", "control.revise", 7],
-          emits: ["{base.defaults.message_type}", "run.done", false],
+          accepts: ["control.approve", { type: "control.revise", requires_response: true }, 7],
+          emits: ["{base.defaults.message_type}", { type: "run.done", level: "info" }, false],
         },
         template: "echo mailbox",
       }),
@@ -363,8 +363,8 @@ test("Template recipes preserve mailbox declarations", async () => {
 
     const config = readResolvedRecipeConfig(recipe)!;
     assert.deepEqual(config.mailbox, {
-      accepts: ["control.approve", "control.revise"],
-      emits: ["checkpoint.ready", "run.done"],
+      accepts: ["control.approve", { type: "control.revise", requires_response: true }],
+      emits: ["checkpoint.ready", { type: "run.done", level: "info" }],
     });
   } finally {
     await rm(root, { recursive: true, force: true });

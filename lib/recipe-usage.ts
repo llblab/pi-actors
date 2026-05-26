@@ -11,9 +11,14 @@ import { writeJsonAtomic } from "./file-state.ts";
 
 interface RecipeUsageRecord {
   calls?: number;
-  last_called?: string;
+  direct_calls?: number;
   fingerprint?: string;
+  last_called?: string;
+  launch_kind?: string;
   reset_at?: string;
+  reset_reason?: string;
+  spawn_calls?: number;
+  tool_calls?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,23 +45,45 @@ function getRecipeFingerprint(raw: Record<string, unknown>): string {
   return createHash("sha256").update(stableStringify(content)).digest("hex");
 }
 
-export function recordRecipeLaunch(path: string, now = new Date()): boolean {
+export type RecipeLaunchKind = "direct" | "spawn" | "tool";
+
+function launchCounterKey(
+  kind: RecipeLaunchKind,
+): "direct_calls" | "spawn_calls" | "tool_calls" {
+  return `${kind}_calls` as "direct_calls" | "spawn_calls" | "tool_calls";
+}
+
+export function recordRecipeLaunch(
+  path: string,
+  now = new Date(),
+  kind: RecipeLaunchKind = "direct",
+): boolean {
   if (!existsSync(path)) return false;
   try {
     const raw = JSON.parse(readFileSync(path, "utf8"));
     if (!isRecord(raw)) return false;
     const usage: RecipeUsageRecord = isRecord(raw.usage) ? raw.usage : {};
     const fingerprint = getRecipeFingerprint(raw);
-    const changed = typeof usage.fingerprint === "string" && usage.fingerprint !== fingerprint;
+    const changed =
+      typeof usage.fingerprint === "string" &&
+      usage.fingerprint !== fingerprint;
     const nowIso = now.toISOString();
+    const counterKey = launchCounterKey(kind);
     writeJsonAtomic(path, {
       ...raw,
       usage: {
         ...usage,
         calls: (changed ? 0 : normalizeCalls(usage.calls)) + 1,
+        [counterKey]: (changed ? 0 : normalizeCalls(usage[counterKey])) + 1,
         last_called: nowIso,
+        launch_kind: kind,
         fingerprint,
-        ...(changed ? { reset_at: nowIso } : {}),
+        ...(changed
+          ? {
+              reset_at: nowIso,
+              reset_reason: "recipe content fingerprint changed",
+            }
+          : {}),
       },
     });
     return true;

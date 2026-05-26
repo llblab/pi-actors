@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.22.5
+  version: 0.23.0
 ---
 
 # Actors (pi-actors)
@@ -84,7 +84,7 @@ Envelope fields:
 - Useful: `summary`, `body`, `from`, `reply_to`, `correlation_id`, `metadata`.
 - Addresses: `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `tool:<name>`, `coordinator`, `session:<id>`.
 - Room posts require `from` from the same run (`run:<run>` or `branch:<run>/<branch>`).
-- Standard termination messages: `control.stop`, `control.cancel`, `control.kill`.
+- Standard termination messages: `control.stop`, `control.cancel`, `control.kill`; terminal retention messages: `control.archive`, `control.prune`.
 
 Check `inspect view=mailbox` before domain-specific messages.
 
@@ -125,7 +125,7 @@ Actor inspector commands:
 - `/actors-inspector-filter all|room|direct|broadcast|unread|branch <name>|current-branch <name>|mention <text>`: narrow table previews without changing room/run state.
 - `/actors-inspect <number>`: open one visible row as a full-message view.
 
-The table is compact and optimistic by default: bounded body previews, capped noisy room rows, branch-local inbox previews, and an inline roster summary in the form `name/role` that wraps only when needed. Use `unread` for queued branch inbox work and `branch <name>` / `current-branch <name>` for one branch's room/direct/inbox traffic. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
+The table is compact and optimistic by default: bounded body previews, capped noisy room rows, branch-local inbox previews, stable event ids in selected-message details, and an inline roster summary in the form `name/role` that wraps only when needed. Use `unread` for queued branch inbox work and `branch <name>` / `current-branch <name>` for one branch's room/direct/inbox traffic. Rows with `metadata.requires_response=true` show a `!` attention marker. `/actors-inspect <number>` marks that row read for the current session filter. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
 
 Let terminal notifications arrive; avoid sleep-poll loops except during diagnosis.
 

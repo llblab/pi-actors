@@ -1,4 +1,17 @@
 #!/usr/bin/env node
+
+/**
+ * Recipe utility command bundle.
+ *
+ * This script provides small, deterministic helper subcommands used by packaged
+ * recipes: run summaries, operational snapshots, playlist generation, changelog
+ * extraction, artifact manifests/writes, actor-message envelopes, package
+ * summaries, and skill summaries.
+ *
+ * Keep outputs compact and machine-readable where possible because recipe-utils
+ * often feeds command-template pipelines and actor context directly.
+ */
+
 import {
   appendFileSync,
   existsSync,

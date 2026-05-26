@@ -218,6 +218,24 @@ test("Run observability suppresses duplicate outbox events after line counter re
   }
 });
 
+test("Run observability skips malformed outbox records", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-corrupt-outbox-"));
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    await writeFile(
+      join(root, "music", "outbox.jsonl"),
+      `{bad json\n${JSON.stringify({ id: "event-1", event: "player.track", summary: "Now playing", delivery: "followup" })}\n`,
+    );
+    const summary = summarizeRuns(root, "session-a");
+    const previous = new Map<string, number>();
+    const events = detectRunOutboxEvents(previous, summary);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].id, "event-1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Run observability detects terminal transitions", () => {
   const previous = new Map([["review", "running" as const]]);
   const transitions = detectRunTransitions(previous, {

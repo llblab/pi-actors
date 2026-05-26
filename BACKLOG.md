@@ -64,19 +64,19 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 
 - Priority: High.
 - Status: Done.
-- Goal: Provide one small reusable mailbox-consuming actor loop so recipe authors do not duplicate claim/handle/wake/poll logic.
+- Goal: Provide one small reusable mailbox-consuming actor loop so recipe authors do not duplicate claim/handle/status logic.
 - Why now: Long-lived actors and worker recipes are the natural center of `pi-actors`; a minimal helper consolidates behavior without adding a broker or scheduler DSL.
 - Files:
   - `lib/actor-loop.ts`.
-  - `scripts/actor-loop.mjs` only if a CLI wrapper is necessary.
 - Direction:
   - Support run inbox claiming, branch inbox claiming, handled/failed status transitions, bounded drains, duplicate-claim protection, and graceful stop-message detection.
   - Defer live wake subscription and polling wrappers until the canonical worker recipe needs them.
   - Keep policy out: no task selection, no model choice, no project prompts.
 - Acceptance:
-  - Concurrent wake and poll paths do not double-process messages.
   - Helper supports run inbox and branch inbox.
-  - A tiny demo/test actor uses mailbox-only control.
+  - Claim/handle/fail transitions are covered by tests.
+  - Duplicate branch claims do not double-process one message.
+  - Bounded drains stop on standard control messages.
 
 ### M-03 Canonical Worker Recipe Template
 

@@ -3,8 +3,8 @@
 /**
  * Template recipe validator CLI shim.
  *
- * Runtime logic lives in scripts/validate-recipe.ts and is compiled to
- * dist/scripts/validate-recipe.js for installed JS-only packages.
+ * Runtime logic lives in lib/validate-recipe.ts and is compiled to
+ * dist/lib/validate-recipe.js for installed JS-only packages.
  */
 
 import { existsSync } from "node:fs";
@@ -17,8 +17,8 @@ function packageRoot() {
 
 function mainModulePath() {
   const root = packageRoot();
-  const compiled = join(root, "dist", "scripts", "validate-recipe.js");
-  return existsSync(compiled) ? compiled : join(root, "scripts", "validate-recipe.ts");
+  const compiled = join(root, "dist", "lib", "validate-recipe.js");
+  return existsSync(compiled) ? compiled : join(root, "lib", "validate-recipe.ts");
 }
 
 const { validateRecipes } = await import(pathToFileURL(mainModulePath()).href);

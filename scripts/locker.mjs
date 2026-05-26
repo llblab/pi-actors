@@ -8,11 +8,13 @@
  */
 
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 function packageRoot() {
-  return dirname(dirname(fileURLToPath(import.meta.url)));
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const parent = dirname(scriptDir);
+  return basename(parent) === "dist" ? dirname(parent) : parent;
 }
 
 function mainModulePath() {

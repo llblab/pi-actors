@@ -9,6 +9,7 @@
 - `[Mailbox Loop]` Added initial run/branch mailbox claim-and-handle helpers plus branch inbox claiming support, failed-handler transitions, standard stop-message detection, bounded message drains, duplicate-claim coverage, and a packaged `actor-worker` demo recipe for canonical mailbox loops.
 - `[Scripts]` Added installed-package coverage proving the packaged `actor-worker` script uses compiled `dist` runtime modules instead of importing TypeScript from `node_modules`; `npm run build` now cleans stale `dist` output, mirrors packaged `scripts/`, `recipes/`, and `fixtures/` into `dist/`, and syntax-checks the built script entrypoints.
 - `[Packaging]` Exposed optional `pi.sourceExtensions` metadata pointing at the root TypeScript entrypoint while keeping Node-compatible `pi.extensions` on compiled `dist` output.
+- `[Context]` Clarified the project frame as an experimental self-evolution membrane for local agent capabilities, grounded in explicit actors, recipes, fixtures, skills, and inspectable state.
 - `[Protocol]` Added compact protocol fixtures for actor messages, mailbox contracts, run inbox records, room messages, and artifact manifests with regression coverage.
 - `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
 

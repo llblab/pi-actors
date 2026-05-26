@@ -11,6 +11,8 @@
 
 `pi-actors` is a local-first actor runtime and orchestrator for pi. It wraps trusted local programs, scripts, services, pipelines, and recipes as addressable actors that agents can `spawn`, control with typed `message` envelopes, and observe with `inspect`. It also persists user/agent-registered actor-control tools as recipe files under `~/.pi/agent/recipes`, giving agents durable operational muscle memory for launching and managing the local actor zoo.
 
+Treat this extension as an experimental self-evolution membrane for the agent harness: a way for agents that are not pretrained on local workflows to acquire, preserve, inspect, and refine operational capabilities through explicit local actors, recipes, fixtures, skills, and state rather than hidden assumptions. Keep that potential grounded in small, testable, operator-visible protocol slices.
+
 ## Topology
 
 - `/index.ts`: Minimal extension coordinator/composition root. It wires live pi ports and should avoid owning domain behavior.

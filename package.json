@@ -30,7 +30,7 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "pack:dry": "npm pack --dry-run",
     "validate": "npx tsc --noEmit && npm run build && npm run check && npm test && npm run pack:dry",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node --check scripts/*.mjs",
     "prepack": "npm run build"
   },
   "files": [

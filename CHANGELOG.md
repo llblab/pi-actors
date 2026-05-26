@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.24.1: Build Script Package Hygiene Hotfix
+
 - `[Backlog]` Added the next focused backlog set for recipe doctor remediation UX, actor worker v2, and dist package contract hardening.
 - `[Skills]` Clarified agent-governed promotion of successful transient actor patterns into durable local tools via `register_tool`, without UI buttons or automatic registration.
 

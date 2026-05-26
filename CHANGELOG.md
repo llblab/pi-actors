@@ -10,7 +10,7 @@
 - `[Scripts]` Added installed-package coverage proving the packaged `actor-worker` script uses compiled `dist` runtime modules instead of importing TypeScript from `node_modules`; `npm run build` now cleans stale `dist` output, mirrors packaged `scripts/`, `recipes/`, and `fixtures/` into `dist/`, and syntax-checks the built script entrypoints. The `actor-worker` executable is now a thin shim over compiled TypeScript entrypoint logic in `lib/actor-worker.ts`.
 - `[Packaging]` Exposed optional `pi.sourceExtensions` metadata pointing at the root TypeScript entrypoint while keeping Node-compatible `pi.extensions` on compiled `dist` output.
 - `[Context]` Clarified the project frame as an experimental self-evolution membrane for local agent capabilities, grounded in explicit actors, recipes, fixtures, skills, and inspectable state.
-- `[Protocol]` Added compact protocol fixtures for actor messages, mailbox contracts, run inbox records, room messages, and artifact manifests with regression coverage.
+- `[Protocol]` Added compact protocol fixtures for actor messages, mailbox contracts, run inbox/outbox records, room messages/rosters, run state, recipe summaries, and artifact manifests with regression coverage.
 - `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
 
 ## 0.23.0: Actor Manifests, Inspection, and Runtime Hygiene

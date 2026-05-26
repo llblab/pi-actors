@@ -18,7 +18,7 @@ function readFixture(name: string): unknown {
 
 test("protocol fixtures are valid JSON objects", () => {
   const files = readdirSync(fixtureRoot).filter((name) => name.endsWith(".json"));
-  assert.ok(files.length >= 5);
+  assert.ok(files.length >= 9);
   for (const file of files) {
     const value = readFixture(file);
     assert.equal(typeof value, "object", `${file} should be an object`);
@@ -48,6 +48,23 @@ test("mailbox contract fixture uses typed accepts and emits", () => {
     "awaiting_assignment",
     "actor.leave",
   ]);
+});
+
+test("run state and outbox event fixtures cover persisted run records", () => {
+  const runState = readFixture("run-state.json") as Record<string, unknown>;
+  const outbox = readFixture("run-outbox-event.json") as Record<string, unknown>;
+  assert.equal(runState.run, "demo");
+  assert.equal(runState.status, "running");
+  assert.equal(outbox.id, "event-001");
+  assert.equal(outbox.type, "task.result");
+});
+
+test("room roster and recipe summary fixtures cover discovery surfaces", () => {
+  const roster = readFixture("room-roster.json") as Record<string, unknown>;
+  const recipe = readFixture("recipe-summary.json") as Record<string, unknown>;
+  assert.deepEqual(Object.keys((roster.members as Record<string, unknown>) ?? {}), ["branch:demo/worker"]);
+  assert.equal(recipe.id, "actor-worker");
+  assert.equal(recipe.active, true);
 });
 
 test("artifact manifest fixture covers string and metadata declarations", () => {

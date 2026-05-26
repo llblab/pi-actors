@@ -99,7 +99,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-04 Protocol Contract Fixtures
 
 - Priority: Medium.
-- Status: In progress.
+- Status: Done.
 - Goal: Freeze the current protocol behavior with compact internal fixtures before further surface growth.
 - Why now: `spawn`, `message`, `inspect`, mailbox contracts, artifacts, rooms, and run indexes now have enough shape to merit regression fixtures; schemas should document reality, not invent a new standard.
 - Direction:

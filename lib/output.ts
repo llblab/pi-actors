@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { sanitizeFilePart } from "./identity.ts";
+import * as Limits from "./limits.ts";
 import * as Paths from "./paths.ts";
 
 export interface FormattedOutput {
@@ -15,9 +16,6 @@ export interface FormattedOutput {
   truncated: boolean;
   fullOutputPath?: string;
 }
-
-const MAX_OUTPUT_BYTES = 50 * 1024;
-const MAX_OUTPUT_LINES = 2_000;
 
 export function writeFullOutput(
   toolName: string,
@@ -70,10 +68,10 @@ export function truncateTailContent(content: string): {
   const lines = content.split("\n");
   const totalLines = lines.length;
   let output =
-    totalLines > MAX_OUTPUT_LINES
-      ? lines.slice(-MAX_OUTPUT_LINES).join("\n")
+    totalLines > Limits.TOOL_OUTPUT_MAX_LINES
+      ? lines.slice(-Limits.TOOL_OUTPUT_MAX_LINES).join("\n")
       : content;
-  output = trimToTailBytes(output, MAX_OUTPUT_BYTES);
+  output = trimToTailBytes(output, Limits.TOOL_OUTPUT_MAX_BYTES);
   const outputBytes = byteLength(output);
   const outputLines = output ? output.split("\n").length : 0;
   return {

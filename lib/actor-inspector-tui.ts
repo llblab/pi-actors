@@ -9,16 +9,19 @@ import * as path from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 import type { ActorMessage } from "./actor-messages.ts";
+import * as Limits from "./limits.ts";
 import * as Paths from "./paths.ts";
 
 export interface ActorInspectorPreview {
   body_preview?: string;
   branch?: string;
   channel: "broadcast" | "direct" | "room";
+  event_id?: string;
   from?: string;
   from_display?: string;
   inbox_status?: string;
   message_id?: string;
+  needs_response?: boolean;
   run: string;
   sequence?: number;
   summary?: string;
@@ -57,6 +60,7 @@ export interface ActorInspectorPreviewReadOptions {
   currentRunOnly?: boolean;
   channels?: ActorInspectorPreview["channel"][];
   mention?: string;
+  readKeys?: Iterable<string>;
   roomLimitPerRun?: number;
   unreadOnly?: boolean;
 }
@@ -86,7 +90,10 @@ function readJsonLines(file: string): Record<string, unknown>[] {
   }
 }
 
-function previewValue(value: unknown, maxLength = 320): string | undefined {
+function previewValue(
+  value: unknown,
+  maxLength = Limits.INSPECTOR_BODY_PREVIEW_CHARS,
+): string | undefined {
   if (value === undefined) return undefined;
   const text = typeof value === "string" ? value : JSON.stringify(value);
   const compact = text.replaceAll(/\s+/g, " ").trim();
@@ -118,6 +125,11 @@ function previewFromMessage(
   const summary =
     typeof message.summary === "string" ? message.summary : undefined;
   const body = asRecord(message.body);
+  const metadata = asRecord(message.metadata);
+  const eventId =
+    typeof message.id === "string" && message.id.trim()
+      ? message.id.trim()
+      : undefined;
   const display = from
     ? typeof body.display === "string" && body.display.trim()
       ? body.display.trim()
@@ -128,8 +140,10 @@ function previewFromMessage(
       ? { body_preview: previewValue(message.body) }
       : {}),
     channel: channelFor({ to }),
+    ...(eventId ? { event_id: eventId } : {}),
     ...(from ? { from } : {}),
     ...(display ? { from_display: display } : {}),
+    ...(metadata.requires_response === true ? { needs_response: true } : {}),
     run,
     ...(summary ? { summary } : {}),
     timestamp,
@@ -144,19 +158,29 @@ function readRoomRosterRecords(
 ): Record<string, Record<string, unknown>> {
   try {
     return JSON.parse(
-      fs.readFileSync(path.join(stateDir, "rooms", room, "roster.json"), "utf8"),
+      fs.readFileSync(
+        path.join(stateDir, "rooms", room, "roster.json"),
+        "utf8",
+      ),
     ) as Record<string, Record<string, unknown>>;
   } catch {
     return {};
   }
 }
 
-function memberDisplay(_address: string, member: Record<string, unknown>): string | undefined {
-  const display = typeof member.display === "string" ? member.display.trim() : "";
+function memberDisplay(
+  _address: string,
+  member: Record<string, unknown>,
+): string | undefined {
+  const display =
+    typeof member.display === "string" ? member.display.trim() : "";
   return display || undefined;
 }
 
-function readRoomDisplayNames(stateDir: string, room: string): Record<string, string> {
+function readRoomDisplayNames(
+  stateDir: string,
+  room: string,
+): Record<string, string> {
   const roster = readRoomRosterRecords(stateDir, room);
   return Object.fromEntries(
     Object.entries(roster).flatMap(([address, member]) => {
@@ -227,17 +251,28 @@ function readBranchInboxPreviews(
             const preview = previewFromMessage(
               run,
               message,
-              String(message.queued_at ?? message.received_at ?? message.timestamp ?? ""),
+              String(
+                message.queued_at ??
+                  message.received_at ??
+                  message.timestamp ??
+                  "",
+              ),
             );
             if (!preview) return undefined;
             return {
               ...preview,
               branch: entry.name,
-              ...(typeof message.id === "string" ? { message_id: message.id } : {}),
-              ...(typeof message.status === "string" ? { inbox_status: message.status } : {}),
+              ...(typeof message.id === "string"
+                ? { message_id: message.id }
+                : {}),
+              ...(typeof message.status === "string"
+                ? { inbox_status: message.status }
+                : {}),
             };
           })
-          .filter((preview): preview is ActorInspectorPreview => Boolean(preview)),
+          .filter((preview): preview is ActorInspectorPreview =>
+            Boolean(preview),
+          ),
       );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -276,8 +311,29 @@ function matchesOwner(stateDir: string, ownerId: string | undefined): boolean {
   return ownerId === undefined || getRunOwnerId(stateDir) === ownerId;
 }
 
-function isUnreadPreview(preview: ActorInspectorPreview): boolean {
-  return preview.inbox_status === "queued" || preview.inbox_status === undefined && preview.branch !== undefined;
+export function inspectorPreviewReadKey(
+  preview: ActorInspectorPreview,
+): string {
+  return [
+    preview.channel,
+    preview.run,
+    preview.branch ?? "",
+    preview.event_id ?? preview.message_id ?? preview.timestamp,
+    preview.from ?? "",
+    preview.to,
+    preview.type,
+  ].join("|");
+}
+
+function isUnreadPreview(
+  preview: ActorInspectorPreview,
+  readKeys?: Set<string>,
+): boolean {
+  if (readKeys?.has(inspectorPreviewReadKey(preview))) return false;
+  return (
+    preview.inbox_status === "queued" ||
+    (preview.inbox_status === undefined && preview.branch !== undefined)
+  );
 }
 
 function matchesBranchFilter(
@@ -298,7 +354,8 @@ function matchesPreviewFilter(
   if (options.channels?.length && !options.channels.includes(preview.channel)) {
     return false;
   }
-  if (options.unreadOnly && !isUnreadPreview(preview)) return false;
+  const readKeys = options.readKeys ? new Set(options.readKeys) : undefined;
+  if (options.unreadOnly && !isUnreadPreview(preview, readKeys)) return false;
   if (!matchesBranchFilter(preview, options.branch)) return false;
   const mention = options.mention?.trim().toLowerCase();
   if (!mention) return true;
@@ -421,6 +478,10 @@ function routeText(preview: ActorInspectorPreview): string {
   return `${actor} → ${actorName(preview.to)}`;
 }
 
+function attentionMarker(preview: ActorInspectorPreview): string {
+  return preview.needs_response ? "! " : "";
+}
+
 function style(
   styleFn: ((text: string) => string) | undefined,
   text: string,
@@ -435,7 +496,8 @@ function previewText(preview: ActorInspectorPreview): string {
 function propertyValue(value: unknown): string {
   if (value === undefined) return "";
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   return JSON.stringify(value);
 }
 
@@ -491,7 +553,7 @@ function renderCompactInspectorEntry(
   const contentWidth = Math.max(8, width - prefix.length - suffix.length);
   const sequence = String(preview.sequence ?? 0).padStart(sequenceWidth, " ");
   const sequencePrefix = `${sequence}${separator}`;
-  const route = routeText(preview);
+  const route = `${attentionMarker(preview)}${routeText(preview)}`;
   const routePadding = " ".repeat(
     Math.max(0, routeWidth - displayWidth(route)),
   );
@@ -537,14 +599,19 @@ function renderInspectorEntry(
   const contentWidth = Math.max(8, width - prefix.length - suffix.length);
   const sequence = String(preview.sequence ?? 0).padStart(sequenceWidth, " ");
   const sequencePrefix = `${sequence}${separator}`;
-  const route = routeText(preview);
+  const route = `${attentionMarker(preview)}${routeText(preview)}`;
   const type = preview.type;
   const summary = preview.summary?.trim() ?? "";
-  const body = preview.body_preview?.trim() || (!summary ? previewText(preview) : "-");
+  const body =
+    preview.body_preview?.trim() || (!summary ? previewText(preview) : "-");
   const visibleRoute = boundedLine(route, routeWidth);
   const visibleType = boundedLine(type, typeWidth);
-  const boundedRoutePadding = " ".repeat(Math.max(0, routeWidth - displayWidth(visibleRoute)));
-  const boundedTypePadding = " ".repeat(Math.max(0, typeWidth - displayWidth(visibleType)));
+  const boundedRoutePadding = " ".repeat(
+    Math.max(0, routeWidth - displayWidth(visibleRoute)),
+  );
+  const boundedTypePadding = " ".repeat(
+    Math.max(0, typeWidth - displayWidth(visibleType)),
+  );
   const leadParts = [
     style(styles.muted, sequencePrefix),
     style(styles.target, visibleRoute),
@@ -557,11 +624,20 @@ function renderInspectorEntry(
   let lead = `${sequencePrefix}${visibleRoute}${boundedRoutePadding}${separator}${visibleType}${boundedTypePadding}${separator}`;
   if (summary) {
     const visibleSummary = boundedLine(summary, summaryWidth);
-    const summaryPadding = " ".repeat(Math.max(0, summaryWidth - displayWidth(visibleSummary)));
+    const summaryPadding = " ".repeat(
+      Math.max(0, summaryWidth - displayWidth(visibleSummary)),
+    );
     lead += `${visibleSummary}${summaryPadding}${separator}`;
-    leadParts.push(style(styles.preview, visibleSummary), summaryPadding, separator);
+    leadParts.push(
+      style(styles.preview, visibleSummary),
+      summaryPadding,
+      separator,
+    );
   }
-  const visibleBody = boundedLine(body, Math.max(0, contentWidth - displayWidth(lead)));
+  const visibleBody = boundedLine(
+    body,
+    Math.max(0, contentWidth - displayWidth(lead)),
+  );
   const plain = `${lead}${visibleBody}`;
   const rendered = `${leadParts.join("")}${style(styles.preview, visibleBody)}`;
   const line = `${prefix}${padLine(plain, rendered, contentWidth, styles)}${suffix}`;
@@ -589,7 +665,10 @@ export function readActorInspectorRoster(
 
 function rosterRoleText(role: string | undefined): string | undefined {
   const roleLabel = role?.split(";")[0] ?? "";
-  const cleaned = roleLabel.replaceAll(/\s*\([^)]*\)\s*$/g, "").trim().toLowerCase();
+  const cleaned = roleLabel
+    .replaceAll(/\s*\([^)]*\)\s*$/g, "")
+    .trim()
+    .toLowerCase();
   if (!cleaned || cleaned === "actor") return undefined;
   return cleaned.replaceAll(/\s+/g, "-");
 }
@@ -603,7 +682,12 @@ function rosterMemberText(member: ActorInspectorRosterMember): string {
 
 function isRosterMemberActive(member: ActorInspectorRosterMember): boolean {
   const status = member.status?.trim().toLowerCase();
-  return !status || status === "present" || status === "active" || status === "running";
+  return (
+    !status ||
+    status === "present" ||
+    status === "active" ||
+    status === "running"
+  );
 }
 
 export function renderInspectorRosterLine(
@@ -633,12 +717,17 @@ export function renderInspectorRosterPanel(
   const flush = () => {
     const visible = boundedLine(plain, innerWidth);
     const line = visible === plain ? rendered : style(styles.muted, visible);
-    lines.push(` ${line}${" ".repeat(Math.max(0, innerWidth - displayWidth(visible)))} `);
+    lines.push(
+      ` ${line}${" ".repeat(Math.max(0, innerWidth - displayWidth(visible)))} `,
+    );
   };
   for (const token of tokens) {
     const separator = plain === prefix ? "" : ", ";
     const nextPlain = `${plain}${separator}${token.text}`;
-    const renderedToken = style(token.active ? styles.target : styles.muted, token.text);
+    const renderedToken = style(
+      token.active ? styles.target : styles.muted,
+      token.text,
+    );
     if (plain !== prefix && displayWidth(nextPlain) > innerWidth) {
       flush();
       plain = `  ${token.text}`;
@@ -664,12 +753,15 @@ export function renderInspectorItemView(
   const orderedKeys = [
     "channel",
     "run",
+    "event_id",
     "from",
     "from_display",
     "to",
     "type",
     "summary",
     "body_preview",
+    "message_id",
+    "needs_response",
     "timestamp",
     "stripe",
   ] as const;
@@ -678,7 +770,9 @@ export function renderInspectorItemView(
     .map((key) => [key, propertyValue(preview[key])] as const);
   const keyWidth = Math.max(1, ...entries.map(([key]) => displayWidth(key)));
   const sequenceText = String(preview.sequence ?? options.sequence);
-  const sequencePadding = " ".repeat(Math.max(0, keyWidth - displayWidth(sequenceText)));
+  const sequencePadding = " ".repeat(
+    Math.max(0, keyWidth - displayWidth(sequenceText)),
+  );
   const headerSeparator = "  ";
   const route = routeText(preview);
   const visibleRoute = boundedLine(
@@ -728,7 +822,9 @@ export function renderInspectorWidget(
     safeWidth - 1 - sequencePrefixWidth - fixedSeparatorsWidth,
   );
   const naturalRouteWidth = Math.max(
-    ...visible.map(({ preview }) => displayWidth(routeText(preview))),
+    ...visible.map(({ preview }) =>
+      displayWidth(`${attentionMarker(preview)}${routeText(preview)}`),
+    ),
   );
   const naturalTypeWidth = Math.max(
     ...visible.map(({ preview }) => displayWidth(preview.type)),
@@ -741,13 +837,19 @@ export function renderInspectorWidget(
     naturalTypeWidth,
     Math.max(4, Math.floor(availableForColumns * 0.25)),
   );
-  const messageWidth = Math.max(0, availableForColumns - routeWidth - typeWidth);
+  const messageWidth = Math.max(
+    0,
+    availableForColumns - routeWidth - typeWidth,
+  );
   const summaryWidths = visible
     .map(({ preview }) => preview.summary?.trim())
     .filter((summary): summary is string => Boolean(summary))
     .map((summary) => displayWidth(summary));
   const summaryWidth = summaryWidths.length
-    ? Math.min(Math.max(...summaryWidths), Math.max(1, Math.floor(messageWidth * 0.5)))
+    ? Math.min(
+        Math.max(...summaryWidths),
+        Math.max(1, Math.floor(messageWidth * 0.5)),
+      )
     : 0;
   for (const { preview, stripe } of visible) {
     lines.push(

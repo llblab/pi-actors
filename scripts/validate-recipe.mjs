@@ -1,4 +1,17 @@
 #!/usr/bin/env -S node --experimental-strip-types
+
+/**
+ * Template recipe validator CLI.
+ *
+ * This script validates one recipe file or a recipe directory using the same
+ * recipe-reference parser and import resolver that the extension runtime uses.
+ * It supports source-tree TypeScript during development and compiled dist
+ * modules when installed from npm.
+ *
+ * Keep it read-only: validation should report parse/import/schema problems
+ * without registering tools, launching runs, or mutating user recipes.
+ */
+
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";

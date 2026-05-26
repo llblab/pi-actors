@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.23.0: Actor Manifests, Inspection, and Runtime Hygiene
+
+- `[Tools]` Unified branch-envelope routing for direct branch messages and selected-recipient room multicast so both paths persist the same branch-local inbox shape before dispatching through the parent run mailbox.
+- `[Async Runs]` Added attention semantics for coordinator-bound actor messages: `metadata.requires_response=true` now produces a follow-up while ordinary coordinator progress messages default to notification-level delivery.
+- `[Registry]` Added `inspect target=recipes view=doctor` as an intentional recipe health surface with compact severity/action counts and structured verbose diagnostics.
+- `[Async Runs]` Added artifact manifest resolution for string and object artifact declarations, including `exists`, `size`, `sha256`, and missing required artifact visibility in artifact inspection.
+- `[Async Runs]` Added explicit terminal run retention controls via `control.archive` and `control.prune`, with active-run fail-closed behavior and optional artifact preservation during prune.
+- `[Inspector]` Added stable event ids, needs-response markers, and session-local read markers to actor inspector previews and selected-item details.
+- `[Registry]` Suppressed routine trusted `bash` wrapper diagnostics from startup warning notifications while keeping them available through recipe diagnostics surfaces.
+- `[Async Runs]` Added a rebuildable run-state index for run listing and observability discovery, with corrupt-index fallback to recursive scan and nested-run-safe state directory entries.
+- `[Testing]` Added `npm run conformance` for a compact CI-ready protocol conformance runner covering recipes, registry, spawn lifecycle, messaging, rooms, branch inboxes, ownership, artifacts, and attention semantics.
+- `[Mailbox]` Added backward-compatible typed mailbox contracts with normalized inspection and advisory warnings for undeclared run message types.
+- `[Output]` Centralized inspect, preview, and tool-output size limits so bounded output governance is shared across tools, room previews, and the actor inspector.
+- `[Registry]` Added explicit mitigation guidance to command-template trust-boundary warnings for shells, eval modes, and broad filesystem mutation.
+- `[Scripts]` Added top-of-file descriptions to packaged helper scripts so their purpose, boundaries, and policy ownership are clear when opened directly.
+- `[Rooms]` Added room compaction metadata with dropped count, configured maximum, and first/last kept timestamps exposed through room status inspection.
+- `[Recipes]` Improved usage telemetry with launch-kind counters (`tool`, `spawn`, `direct`) and explicit reset reasons when recipe content fingerprints change.
+- `[Inspect]` Added `inspect target=recipes view=imports` to summarize recipe import aliases and source references for debugging recipe composition.
 
 ## 0.22.5: CI Stability Hotfix
 

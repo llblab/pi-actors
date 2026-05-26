@@ -493,6 +493,7 @@ export function summarizeDiscovery(
         disabled: entry.disabled,
         invalid: entry.invalid,
         shadows: entry.shadows,
+        ...(entry.config?.imports ? { imports: entry.config.imports } : {}),
         ...(recipeUsage(entry.config)
           ? { usage: recipeUsage(entry.config) }
           : {}),

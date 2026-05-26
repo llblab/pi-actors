@@ -26,9 +26,21 @@ export interface TemplateRecipeImportBinding {
 
 export type TemplateRecipeImport = string | TemplateRecipeImportBinding;
 
+export type TemplateRecipeMailboxEntry =
+  | string
+  | {
+      type: string;
+      body_schema?: unknown;
+      ack?: boolean | string;
+      idempotency?: string;
+      requires_response?: boolean;
+      level?: string;
+      summary?: string;
+    };
+
 export interface TemplateRecipeMailbox {
-  accepts?: string[];
-  emits?: string[];
+  accepts?: TemplateRecipeMailboxEntry[];
+  emits?: TemplateRecipeMailboxEntry[];
 }
 
 export interface TemplateRecipeDefinition {
@@ -834,14 +846,18 @@ export function readResolvedRecipeConfig(
             ...(Array.isArray(substituted.mailbox.accepts)
               ? {
                   accepts: substituted.mailbox.accepts.filter(
-                    (value): value is string => typeof value === "string",
+                    (value): value is TemplateRecipeMailboxEntry =>
+                      typeof value === "string" ||
+                      (isRecord(value) && typeof value.type === "string"),
                   ),
                 }
               : {}),
             ...(Array.isArray(substituted.mailbox.emits)
               ? {
                   emits: substituted.mailbox.emits.filter(
-                    (value): value is string => typeof value === "string",
+                    (value): value is TemplateRecipeMailboxEntry =>
+                      typeof value === "string" ||
+                      (isRecord(value) && typeof value.type === "string"),
                   ),
                 }
               : {}),

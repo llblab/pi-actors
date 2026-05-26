@@ -98,9 +98,27 @@ export function createAutoToolsRuntime(
     runtimeTools.add(cfg.name);
     runtimeToolFingerprints.set(cfg.name, fingerprint);
   }
+  function isStartupActionableRegistryWarning(warning: string): boolean {
+    if (
+      warning.includes("invokes bash;") &&
+      warning.includes("trusted executable content")
+    )
+      return false;
+    if (
+      warning.includes("invokes bash;") &&
+      warning.includes("shell scripts are trusted executable content")
+    )
+      return false;
+    return true;
+  }
+
   function formatRecipeToolWarnings(warnings: string[]): string {
-    const shadowed = warnings.filter((warning) => warning.includes(" shadows "));
-    const skipped = warnings.filter((warning) => warning.includes(" could not be exposed as a tool:"));
+    const shadowed = warnings.filter((warning) =>
+      warning.includes(" shadows "),
+    );
+    const skipped = warnings.filter((warning) =>
+      warning.includes(" could not be exposed as a tool:"),
+    );
     const other = warnings.filter(
       (warning) => !shadowed.includes(warning) && !skipped.includes(warning),
     );
@@ -122,7 +140,8 @@ export function createAutoToolsRuntime(
   function loadTools(ctx: RuntimeContext) {
     const warnings: string[] = [];
     const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
-    const packagedRecipeRoot = deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot();
+    const packagedRecipeRoot =
+      deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot();
     const migration = RecipeMigration.migrateLegacyToolRegistry({
       configPath: deps.configPath,
       recipeRoot,
@@ -130,9 +149,13 @@ export function createAutoToolsRuntime(
     });
     warnings.push(...migration.warnings);
     if (migration.conflicts.length > 0)
-      warnings.push(`Recipe migration conflicts: ${migration.conflicts.join(", ")}`);
+      warnings.push(
+        `Recipe migration conflicts: ${migration.conflicts.join(", ")}`,
+      );
     if (migration.invalid.length > 0)
-      warnings.push(`Recipe migration invalid entries: ${migration.invalid.join(", ")}`);
+      warnings.push(
+        `Recipe migration invalid entries: ${migration.invalid.join(", ")}`,
+      );
     const discovered = RecipeDiscovery.discoverRecipeSources([
       { root: recipeRoot, defaultTool: true, mutableUsage: true },
       { root: packagedRecipeRoot },
@@ -158,8 +181,9 @@ export function createAutoToolsRuntime(
       }
       registerRuntimeTool(cfg);
     }
-    if (warnings.length > 0) {
-      notify(ctx, formatRecipeToolWarnings(warnings), "warning");
+    const startupWarnings = warnings.filter(isStartupActionableRegistryWarning);
+    if (startupWarnings.length > 0) {
+      notify(ctx, formatRecipeToolWarnings(startupWarnings), "warning");
     }
   }
   return {

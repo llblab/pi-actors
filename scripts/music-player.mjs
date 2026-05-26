@@ -1,4 +1,17 @@
 #!/usr/bin/env node
+
+/**
+ * Packaged local music-player actor helper.
+ *
+ * This script backs the standard music-player recipe. It scans local music
+ * sources, builds playback queues, launches an available backend player, and
+ * consumes run-mailbox control messages such as play, pause, next, previous,
+ * stop, and status.
+ *
+ * Keep the helper focused on one maintained player actor implementation; recipe
+ * metadata and invocation arguments choose source paths and backend behavior.
+ */
+
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -156,7 +169,9 @@ function windowsMediaPlayerExecutable() {
   const roots = [
     process.env.ProgramFiles,
     process.env["ProgramFiles(x86)"],
-    process.env.SystemDrive ? join(process.env.SystemDrive, "Program Files") : undefined,
+    process.env.SystemDrive
+      ? join(process.env.SystemDrive, "Program Files")
+      : undefined,
     process.env.SystemDrive
       ? join(process.env.SystemDrive, "Program Files (x86)")
       : undefined,
@@ -728,7 +743,11 @@ function startControlLoop(ctx) {
   try {
     watcher = watch(ctx.stateDir, { persistent: false }, (_eventType, file) => {
       const name = file ? String(file) : "";
-      if (!name || name === basename(ctx.inboxFile) || name === basename(runtimeWakeFile(ctx))) {
+      if (
+        !name ||
+        name === basename(ctx.inboxFile) ||
+        name === basename(runtimeWakeFile(ctx))
+      ) {
         dirty = true;
       }
     });

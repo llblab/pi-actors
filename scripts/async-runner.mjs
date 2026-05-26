@@ -64,22 +64,27 @@ function event(name, data = {}) {
     `${JSON.stringify({ event: name, ts: new Date().toISOString(), ...data })}\n`,
   );
 }
+
 function quoteCommandDetailPart(value) {
   if (value === "") return "''";
   if (/^[A-Za-z0-9_/:=.,@%+\-]+$/.test(value)) return value;
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
+
 function formatCommandDetail(command, args) {
   return [command, ...args].map(quoteCommandDetailPart).join(" ");
 }
+
 function summarizeCommandDetail(commandDetail) {
   return commandDetail.length > 160
     ? `${commandDetail.slice(0, 157)}...`
     : commandDetail;
 }
+
 function getCommandDoneDelivery(result) {
   return result.code !== 0 || activeSubagents > 0 ? "followup" : "log";
 }
+
 function outbox(name, summary, data = {}, delivery = "log", level = "info") {
   appendFileSync(
     outboxPath,
@@ -102,6 +107,7 @@ function progress(phase, extra = {}) {
 let activeSubagents = 0;
 let completedSubagents = 0;
 const subagentFailures = [];
+
 function progressRunning() {
   progress("running", {
     activeSubagents,

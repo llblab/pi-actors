@@ -178,6 +178,7 @@ test("Command templates detect high-risk trusted executable shapes", () => {
   assert.match(warnings[1], /eval/);
   assert.match(warnings[2], /code-eval/);
   assert.match(warnings[3], /removes filesystem paths/);
+  assert.equal(warnings.every((warning) => /Mitigation:/.test(warning)), true);
 
   assert.match(
     getCommandTemplateWarnings("bash -lc {script}").join("\n"),

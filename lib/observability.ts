@@ -144,7 +144,7 @@ function getUpdatedAt(status: Record<string, unknown>): string | undefined {
       : undefined;
 }
 
-function listRunStateDirs(
+function scanRunStateDirs(
   stateRoot: string,
   depth = 0,
   seen = new Set<string>(),
@@ -163,7 +163,7 @@ function listRunStateDirs(
     const child = join(stateRoot, entry.name);
     if (existsSync(join(child, "run.json"))) result.push(child);
     if (depth + 1 < RUN_STATE_DISCOVERY_MAX_DEPTH)
-      result.push(...listRunStateDirs(child, depth + 1, seen));
+      result.push(...scanRunStateDirs(child, depth + 1, seen));
   }
   return result;
 }
@@ -226,7 +226,10 @@ export function summarizeRuns(
       total: 0,
     };
   }
-  const runs = listRunStateDirs(stateRoot)
+  const runs = (
+    AsyncRuns.readRunStateIndex(stateRoot)?.map((entry) => entry.state_dir) ??
+    scanRunStateDirs(stateRoot)
+  )
     .map((stateDir) => observeRun(stateDir))
     .filter((run): run is RunObservation => Boolean(run))
     .filter((run) => ownerId === undefined || run.ownerId === ownerId)
@@ -331,7 +334,10 @@ function summarizeRunsWithoutSubagents(
       runs: [],
       total: 0,
     };
-  const runs = listRunStateDirs(stateRoot)
+  const runs = (
+    AsyncRuns.readRunStateIndex(stateRoot)?.map((entry) => entry.state_dir) ??
+    scanRunStateDirs(stateRoot)
+  )
     .map((stateDir) => observeRun(stateDir))
     .filter((run): run is RunObservation => Boolean(run))
     .filter((run) => ownerId === undefined || run.ownerId === ownerId)

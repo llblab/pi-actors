@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import * as path from "node:path";
 
 import type { ActorMessage } from "./actor-messages.ts";
+import * as Limits from "./limits.ts";
 import { notifyRuntimeWake } from "./runtime-notifier.ts";
 
 const STATE_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
@@ -49,10 +50,19 @@ export interface RoomMessagePreview {
   type: string;
 }
 
+export interface RoomCompactionInfo {
+  compacted_at: string;
+  dropped_count: number;
+  first_kept_at?: string;
+  last_kept_at?: string;
+  max_messages: number;
+}
+
 export interface RoomStatus {
   room: string;
   message_count: number;
   roster_count: number;
+  compaction?: RoomCompactionInfo;
   last_message_at?: string;
   last_message_from?: string;
   last_message_summary?: string;
@@ -105,7 +115,10 @@ function branchInboxFile(stateDir: string, branch: string): string {
   return path.join(stateDir, "branches", branch, "inbox.jsonl");
 }
 
-function branchIdFromAddress(address: string | undefined, run: string): string | undefined {
+function branchIdFromAddress(
+  address: string | undefined,
+  run: string,
+): string | undefined {
   if (!address) return undefined;
   const match = new RegExp(`^branch:${run}/(.+)$`).exec(address);
   return match?.[1];
@@ -119,7 +132,11 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function acquireStateLock(parentDir: string, name: string, label: string): () => void {
+function acquireStateLock(
+  parentDir: string,
+  name: string,
+  label: string,
+): () => void {
   fs.mkdirSync(parentDir, { recursive: true });
   const lockDir = path.join(parentDir, name);
   const started = Date.now();
@@ -150,11 +167,19 @@ function acquireStateLock(parentDir: string, name: string, label: string): () =>
 }
 
 function acquireRoomLock(stateDir: string, room: string): () => void {
-  return acquireStateLock(roomDir(stateDir, room), ".append.lock", `Room append ${room}`);
+  return acquireStateLock(
+    roomDir(stateDir, room),
+    ".append.lock",
+    `Room append ${room}`,
+  );
 }
 
 function acquireBranchInboxLock(stateDir: string, branch: string): () => void {
-  return acquireStateLock(path.dirname(branchInboxFile(stateDir, branch)), ".inbox.lock", `Branch inbox ${branch}`);
+  return acquireStateLock(
+    path.dirname(branchInboxFile(stateDir, branch)),
+    ".inbox.lock",
+    `Branch inbox ${branch}`,
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -201,7 +226,10 @@ function positiveEnvInt(name: string, fallback: number): number {
 }
 
 function roomMaxMessages(): number {
-  return positiveEnvInt("PI_ACTORS_ROOM_MAX_MESSAGES", DEFAULT_ROOM_MAX_MESSAGES);
+  return positiveEnvInt(
+    "PI_ACTORS_ROOM_MAX_MESSAGES",
+    DEFAULT_ROOM_MAX_MESSAGES,
+  );
 }
 
 function snapshotMinIntervalMs(): number {
@@ -225,8 +253,22 @@ function compactRoomMessages(stateDir: string, room: string): void {
   if (lines.length <= maxMessages) return;
   const kept = lines.slice(-maxMessages);
   fs.writeFileSync(file, `${kept.join("\n")}\n`);
+  const keptMessages = kept.flatMap((line) => {
+    try {
+      return [JSON.parse(line) as RoomTimelineEntry];
+    } catch {
+      return [];
+    }
+  });
   writeJsonFile(path.join(roomDir(stateDir, room), "compaction.json"), {
     compacted_at: new Date().toISOString(),
+    dropped_count: lines.length - kept.length,
+    ...(keptMessages[0]?.received_at
+      ? { first_kept_at: keptMessages[0].received_at }
+      : {}),
+    ...(keptMessages.at(-1)?.received_at
+      ? { last_kept_at: keptMessages.at(-1)?.received_at }
+      : {}),
     max_messages: maxMessages,
   });
 }
@@ -242,7 +284,13 @@ function readJsonlLineCount(file: string): number {
     let count = 0;
     let lastByte: number | undefined;
     while (position < stat.size) {
-      const bytesRead = fs.readSync(fd, chunk, 0, Math.min(chunkSize, stat.size - position), position);
+      const bytesRead = fs.readSync(
+        fd,
+        chunk,
+        0,
+        Math.min(chunkSize, stat.size - position),
+        position,
+      );
       if (bytesRead <= 0) break;
       position += bytesRead;
       for (let index = 0; index < bytesRead; index += 1) {
@@ -299,7 +347,10 @@ export function readRoomRoster(
   stateDir: string,
   room: string,
 ): Record<string, RoomMember> {
-  return readJsonFile<Record<string, RoomMember>>(rosterFile(stateDir, room), {});
+  return readJsonFile<Record<string, RoomMember>>(
+    rosterFile(stateDir, room),
+    {},
+  );
 }
 
 function writeRoomRoster(
@@ -353,29 +404,54 @@ function updateRosterForMessage(
   if (!message.from) return roster;
   const body = asRecord(message.body);
   const current = roster[message.from];
-  const next = message.type === "actor.leave"
-    ? {
-        address: message.from,
-        joined_at: current?.joined_at ?? receivedAt,
-        last_seen: receivedAt,
-        ...(current?.caps !== undefined ? { caps: current.caps } : {}),
-        ...(current?.claim !== undefined ? { claim: current.claim } : {}),
-        ...(current?.display !== undefined ? { display: current.display } : {}),
-        ...(current?.parent !== undefined ? { parent: current.parent } : {}),
-        ...(current?.role !== undefined ? { role: current.role } : { role: "actor" }),
-        status: String(body.status ?? "left"),
-      }
-    : {
-        address: message.from,
-        joined_at: current?.joined_at ?? receivedAt,
-        last_seen: receivedAt,
-        ...(body.caps !== undefined ? { caps: body.caps } : current?.caps !== undefined ? { caps: current.caps } : {}),
-        ...(body.claim !== undefined ? { claim: body.claim } : current?.claim !== undefined ? { claim: current.claim } : {}),
-        ...(body.display !== undefined ? { display: body.display } : current?.display !== undefined ? { display: current.display } : {}),
-        ...(body.parent !== undefined ? { parent: body.parent } : current?.parent !== undefined ? { parent: current.parent } : {}),
-        ...(body.role !== undefined ? { role: body.role } : current?.role !== undefined ? { role: current.role } : { role: "actor" }),
-        status: String(body.status ?? current?.status ?? "present"),
-      };
+  const next =
+    message.type === "actor.leave"
+      ? {
+          address: message.from,
+          joined_at: current?.joined_at ?? receivedAt,
+          last_seen: receivedAt,
+          ...(current?.caps !== undefined ? { caps: current.caps } : {}),
+          ...(current?.claim !== undefined ? { claim: current.claim } : {}),
+          ...(current?.display !== undefined
+            ? { display: current.display }
+            : {}),
+          ...(current?.parent !== undefined ? { parent: current.parent } : {}),
+          ...(current?.role !== undefined
+            ? { role: current.role }
+            : { role: "actor" }),
+          status: String(body.status ?? "left"),
+        }
+      : {
+          address: message.from,
+          joined_at: current?.joined_at ?? receivedAt,
+          last_seen: receivedAt,
+          ...(body.caps !== undefined
+            ? { caps: body.caps }
+            : current?.caps !== undefined
+              ? { caps: current.caps }
+              : {}),
+          ...(body.claim !== undefined
+            ? { claim: body.claim }
+            : current?.claim !== undefined
+              ? { claim: current.claim }
+              : {}),
+          ...(body.display !== undefined
+            ? { display: body.display }
+            : current?.display !== undefined
+              ? { display: current.display }
+              : {}),
+          ...(body.parent !== undefined
+            ? { parent: body.parent }
+            : current?.parent !== undefined
+              ? { parent: current.parent }
+              : {}),
+          ...(body.role !== undefined
+            ? { role: body.role }
+            : current?.role !== undefined
+              ? { role: current.role }
+              : { role: "actor" }),
+          status: String(body.status ?? current?.status ?? "present"),
+        };
   roster[message.from] = next;
   if (shouldWriteRoomRosterMember(stateDir, room, current, next)) {
     writeRoomRoster(stateDir, room, roster);
@@ -401,7 +477,8 @@ function readBranchInboxFile(
   limit = 40,
 ): BranchInboxReadResult {
   const branch = branchIdFromAddress(address, run);
-  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  if (!branch)
+    throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
   try {
     const lines = readJsonlTailLines(branchInboxFile(stateDir, branch), limit);
     const messages: BranchInboxRecord[] = [];
@@ -415,7 +492,8 @@ function readBranchInboxFile(
     }
     return { corrupted, messages };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { corrupted: 0, messages: [] };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { corrupted: 0, messages: [] };
     throw error;
   }
 }
@@ -426,7 +504,8 @@ function readAllBranchInboxLines(
   address: string,
 ): Array<{ raw: string } | { message: BranchInboxRecord }> {
   const branch = branchIdFromAddress(address, run);
-  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  if (!branch)
+    throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
   try {
     const content = fs.readFileSync(branchInboxFile(stateDir, branch), "utf8");
     return content
@@ -464,7 +543,9 @@ export function readBranchInboxDiagnostics(
 }
 
 export function getBranchInboxTerminalRetainLimit(): number {
-  const value = Number(process.env.PI_ACTORS_BRANCH_INBOX_TERMINAL_RETAINED ?? "");
+  const value = Number(
+    process.env.PI_ACTORS_BRANCH_INBOX_TERMINAL_RETAINED ?? "",
+  );
   return Number.isInteger(value) && value >= 0
     ? value
     : DEFAULT_BRANCH_INBOX_TERMINAL_RETAINED;
@@ -490,7 +571,8 @@ export function appendBranchInboxMessage(
   message: ActorMessage,
 ): void {
   const branch = branchIdFromAddress(address, run);
-  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  if (!branch)
+    throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
   const releaseLock = acquireBranchInboxLock(stateDir, branch);
   try {
     fs.writeFileSync(
@@ -516,7 +598,8 @@ export function updateBranchInboxMessageStatus(
   metadata: Record<string, unknown> = {},
 ): boolean {
   const branch = branchIdFromAddress(address, run);
-  if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  if (!branch)
+    throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
   const releaseLock = acquireBranchInboxLock(stateDir, branch);
   try {
     const file = branchInboxFile(stateDir, branch);
@@ -526,11 +609,22 @@ export function updateBranchInboxMessageStatus(
     const updated = records.map((record) => {
       if (!("message" in record) || record.message.id !== id) return record;
       changed = true;
-      return { message: { ...record.message, ...metadata, [timestampKey]: new Date().toISOString(), status } };
+      return {
+        message: {
+          ...record.message,
+          ...metadata,
+          [timestampKey]: new Date().toISOString(),
+          status,
+        },
+      };
     });
     if (!changed) return false;
-    const validMessages = updated.flatMap((record) => "message" in record ? [record.message] : []);
-    const compactedIds = new Set(compactBranchInboxMessages(validMessages).map((message) => message.id));
+    const validMessages = updated.flatMap((record) =>
+      "message" in record ? [record.message] : [],
+    );
+    const compactedIds = new Set(
+      compactBranchInboxMessages(validMessages).map((message) => message.id),
+    );
     const lines = updated.flatMap((record) => {
       if ("raw" in record) return [record.raw];
       if (record.message.id && !compactedIds.has(record.message.id)) return [];
@@ -553,7 +647,10 @@ export function appendRoomMessage(
   try {
     const receivedAt = new Date().toISOString();
     const entry: RoomTimelineEntry = { ...message, received_at: receivedAt };
-    fs.appendFileSync(messagesFile(stateDir, room), `${JSON.stringify(entry)}\n`);
+    fs.appendFileSync(
+      messagesFile(stateDir, room),
+      `${JSON.stringify(entry)}\n`,
+    );
     compactRoomMessages(stateDir, room);
     const roster = updateRosterForMessage(stateDir, room, message, receivedAt);
     const run = runFromRoomAddress(message.to);
@@ -592,7 +689,10 @@ export function readRoomMessages(
   }
 }
 
-function previewValue(value: unknown, maxLength = 120): string | undefined {
+function previewValue(
+  value: unknown,
+  maxLength = Limits.ROOM_MESSAGE_PREVIEW_CHARS,
+): string | undefined {
   if (value === undefined) return undefined;
   const text = typeof value === "string" ? value : JSON.stringify(value);
   const compact = text.replaceAll(/\s+/g, " ").trim();
@@ -608,7 +708,9 @@ export function readRoomMessagePreviews(
   limit = 40,
 ): RoomMessagePreview[] {
   return readRoomMessages(stateDir, room, limit).map((message) => ({
-    ...(previewValue(message.body) ? { body_preview: previewValue(message.body) } : {}),
+    ...(previewValue(message.body)
+      ? { body_preview: previewValue(message.body) }
+      : {}),
     ...(message.from ? { from: message.from } : {}),
     ...(message.summary ? { summary: message.summary } : {}),
     timestamp: message.received_at,
@@ -620,6 +722,10 @@ export function readRoomMessagePreviews(
 export function getRoomStatus(stateDir: string, room: string): RoomStatus {
   const messageCount = readRoomMessageCount(stateDir, room);
   const [last] = readRoomMessages(stateDir, room, 1);
+  const compaction = readJsonFile<RoomCompactionInfo | undefined>(
+    path.join(roomDir(stateDir, room), "compaction.json"),
+    undefined,
+  );
   return {
     ...(last
       ? {
@@ -629,6 +735,7 @@ export function getRoomStatus(stateDir: string, room: string): RoomStatus {
           last_message_type: last.type,
         }
       : {}),
+    ...(compaction ? { compaction } : {}),
     message_count: messageCount,
     room,
     roster_count: Object.keys(readRoomRoster(stateDir, room)).length,
@@ -661,7 +768,10 @@ export function ensureRoomMember(
   });
 }
 
-export function ensureDefaultRoom(stateDir: string, run: string): RoomAppendResult {
+export function ensureDefaultRoom(
+  stateDir: string,
+  run: string,
+): RoomAppendResult {
   return ensureRoomMember(
     stateDir,
     run,
@@ -753,6 +863,7 @@ function writeBranchCommunicationSnapshotDebounced(
 ): ActorCommunicationSnapshot | undefined {
   const branch = branchIdFromAddress(self, run);
   if (!branch) throw new Error(`Expected branch:${run}/<branch>; got ${self}`);
-  if (shouldDebounceSnapshot(branchSnapshotFile(stateDir, branch))) return undefined;
+  if (shouldDebounceSnapshot(branchSnapshotFile(stateDir, branch)))
+    return undefined;
   return writeBranchCommunicationSnapshot(stateDir, run, self);
 }

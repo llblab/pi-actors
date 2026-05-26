@@ -162,7 +162,7 @@ Use recipe-level `mailbox` to document the semantic messages a recipe actor acce
 }
 ```
 
-`mailbox` is contract metadata, not transport configuration. It should name semantic message types, not transport commands, file paths, or CLI fragments.
+`mailbox` is contract metadata, not transport configuration. It should name semantic message types, not transport commands, file paths, or CLI fragments. Entries may be strings or typed objects such as `{ "type": "task.assign", "requires_response": true, "summary": "Assign work" }`; inspection normalizes both forms. Acceptance contracts are advisory by default: messages outside `mailbox.accepts` produce warnings rather than hard routing failures.
 
 ## Actor Recipe Context
 

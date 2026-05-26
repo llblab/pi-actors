@@ -166,8 +166,9 @@ Low-level async actions map into the actor surface instead of forming a second p
 - Send/control → `message`
 - Status/tail/messages/list → `inspect`
 - Stop/kill → `message` with `control.stop` or `control.kill`, with synchronous results
+- Archive/prune terminal state → `message` with `control.archive` or `control.prune`, with active runs rejected fail-closed
 
-Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. Registered tools are the preferred user-facing surface for reusable recipes.
+Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. The run root may contain a rebuildable `index.json` with run id, state directory, owner, status, update time, and recipe/tool hints; corrupt indexes fall back to recursive scan. Registered tools are the preferred user-facing surface for reusable recipes. `control.prune` accepts `body.preserve_artifacts=true` to copy existing named artifacts beside the run root before deleting terminal state.
 
 ## Run-Local Messages
 

@@ -62,6 +62,45 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
   }
 });
 
+test("Runtime suppresses routine bash wrapper startup warnings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-registry-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const packagedRecipeRoot = join(root, "packaged");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(recipeRoot, { recursive: true }),
+        fs.mkdir(packagedRecipeRoot, { recursive: true }),
+      ]),
+    );
+    await writeRecipe(recipeRoot, "bash-wrapper", {
+      description: "Trusted local wrapper",
+      template: "bash -- ./script.sh",
+    });
+
+    const notifications: string[] = [];
+    const runtime = createAutoToolsRuntime({
+      configPath: join(root, "legacy-tool-registry.json"),
+      exec,
+      getAllTools: () => [],
+      packagedRecipeRoot,
+      recipeRoot,
+      registerTool: () => {},
+      reservedToolNames: new Set(),
+    });
+
+    runtime.loadTools({
+      hasUI: true,
+      ui: { notify: (message) => notifications.push(message) },
+    });
+
+    assert.equal(runtime.getTools().has("bash-wrapper"), true);
+    assert.equal(notifications.join("\n"), "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Runtime loads tools from discovered user recipes by default", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-registry-"));
   try {

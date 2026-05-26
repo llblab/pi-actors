@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.24.0: Reliability, Mailbox Workers, and Dist-First Packaging
+
 - `[Prompts]` Clarified that recipe registry warnings are actionable maintenance: invalid or blocking recipes should be fixed, removed, or disabled rather than ignored.
 - `[Backlog]` Pruned and refocused the backlog around reliability, mailbox-loop consolidation, protocol fixtures, follow-up deduplication, and portability reality checks.
 - `[State]` Added resilient JSON/JSONL state reader helpers and routed room, inspector, runtime wake, run inbox, and observability outbox reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts and reader degradation behavior has direct regression coverage.

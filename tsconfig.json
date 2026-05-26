@@ -7,7 +7,14 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ]
   },
-  "include": ["index.ts", "lib/**/*.ts", "tests/**/*.test.ts"],
+  "include": [
+    "index.ts",
+    "lib/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.test.ts"
+  ]
 }

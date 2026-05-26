@@ -3,8 +3,8 @@
 /**
  * Build the JavaScript-only distributive tree shim.
  *
- * Runtime logic lives in lib/build-dist.ts and is compiled to
- * dist/lib/build-dist.js when the package is built.
+ * Runtime logic lives in scripts/build-dist.ts and is compiled to
+ * dist/scripts/build-dist.js when the package is built.
  */
 
 import { existsSync } from "node:fs";
@@ -17,8 +17,8 @@ function packageRoot() {
 
 function mainModulePath() {
   const root = packageRoot();
-  const compiled = join(root, "dist", "lib", "build-dist.js");
-  return existsSync(compiled) ? compiled : join(root, "lib", "build-dist.ts");
+  const compiled = join(root, "dist", "scripts", "build-dist.js");
+  return existsSync(compiled) ? compiled : join(root, "scripts", "build-dist.ts");
 }
 
 const { buildDist } = await import(pathToFileURL(mainModulePath()).href);

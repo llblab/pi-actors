@@ -70,7 +70,6 @@ test("build output includes compiled modules for TypeScript-backed script shims"
   for (const module of [
     "actor-worker",
     "async-runner",
-    "build-dist",
     "coordinator",
     "conformance",
     "locker",
@@ -79,6 +78,10 @@ test("build output includes compiled modules for TypeScript-backed script shims"
   ]) {
     await access(join(process.cwd(), "dist", "lib", `${module}.js`));
     await access(join(process.cwd(), "dist", "lib", `${module}.d.ts`));
+  }
+  for (const module of ["build-dist"]) {
+    await access(join(process.cwd(), "dist", "scripts", `${module}.js`));
+    await access(join(process.cwd(), "dist", "scripts", `${module}.d.ts`));
   }
 });
 

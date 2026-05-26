@@ -7,6 +7,7 @@
 - `[State]` Added resilient JSON/JSONL state reader helpers and routed room, inspector, runtime wake, run inbox, and observability outbox reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts.
 - `[Observability]` Deduplicated run outbox events by stable event id so line-counter resets do not replay already-seen follow-ups.
 - `[Actor Loop]` Added initial run/branch mailbox claim-and-handle helpers plus branch inbox claiming support, failed-handler transitions, standard stop-message detection, bounded message drains, duplicate-claim coverage, and a packaged `actor-worker` demo recipe for canonical actor loops.
+- `[Scripts]` Added installed-package coverage proving the packaged `actor-worker` script uses compiled `dist` runtime modules instead of importing TypeScript from `node_modules`.
 - `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
 
 ## 0.23.0: Actor Manifests, Inspection, and Runtime Hygiene

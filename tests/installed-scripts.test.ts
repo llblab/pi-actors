@@ -129,6 +129,39 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
   }
 });
 
+test("installed actor-worker avoids importing TypeScript from node_modules", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-worker-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const stateDir = join(root, "worker-state");
+    await mkdir(stateDir, { recursive: true });
+
+    const worker = execFile(
+      process.execPath,
+      [
+        join(packageDir, "scripts", "actor-worker.mjs"),
+        "--state-dir",
+        stateDir,
+        "--run",
+        "installed-worker",
+        "--branch",
+        "worker",
+        "--poll-ms",
+        "50",
+      ],
+      { timeout: 2000 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    worker.kill("SIGTERM");
+
+    const journal = await readTextIfExists(join(stateDir, "worker-events.jsonl"));
+    assert.match(journal, /worker.started/);
+    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "actor-loop.ts")), "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("installed validate-recipe avoids importing TypeScript from node_modules", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-validator-"));
   try {

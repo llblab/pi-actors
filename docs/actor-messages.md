@@ -69,9 +69,9 @@ Field rules:
 
 - `to`: required address.
 - `from`: optional address; runtime fills when known.
-- `type`: required semantic message type.
+- `type`: required semantic message type. Prefer compact dotted names such as `control.stop`, `task.claim`, or `player.next`, where the prefix is the interaction channel/domain and the suffix is the action. Many script-backed actors should be able to dispatch from `type` alone without requiring a structured body.
 - `summary`: short human-facing line for notifications/follow-ups.
-- `body`: string or JSON payload.
+- `body`: optional string or JSON payload. Use it when extra context is needed: scripts may ignore it for action-only messages, while LLM-backed agents can accept free-form natural-language prompts without a rigid schema.
 - Routing/delivery is inferred from `to`, actor ownership, and coordinator runtime policy; recipes should not expose delivery knobs. When a coordinator session is known, addressed run/branch/control messages fail closed before controlling or emitting from runs owned by another session.
 - `reply_to`: optional message id for conversational checkpoints.
 - `correlation_id`: optional task/run/workflow id.

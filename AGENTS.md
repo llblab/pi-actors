@@ -67,6 +67,7 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 - Prefer one typed actor-message envelope for upward, downward, lateral, parent/branch, and branch/parent messages.
 - Prefer actor addresses and inspect views over exposing FIFO, outbox, or status mechanics as public concepts.
 - Keep route and semantic type separate: delivery behavior comes from `to`, while `type` describes intent.
+- Treat dotted message types as the minimal action surface: `channel.action` should often be enough for script-backed actors, with `body` reserved for extra context or free-form prompts to LLM-backed actors.
 
 ## Runtime Contract
 

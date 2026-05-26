@@ -1,5 +1,5 @@
 /**
- * Actor loop helper regression tests
+ * Mailbox loop helper regression tests
  * Covers minimal reusable run/branch mailbox claim and handler status transitions.
  */
 
@@ -11,10 +11,10 @@ import test from "node:test";
 
 import { appendBranchInboxMessage, readBranchInboxMessages } from "../lib/actor-rooms.ts";
 import {
-  drainActorLoopMessages,
-  handleActorLoopOnce,
-  isActorLoopStopMessage,
-} from "../lib/actor-loop.ts";
+  drainMailboxLoopMessages,
+  handleMailboxLoopOnce,
+  isMailboxLoopStopMessage,
+} from "../lib/mailbox-loop.ts";
 import { killRun, readRunInboxMessages, sendRunMessage, startRun } from "../lib/async-runs.ts";
 
 async function waitForStatus(stateDir: string, status: string): Promise<void> {
@@ -31,7 +31,7 @@ async function waitForStatus(stateDir: string, status: string): Promise<void> {
   throw new Error(`Timed out waiting for ${status}`);
 }
 
-test("Actor loop handles one run inbox message", async () => {
+test("Mailbox loop handles one run inbox message", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-loop-run-"));
   const stateDir = join(root, "worker");
   try {
@@ -58,7 +58,7 @@ test("Actor loop handles one run inbox message", async () => {
     );
 
     const seen: unknown[] = [];
-    const result = await handleActorLoopOnce(
+    const result = await handleMailboxLoopOnce(
       { kind: "run", runOrDir: stateDir },
       (message) => {
         seen.push(message.body);
@@ -75,7 +75,7 @@ test("Actor loop handles one run inbox message", async () => {
   }
 });
 
-test("Actor loop marks failed handler messages", async () => {
+test("Mailbox loop marks failed handler messages", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-failed-"));
   try {
     appendBranchInboxMessage(stateDir, "demo", "branch:demo/worker", {
@@ -87,7 +87,7 @@ test("Actor loop marks failed handler messages", async () => {
 
     await assert.rejects(
       () =>
-        handleActorLoopOnce(
+        handleMailboxLoopOnce(
           {
             address: "branch:demo/worker",
             kind: "branch",
@@ -109,14 +109,14 @@ test("Actor loop marks failed handler messages", async () => {
   }
 });
 
-test("Actor loop recognizes standard stop messages", () => {
-  assert.equal(isActorLoopStopMessage({ type: "control.stop" }), true);
-  assert.equal(isActorLoopStopMessage({ type: "control.cancel" }), true);
-  assert.equal(isActorLoopStopMessage({ type: "control.kill" }), true);
-  assert.equal(isActorLoopStopMessage({ type: "task.assign" }), false);
+test("Mailbox loop recognizes standard stop messages", () => {
+  assert.equal(isMailboxLoopStopMessage({ type: "control.stop" }), true);
+  assert.equal(isMailboxLoopStopMessage({ type: "control.cancel" }), true);
+  assert.equal(isMailboxLoopStopMessage({ type: "control.kill" }), true);
+  assert.equal(isMailboxLoopStopMessage({ type: "task.assign" }), false);
 });
 
-test("Actor loop drains available branch messages until stop", async () => {
+test("Mailbox loop drains available branch messages until stop", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-drain-"));
   try {
     for (const [type, body] of [
@@ -133,7 +133,7 @@ test("Actor loop drains available branch messages until stop", async () => {
     }
 
     const seen: unknown[] = [];
-    const result = await drainActorLoopMessages(
+    const result = await drainMailboxLoopMessages(
       {
         address: "branch:demo/worker",
         kind: "branch",
@@ -160,7 +160,7 @@ test("Actor loop drains available branch messages until stop", async () => {
   }
 });
 
-test("Actor loop concurrent claims do not double-process one branch message", async () => {
+test("Mailbox loop concurrent claims do not double-process one branch message", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-concurrent-"));
   try {
     appendBranchInboxMessage(stateDir, "demo", "branch:demo/worker", {
@@ -178,14 +178,14 @@ test("Actor loop concurrent claims do not double-process one branch message", as
       stateDir,
     };
     const [first, second] = await Promise.all([
-      handleActorLoopOnce(
+      handleMailboxLoopOnce(
         target,
         (message) => {
           seen.push(message.body);
         },
         { owner: "loop-a" },
       ),
-      handleActorLoopOnce(
+      handleMailboxLoopOnce(
         target,
         (message) => {
           seen.push(message.body);
@@ -205,7 +205,7 @@ test("Actor loop concurrent claims do not double-process one branch message", as
   }
 });
 
-test("Actor loop handles one branch inbox message", async () => {
+test("Mailbox loop handles one branch inbox message", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-branch-"));
   try {
     appendBranchInboxMessage(stateDir, "demo", "branch:demo/worker", {
@@ -216,7 +216,7 @@ test("Actor loop handles one branch inbox message", async () => {
     });
 
     const seen: unknown[] = [];
-    const result = await handleActorLoopOnce(
+    const result = await handleMailboxLoopOnce(
       {
         address: "branch:demo/worker",
         kind: "branch",

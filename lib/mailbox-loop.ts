@@ -1,5 +1,5 @@
 /**
- * Minimal actor mailbox loop helpers.
+ * Minimal mailbox loop helpers.
  * Zones: mailbox-consuming actors, run/branch inbox claiming, handler status transitions
  * Owns small reusable primitives for recipe authors; scheduling and task policy stay outside.
  */
@@ -15,9 +15,9 @@ import {
   type RunInboxMessage,
 } from "./async-runs.ts";
 
-export type ActorLoopMailboxMessage = RunInboxMessage | BranchInboxRecord;
+export type MailboxLoopMessage = RunInboxMessage | BranchInboxRecord;
 
-export type ActorLoopTarget =
+export type MailboxLoopTarget =
   | {
       kind: "run";
       runOrDir: string;
@@ -29,30 +29,30 @@ export type ActorLoopTarget =
       stateDir: string;
     };
 
-export interface ActorLoopClaimOptions {
+export interface MailboxLoopClaimOptions {
   owner?: string;
   statuses?: string[];
 }
 
-export interface ActorLoopHandleResult {
+export interface MailboxLoopHandleResult {
   handled: boolean;
   id?: string;
-  message?: ActorLoopMailboxMessage;
-  target: ActorLoopTarget;
+  message?: MailboxLoopMessage;
+  target: MailboxLoopTarget;
 }
 
-export interface ActorLoopDrainOptions extends ActorLoopClaimOptions {
+export interface MailboxLoopDrainOptions extends MailboxLoopClaimOptions {
   maxMessages?: number;
   stopOnControl?: boolean;
 }
 
-export interface ActorLoopDrainResult {
+export interface MailboxLoopDrainResult {
   handled: number;
   stopped: boolean;
-  target: ActorLoopTarget;
+  target: MailboxLoopTarget;
 }
 
-export function isActorLoopStopMessage(message: unknown): boolean {
+export function isMailboxLoopStopMessage(message: unknown): boolean {
   const type =
     message && typeof message === "object" && "type" in message
       ? (message as { type?: unknown }).type
@@ -65,16 +65,16 @@ export function isActorLoopStopMessage(message: unknown): boolean {
 }
 
 function messageId(
-  message: ActorLoopMailboxMessage | undefined,
+  message: MailboxLoopMessage | undefined,
 ): string | undefined {
   return typeof message?.id === "string" ? message.id : undefined;
 }
 
-export function claimActorLoopMessage(
-  target: ActorLoopTarget,
-  options: ActorLoopClaimOptions = {},
-): ActorLoopMailboxMessage | undefined {
-  const owner = options.owner ?? "actor-loop";
+export function claimMailboxLoopMessage(
+  target: MailboxLoopTarget,
+  options: MailboxLoopClaimOptions = {},
+): MailboxLoopMessage | undefined {
+  const owner = options.owner ?? "mailbox-loop";
   const statuses = options.statuses ?? ["queued"];
   return target.kind === "run"
     ? claimRunInboxMessage(target.runOrDir, owner, statuses)
@@ -87,8 +87,8 @@ export function claimActorLoopMessage(
       );
 }
 
-export function updateActorLoopMessageStatus(
-  target: ActorLoopTarget,
+export function updateMailboxLoopMessageStatus(
+  target: MailboxLoopTarget,
   id: string,
   status: "claimed" | "handled" | "failed",
   metadata: Record<string, unknown> = {},
@@ -105,39 +105,42 @@ export function updateActorLoopMessageStatus(
       );
 }
 
-export async function handleActorLoopOnce(
-  target: ActorLoopTarget,
-  handler: (message: ActorLoopMailboxMessage) => Promise<void> | void,
-  options: ActorLoopClaimOptions = {},
-): Promise<ActorLoopHandleResult> {
-  const message = claimActorLoopMessage(target, options);
+export async function handleMailboxLoopOnce(
+  target: MailboxLoopTarget,
+  handler: (message: MailboxLoopMessage) => Promise<void> | void,
+  options: MailboxLoopClaimOptions = {},
+): Promise<MailboxLoopHandleResult> {
+  const message = claimMailboxLoopMessage(target, options);
   const id = messageId(message);
   if (!message || !id) return { handled: false, target };
   try {
     await handler(message);
-    updateActorLoopMessageStatus(target, id, "handled");
+    updateMailboxLoopMessageStatus(target, id, "handled");
     return { handled: true, id, message, target };
   } catch (error) {
-    updateActorLoopMessageStatus(target, id, "failed", {
+    updateMailboxLoopMessageStatus(target, id, "failed", {
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }
 }
 
-export async function drainActorLoopMessages(
-  target: ActorLoopTarget,
-  handler: (message: ActorLoopMailboxMessage) => Promise<void> | void,
-  options: ActorLoopDrainOptions = {},
-): Promise<ActorLoopDrainResult> {
+export async function drainMailboxLoopMessages(
+  target: MailboxLoopTarget,
+  handler: (message: MailboxLoopMessage) => Promise<void> | void,
+  options: MailboxLoopDrainOptions = {},
+): Promise<MailboxLoopDrainResult> {
   const maxMessages = Math.max(1, Math.floor(options.maxMessages ?? 100));
   let handled = 0;
   for (; handled < maxMessages; handled += 1) {
-    const result = await handleActorLoopOnce(target, handler, options);
+    const result = await handleMailboxLoopOnce(target, handler, options);
     if (!result.handled || !result.message) {
       return { handled, stopped: false, target };
     }
-    if (options.stopOnControl !== false && isActorLoopStopMessage(result.message)) {
+    if (
+      options.stopOnControl !== false &&
+      isMailboxLoopStopMessage(result.message)
+    ) {
       return { handled: handled + 1, stopped: true, target };
     }
   }

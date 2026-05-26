@@ -73,7 +73,7 @@ const roomAddress = `room:${run}`;
 const journalPath = join(stateDir, "worker-events.jsonl");
 
 const { appendRoomMessage, ensureRoomMember } = await importLib("actor-rooms");
-const { handleActorLoopOnce, isActorLoopStopMessage } = await importLib("actor-loop");
+const { handleMailboxLoopOnce, isMailboxLoopStopMessage } = await importLib("mailbox-loop");
 
 function journal(event, data = {}) {
   appendFileSync(
@@ -105,10 +105,10 @@ journal("worker.started", { branch, run });
 
 let stopping = false;
 while (!stopping) {
-  const result = await handleActorLoopOnce(
+  const result = await handleMailboxLoopOnce(
     { address: branchAddress, kind: "branch", run, stateDir },
     (message) => {
-      if (isActorLoopStopMessage(message)) {
+      if (isMailboxLoopStopMessage(message)) {
         stopping = true;
         room("actor.leave", `${branch} stopping`, { branch, reason: message.type });
         journal("worker.stopping", { id: message.id, type: message.type });

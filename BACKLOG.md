@@ -64,10 +64,10 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 
 - Priority: High.
 - Status: Done.
-- Goal: Provide one small reusable mailbox-consuming actor loop so recipe authors do not duplicate claim/handle/status logic.
+- Goal: Provide one small reusable mailbox loop so recipe authors do not duplicate claim/handle/status logic.
 - Why now: Long-lived actors and worker recipes are the natural center of `pi-actors`; a minimal helper consolidates behavior without adding a broker or scheduler DSL.
 - Files:
-  - `lib/actor-loop.ts`.
+  - `lib/mailbox-loop.ts`.
 - Direction:
   - Support run inbox claiming, branch inbox claiming, handled/failed status transitions, bounded drains, duplicate-claim protection, and graceful stop-message detection.
   - Defer live wake subscription and polling wrappers until the canonical worker recipe needs them.
@@ -84,7 +84,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 - Status: Done.
 - Depends on: M-02.
 - Goal: Add one canonical packaged worker recipe/template demonstrating the intended long-lived actor pattern.
-- Why now: The extension should teach one excellent actor loop rather than accumulate scenario-specific scripts.
+- Why now: The extension should teach one excellent mailbox loop rather than accumulate scenario-specific scripts.
 - Direction:
   - Worker joins the default room.
   - Worker declares typed mailbox accepts/emits.
@@ -131,7 +131,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 - Why now: Mailbox-only paths and named-pipe support exist; operators need accurate diagnostics, not hidden platform assumptions.
 - Direction:
   - Doctor flags FIFO-only recipes on native Windows.
-  - Keep mailbox-only actor loop/demo cross-platform.
+  - Keep mailbox-only worker demo cross-platform.
   - Document a small platform matrix.
   - Cover named-pipe adapter with injected sender where practical.
 - Acceptance:
@@ -160,10 +160,10 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 
 These are valid ideas but not current focus. Reintroduce only with concrete evidence from real actor workflows.
 
-- Spawn preflight mode: useful later, but lower value than resilient inspect and actor-loop consolidation.
+- Spawn preflight mode: useful later, but lower value than resilient inspect and mailbox-loop consolidation.
 - Run restart/reattach policy: risky for isolation; defer until corruption recovery and protocol fixtures are stronger.
 - Actor address helper CLI: keep diagnostics improving opportunistically inside existing parser/tests.
-- Documentation refactor: defer until the canonical actor loop and worker recipe exist; avoid rewriting docs twice.
+- Documentation refactor: defer until the canonical mailbox loop and worker recipe exist; avoid rewriting docs twice.
 - Host-level tool unregistration: blocked on host API support.
 - Branch-local checkpoint semantics: wait for real collaborative branch-runner experiments.
 - Actor recipe feedback loop: keep advisory and operator-gated after real runs produce evidence.
@@ -174,7 +174,7 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 0.24 — Reliability membrane:
   M-01, M-05
 
-0.25 — Canonical actor loop:
+0.25 — Canonical mailbox loop:
   M-02, M-03
 
 0.26 — Contract and portability consolidation:

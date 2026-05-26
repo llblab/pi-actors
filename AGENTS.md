@@ -24,7 +24,7 @@
   - `registry.ts`, `runtime.ts`: register/update/delete, load/conflict/registration coordination.
   - `execution.ts`, `output.ts`, `limits.ts`: registered-tool execution and bounded output.
   - `recipe-references.ts`, `recipe-discovery.ts`, `recipe-usage.ts`: recipe graph, discovery, and usage metadata.
-  - `async-runs.ts`, `runtime-notifier.ts`, `actor-loop.ts`: detached run state, wake notifications, and mailbox worker helpers.
+  - `async-runs.ts`, `runtime-notifier.ts`, `mailbox-loop.ts`: detached run state, wake notifications, and mailbox worker helpers.
   - `actor-rooms.ts`, `actor-inspector-tui.ts`, `observability.ts`: rooms, communication previews, and ambient run status.
   - `prompts.ts`, `tools.ts`, `temp.ts`: LLM-facing copy, pi-facing tool definitions, and temp cleanup.
 
@@ -106,7 +106,7 @@
 ## Coordination And Lifecycle
 
 - Persistent implementer workflows are recipe composition, not one-off scripts.
-- Compose cells such as `coordinator-locker`, subagent launchers, actor-message utilities, and actor-loop helpers.
+- Compose cells such as `coordinator-locker`, subagent launchers, actor-message utilities, and mailbox-loop helpers.
 - Preserve JSON envelope object shape across handoffs.
 - Keep locker state generic and thin; orchestration strategy belongs in the coordinator.
 - Graceful actor retirement is opt-in through recipe/run metadata and must not infer retirement for persistent services or backlog implementers.

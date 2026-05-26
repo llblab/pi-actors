@@ -208,6 +208,25 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Installed-package tests cover every script shim that imports compiled domain logic.
   - Pack dry assertions cover `dist/scripts`, `dist/recipes`, `dist/fixtures`, and `dist/skills`.
 
+### M-11 Actor Termination Semantics
+
+- Priority: Medium.
+- Status: Open.
+- Goal: Make `control.kill` the canonical parent-to-actor termination action while keeping `control.stop` and `control.cancel` as actor-domain messages whose meaning depends on the actor protocol.
+- Why now: Mailbox workers need a clearer lifecycle boundary before v2 patterns harden. Treating `stop`, `cancel`, and `kill` as equivalent stop messages blurs actor termination with domain-specific task or playback control.
+- Direction:
+  - Document `control.kill` as the universal lifecycle action for a parent/supervisor terminating an actor or run.
+  - Reframe `control.stop` as actor-defined domain control, such as stopping music playback or ending an actor-specific loop when that actor declares it.
+  - Reframe `control.cancel` as actor-defined domain control, such as cancelling the current subagent task while keeping the worker actor alive for later assignments.
+  - Split mailbox-loop helper semantics so lifecycle termination detection is distinct from general control-message detection.
+  - While the package is pre-1.0, allow a small intentional minor-version contract break: remove legacy treatment that aliases `control.stop` or `control.cancel` to actor termination.
+  - Do not preserve compatibility shims for the old stop/cancel-as-termination behavior before the first 1.0 major release unless a concrete safety issue appears during implementation.
+- Acceptance:
+  - Docs and actors skill advertise `control.kill` as canonical parent-to-actor termination.
+  - Mailbox-loop helpers/tests distinguish actor termination from actor-domain `stop`/`cancel` handling.
+  - Packaged recipes declare `stop`/`cancel` only when the actor-specific behavior is meaningful.
+  - Tests assert that generic mailbox-loop termination is not triggered by `control.stop` or `control.cancel`.
+
 ## Explicitly Deferred
 
 These are valid ideas but not current focus. Reintroduce only with concrete evidence from real actor workflows.
@@ -226,6 +245,6 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 0.25 — Operator remediation and worker maturity:
   M-08, M-09
 
-0.26 — Package contract hardening:
-  M-10
+0.26 — Package contract hardening and lifecycle semantics:
+  M-10, M-11
 ```

@@ -155,6 +155,20 @@ async function writeLockerMessage(locker, message) {
   await sleep(50);
 }
 
+async function waitForLockerJournal(locker, pattern, timeoutMs = 2000) {
+  if (!locker) return;
+  const journalPath = `${locker.stateDir}/journal.jsonl`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (pattern.test(await readFile(journalPath, "utf8"))) return;
+    } catch {
+      // Journal may not exist yet.
+    }
+    await sleep(25);
+  }
+}
+
 function scriptPath(name) {
   const here = dirname(fileURLToPath(import.meta.url));
   const root = here.endsWith(`${join("dist", "lib")}`)
@@ -293,6 +307,7 @@ async function synthesize(config, locker) {
       type: "lock.complete",
       body: { id: "coordinator-artifact", artifact: config.artifactPath },
     });
+    await waitForLockerJournal(locker, /lock\.complete/);
     await writeLockerMessage(locker, {
       type: "lock.release",
       body: { resource: config.artifactPath },

@@ -156,6 +156,43 @@ test("Actor loop drains available branch messages until stop", async () => {
   }
 });
 
+test("Actor loop concurrent claims do not double-process one branch message", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-concurrent-"));
+  try {
+    appendBranchInboxMessage(stateDir, "demo", "branch:demo/worker", {
+      body: "single work",
+      from: "run:demo",
+      to: "branch:demo/worker",
+      type: "task.assign",
+    });
+
+    const seen: unknown[] = [];
+    const target = {
+      address: "branch:demo/worker",
+      kind: "branch" as const,
+      run: "demo",
+      stateDir,
+    };
+    const [first, second] = await Promise.all([
+      handleActorLoopOnce(target, (message) => seen.push(message.body), {
+        owner: "loop-a",
+      }),
+      handleActorLoopOnce(target, (message) => seen.push(message.body), {
+        owner: "loop-b",
+      }),
+    ]);
+
+    assert.equal(Number(first.handled) + Number(second.handled), 1);
+    assert.deepEqual(seen, ["single work"]);
+    assert.equal(
+      readBranchInboxMessages(stateDir, "demo", "branch:demo/worker")[0].status,
+      "handled",
+    );
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("Actor loop handles one branch inbox message", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-branch-"));
   try {

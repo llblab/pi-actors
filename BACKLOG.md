@@ -63,14 +63,15 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-02 Actor Loop Helper Minimal Core
 
 - Priority: High.
-- Status: In progress.
+- Status: Done.
 - Goal: Provide one small reusable mailbox-consuming actor loop so recipe authors do not duplicate claim/handle/wake/poll logic.
 - Why now: Long-lived actors and worker recipes are the natural center of `pi-actors`; a minimal helper consolidates behavior without adding a broker or scheduler DSL.
 - Files:
   - `lib/actor-loop.ts`.
   - `scripts/actor-loop.mjs` only if a CLI wrapper is necessary.
 - Direction:
-  - Support initial reconciliation, advisory wake subscription, polling fallback, run inbox claiming, branch inbox claiming, handled/failed status transitions, progress, and graceful stop.
+  - Support run inbox claiming, branch inbox claiming, handled/failed status transitions, bounded drains, duplicate-claim protection, and graceful stop-message detection.
+  - Defer live wake subscription and polling wrappers until the canonical worker recipe needs them.
   - Keep policy out: no task selection, no model choice, no project prompts.
 - Acceptance:
   - Concurrent wake and poll paths do not double-process messages.

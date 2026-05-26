@@ -60,7 +60,9 @@ test("Actor loop handles one run inbox message", async () => {
     const seen: unknown[] = [];
     const result = await handleActorLoopOnce(
       { kind: "run", runOrDir: stateDir },
-      (message) => seen.push(message.body),
+      (message) => {
+        seen.push(message.body);
+      },
       { owner: "loop-test" },
     );
 
@@ -138,7 +140,9 @@ test("Actor loop drains available branch messages until stop", async () => {
         run: "demo",
         stateDir,
       },
-      (message) => seen.push(message.body),
+      (message) => {
+        seen.push(message.body);
+      },
       { owner: "loop-test" },
     );
 
@@ -174,12 +178,20 @@ test("Actor loop concurrent claims do not double-process one branch message", as
       stateDir,
     };
     const [first, second] = await Promise.all([
-      handleActorLoopOnce(target, (message) => seen.push(message.body), {
-        owner: "loop-a",
-      }),
-      handleActorLoopOnce(target, (message) => seen.push(message.body), {
-        owner: "loop-b",
-      }),
+      handleActorLoopOnce(
+        target,
+        (message) => {
+          seen.push(message.body);
+        },
+        { owner: "loop-a" },
+      ),
+      handleActorLoopOnce(
+        target,
+        (message) => {
+          seen.push(message.body);
+        },
+        { owner: "loop-b" },
+      ),
     ]);
 
     assert.equal(Number(first.handled) + Number(second.handled), 1);
@@ -211,7 +223,9 @@ test("Actor loop handles one branch inbox message", async () => {
         run: "demo",
         stateDir,
       },
-      (message) => seen.push(message.body),
+      (message) => {
+        seen.push(message.body);
+      },
       { owner: "loop-test" },
     );
 

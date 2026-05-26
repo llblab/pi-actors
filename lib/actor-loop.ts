@@ -52,13 +52,15 @@ export interface ActorLoopDrainResult {
   target: ActorLoopTarget;
 }
 
-export function isActorLoopStopMessage(
-  message: Pick<ActorLoopMailboxMessage, "type">,
-): boolean {
+export function isActorLoopStopMessage(message: unknown): boolean {
+  const type =
+    message && typeof message === "object" && "type" in message
+      ? (message as { type?: unknown }).type
+      : undefined;
   return (
-    message.type === "control.stop" ||
-    message.type === "control.cancel" ||
-    message.type === "control.kill"
+    type === "control.stop" ||
+    type === "control.cancel" ||
+    type === "control.kill"
   );
 }
 

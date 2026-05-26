@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.24.1: Build Script Package Hygiene Hotfix
+
 - `[Backlog]` Added the next focused backlog set for recipe doctor remediation UX, actor worker v2, and dist package contract hardening.
 - `[Skills]` Clarified agent-governed promotion of successful transient actor patterns into durable local tools via `register_tool`, without UI buttons or automatic registration.
 
@@ -21,7 +23,7 @@
 - `[Packaging]` Build output now mirrors packaged `skills/` into `dist/` alongside scripts, recipes, and fixtures so the JS-only distributive tree carries the project skills; package skill metadata now points at `dist/skills` with `pi.sourceSkills` preserving root TypeScript/source-tree paths, and README now documents the dist-first/source-optional package shape. The dist build pipeline now lives in `scripts/build-dist.mjs` instead of an inline package script, completing the compiled script entrypoint backlog slice.
 - `[Docs]` Added a platform support matrix for mailbox-only, FIFO, named-pipe, and process-control behavior across Linux/macOS/WSL and native Windows, with regressions proving native Windows FIFO limits remain visible and the canonical worker recipe stays mailbox-only.
 - `[Backlog]` Marked the reliability, mailbox loop, protocol fixture, portability, and compiled-entrypoint milestone set complete; future backlog additions should come from concrete actor workflow evidence.
-- `[Scripts]` Migrated `recipe-utils`, `build-dist`, `locker`, `coordinator`, and `validate-recipe` command logic behind compiled TypeScript domain modules while preserving the stable `scripts/*.mjs` shim paths; project guidance frames this as deliberate standard-library growth with clear domain boundaries while keeping self-contained application scripts such as `music-player.mjs` standalone.
+- `[Scripts]` Migrated `recipe-utils`, `locker`, `coordinator`, and `validate-recipe` command logic behind compiled TypeScript domain modules while preserving the stable `scripts/*.mjs` shim paths; project guidance frames this as deliberate standard-library growth with clear domain boundaries while keeping self-contained application/build scripts such as `music-player.mjs` and `build-dist.mjs` standalone.
 - `[Protocol]` Added compact protocol fixtures for actor messages, mailbox contracts, run inbox/outbox records, room messages/rosters, run state, recipe summaries, and artifact manifests with regression coverage.
 - `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
 

@@ -71,6 +71,7 @@ test("build output includes compiled modules for TypeScript-backed script shims"
     "actor-worker",
     "async-runner",
     "conformance",
+    "recipe-utils",
     "validate-recipe",
   ]) {
     await access(join(process.cwd(), "dist", "lib", `${module}.js`));

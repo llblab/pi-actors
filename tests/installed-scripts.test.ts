@@ -42,6 +42,14 @@ test("package metadata exposes compiled and source extension entrypoints", async
   const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   assert.deepEqual(pkg.pi.extensions, ["./dist/index.js"]);
   assert.deepEqual(pkg.pi.sourceExtensions, ["./index.ts"]);
+  assert.deepEqual(pkg.pi.skills, [
+    "./dist/skills/actors/SKILL.md",
+    "./dist/skills/swarm/SKILL.md",
+  ]);
+  assert.deepEqual(pkg.pi.sourceSkills, [
+    "./skills/actors/SKILL.md",
+    "./skills/swarm/SKILL.md",
+  ]);
   await access(join(process.cwd(), pkg.pi.extensions[0]));
   await access(join(process.cwd(), pkg.pi.sourceExtensions[0]));
 });

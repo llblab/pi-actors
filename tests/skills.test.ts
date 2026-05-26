@@ -52,9 +52,13 @@ test("Package extension entrypoint uses compiled dist output", () => {
   assert.equal(existsSync("index.js"), false);
 });
 
-test("Packaged skills are registered in package metadata", () => {
+test("Packaged skills are registered through dist metadata", () => {
+  assert.deepEqual(packageJson.pi.skills, [
+    "./dist/skills/actors/SKILL.md",
+    "./dist/skills/swarm/SKILL.md",
+  ]);
   assert.deepEqual(
-    packageJson.pi.skills.map((path) => path.replace(/^\.\//, "")).sort(),
+    packageJson.pi.sourceSkills.map((path) => path.replace(/^\.\//, "")).sort(),
     packagedSkillPaths,
   );
 });

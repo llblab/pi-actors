@@ -56,6 +56,10 @@
       "./index.ts"
     ],
     "skills": [
+      "./dist/skills/actors/SKILL.md",
+      "./dist/skills/swarm/SKILL.md"
+    ],
+    "sourceSkills": [
       "./skills/actors/SKILL.md",
       "./skills/swarm/SKILL.md"
     ],

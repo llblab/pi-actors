@@ -462,6 +462,10 @@ function updateRosterForMessage(
 }
 
 export interface BranchInboxRecord extends ActorMessage {
+  claimed_at?: string;
+  claimed_by?: string;
+  failed_at?: string;
+  handled_at?: string;
   id?: string;
   queued_at?: string;
   status?: string;
@@ -586,6 +590,49 @@ export function appendBranchInboxMessage(
       ...(message.from ? { from: message.from } : {}),
       type: message.type,
     });
+  } finally {
+    releaseLock();
+  }
+}
+
+export function claimBranchInboxMessage(
+  stateDir: string,
+  run: string,
+  address: string,
+  owner = "runtime",
+  statuses: string[] = ["queued"],
+): BranchInboxRecord | undefined {
+  const branch = branchIdFromAddress(address, run);
+  if (!branch)
+    throw new Error(`Expected branch:${run}/<branch>; got ${address}`);
+  const releaseLock = acquireBranchInboxLock(stateDir, branch);
+  try {
+    const file = branchInboxFile(stateDir, branch);
+    const records = readAllBranchInboxLines(stateDir, run, address);
+    let claimed: BranchInboxRecord | undefined;
+    const now = new Date().toISOString();
+    const updated = records.map((record) => {
+      if (claimed || !("message" in record)) return record;
+      const status = record.message.status ?? "queued";
+      if (!statuses.includes(status)) return record;
+      claimed = {
+        ...record.message,
+        claimed_at: now,
+        claimed_by: owner,
+        status: "claimed",
+      };
+      return { message: claimed };
+    });
+    if (!claimed) return undefined;
+    fs.writeFileSync(
+      file,
+      `${updated.map((record) => ("raw" in record ? record.raw : JSON.stringify(record.message))).join("\n")}\n`,
+    );
+    notifyActorWake(stateDir, address, "branch.inbox.claim", {
+      id: claimed.id,
+      owner,
+    });
+    return claimed;
   } finally {
     releaseLock();
   }

@@ -63,6 +63,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-02 Actor Loop Helper Minimal Core
 
 - Priority: High.
+- Status: In progress; first slice adds shared run/branch claim-and-handle primitives in `lib/actor-loop.ts`.
 - Goal: Provide one small reusable mailbox-consuming actor loop so recipe authors do not duplicate claim/handle/wake/poll logic.
 - Why now: Long-lived actors and worker recipes are the natural center of `pi-actors`; a minimal helper consolidates behavior without adding a broker or scheduler DSL.
 - Files:

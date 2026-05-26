@@ -1,25 +1,33 @@
 #!/usr/bin/env node
 
 /**
- * Build the JavaScript-only distributive tree shim.
+ * Build the JavaScript-only distributive tree.
  *
- * Runtime logic lives in lib/build-dist.ts and is compiled to
- * dist/lib/build-dist.js when the package is built.
+ * This is intentionally standalone: it is package/build glue, not reusable
+ * actor-domain behavior. It cleans dist, compiles TypeScript, mirrors runtime
+ * assets, and syntax-checks packaged script shims.
  */
 
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
-function packageRoot() {
-  return dirname(dirname(fileURLToPath(import.meta.url)));
+function run(command, args) {
+  const result = spawnSync(command, args, { stdio: "inherit" });
+  if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-function mainModulePath() {
-  const root = packageRoot();
-  const compiled = join(root, "dist", "lib", "build-dist.js");
-  return existsSync(compiled) ? compiled : join(root, "lib", "build-dist.ts");
+rmSync("dist", { recursive: true, force: true });
+mkdirSync("dist", { recursive: true });
+
+run("tsc", ["-p", "tsconfig.build.json"]);
+
+for (const dir of ["scripts", "recipes", "fixtures", "skills"]) {
+  cpSync(dir, join("dist", dir), { recursive: true });
 }
 
-const { buildDist } = await import(pathToFileURL(mainModulePath()).href);
-buildDist();
+const builtScripts = readdirSync(join("dist", "scripts"))
+  .filter((name) => name.endsWith(".mjs"))
+  .map((name) => join("dist", "scripts", name));
+
+run(process.execPath, ["--check", ...builtScripts]);

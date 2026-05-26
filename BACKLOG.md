@@ -149,7 +149,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 - Why now: Recipes increasingly depend on helper scripts that import extension internals; compiling script logic closes the gap between source-tree development and installed package behavior.
 - Direction:
   - Keep stable executable recipe paths through thin `scripts/*.mjs` shims.
-  - Keep substantive script logic in compiled `lib/*.ts` modules so scripts stay lightweight runners and `dist/lib` is the JS-only runtime surface.
+  - Keep substantive reusable script logic in compiled `lib/*.ts` modules so scripts stay lightweight runners and `dist/lib` is the JS-only runtime surface; allow self-contained application scripts to remain standalone `.mjs` when no reuse is expected.
   - Keep `npm run build` checking packaged script entrypoint syntax while compiled module migration proceeds.
   - Make installed scripts prefer `dist` runtime modules and avoid importing `.ts` from `node_modules`.
   - Preserve source-tree developer ergonomics without requiring global install.

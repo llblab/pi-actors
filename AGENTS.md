@@ -33,7 +33,7 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 ## Repo Surfaces
 
 - `/scripts/*.mjs`: Stable executable shims for detached/helper processes.
-- `/lib/*.ts`: Compiled domain and script-entrypoint logic. Keep `scripts/*.mjs` lightweight and move substantive behavior into named domain modules so `dist/lib` is the JS-only runtime surface. This intentionally grows a standard library: even script-born behavior should gain a clear domain name and boundary so it can be reused by other domains when the need appears.
+- `/lib/*.ts`: Compiled domain and script-entrypoint logic. Keep `scripts/*.mjs` lightweight and move substantive behavior into named domain modules so `dist/lib` is the JS-only runtime surface. This intentionally grows a standard library: script-born behavior should gain a clear domain name when reuse is plausible. Exception: self-contained application scripts with no expected second consumer, such as `music-player.mjs`, may remain standalone `.mjs` files.
 - `/recipes/*.json`: Packaged standard recipe library. Keep recipes optional, composable, policy-light, and caller-configurable.
 - `/skills/actors/SKILL.md`: Dense practical reference for operating pi-actors itself.
 - `/skills/swarm/SKILL.md`: Bundled methodology skill for multi-agent standards, strategies, and portable examples.

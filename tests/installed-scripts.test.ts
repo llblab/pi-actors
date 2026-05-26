@@ -46,11 +46,13 @@ test("package metadata exposes compiled and source extension entrypoints", async
   await access(join(process.cwd(), pkg.pi.sourceExtensions[0]));
 });
 
-test("build output includes packaged scripts and recipes under dist", async () => {
+test("build output mirrors JS runtime assets under dist", async () => {
   await access(join(process.cwd(), "dist", "scripts", "actor-worker.mjs"));
   await access(join(process.cwd(), "dist", "scripts", "async-runner.mjs"));
   await access(join(process.cwd(), "dist", "recipes", "actor-worker.json"));
   await access(join(process.cwd(), "dist", "recipes", "utility-validate-recipe.json"));
+  await access(join(process.cwd(), "dist", "fixtures", "protocol", "actor-message-branch.json"));
+  await access(join(process.cwd(), "dist", "fixtures", "protocol", "mailbox-contract.json"));
 });
 
 test("installed extension entrypoint imports compiled dist runtime", async () => {

@@ -43,6 +43,8 @@ Or from git:
 pi install git:github.com/llblab/pi-actors
 ```
 
+The npm package is dist-first for JavaScript-only runtimes: default Pi metadata points at compiled `dist/` entrypoints and mirrored runtime assets. Source TypeScript and source skills remain in the package for TypeScript-native runtimes through optional source metadata.
+
 ## Address Surface
 
 Actors and coordination endpoints are addressed with compact route strings:

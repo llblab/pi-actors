@@ -849,7 +849,7 @@ test("Async runs can send messages to a Windows named-pipe control endpoint", as
       {
         run_id: "controlled-winpipe",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+        template: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
       },
       process.cwd(),
     );
@@ -914,7 +914,7 @@ test("Async run named-pipe timeout keeps durable queued message details", async 
       {
         run_id: "controlled-winpipe-timeout",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+        template: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
       },
       process.cwd(),
     );

@@ -275,6 +275,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 - [`locker`](../../recipes/locker.json): modular queue + acquire/renew/release lease locks + journaled locker messages + platform-adapted control metadata.
 - [`utility-coordinator-lock-snapshot`](../../recipes/utility-coordinator-lock-snapshot.json): one-shot JSON snapshot of a coordinator-locker state directory.
 - [`music-player`](../../recipes/music-player.json): background local/URL/directory/playlist playback actor controlled by messages.
+- [`actor-worker`](../../recipes/actor-worker.json): canonical mailbox-backed branch worker demo that claims branch inbox work, emits room-visible task lifecycle messages, and stops on standard control messages.
 
 ### Subagent Atoms
 

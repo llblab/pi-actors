@@ -81,6 +81,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-03 Canonical Worker Recipe Template
 
 - Priority: High.
+- Status: Done.
 - Depends on: M-02.
 - Goal: Add one canonical packaged worker recipe/template demonstrating the intended long-lived actor pattern.
 - Why now: The extension should teach one excellent actor loop rather than accumulate scenario-specific scripts.

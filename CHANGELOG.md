@@ -6,7 +6,7 @@
 - `[Backlog]` Pruned and refocused the backlog around reliability, actor-loop consolidation, protocol fixtures, follow-up deduplication, and portability reality checks.
 - `[State]` Added resilient JSON/JSONL state reader helpers and routed room, inspector, runtime wake, and run inbox reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts.
 - `[Observability]` Deduplicated run outbox events by stable event id so line-counter resets do not replay already-seen follow-ups.
-- `[Actor Loop]` Added initial run/branch mailbox claim-and-handle helpers plus branch inbox claiming support, failed-handler transitions, standard stop-message detection, bounded message drains, and duplicate-claim coverage for canonical actor loops.
+- `[Actor Loop]` Added initial run/branch mailbox claim-and-handle helpers plus branch inbox claiming support, failed-handler transitions, standard stop-message detection, bounded message drains, duplicate-claim coverage, and a packaged `actor-worker` demo recipe for canonical actor loops.
 - `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
 
 ## 0.23.0: Actor Manifests, Inspection, and Runtime Hygiene

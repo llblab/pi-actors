@@ -173,6 +173,7 @@ test("installed actor-worker avoids importing TypeScript from node_modules", asy
 
     const journal = await readTextIfExists(join(stateDir, "worker-events.jsonl"));
     assert.match(journal, /worker.started/);
+    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "actor-worker-main.ts")), "");
     assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "mailbox-loop.ts")), "");
   } finally {
     await rm(root, { recursive: true, force: true });

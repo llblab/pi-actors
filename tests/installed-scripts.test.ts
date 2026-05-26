@@ -140,6 +140,7 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
       /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/,
     );
     assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /installed async ok/);
+    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "async-runner.ts")), "");
     assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "execution.ts")), "");
   } finally {
     await rm(root, { recursive: true, force: true });

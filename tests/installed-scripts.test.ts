@@ -195,6 +195,7 @@ test("installed validate-recipe avoids importing TypeScript from node_modules", 
     const report = JSON.parse(stdout);
     assert.equal(report.ok, true);
     assert.equal(report.passed, 1);
+    assert.equal(await readTextIfExists(join(root, ".type-strip-lib", "validate-recipe.ts")), "");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

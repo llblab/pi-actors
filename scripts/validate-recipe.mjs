@@ -1,137 +1,34 @@
 #!/usr/bin/env -S node --experimental-strip-types
 
 /**
- * Template recipe validator CLI.
+ * Template recipe validator CLI shim.
  *
- * This script validates one recipe file or a recipe directory using the same
- * recipe-reference parser and import resolver that the extension runtime uses.
- * It supports source-tree TypeScript during development and compiled dist
- * modules when installed from npm.
- *
- * Keep it read-only: validation should report parse/import/schema problems
- * without registering tools, launching runs, or mutating user recipes.
+ * Runtime logic lives in lib/validate-recipe.ts and is compiled to
+ * dist/lib/validate-recipe.js for installed JS-only packages.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-function scriptFile() {
-  return fileURLToPath(import.meta.url);
-}
-
 function packageRoot() {
-  return dirname(dirname(scriptFile()));
+  return dirname(dirname(fileURLToPath(import.meta.url)));
 }
 
-function libModulePath(name) {
+function mainModulePath() {
   const root = packageRoot();
-  const compiled = join(root, "dist", "lib", `${name}.js`);
-  return existsSync(compiled) ? compiled : join(root, "lib", `${name}.ts`);
+  const compiled = join(root, "dist", "lib", "validate-recipe.js");
+  return existsSync(compiled) ? compiled : join(root, "lib", "validate-recipe.ts");
 }
 
-const { readResolvedRecipeConfig } = await import(
-  pathToFileURL(libModulePath("recipe-references")).href
-);
+const { validateRecipes } = await import(pathToFileURL(mainModulePath()).href);
 
-function usage() {
-  console.error(`Usage:
-  validate-recipe.mjs <recipe-file-or-dir> [--all]
-
-Validates one template recipe file, or all *.json/*.md files in a directory when --all is set.`);
+try {
+  const report = validateRecipes(process.argv.slice(2));
+  if (report.help) console.error(report.usage);
+  else console.log(JSON.stringify(report, null, 2));
+  process.exit(report.ok ? 0 : 1);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
 }
-
-function expandPath(value) {
-  return resolve(
-    String(value).replace(/^~(?=\/|$)/, process.env.HOME ?? homedir()),
-  );
-}
-
-function templateKind(template) {
-  if (typeof template === "string") return "leaf";
-  if (Array.isArray(template)) return "sequence";
-  if (template && typeof template === "object") {
-    if (typeof template.template === "string") return "leaf";
-    if (Array.isArray(template.template))
-      return template.parallel === true ? "parallel" : "sequence";
-    if (template.parallel === true) return "parallel";
-    return "object";
-  }
-  return "unknown";
-}
-
-function recipeFiles(target, all) {
-  if (!existsSync(target)) throw new Error(`Recipe path not found: ${target}`);
-  const stat = statSync(target);
-  if (stat.isFile()) return [target];
-  if (!stat.isDirectory())
-    throw new Error(`Recipe path is not a file or directory: ${target}`);
-  if (!all) throw new Error("Directory validation requires --all.");
-  return readdirSync(target)
-    .filter((file) => file.endsWith(".json") || file.endsWith(".md"))
-    .sort((a, b) => a.localeCompare(b))
-    .map((file) => resolve(target, file));
-}
-
-function validateFile(file) {
-  try {
-    const config = readResolvedRecipeConfig(file);
-    if (!config?.template)
-      throw new Error("Recipe must define a non-empty template.");
-    return {
-      file,
-      ok: true,
-      name: config.name ?? "",
-      async: Boolean(config.async),
-      args: Array.isArray(config.args) ? config.args : [],
-      defaults:
-        config.defaults && typeof config.defaults === "object"
-          ? Object.keys(config.defaults).sort()
-          : [],
-      imports:
-        config.imports && typeof config.imports === "object"
-          ? Object.keys(config.imports).sort()
-          : [],
-      mailbox:
-        config.mailbox && typeof config.mailbox === "object"
-          ? {
-              accepts: Array.isArray(config.mailbox.accepts)
-                ? config.mailbox.accepts
-                : [],
-              emits: Array.isArray(config.mailbox.emits)
-                ? config.mailbox.emits
-                : [],
-            }
-          : undefined,
-      template: templateKind(config.template),
-    };
-  } catch (error) {
-    return {
-      file,
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-const args = process.argv.slice(2);
-const targetArg = args.find((arg) => !arg.startsWith("-"));
-const all = args.includes("--all");
-if (!targetArg || args.includes("--help") || args.includes("-h")) {
-  usage();
-  process.exit(targetArg ? 0 : 1);
-}
-
-const files = recipeFiles(expandPath(targetArg), all);
-const results = files.map(validateFile);
-const failed = results.filter((result) => !result.ok).length;
-const report = {
-  ok: failed === 0,
-  total: results.length,
-  passed: results.length - failed,
-  failed,
-  results,
-};
-console.log(JSON.stringify(report, null, 2));
-process.exit(report.ok ? 0 : 1);

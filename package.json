@@ -52,6 +52,9 @@
     "extensions": [
       "./dist/index.js"
     ],
+    "sourceExtensions": [
+      "./index.ts"
+    ],
     "skills": [
       "./skills/actors/SKILL.md",
       "./skills/swarm/SKILL.md"

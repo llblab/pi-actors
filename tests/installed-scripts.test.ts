@@ -38,6 +38,14 @@ async function prepareInstalledPackage(root: string): Promise<string> {
   return packageDir;
 }
 
+test("package metadata exposes compiled and source extension entrypoints", async () => {
+  const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
+  assert.deepEqual(pkg.pi.extensions, ["./dist/index.js"]);
+  assert.deepEqual(pkg.pi.sourceExtensions, ["./index.ts"]);
+  await access(join(process.cwd(), pkg.pi.extensions[0]));
+  await access(join(process.cwd(), pkg.pi.sourceExtensions[0]));
+});
+
 test("build output includes packaged scripts and recipes under dist", async () => {
   await access(join(process.cwd(), "dist", "scripts", "actor-worker.mjs"));
   await access(join(process.cwd(), "dist", "scripts", "async-runner.mjs"));

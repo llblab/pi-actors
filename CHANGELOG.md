@@ -8,6 +8,7 @@
 - `[Observability]` Deduplicated run outbox events by stable event id so line-counter resets do not replay already-seen follow-ups; stale dedupe state is pruned with terminal and missing runs.
 - `[Mailbox Loop]` Added initial run/branch mailbox claim-and-handle helpers plus branch inbox claiming support, failed-handler transitions, standard stop-message detection, bounded message drains, duplicate-claim coverage, and a packaged `actor-worker` demo recipe for canonical mailbox loops.
 - `[Scripts]` Added installed-package coverage proving the packaged `actor-worker` script uses compiled `dist` runtime modules instead of importing TypeScript from `node_modules`; `npm run build` now cleans stale `dist` output, copies packaged `scripts/` and `recipes/` into `dist/`, and syntax-checks the built script entrypoints.
+- `[Packaging]` Exposed optional `pi.sourceExtensions` metadata pointing at the root TypeScript entrypoint while keeping Node-compatible `pi.extensions` on compiled `dist` output.
 - `[Protocol]` Added compact protocol fixtures for actor messages, mailbox contracts, run inbox records, room messages, and artifact manifests with regression coverage.
 - `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
 

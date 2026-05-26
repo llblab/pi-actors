@@ -143,7 +143,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-07 Compiled Script Entrypoints
 
 - Priority: Medium.
-- Status: In progress.
+- Status: Done.
 - Goal: Bring packaged script entrypoints under the build so installed npm recipes run against compiled runtime code.
 - Why now: Recipes increasingly depend on helper scripts that import extension internals; compiling script logic closes the gap between source-tree development and installed package behavior.
 - Direction:

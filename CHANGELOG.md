@@ -12,6 +12,7 @@
 - `[Context]` Clarified the project frame as an experimental self-evolution membrane for local agent capabilities, grounded in explicit actors, recipes, fixtures, skills, and inspectable state.
 - `[Protocol]` Clarified dotted `channel.action` message types as the minimal action surface: scripts can often dispatch from `type` alone while agents may use `body` for free-form prompts.
 - `[Recipes]` Fixed `pipeline-quorum-review` registry loading by inlining the quorum fanout over its `models` array instead of importing a nested repeated recipe with unresolved runtime values.
+- `[Recipes]` Made Markdown recipe frontmatter more forgiving: `args` can be a comma-separated scalar and `defaults` can be a list of `key: value` entries, both normalizing to the canonical JSON recipe shape.
 - `[Protocol]` Added compact protocol fixtures for actor messages, mailbox contracts, run inbox/outbox records, room messages/rosters, run state, recipe summaries, and artifact manifests with regression coverage.
 - `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
 

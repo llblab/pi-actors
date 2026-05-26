@@ -90,7 +90,7 @@ npm run check -- {scope}
 ```
 ````
 
-Fenced blocks marked `template`, `command-template`, `json`, or `recipe` are executable. A `template` fence stores its text as the command-template string. A JSON fence can contain either a full recipe object with `template` or a raw command-template value. Frontmatter supports the recipe metadata used by JSON recipes, including `args`, `defaults`, `imports`, `mailbox`, `artifacts`, `async`, and command-template flags.
+Fenced blocks marked `template`, `command-template`, `json`, or `recipe` are executable. A `template` fence stores its text as the command-template string. A JSON fence can contain either a full recipe object with `template` or a raw command-template value. Frontmatter supports the recipe metadata used by JSON recipes, including `args`, `defaults`, `imports`, `mailbox`, `artifacts`, `async`, and command-template flags. For Markdown ergonomics, `args` may be either a YAML list or a comma-separated scalar, and `defaults` may be either a YAML object or a list of `key: value` entries; both normalize to the same JSON recipe shape.
 
 JSON remains the source-of-truth format for precise machine editing. If `<id>.json` and `<id>.md` exist in the same discovery priority layer, `<id>.json` wins and the Markdown recipe is reported as shadowed.
 

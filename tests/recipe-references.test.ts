@@ -256,6 +256,34 @@ imports:
   }
 });
 
+test("Markdown recipes accept compact args and defaults authoring", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-md-compact-"));
+  try {
+    const recipe = join(root, "compact.md");
+    await writeFile(
+      recipe,
+      `---
+description: Compact Markdown
+args: word:string, suffix:string
+defaults:
+  - word: hello
+  - suffix: "!"
+---
+
+\`\`\`template
+printf {word}{suffix}
+\`\`\`
+`,
+    );
+
+    const config = readResolvedRecipeConfig(recipe)!;
+    assert.deepEqual(config.args, ["word:string", "suffix:string"]);
+    assert.deepEqual(config.defaults, { suffix: "!", word: "hello" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Template recipes reject unknown named import nodes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {

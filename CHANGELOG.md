@@ -4,7 +4,7 @@
 
 - `[Prompts]` Clarified that recipe registry warnings are actionable maintenance: invalid or blocking recipes should be fixed, removed, or disabled rather than ignored.
 - `[Backlog]` Pruned and refocused the backlog around reliability, actor-loop consolidation, protocol fixtures, follow-up deduplication, and portability reality checks.
-- `[State]` Added resilient JSON/JSONL state reader helpers and routed room, inspector, and run inbox reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts.
+- `[State]` Added resilient JSON/JSONL state reader helpers and routed room, inspector, runtime wake, and run inbox reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts.
 
 ## 0.23.0: Actor Manifests, Inspection, and Runtime Hygiene
 

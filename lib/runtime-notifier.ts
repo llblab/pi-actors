@@ -16,6 +16,8 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
+import { readJsonlFileResilient } from "./state-readers.ts";
+
 export interface RuntimeWakeEvent {
   actor: string;
   id: string;
@@ -124,12 +126,8 @@ export function parseRuntimeWakeEventLine(
 }
 
 export function readRuntimeWakeEvents(stateDir: string): RuntimeWakeEvent[] {
-  const file = runtimeWakeFile(stateDir);
-  if (!existsSync(file)) return [];
-  return readFileSync(file, "utf8")
-    .split("\n")
-    .filter((line) => line.trim())
-    .map(parseRuntimeWakeEventLine)
+  return readJsonlFileResilient<Record<string, unknown>>(runtimeWakeFile(stateDir))
+    .records.map((record) => parseRuntimeWakeEventLine(JSON.stringify(record)))
     .filter((event): event is RuntimeWakeEvent => Boolean(event));
 }
 

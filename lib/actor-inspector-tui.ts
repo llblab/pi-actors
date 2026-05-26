@@ -277,14 +277,11 @@ function readOutboxPreviews(
 }
 
 function getRunOwnerId(stateDir: string): string | undefined {
-  try {
-    const meta = JSON.parse(
-      fs.readFileSync(path.join(stateDir, "run.json"), "utf8"),
-    ) as Record<string, unknown>;
-    return typeof meta.ownerId === "string" ? meta.ownerId : undefined;
-  } catch {
-    return undefined;
-  }
+  const meta = readJsonFileResilient<Record<string, unknown> | undefined>(
+    path.join(stateDir, "run.json"),
+    undefined,
+  ).value;
+  return typeof meta?.ownerId === "string" ? meta.ownerId : undefined;
 }
 
 function matchesOwner(stateDir: string, ownerId: string | undefined): boolean {

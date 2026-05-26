@@ -55,6 +55,18 @@ test("build output mirrors JS runtime assets under dist", async () => {
   await access(join(process.cwd(), "dist", "fixtures", "protocol", "mailbox-contract.json"));
 });
 
+test("build output includes compiled modules for TypeScript-backed script shims", async () => {
+  for (const module of [
+    "actor-worker",
+    "async-runner",
+    "conformance",
+    "validate-recipe",
+  ]) {
+    await access(join(process.cwd(), "dist", "lib", `${module}.js`));
+    await access(join(process.cwd(), "dist", "lib", `${module}.d.ts`));
+  }
+});
+
 test("installed extension entrypoint imports compiled dist runtime", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-entry-"));
   try {

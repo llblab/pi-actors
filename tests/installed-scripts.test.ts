@@ -74,12 +74,11 @@ test("build output includes compiled modules for TypeScript-backed script shims"
     "conformance",
     "locker",
     "recipe-utils",
-    "validate-recipe",
   ]) {
     await access(join(process.cwd(), "dist", "lib", `${module}.js`));
     await access(join(process.cwd(), "dist", "lib", `${module}.d.ts`));
   }
-  for (const module of ["build-dist"]) {
+  for (const module of ["build-dist", "validate-recipe"]) {
     await access(join(process.cwd(), "dist", "scripts", `${module}.js`));
     await access(join(process.cwd(), "dist", "scripts", `${module}.d.ts`));
   }

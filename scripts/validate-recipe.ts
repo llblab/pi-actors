@@ -7,7 +7,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-import { readResolvedRecipeConfig } from "./recipe-references.ts";
+import { readResolvedRecipeConfig } from "../lib/recipe-references.ts";
 
 export function validateRecipeUsage(): string {
   return `Usage:

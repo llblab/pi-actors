@@ -16,6 +16,7 @@ import {
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
+import { readJsonlFileResilient } from "./state-readers.ts";
 
 export type RunObservedStatus =
   | "running"
@@ -605,15 +606,12 @@ function normalizeOutboxLevel(value: unknown): RunOutboxLevel {
   return value === "warning" || value === "error" ? value : "info";
 }
 
-function parseOutboxLine(
-  line: string,
+function parseOutboxRecord(
+  raw: Record<string, unknown>,
   run: RunObservation,
   index: number,
 ): RunOutboxEvent | undefined {
   if (!run.stateDir) return undefined;
-  try {
-    const raw = JSON.parse(line) as Record<string, unknown>;
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
     const event =
       typeof raw.event === "string" && raw.event.trim()
         ? raw.event.trim()
@@ -647,17 +645,13 @@ function parseOutboxLine(
       summary,
       ts,
     };
-  } catch {
-    return undefined;
-  }
 }
 
-function readOutboxLines(run: RunObservation): string[] {
+function readOutboxRecords(run: RunObservation): Record<string, unknown>[] {
   if (!run.stateDir) return [];
-  const path = join(run.stateDir, "outbox.jsonl");
-  if (!existsSync(path)) return [];
-  const content = readFileSync(path, "utf8").trimEnd();
-  return content ? content.split("\n") : [];
+  return readJsonlFileResilient<Record<string, unknown>>(
+    join(run.stateDir, "outbox.jsonl"),
+  ).records;
 }
 
 export function pruneRunObservationState(
@@ -665,6 +659,7 @@ export function pruneRunObservationState(
   previousLineCounts: Map<string, number>,
   summary: RunSummary,
   terminalRuns: Iterable<string> = [],
+  seenEventIds: Map<string, Set<string>> = new Map(),
 ): void {
   const activeRuns = new Set(summary.runs.map((run) => runObservationKey(run)));
   const terminalRunSet = new Set(terminalRuns);
@@ -685,23 +680,33 @@ export function pruneRunObservationState(
       previousLineCounts.delete(key);
     }
   }
+  for (const key of seenEventIds.keys()) {
+    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) {
+      seenEventIds.delete(key);
+    }
+  }
 }
 
 export function detectRunOutboxEvents(
   previousLineCounts: Map<string, number>,
   summary: RunSummary,
+  seenEventIds: Map<string, Set<string>> = new Map(),
 ): RunOutboxEvent[] {
   const events: RunOutboxEvent[] = [];
   for (const run of summary.runs) {
     const key = run.stateDir ?? run.run;
-    const lines = readOutboxLines(run);
+    const records = readOutboxRecords(run);
     const previousCount = previousLineCounts.get(key) ?? 0;
-    const start = Math.min(previousCount, lines.length);
-    for (let index = start; index < lines.length; index += 1) {
-      const event = parseOutboxLine(lines[index], run, index);
-      if (event) events.push(event);
+    const start = Math.min(previousCount, records.length);
+    const seen = seenEventIds.get(key) ?? new Set<string>();
+    for (let index = start; index < records.length; index += 1) {
+      const event = parseOutboxRecord(records[index], run, index);
+      if (!event || seen.has(event.id)) continue;
+      events.push(event);
+      seen.add(event.id);
     }
-    previousLineCounts.set(key, lines.length);
+    previousLineCounts.set(key, records.length);
+    seenEventIds.set(key, seen);
   }
   return events;
 }

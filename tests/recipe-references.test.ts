@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { getPackagedRecipeRoot } from "../lib/paths.ts";
 import { buildRecipeContextRecords, getRecipeIdFromPath, readResolvedRecipeConfig, resolveRecipePath } from "../lib/recipe-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -256,6 +257,34 @@ imports:
   }
 });
 
+test("Markdown recipes accept compact args and defaults authoring", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-md-compact-"));
+  try {
+    const recipe = join(root, "compact.md");
+    await writeFile(
+      recipe,
+      `---
+description: Compact Markdown
+args: word:string, suffix:string
+defaults:
+  - word: hello
+  - suffix: "!"
+---
+
+\`\`\`template
+printf {word}{suffix}
+\`\`\`
+`,
+    );
+
+    const config = readResolvedRecipeConfig(recipe)!;
+    assert.deepEqual(config.args, ["word:string", "suffix:string"]);
+    assert.deepEqual(config.defaults, { suffix: "!", word: "hello" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Template recipes reject unknown named import nodes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
@@ -441,6 +470,19 @@ test("Packaged recipes do not ship concrete model-version defaults", async () =>
       );
     }
   }
+});
+
+test("Packaged actor worker recipe stays mailbox-only and cross-platform", () => {
+  const config = readResolvedRecipeConfig(join(getPackagedRecipeRoot(), "actor-worker.json"))!;
+  assert.deepEqual(config.mailbox?.accepts, [
+    "task.assign",
+    "control.stop",
+    "control.cancel",
+    "control.kill",
+  ]);
+  const template = JSON.stringify(config.template);
+  assert.match(template, /actor-worker\.mjs/);
+  assert.doesNotMatch(template, /control\.fifo|mkfifo|named-pipe/);
 });
 
 test("Packaged async recipes expose actor-native termination controls", async () => {

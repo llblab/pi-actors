@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -30,7 +30,7 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "pack:dry": "npm pack --dry-run",
     "validate": "npx tsc --noEmit && npm run build && npm run check && npm test && npm run pack:dry",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/build-dist.mjs",
     "prepack": "npm run build"
   },
   "files": [
@@ -45,13 +45,21 @@
     "BACKLOG.md",
     "CHANGELOG.md",
     "docs",
+    "fixtures",
     "banner.jpg"
   ],
   "pi": {
     "extensions": [
       "./dist/index.js"
     ],
+    "sourceExtensions": [
+      "./index.ts"
+    ],
     "skills": [
+      "./dist/skills/actors/SKILL.md",
+      "./dist/skills/swarm/SKILL.md"
+    ],
+    "sourceSkills": [
       "./skills/actors/SKILL.md",
       "./skills/swarm/SKILL.md"
     ],

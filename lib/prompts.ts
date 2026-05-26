@@ -29,7 +29,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Recipe imports are local variables; imported recipes are definitions, not nested async runs; parent async:true creates one run.
 - Use spawn/message/inspect for actor-level start/send/observe; avoid runtime/FIFO/outbox vocabulary in public guidance.
 - Run state lives under ~/.pi/agent/tmp/pi-actors/runs; inspect status/tail/messages/mailbox/files/artifacts intentionally and avoid busy-polling.
-- Maintain ~/.pi/agent/recipes like MEMORY.md for capabilities: keep useful tools, curate stale ones; packaged/ad hoc recipes are lower-priority components; offer to save successful recurring patterns only after confirmation.
+- Maintain ~/.pi/agent/recipes like MEMORY.md for capabilities: keep useful tools, curate stale ones, and fix/remove/disable invalid recipes flagged by registry warnings; packaged/ad hoc recipes are lower-priority components; offer to save successful recurring patterns only after confirmation.
 - Foreground tools/templates fit short work; async recipes/runs fit subagents, services, fanout, media, and long pipelines.
 - Long fanout = parent async recipe wrapping template(parallel:true) and imports; packaged fanout recipes bubble branch completion messages; grow recurring multi-agent workflows as packaged recipes/pipelines, not ad hoc external scripts.
 - For deeper pi-actors guidance, inspect installed extension sources/docs/recipes; README and docs are not automatically in context.`;

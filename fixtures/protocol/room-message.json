@@ -1,0 +1,11 @@
+{
+  "to": "room:demo",
+  "from": "branch:demo/worker",
+  "type": "task.result",
+  "summary": "Worker completed task",
+  "body": {
+    "id": "inbox-001",
+    "result": "ok"
+  },
+  "received_at": "2026-05-26T00:00:00.000Z"
+}

@@ -48,6 +48,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
   const runDirWatchers = new Map<string, FSWatcher>();
   const observedRuns = new Map<string, Observability.RunObservedStatus>();
   const observedRunEventLines = new Map<string, number>();
+  const observedRunOutboxEventIds = new Map<string, Set<string>>();
   const retirementAttempts = new Set<string>();
   let runStatusFrame = 0;
   let communicationWidgetVisible = false;
@@ -152,6 +153,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     const outboxEvents = Observability.detectRunOutboxEvents(
       observedRunEventLines,
       summary,
+      observedRunOutboxEventIds,
     );
     if (!notify) return;
     retireCandidateRuns(ctx, summary);
@@ -177,6 +179,7 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
       observedRunEventLines,
       summary,
       transitions.map((transition) => transition.stateDir ?? transition.run),
+      observedRunOutboxEventIds,
     );
     for (const event of outboxEvents) {
       if (!Observability.shouldNotifyRunOutboxEvent(event)) continue;

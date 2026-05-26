@@ -1,0 +1,11 @@
+{
+  "room": "main",
+  "members": {
+    "branch:demo/worker": {
+      "display": "worker",
+      "role": "worker",
+      "status": "present",
+      "last_seen": "2026-05-26T00:00:00.000Z"
+    }
+  }
+}

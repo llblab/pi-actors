@@ -298,7 +298,7 @@ function compactRoomRoster(
 }
 
 function compactRoomStatus(status: ActorRooms.RoomStatus): string {
-  return `\nroom=${status.room} messages=${status.message_count} roster=${status.roster_count}${status.last_message_at ? ` last_message_at=${status.last_message_at}` : ""}${status.last_message_from ? ` last_from=${status.last_message_from}` : ""}${status.last_message_type ? ` last_type=${status.last_message_type}` : ""}${status.last_message_summary ? ` last_summary=${compactPreview(status.last_message_summary)}` : ""}`;
+  return `\nroom=${status.room} messages=${status.message_count} roster=${status.roster_count}${status.diagnostics_count ? ` diagnostics=${status.diagnostics_count}` : ""}${status.last_message_at ? ` last_message_at=${status.last_message_at}` : ""}${status.last_message_from ? ` last_from=${status.last_message_from}` : ""}${status.last_message_type ? ` last_type=${status.last_message_type}` : ""}${status.last_message_summary ? ` last_summary=${compactPreview(status.last_message_summary)}` : ""}`;
 }
 
 function compactCommunicationSnapshot(

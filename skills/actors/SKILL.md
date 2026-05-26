@@ -2,12 +2,14 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.23.0
+  version: 0.24.0
 ---
 
 # Actors (pi-actors)
 
 `pi-actors` turns trusted local capabilities into addressable actors. This skill is the compact operator/reference layer for the extension itself: tools, nouns, lifecycle, message protocol, recipes, and common edge cases. It is not a multi-agent strategy guide; use a swarm skill for decomposition, quorum design, reviewer lenses, and consensus methodology.
+
+Maintain this skill as the extension's agent-facing manual. When implementation changes reveal new durable mechanics, invariants, warnings, or safer operating patterns, update this skill alongside code/docs so future agents learn the current actor model instead of rediscovering it.
 
 ## Knowledge Surfaces
 
@@ -150,7 +152,7 @@ When using actors as backlog implementers, avoid one-shot subagents that exit af
 4. Actor posts `task.result` and `awaiting_assignment`.
 5. Actor stays alive until the coordinator sends another `task.assign` or an explicit `control.stop`.
 
-Use `front`/`back` actors for opposite backlog ends when reducing overlap. Implementer workflows should be packaged as reusable recipe composition, not bespoke scripts: use `coordinator-locker` for queue/assignment/locking, subagent launcher recipes for execution cells, and actor-message utility recipes for structured handoffs. If the existing recipe library cannot express the scenario, add missing reusable component recipes first, then compose the higher-level workflow from them. Supervisors should route coordinator assignments by `body.actor`, preserve the assignment as an object rather than a JSON string, and keep stopped-worker summaries tied to the original actor list.
+Use `front`/`back` actors for opposite backlog ends when reducing overlap. Implementer workflows should be packaged as reusable recipe composition, not bespoke scripts: use `coordinator-locker` for queue/assignment/locking, subagent launcher recipes for execution cells, actor-message utility recipes for structured handoffs, and `lib/mailbox-loop.ts` helpers when writing mailbox-consuming workers. Mailbox loops should claim one run or branch inbox message at a time, mark success as `handled`, mark exceptions as `failed`, and treat `control.stop` / `control.cancel` / `control.kill` as standard stop messages; bounded drains may process available work until a stop message or max-message guard. If the existing recipe library cannot express the scenario, add missing reusable component recipes first, then compose the higher-level workflow from them. Supervisors should route coordinator assignments by `body.actor`, preserve the assignment as an object rather than a JSON string, and keep stopped-worker summaries tied to the original actor list.
 
 Current packaged building blocks:
 
@@ -273,6 +275,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 - [`locker`](../../recipes/locker.json): modular queue + acquire/renew/release lease locks + journaled locker messages + platform-adapted control metadata.
 - [`utility-coordinator-lock-snapshot`](../../recipes/utility-coordinator-lock-snapshot.json): one-shot JSON snapshot of a coordinator-locker state directory.
 - [`music-player`](../../recipes/music-player.json): background local/URL/directory/playlist playback actor controlled by messages.
+- [`actor-worker`](../../recipes/actor-worker.json): canonical mailbox-backed branch worker demo that claims branch inbox work, emits room-visible task lifecycle messages, and stops on standard control messages.
 
 ### Subagent Atoms
 

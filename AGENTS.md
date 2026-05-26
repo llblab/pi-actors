@@ -2,81 +2,146 @@
 
 ## Meta-Protocol Principles
 
-- `Constraint-Driven Evolution`: Add structure when real project constraints justify it
-- `Single Source of Truth`: Keep durable protocol, open work, completed delivery, and docs in separate files
-- `Context Hygiene`: Compress stale context before it becomes coordination drag
-- `Boundary Clarity`: README is the human entrypoint, `AGENTS.md` is durable protocol, `BACKLOG.md` is open work, and `CHANGELOG.md` is delivery history
+- `Constraint-Driven Evolution`: Add structure when real project constraints justify it.
+- `Single Source of Truth`: Keep durable protocol, open work, completed delivery, and docs in separate files.
+- `Context Hygiene`: Compress stale context before it becomes coordination drag.
+- `Boundary Clarity`: README is the human entrypoint, `AGENTS.md` is durable protocol, `BACKLOG.md` is open work, and `CHANGELOG.md` is delivery history.
 
 ## Concept
 
-`pi-actors` is a local-first actor runtime and orchestrator for pi. It wraps trusted local programs, scripts, services, pipelines, and recipes as addressable actors that agents can `spawn`, control with typed `message` envelopes, and observe with `inspect`. It also persists user/agent-registered actor-control tools as recipe files under `~/.pi/agent/recipes`, giving agents durable operational muscle memory for launching and managing the local actor zoo.
+`pi-actors` is a local-first actor runtime and orchestrator for Pi. It wraps trusted local programs, scripts, services, pipelines, and recipes as addressable actors that agents can `spawn`, control with typed `message` envelopes, and observe with `inspect`. It also persists user/agent-registered actor-control tools as recipe files under `~/.pi/agent/recipes`, giving agents durable operational muscle memory for launching and managing the local actor zoo.
+
+Treat this extension as an experimental self-evolution membrane for the agent harness: a way for agents that are not pretrained on local workflows to acquire, preserve, inspect, and refine operational capabilities through explicit local actors, recipes, fixtures, skills, and state rather than hidden assumptions. Keep that potential grounded in small, testable, operator-visible protocol slices.
 
 ## Topology
 
-- `/index.ts`: Minimal extension coordinator/composition root; it wires live pi ports and should avoid owning domain behavior
-- `/lib/*.ts`: Flat Domain DAG modules for cohesive reusable behavior; `command-templates.ts` mirrors the shared portable command-template standard, `schema.ts` owns tool arg declarations and placeholder-derived tool schemas, `identity.ts` owns names, `config.ts` owns config persistence, `registry.ts` owns registry register/update/delete use-cases, `output.ts` owns result formatting/truncation, `execution.ts` owns registered-tool execution, `recipe-references.ts` owns template recipe reference detection and path resolution, `async-runs.ts` owns async run state, `actor-rooms.ts` owns room timelines/rosters/communication snapshots with burst-safe roster and branch snapshot writes, locked branch-local inbox mutations, plus status reads that avoid parsing full timelines, `actor-inspector-tui.ts` owns compact terminal previews, branch-inbox unread/current-branch filtering, and selected-message inspection for actor communications, `observability.ts` owns ambient run summaries, `temp.ts` owns pi-agent temp cleanup, `prompts.ts` owns LLM-facing copy, `tools.ts` owns pi-facing tool definitions for both `register_tool`, async run primitives, and generated runtime tools, `runtime.ts` owns load/conflict/registration coordination, and `paths.ts` owns config/tmp path resolution
-- `index.ts` should import local domains as namespaces (`import * as CommandTemplates from "./lib/command-templates.ts"`) so orchestration reads through domain names instead of flat helper imports
-- `/scripts/*.mjs`: Thin helper processes for detached async run execution; keep policy in registered tool config and reusable logic in `/lib`
-- `/recipes/*.json`: Packaged standard recipe library; keep recipes optional, composable, and policy-light; prefer public args for operator/agent decisions instead of baking project-specific prompts, file names, or concrete model-version defaults into reusable recipes
-- `/skills/actors/SKILL.md`: Dense practical reference for operating pi-actors itself
-- `/skills/swarm/SKILL.md`: Bundled methodology skill for multi-agent standards, strategies, and portable examples; keep it theory/strategy-oriented while pi-actors recipes/scripts provide the local execution engine
-- `/scripts/music-player.mjs`: Standard helper script for the packaged music-player recipe; keep it executable and avoid restoring parallel shell-wrapper variants unless a concrete portability need appears
-- `/tests/*.test.ts`: Focused regression tests for pure domains
-- `/README.md`: Human-facing install, usage, and runtime semantics
-- `/BACKLOG.md`: Canonical open work; keep it empty when no actionable or gated work remains
-- `/CHANGELOG.md`: Completed delivery history
-- `/docs/README.md`: Documentation index
+- `/index.ts`: Minimal extension coordinator/composition root. It wires live pi ports and should avoid owning domain behavior.
+
+## Domain Modules
+
+- `/lib/*.ts`: Flat Domain DAG modules for cohesive reusable behavior.
+  - `command-templates.ts`: portable command-template execution graph.
+  - `schema.ts`: tool arg declarations and placeholder-derived schemas.
+  - `identity.ts`, `paths.ts`, `config.ts`: names, paths, and persistence.
+  - `registry.ts`, `runtime.ts`: register/update/delete, load/conflict/registration coordination.
+  - `execution.ts`, `output.ts`, `limits.ts`: registered-tool execution and bounded output.
+  - `recipe-references.ts`, `recipe-discovery.ts`, `recipe-usage.ts`: recipe graph, discovery, and usage metadata.
+  - `async-runs.ts`, `runtime-notifier.ts`, `mailbox-loop.ts`: detached run state, wake notifications, and mailbox worker helpers.
+  - `actor-rooms.ts`, `actor-inspector-tui.ts`, `observability.ts`: rooms, communication previews, and ambient run status.
+  - `prompts.ts`, `tools.ts`, `temp.ts`: LLM-facing copy, pi-facing tool definitions, and temp cleanup.
+
+## Repo Surfaces
+
+- `/scripts/*.mjs`: Stable executable shims for detached/helper processes.
+- `/lib/*.ts`: Compiled domain and script-entrypoint logic. Keep `scripts/*.mjs` lightweight and move substantive behavior into named domain modules so `dist/lib` is the JS-only runtime surface. This intentionally grows a standard library: script-born behavior should gain a clear domain name when reuse is plausible. Exception: self-contained application scripts with no expected second consumer, such as `music-player.mjs`, may remain standalone `.mjs` files.
+- `/recipes/*.json`: Packaged standard recipe library. Keep recipes optional, composable, policy-light, and caller-configurable.
+- `/skills/actors/SKILL.md`: Dense practical reference for operating pi-actors itself.
+- `/skills/swarm/SKILL.md`: Bundled methodology skill for multi-agent standards, strategies, and portable examples.
+- `/tests/*.test.ts`: Focused regression tests for pure domains.
+- `/README.md`: Human-facing install, usage, and runtime semantics.
+- `/BACKLOG.md`: Canonical open work; only completable future work.
+- `/CHANGELOG.md`: Completed delivery history.
+- `/docs/README.md`: Documentation index.
 
 ## Operating Principles
 
-- Prefer explicit migration boundaries over silent user-config rewrites
-- Keep published documentation portable: use `~`, `<repo>`, or relative paths instead of machine-local absolute paths
-- Preserve runtime output discipline because tool output flows directly into agent context
-- Keep the project lens local-first and cybernetic: agents wrap durable local capabilities as actors, then use semantic tools and messages instead of repeatedly reconstructing shell commands
-- Design recipes as agent-callable tools: make prompts, scopes, paths, models, and policy knobs public args/defaults when the caller should decide them at invocation time
+- Prefer explicit migration boundaries over silent user-config rewrites.
+- Keep published documentation portable: use `~`, `<repo>`, or relative paths instead of machine-local absolute paths.
+- Preserve runtime output discipline because tool output flows directly into agent context.
+- Keep the project lens local-first and cybernetic: agents wrap durable local capabilities as actors, then use semantic tools and messages instead of repeatedly reconstructing shell commands.
+- Design recipes as agent-callable tools: make prompts, scopes, paths, models, and policy knobs public args/defaults when the caller should decide them at invocation time.
+- Decompose oversized bullets into sublists or hierarchy; long flat list items are a context-smell.
 
-## Durable Conventions
+## Knowledge Surfaces
 
-- `Knowledge surface separation`: pi-actors has distinct knowledge surfaces with different context-entry behavior: injected prompt is always present and should stay a tiny bootstrap/reminder; packaged `actors` skill is auto-matched by name/description and should signal that its body is the highest-density practical guide for operating the extension plus the shortest navigator to bundled recipes; packaged `swarm` skill is auto-matched for multi-agent methodology, strategies, standards, and portable examples; README is the human entrypoint explaining concept, rhythm, benefits, and scenarios but is not automatically in context; `/docs` are detailed transportable standards read on demand; `AGENTS.md` is project context and architectural constraints for agents changing the repo | Trigger: Editing prompt copy, README, docs, skills, or project context | Action: Keep each surface on its own wave, avoid duplicating prompt and skill headers, keep the actors skill recipe navigator compact and concrete, avoid duplicating scenario catalogs or changelog narratives in the actors skill, avoid turning the prompt into docs, keep multi-agent methodology in swarm-oriented guidance rather than the actors skill, keep packaged extension skill metadata versions synchronized with `package.json` version, and avoid extra colons in skill frontmatter scalar lines because skill formatters treat them poorly
-- `Tool registry is executable muscle memory`: `~/.pi/agent/recipes/*.json` is the persistent user tool surface by location: every recipe in that agent root is automatically registered as an agent tool across sessions, and `register_tool` creates/updates/deletes recipe files there under the hood | Trigger: Any runtime registration, recipe discovery, migration, docs, skill, prompt, or recipe authoring work | Action: Treat the directory like `MEMORY.md` for executable habits; preserve filename identity, atomic writes, explicit operator-gated migration paths, and keep recipe files transportable by making exposure a function of location rather than recipe content; packaged/ad hoc recipes outside the agent root are components, not tools
-- `Current runtime contract`: Register trusted command templates with tool names from registry keys, placeholder-derived args, progressive typed arg declarations, inline/default/`??`/ternary config fallback, placeholder-derived numeric node controls, split-first command-arg construction, sequential or `parallel: true` composition, direct no-shell execution, optional per-node `when`, optional per-node positive `timeout` disabled by default, lightweight warnings for obvious trusted-executable risk shapes, per-node `delay`, bounded leaf/node `retry`, `failure: "continue|branch|root"` propagation, `recover` cleanup between retry attempts, template recipes with explicit `async: true` detached mode, actor-oriented `spawn`/`message`/`inspect` tools with run-local JSONL outbox messages, Unix FIFO send, graceful cancel, and force kill, generic detached run primitives with process-group cancellation, injected async `{run_id}` and `{state_dir}` values, coordinator-scoped event-driven observability with at least one triangle per active async run and extra triangles for active parallel branches, runtime-inferred `command.done` bubbling for packaged multi-agent fanout, terminal follow-ups for `done`/`failed`/unhandled `killed`/`exited` states, recipe-persistence suggestions for successful direct inline/ad hoc `spawn` runs and successful recipes outside the durable user recipe root, named recipe `artifacts`, recipe `mailbox` metadata, `template` recipe references, recipe-layer `imports`, file-backed async recipe JSONL context bundles for child `pi -p` actors with raw entry/import recipes and `"you_are_here": true`, co-located recipe entries, `~/.pi/agent/recipes/*.json` template recipe files, run state under `~/.pi/agent/tmp/pi-actors/runs`, and `{file}` as the canonical local file path arg | Trigger: Changing registration or invocation behavior | Action: Keep README, command-template docs, template-recipe docs, async-run docs, actor-message docs, implementation, and migration notes aligned
-- `Typed arg authoring`: Typed args support `string`, `path`, `int`, `number`, `bool`, and `enum(...)` plus two equivalent readability styles: metadata-first (`args` + `defaults` + simple `{name}` placeholders) for long command lines, and inline-first (`{name:type=default}` placeholders) for compact one-property templates | Trigger: Changing arg parsing, docs, schema generation, or registry serialization | Action: Preserve both styles, keep explicit `args` type declarations higher priority than inline placeholder types, and make breaking cleanup explicit when removing old arg shapes
-- `Template recipe graph`: The valid execution chain is `tool → template → recipe → run → template`; file-backed and co-located recipes are storage variants of that chain | Trigger: Adding registry bindings, recipes, docs, or runtime shortcuts | Action: Keep command templates synchronous and portable, use `async: true` as the detached run switch, require every recipe to own `template` directly, and reject cyclic shortcuts where saved recipes point back at generated tools
-- `Layer boundary discipline`: Command-template evolution must be separated from template-recipe configuration and async-run lifecycle configuration | Trigger: Adding syntax, placeholders, imports, async controls, or docs | Action: Put portable execution graph semantics in `docs/command-templates.md`, recipe storage/import/default/reference behavior in `docs/template-recipes.md`, and detached lifecycle/state/IPC behavior in `docs/async-runs.md`; type imported recipes as command-template-shaped recipe definitions, not async-run instances
-- `Executable script recipes`: Recipe templates may point directly at executable helper scripts, including JavaScript `.mjs` files with shebangs; do not prefix such recipes with `node` unless the script is intentionally not executable | Trigger: Adding or editing script-backed recipes and docs | Action: Keep the script executable bit, call `{repo}/scripts/name.mjs ...` directly, keep the standard library on one maintained wrapper per capability unless a second wrapper has a concrete platform reason, and ship compiled `dist/lib/*.js` runtime modules for installed npm script entrypoints and ensure those scripts do not import `.ts` files from under `node_modules` through Node native type stripping
-- `Registry safety boundaries`: Tool definitions use `template`, not `script`, and built-in/core tool names must not be shadowed | Trigger: Loading/editing persisted config or registration logic | Action: Reject legacy `script` entries explicitly, avoid silent user-config rewrites outside the repo, and keep conflict checks before persistence/runtime registration
-- `Async run observability`: Ambient triangles count active async work units across the visible run tree: each running async run contributes at least one triangle, reported active parallel command/subagent branches contribute the visible branch count when greater than one, and descendant `pi -p` subagent processes are folded in so coordinator-plus-workers scenarios expand beyond a single coordinator marker. Event-driven terminal/outbox watchers should initiate follow-up for unhandled terminal completion/failure states, failed or in-flight `command.done` branch completions, and coordinator-bound script-authored messages with bounded body previews; actor `message` is the explicit coordinator-to-run command channel paired with these upward events. Do not restore busy-polling loops, sleep-then-status smoke examples, duplicate follow-ups for final successful leaf commands, or duplicate follow-ups for `cancel`, `kill`, or control-stop actions already handled by synchronous tool results. | Trigger: Changing async run UI, notifications, actor-message routing, or smoke-test interpretation | Action: Preserve branch-aware triangles from `progress.activeSubagents`, runtime-inferred branch bubbling for packaged fanout completion, process-tree expansion for coordinator-launched workers, terminal notifications as event-driven behavior, and docs/examples that teach reactive run→coordinator→message loops before sleep-polling patterns.
-- `Communication direction`: The design target is an organic universal message layer across sync tasks, async runs, branches, tools, and coordinators. Breaking changes are allowed to compress concepts, remove accidental duplication, and make duplex communication symmetric where the domain is symmetric. | Trigger: Designing APIs or recipes that communicate | Action: Prefer a concentrated actor/message protocol (`spawn`, `message`, `inspect`, addressed endpoints, typed message envelopes, mailbox accepts/emits) over exposing FIFO/outbox/status mechanics directly; use one envelope for upward, downward, lateral, parent/branch, and branch/parent messages; absorb runtime async primitives into actor API instead of preserving parallel public concepts.
-- `Runtime IO discipline`: Tool stdout and temp state must stay bounded and local | Trigger: Changing execution, formatting, temp files, run state, logs, or artifacts | Action: Keep tail truncation/full-output temp files/failure formatting intact; keep extension-owned temp state under `~/.pi/agent/tmp/pi-actors` unless explicitly overridden
-- `Backlog is planning, not history`: `BACKLOG.md` should contain only completable future work with current task/scope/exit criteria; completed delivery history belongs in `CHANGELOG.md`, and durable or evergreen behavior belongs in `AGENTS.md`, README, docs, or skills | Trigger: Editing backlog or reconciling completed slices | Action: Remove historical progress narratives, version-scoped headings, watch-mode/monitoring principles, open-ended “continue evolving” items, and conditional “if usage proves” notes unless they are framed as a concrete gated task; keep priority order and prefer an 80/20 focus list when many remaining tasks compete for attention
-- `Changelog signal only`: Changelog bullets describe meaningful user/operator/developer changes, not release bookkeeping | Trigger: Preparing or editing release notes | Action: Do not add bullets that only say package, lockfile, or packaged skill metadata versions were bumped for this package; the version heading already carries that information. Mention dependency or package metadata changes only when the metadata change itself has user-visible or operational meaning
-- `Release artifact hygiene`: PR/release summaries become stale during active branch work and do not belong in the repository documentation tree | Trigger: Preparing release notes or PR bodies | Action: Create temporary/operator-facing artifacts outside the repo only during explicit release finalization; keep durable release evidence in `CHANGELOG.md` and open gates in `BACKLOG.md`
-- `Graceful actor retirement`: Coordinator/helper actors that exist only to supervise a bounded worker tree should have explicit retirement semantics instead of relying on the operator or LLM to remember cleanup | Trigger: Designing coordinator recipes, helper actors, worker fanout, locker-backed swarms, or auto-stop behavior | Action: Make retirement opt-in through recipe/run metadata, keep candidates blocked while active command-template branches or descendant `pi -p` workers are still running, retire only after observed child actors are terminal and outputs are flushed, prefer graceful control messages before process termination, record retirement events, and never infer retirement for persistent services or backlog implementers
-- `Persistent implementer workflows are recipe composition`: Backlog implementer scenarios should be launched through reusable component recipes, not one-off scripts or ad hoc shell orchestration | Trigger: Designing implementer swarms, backlog workers, coordinator-assigned task loops, or related recipes | Action: Compose cells such as `coordinator-locker`, subagent launchers, and actor-message utilities; preserve JSON envelope object shape across handoffs; add missing reusable component recipes only when needed; update the actors skill launcher map with supported scenarios
-- `Modular coordination and separate lock state`: The coordination of multi-agent workflows is split into two cleanly decoupled layers: the active coordinator and the stateful locker. The locker manages task queueing and resource lock leases over Unix FIFO/pipes without project policy. The coordinator script (`scripts/coordinator.mjs`) manages process pools, rooms, and lifecycles, and supports different pluggable mode strategies (`pipeline`, `fanout`, `pool`, `consensus`). | Trigger: Modifying coordination scripts, queues, locking, or parallel worker flows | Action: Keep the locker generic and thin, and implement all orchestration strategy rules inside the multi-mode coordinator.
-- `Active branch inbox queues`: Direct branch messages are active, work-triggering inbox queues rather than passive files. During subagent execution, the coordinator atomically claims (`claimed`), assigns missing message IDs, injects, and handles (`handled`/`failed`) queued branch-local direct messages to allow interactive/resumable worker workflows. | Trigger: Delivering branch messages, executing subagents, or updating branch queues | Action: Ensure direct messages can continue or wake long-lived branch runners, guard branch-local inbox append/status rewrites with the branch inbox lock, and keep the FIFO queue status transitions clean and fully tested.
-- `Recipe library growth is demand-driven`: Packaged recipes should grow from concrete repeated task patterns, not speculative scenario catalogs | Trigger: Adding packaged utilities, pipelines, or component recipes | Action: Prefer existing component composition, keep recipes policy-light with caller-owned prompts/models/paths/knobs, avoid scenario-specific scripts when existing components suffice, and document new reusable launch scenarios in the actors skill only after the recipe exists
-- `Context sync`: Meaningful implementation or docs changes must reconcile `BACKLOG.md`, `CHANGELOG.md`, README, and docs navigation | Trigger: Closing, narrowing, or discovering work | Action: Run the context validator before final status when practical
-- `Public path hygiene`: Published docs must not include machine-local absolute paths | Trigger: Adding validation commands, examples, or local instructions to README/AGENTS/docs/changelog | Action: Use `~/.pi/...`, `<repo>/...`, `${SKILL_DIR}/...`, or relative paths
+- Injected prompt: tiny bootstrap/reminder, never full docs.
+- README: public face of the project. Keep it current, focused, pruned, and limited to highest-signal scenarios.
+- `actors` skill: agent-facing manual for operating the extension and navigating bundled recipes.
+- `swarm` skill: multi-agent methodology, strategies, standards, and portable examples.
+- `/docs`: detailed transportable standards read on demand.
+- `AGENTS.md`: durable project protocol for agents changing this repo.
+- Skill evolution is passive-active: when implementation yields durable mechanics, invariants, warnings, or orchestration lessons, update `skills/actors/SKILL.md` or `skills/swarm/SKILL.md` immediately instead of carrying evergreen skill-upkeep items in `BACKLOG.md`.
+
+## Public Actor Model
+
+- Preserve the public verbs: `spawn`, `message`, `inspect`.
+- Prefer one typed actor-message envelope for upward, downward, lateral, parent/branch, and branch/parent messages.
+- Prefer actor addresses and inspect views over exposing FIFO, outbox, or status mechanics as public concepts.
+- Keep route and semantic type separate: delivery behavior comes from `to`, while `type` describes intent.
+- Treat dotted message types as the minimal action surface: `channel.action` should often be enough for script-backed actors, with `body` reserved for extra context or free-form prompts to LLM-backed actors.
+
+## Runtime Contract
+
+- Register trusted command templates with placeholder-derived args, progressive typed arg declarations, inline/default/`??`/ternary fallback, and split-first command argv construction.
+- Keep command templates synchronous and portable; `async: true` is the detached run switch.
+- Preserve node controls: `when`, positive `timeout`, `delay`, bounded `retry`, `failure`, and `recover` cleanup.
+- Keep async run state under `~/.pi/agent/tmp/pi-actors/runs` with injected `{run_id}` and `{state_dir}` values.
+- Preserve event-driven observability: terminal follow-ups, coordinator-bound outbox messages, branch-aware triangles, process-tree expansion, and bounded body previews.
+- Do not restore busy-polling examples, duplicate terminal follow-ups, or duplicate follow-ups for handled `cancel`, `kill`, or control-stop actions.
+
+## Recipes And Registry
+
+- `~/.pi/agent/recipes/*.json` is executable muscle memory: recipes there become persistent tools by location.
+- Preserve filename identity, atomic writes, explicit operator-gated migration paths, and local transportability.
+- Packaged/ad hoc recipes outside the agent root are components, not user tools.
+- Tool definitions use `template`, not `script`, and built-in/core tool names must not be shadowed.
+- Packaged recipe growth is demand-driven: prefer reusable components over speculative scenario catalogs.
+- Recipe templates may point directly at executable helper scripts; keep script executable bits and avoid unnecessary `node` prefixes.
+
+## Command And Recipe Layers
+
+- Keep command-template semantics in `docs/command-templates.md`.
+- Keep recipe storage/import/default/reference behavior in `docs/template-recipes.md`.
+- Keep detached lifecycle/state/IPC behavior in `docs/async-runs.md`.
+- Imported recipes are command-template-shaped definitions, not async-run instances.
+- Valid chain: `tool → template → recipe → run → template`; reject cyclic shortcuts.
+- Typed args support `string`, `path`, `int`, `number`, `bool`, `array`, and `enum(...)`.
+- Preserve both metadata-first args and inline-first placeholder style.
+
+## State, IO, And Safety
+
+- Tool stdout and temp state must stay bounded and local.
+- Keep tail truncation, full-output temp files, failure formatting, and centralized limits intact.
+- Published docs must not include machine-local absolute paths.
+- Any view scanning run directories must apply coordinator/session ownership filters before exposing summaries or previews.
+- Direct branch messages are active inbox queues; guard branch-local append/status rewrites with the branch inbox lock and keep claim/handled/failed transitions tested.
+- Room/branch provenance checks should validate that accepted `from` addresses belong to the addressed run.
+
+## Coordination And Lifecycle
+
+- Persistent implementer workflows are recipe composition, not one-off scripts.
+- Compose cells such as `coordinator-locker`, subagent launchers, actor-message utilities, and mailbox-loop helpers.
+- Preserve JSON envelope object shape across handoffs.
+- Keep locker state generic and thin; orchestration strategy belongs in the coordinator.
+- Graceful actor retirement is opt-in through recipe/run metadata and must not infer retirement for persistent services or backlog implementers.
+
+## Context And Planning Hygiene
+
+- `BACKLOG.md` is planning, not history: only completable future work with current scope and exit criteria.
+- Completed delivery belongs in `CHANGELOG.md`.
+- Durable/evergreen behavior belongs in `AGENTS.md`, README, docs, or skills.
+- Changelog bullets describe meaningful user/operator/developer changes, not release bookkeeping.
+- PR/release summaries are temporary artifacts; keep durable release evidence in `CHANGELOG.md` and gates in `BACKLOG.md`.
+- Meaningful implementation or docs changes must reconcile `BACKLOG.md`, `CHANGELOG.md`, README, and docs navigation.
 
 ## Validation
 
-- `npm run check`: Lightweight extension-load sanity check
-- `npm test`: Focused regression tests for extracted pure domains
-- `npm run pack:dry`: Verify package contents and npm metadata
-- `npm run conformance`: Compact protocol conformance runner for actor/recipe behavior
-- `bash ~/.pi/agent/skills/abcd-context/scripts/validate-context.sh`: Validate context split, links, and README/docs reachability
+- `npm run check`: Lightweight extension-load sanity check.
+- `npm test`: Focused regression tests for extracted pure domains.
+- `npm run pack:dry`: Verify package contents and npm metadata.
+- `npm run conformance`: Compact protocol conformance runner for actor/recipe behavior.
+- `bash ~/.pi/agent/skills/abcd-context/scripts/validate-context.sh`: Validate context split, links, and README/docs reachability.
 
 ## Pre-Task Preparation
 
-1. Read this file, `BACKLOG.md`, and `README.md`
-2. Inspect `index.ts` around the touched tool/runtime path
-3. Prefer targeted edits over broad rewrites
-4. Run the smallest validation set that covers the touched scope
+1. Read this file, `BACKLOG.md`, and `README.md`.
+2. Inspect `index.ts` around the touched tool/runtime path.
+3. Prefer targeted edits over broad rewrites.
+4. Run the smallest validation set that covers the touched scope.
 
 ## Task Completion Protocol
 
-1. Reconcile backlog state with reality: close, narrow, split, defer, or gate items explicitly
-2. Update README/docs when public behavior, setup, package contents, or navigation changes
-3. Record meaningful delivered slices in `CHANGELOG.md`
-4. Run relevant validation and report exact commands
+1. Reconcile backlog state with reality: close, narrow, split, defer, or gate items explicitly.
+2. Update README/docs when public behavior, setup, package contents, or navigation changes.
+3. Record meaningful delivered slices in `CHANGELOG.md`.
+4. Run relevant validation and report exact commands.

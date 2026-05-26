@@ -67,6 +67,16 @@ test("Recipe discovery flags packaged validation wrapper as trusted shell bounda
   assert.match(diagnostics, /trusted executable content/);
 });
 
+test("Recipe discovery loads packaged quorum review without repeat diagnostics", () => {
+  const result = discoverRecipeSources([
+    { root: getPackagedRecipeRoot(), defaultTool: true },
+  ]);
+  const recipe = result.active.get("pipeline-quorum-review");
+  assert.equal(recipe?.active, true);
+  assert.equal(recipe?.invalid, false);
+  assert.doesNotMatch(result.diagnostics.join("\n"), /pipeline-quorum-review|repeat must/);
+});
+
 test("Recipe discovery exposes an integrity manifest", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-"));
   try {

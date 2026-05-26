@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -1115,6 +1115,44 @@ test("Async run inbox messages can be claimed and handled", async () => {
     );
     const afterClaim = readRunInboxMessages(stateDir, 1)[0];
     assert.equal(afterClaim.status, "claimed");
+  } finally {
+    killRun(stateDir);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run inbox reads skip malformed state records", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-inbox-corrupt-"));
+  const stateDir = join(root, "inbox-corrupt");
+  try {
+    startRun(
+      {
+        run_id: "inbox-corrupt",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    await assert.rejects(
+      () => sendRunMessage(
+        stateDir,
+        JSON.stringify({
+          body: "valid",
+          from: "coordinator",
+          to: "run:inbox-corrupt",
+          type: "control.note",
+        }),
+      ),
+      /Run control FIFO not found/,
+    );
+    await appendFile(join(stateDir, "inbox.jsonl"), "{bad json\n");
+
+    const messages = readRunInboxMessages(stateDir, 10);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].body, "valid");
+    const claimed = claimRunInboxMessage(stateDir, "worker");
+    assert.equal(claimed?.body, "valid");
   } finally {
     killRun(stateDir);
     await rm(root, { recursive: true, force: true });

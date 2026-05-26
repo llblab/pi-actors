@@ -1,0 +1,10 @@
+{
+  "run": "demo",
+  "state_dir": "{state_dir}",
+  "status": "running",
+  "template": "echo demo",
+  "values": {
+    "run_id": "demo",
+    "state_dir": "{state_dir}"
+  }
+}

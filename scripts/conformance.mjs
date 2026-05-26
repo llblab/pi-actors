@@ -1,47 +1,33 @@
 #!/usr/bin/env node
 
 /**
- * Internal conformance runner.
+ * Internal conformance runner shim.
  *
- * This script runs the protocol-facing regression suites that exercise recipe
- * discovery, registry mutation, spawn lifecycle, message routing, room/branch
- * state, ownership checks, artifacts, and attention semantics without requiring
- * the Pi UI.
- *
- * Keep output compact for CI and release preflight use; detailed failures are
- * printed only when the underlying Node test run fails.
+ * Runtime logic lives in lib/conformance.ts and is compiled to
+ * dist/lib/conformance.js for installed JS-only packages.
  */
 
-import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const suites = [
-  "tests/protocol-examples.test.ts",
-  "tests/recipe-discovery.test.ts",
-  "tests/registry.test.ts",
-  "tests/runtime-registry.test.ts",
-  "tests/async-runs.test.ts",
-  "tests/actor-rooms.test.ts",
-  "tests/tools.test.ts",
-];
+function packageRoot() {
+  return dirname(dirname(fileURLToPath(import.meta.url)));
+}
 
-const result = spawnSync(
-  process.execPath,
-  ["--experimental-strip-types", "--test", ...suites],
-  { cwd: new URL("..", import.meta.url), encoding: "utf8", stdio: "pipe" },
-);
+function mainModulePath() {
+  const root = packageRoot();
+  const compiled = join(root, "dist", "lib", "conformance.js");
+  return existsSync(compiled) ? compiled : join(root, "lib", "conformance.ts");
+}
 
-const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-const summary = output
-  .split("\n")
-  .filter((line) =>
-    /^ℹ (tests|pass|fail|cancelled|skipped|todo|duration_ms) /.test(line),
-  )
-  .join("\n");
+const { runConformance } = await import(pathToFileURL(mainModulePath()).href);
+const report = runConformance(packageRoot());
 
 console.log("pi-actors conformance");
-console.log(`suites ${suites.length}`);
-if (summary) console.log(summary);
-if (result.status !== 0) {
-  console.error(output.trimEnd());
-  process.exit(result.status ?? 1);
+console.log(`suites ${report.suites}`);
+if (report.summary) console.log(report.summary);
+if (report.code !== 0) {
+  console.error(report.output.trimEnd());
+  process.exit(report.code);
 }

@@ -311,6 +311,35 @@ function parseMarkdownFrontmatterObject(
   return result;
 }
 
+function normalizeMarkdownFrontmatterField(
+  key: string,
+  value: unknown,
+): unknown {
+  if (key === "args" && typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (key === "defaults" && Array.isArray(value)) {
+    return Object.fromEntries(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => {
+          const separator = item.indexOf(":");
+          return separator < 0
+            ? [item.trim(), ""]
+            : [
+                item.slice(0, separator).trim(),
+                parseMarkdownScalar(item.slice(separator + 1)),
+              ];
+        })
+        .filter(([name]) => Boolean(name)),
+    );
+  }
+  return value;
+}
+
 function parseMarkdownFrontmatter(value: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const lines = value.split(/\r?\n/);
@@ -320,7 +349,10 @@ function parseMarkdownFrontmatter(value: string): Record<string, unknown> {
     const match = line.match(/^([A-Za-z_][A-Za-z0-9_.-]*):\s*(.*)$/);
     if (!match) continue;
     if (match[2]) {
-      result[match[1]] = parseMarkdownScalar(match[2]);
+      result[match[1]] = normalizeMarkdownFrontmatterField(
+        match[1],
+        parseMarkdownScalar(match[2]),
+      );
       continue;
     }
     const nested: string[] = [];
@@ -328,7 +360,10 @@ function parseMarkdownFrontmatter(value: string): Record<string, unknown> {
       index += 1;
       nested.push(lines[index]);
     }
-    result[match[1]] = parseMarkdownFrontmatterObject(nested);
+    result[match[1]] = normalizeMarkdownFrontmatterField(
+      match[1],
+      parseMarkdownFrontmatterObject(nested),
+    );
   }
   return result;
 }

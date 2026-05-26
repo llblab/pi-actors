@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+## 0.24.0: Reliability, Mailbox Workers, and Dist-First Packaging
+
+- `[Prompts]` Clarified that recipe registry warnings are actionable maintenance: invalid or blocking recipes should be fixed, removed, or disabled rather than ignored.
+- `[Backlog]` Pruned and refocused the backlog around reliability, mailbox-loop consolidation, protocol fixtures, follow-up deduplication, and portability reality checks.
+- `[State]` Added resilient JSON/JSONL state reader helpers and routed room, inspector, runtime wake, run inbox, and observability outbox reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts and reader degradation behavior has direct regression coverage.
+- `[Observability]` Deduplicated run outbox events by stable event id so line-counter resets do not replay already-seen follow-ups; stale dedupe state is pruned with terminal and missing runs.
+- `[Mailbox Loop]` Added initial run/branch mailbox claim-and-handle helpers plus branch inbox claiming support, failed-handler transitions, standard stop-message detection, bounded message drains, duplicate-claim coverage, and a packaged `actor-worker` demo recipe for canonical mailbox loops.
+- `[Scripts]` Added installed-package coverage proving the packaged `actor-worker` script uses compiled `dist` runtime modules instead of importing TypeScript from `node_modules`; `npm run build` now cleans stale `dist` output, mirrors packaged `scripts/`, `recipes/`, and `fixtures/` into `dist/`, and syntax-checks the built script entrypoints. The `actor-worker`, `async-runner`, `validate-recipe`, and `conformance` executables are now thin shims over compiled TypeScript entrypoint logic in `lib/actor-worker.ts`, `lib/async-runner.ts`, `lib/validate-recipe.ts`, and `lib/conformance.ts`, with build-output regressions for the compiled shim modules.
+- `[Packaging]` Exposed optional `pi.sourceExtensions` metadata pointing at the root TypeScript entrypoint while keeping Node-compatible `pi.extensions` on compiled `dist` output.
+- `[Context]` Clarified the project frame as an experimental self-evolution membrane for local agent capabilities, grounded in explicit actors, recipes, fixtures, skills, and inspectable state.
+- `[Protocol]` Clarified dotted `channel.action` message types as the minimal action surface: scripts can often dispatch from `type` alone while agents may use `body` for free-form prompts.
+- `[Recipes]` Fixed `pipeline-quorum-review` registry loading by inlining the quorum fanout over its `models` array instead of importing a nested repeated recipe with unresolved runtime values.
+- `[Recipes]` Made Markdown recipe frontmatter more forgiving: `args` can be a comma-separated scalar and `defaults` can be a list of `key: value` entries, both normalizing to the canonical JSON recipe shape.
+- `[Packaging]` Build output now mirrors packaged `skills/` into `dist/` alongside scripts, recipes, and fixtures so the JS-only distributive tree carries the project skills; package skill metadata now points at `dist/skills` with `pi.sourceSkills` preserving root TypeScript/source-tree paths, and README now documents the dist-first/source-optional package shape. The dist build pipeline now lives in `scripts/build-dist.mjs` instead of an inline package script, completing the compiled script entrypoint backlog slice.
+- `[Docs]` Added a platform support matrix for mailbox-only, FIFO, named-pipe, and process-control behavior across Linux/macOS/WSL and native Windows, with regressions proving native Windows FIFO limits remain visible and the canonical worker recipe stays mailbox-only.
+- `[Backlog]` Marked the reliability, mailbox loop, protocol fixture, portability, and compiled-entrypoint milestone set complete; future backlog additions should come from concrete actor workflow evidence.
+- `[Scripts]` Migrated `recipe-utils`, `build-dist`, `locker`, `coordinator`, and `validate-recipe` command logic behind compiled TypeScript domain modules while preserving the stable `scripts/*.mjs` shim paths; project guidance frames this as deliberate standard-library growth with clear domain boundaries while keeping self-contained application scripts such as `music-player.mjs` standalone.
+- `[Protocol]` Added compact protocol fixtures for actor messages, mailbox contracts, run inbox/outbox records, room messages/rosters, run state, recipe summaries, and artifact manifests with regression coverage.
+- `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
+
 ## 0.23.0: Actor Manifests, Inspection, and Runtime Hygiene
 
 - `[Tools]` Unified branch-envelope routing for direct branch messages and selected-recipient room multicast so both paths persist the same branch-local inbox shape before dispatching through the parent run mailbox.

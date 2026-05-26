@@ -593,6 +593,7 @@ function getRunOwnerId(ctx: AsyncRunToolContext): string | undefined {
 }
 
 function messageBodyToRunLine(message: ActorMessages.ActorMessage): string {
+  if (message.type !== "run.message") return JSON.stringify(message);
   if (typeof message.body === "string") return message.body;
   if (message.body === undefined) return message.type;
   return JSON.stringify(message.body);

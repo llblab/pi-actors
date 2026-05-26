@@ -1414,8 +1414,9 @@ test("Inspect tool reads run mailbox inbox entries", async () => {
       undefined,
     );
     assert.match(inspected.content[0].text, /status=queued/);
-    assert.match(inspected.content[0].text, /type=run\.message/);
+    assert.match(inspected.content[0].text, /type=control\.note/);
     assert.equal(inspected.details.messages.length, 1);
+    assert.equal(inspected.details.messages[0].type, "control.note");
     assert.equal(inspected.details.messages[0].body, "queue me");
   } finally {
     if (stateDir) {

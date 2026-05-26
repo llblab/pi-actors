@@ -33,6 +33,7 @@ import type {
 } from "./command-templates.ts";
 import { substituteCommandTemplateToken } from "./command-templates.ts";
 import { writeJsonAtomic } from "./file-state.ts";
+import { readJsonFileResilient, readJsonlFileResilient } from "./state-readers.ts";
 import * as Paths from "./paths.ts";
 import * as RecipeReferences from "./recipe-references.ts";
 import * as RecipeUsage from "./recipe-usage.ts";
@@ -345,11 +346,10 @@ function resolveStartParams(params: AsyncRunStartParams): AsyncRunStartParams {
 }
 
 function readJson(path: string): Record<string, unknown> | undefined {
-  try {
-    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
+  return readJsonFileResilient<Record<string, unknown> | undefined>(
+    path,
+    undefined,
+  ).value;
 }
 
 function isAlive(pid: number): boolean {
@@ -392,16 +392,12 @@ function tailLines(path: string, lines: number): string[] {
 function getInterruptedRunStatus(
   stateDir: string,
 ): "cancelled" | "killed" | undefined {
-  const events = tailFile(join(stateDir, "events.jsonl"), 200);
-  if (!events) return undefined;
-  for (const line of events.split("\n").reverse()) {
-    try {
-      const event = JSON.parse(line) as Record<string, unknown>;
-      if (event.event === "run.kill") return "killed";
-      if (event.event === "run.cancel") return "cancelled";
-    } catch {
-      // Ignore malformed event lines.
-    }
+  const events = readJsonlFileResilient<Record<string, unknown>>(
+    join(stateDir, "events.jsonl"),
+  ).records.slice(-200);
+  for (const event of events.reverse()) {
+    if (event.event === "run.kill") return "killed";
+    if (event.event === "run.cancel") return "cancelled";
   }
   return undefined;
 }
@@ -913,13 +909,7 @@ function parseRunInboxLine(line: string): RunInboxMessage | undefined {
 }
 
 function readRunInboxMessagesFromStateDir(stateDir: string): RunInboxMessage[] {
-  const file = runInboxFile(stateDir);
-  if (!existsSync(file)) return [];
-  return readFileSync(file, "utf8")
-    .split("\n")
-    .filter((line) => line.trim())
-    .map(parseRunInboxLine)
-    .filter((message): message is RunInboxMessage => Boolean(message));
+  return readJsonlFileResilient<RunInboxMessage>(runInboxFile(stateDir)).records;
 }
 
 function writeRunInboxMessages(

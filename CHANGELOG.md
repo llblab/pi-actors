@@ -14,7 +14,7 @@
 - `[Recipes]` Fixed `pipeline-quorum-review` registry loading by inlining the quorum fanout over its `models` array instead of importing a nested repeated recipe with unresolved runtime values.
 - `[Recipes]` Made Markdown recipe frontmatter more forgiving: `args` can be a comma-separated scalar and `defaults` can be a list of `key: value` entries, both normalizing to the canonical JSON recipe shape.
 - `[Packaging]` Build output now mirrors packaged `skills/` into `dist/` alongside scripts, recipes, and fixtures so the JS-only distributive tree carries the project skills; package skill metadata now points at `dist/skills` with `pi.sourceSkills` preserving root TypeScript/source-tree paths, and README now documents the dist-first/source-optional package shape. The dist build pipeline now lives in `scripts/build-dist.mjs` instead of an inline package script, completing the compiled script entrypoint backlog slice.
-- `[Docs]` Added a platform support matrix for mailbox-only, FIFO, named-pipe, and process-control behavior across Linux/macOS/WSL and native Windows.
+- `[Docs]` Added a platform support matrix for mailbox-only, FIFO, named-pipe, and process-control behavior across Linux/macOS/WSL and native Windows, with regressions proving native Windows FIFO limits remain visible and the canonical worker recipe stays mailbox-only.
 - `[Protocol]` Added compact protocol fixtures for actor messages, mailbox contracts, run inbox/outbox records, room messages/rosters, run state, recipe summaries, and artifact manifests with regression coverage.
 - `[Skills]` Documented the passive-active skill evolution discipline: `actors` tracks extension mechanics while `swarm` tracks orchestration standards and lessons.
 

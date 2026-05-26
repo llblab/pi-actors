@@ -176,13 +176,4 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 
 ## Suggested Milestone Order
 
-```text
-0.24 — Reliability membrane:
-  M-01, M-05
-
-0.25 — Canonical mailbox loop:
-  M-02, M-03
-
-0.26 — Contract and portability consolidation:
-  M-04, M-06
-```
+All milestone tasks in this backlog are currently complete. Reopen this section only with concrete follow-up work from real actor workflows, release preflight, or operator diagnostics.

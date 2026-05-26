@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.24.3: Actor Inspector Body Field Hotfix
+
+- `[Inspector]` Removed the selected-item key-label shim by projecting actor-message detail rows with a real `body` field instead of rendering `body_preview` under an alias.
+
 ## 0.24.2: Actor Inspector Item View Hotfix
 
 - `[Inspector]` Removed the roster panel from selected actor-message item inspection, kept the compact route header styling, added the same left/right gutter used by inspector rows, and renamed the selected-item `body_preview` label to `body`.

@@ -45,6 +45,7 @@
     "BACKLOG.md",
     "CHANGELOG.md",
     "docs",
+    "fixtures",
     "banner.jpg"
   ],
   "pi": {

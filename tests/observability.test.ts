@@ -464,6 +464,11 @@ test("Run observability prunes terminal and stale map entries", () => {
     ["/tmp/missing", 4],
     ["/tmp/live", 5],
   ]);
+  const seenEventIds = new Map([
+    ["/tmp/done", new Set(["done-event"])],
+    ["/tmp/missing", new Set(["missing-event"])],
+    ["/tmp/live", new Set(["live-event"])],
+  ]);
   pruneRunObservationState(
     statuses,
     lineCounts,
@@ -482,9 +487,11 @@ test("Run observability prunes terminal and stale map entries", () => {
       total: 2,
     },
     ["/tmp/done"],
+    seenEventIds,
   );
   assert.deepEqual([...statuses.keys()], ["/tmp/live"]);
   assert.deepEqual([...lineCounts.keys()], ["/tmp/live"]);
+  assert.deepEqual([...seenEventIds.keys()], ["/tmp/live"]);
 });
 
 test("Run observability renders animated subagent triangles", () => {

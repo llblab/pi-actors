@@ -70,6 +70,7 @@ test("build output includes compiled modules for TypeScript-backed script shims"
   for (const module of [
     "actor-worker",
     "async-runner",
+    "build-dist",
     "conformance",
     "recipe-utils",
     "validate-recipe",

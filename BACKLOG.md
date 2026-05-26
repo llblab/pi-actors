@@ -128,6 +128,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-06 Portability Reality Pass
 
 - Priority: Medium.
+- Status: In progress.
 - Goal: Make current Linux/macOS/WSL/native-Windows behavior explicit without adding a new backend.
 - Why now: Mailbox-only paths and named-pipe support exist; operators need accurate diagnostics, not hidden platform assumptions.
 - Direction:

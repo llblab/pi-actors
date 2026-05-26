@@ -57,6 +57,7 @@ test("package metadata exposes compiled and source extension entrypoints", async
 test("build output mirrors JS runtime assets under dist", async () => {
   await access(join(process.cwd(), "dist", "scripts", "actor-worker.mjs"));
   await access(join(process.cwd(), "dist", "scripts", "async-runner.mjs"));
+  await access(join(process.cwd(), "dist", "scripts", "build-dist.mjs"));
   await access(join(process.cwd(), "dist", "recipes", "actor-worker.json"));
   await access(join(process.cwd(), "dist", "recipes", "utility-validate-recipe.json"));
   await access(join(process.cwd(), "dist", "fixtures", "protocol", "actor-message-branch.json"));

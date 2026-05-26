@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.22.5: CI Stability Hotfix
+
+- `[Tests]` Stabilized the Windows named-pipe control endpoint regression by keeping its synthetic run alive longer under slower full-suite CI scheduling.
+- `[Tests]` Stabilized the coordinator-locker queue/lock smoke by waiting for assignment, renewal, and denial actor messages before stopping the helper, removing a FIFO processing race from main-branch validation.
+
 ## 0.22.4: Actor Isolation and Registry Diagnostics Hotfix
 
 - `[Tests]` Added explicit regression coverage that ad hoc recipe files outside the user recipe root remain recipe components rather than automatically exposed tools, reinforcing the location-based tool exposure invariant.

@@ -38,6 +38,24 @@ async function sendLine(path: string, value: unknown): Promise<void> {
   throw new Error(`Timed out sending to ${path}`);
 }
 
+async function waitForOutboxEvent(stateDir: string, type: string): Promise<void> {
+  const outbox = join(stateDir, "outbox.jsonl");
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    try {
+      const messages = (await readFile(outbox, "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      if (messages.some((message) => message.type === type)) return;
+    } catch {
+      // File may not exist yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for outbox event ${type}`);
+}
+
 test("room-swarm optional locker records artifact coordination", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-room-swarm-locker-"));
   try {
@@ -214,8 +232,11 @@ test("coordinator-locker queues, assigns, locks, and stops", async () => {
       body: { id: "task-1", task: "Edit docs", resources: ["file:README.md"] },
     });
     await sendLine(control, { type: "coord.claim", body: { owner: "run:worker" } });
+    await waitForOutboxEvent(stateDir, "lock.assigned");
     await sendLine(control, { type: "lock.renew", body: { resource: "file:README.md", owner: "run:worker" } });
+    await waitForOutboxEvent(stateDir, "lock.renewed");
     await sendLine(control, { type: "lock.acquire", body: { resource: "file:README.md", owner: "run:other" } });
+    await waitForOutboxEvent(stateDir, "lock.denied");
     await sendLine(control, "stop");
     const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
     assert.equal(code, 0);

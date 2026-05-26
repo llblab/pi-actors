@@ -11,6 +11,11 @@ import * as path from "node:path";
 import type { ActorMessage } from "./actor-messages.ts";
 import * as Limits from "./limits.ts";
 import { notifyRuntimeWake } from "./runtime-notifier.ts";
+import {
+  formatStateReadDiagnostics,
+  readJsonFileResilient,
+  readJsonlFileResilient,
+} from "./state-readers.ts";
 
 const STATE_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
 const STATE_LOCK_TIMEOUT_MS = 5000;
@@ -63,6 +68,8 @@ export interface RoomStatus {
   message_count: number;
   roster_count: number;
   compaction?: RoomCompactionInfo;
+  diagnostics?: string[];
+  diagnostics_count?: number;
   last_message_at?: string;
   last_message_from?: string;
   last_message_summary?: string;
@@ -194,12 +201,7 @@ function runFromRoomAddress(address: string): string | undefined {
 }
 
 function readJsonFile<T>(file: string, fallback: T): T {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return fallback;
-    throw error;
-  }
+  return readJsonFileResilient<T>(file, fallback).value;
 }
 
 function writeJsonFile(file: string, value: unknown): void {
@@ -682,7 +684,13 @@ export function readRoomMessages(
 ): RoomTimelineEntry[] {
   try {
     const lines = readJsonlTailLines(messagesFile(stateDir, room), limit);
-    return lines.map((line) => JSON.parse(line));
+    return lines.flatMap((line) => {
+      try {
+        return [JSON.parse(line) as RoomTimelineEntry];
+      } catch {
+        return [];
+      }
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
@@ -722,10 +730,22 @@ export function readRoomMessagePreviews(
 export function getRoomStatus(stateDir: string, room: string): RoomStatus {
   const messageCount = readRoomMessageCount(stateDir, room);
   const [last] = readRoomMessages(stateDir, room, 1);
-  const compaction = readJsonFile<RoomCompactionInfo | undefined>(
+  const compactionRead = readJsonFileResilient<RoomCompactionInfo | undefined>(
     path.join(roomDir(stateDir, room), "compaction.json"),
     undefined,
   );
+  const rosterRead = readJsonFileResilient<Record<string, RoomMember>>(
+    rosterFile(stateDir, room),
+    {},
+  );
+  const messageRead = readJsonlFileResilient<RoomTimelineEntry>(
+    messagesFile(stateDir, room),
+  );
+  const diagnostics = [
+    ...messageRead.diagnostics,
+    ...rosterRead.diagnostics,
+    ...compactionRead.diagnostics,
+  ];
   return {
     ...(last
       ? {
@@ -735,10 +755,16 @@ export function getRoomStatus(stateDir: string, room: string): RoomStatus {
           last_message_type: last.type,
         }
       : {}),
-    ...(compaction ? { compaction } : {}),
+    ...(compactionRead.value ? { compaction: compactionRead.value } : {}),
+    ...(diagnostics.length
+      ? {
+          diagnostics: formatStateReadDiagnostics(diagnostics),
+          diagnostics_count: diagnostics.length,
+        }
+      : {}),
     message_count: messageCount,
     room,
-    roster_count: Object.keys(readRoomRoster(stateDir, room)).length,
+    roster_count: Object.keys(rosterRead.value).length,
   };
 }
 
@@ -785,14 +811,10 @@ export function ensureDefaultRoom(
 export function readCommunicationSnapshot(
   stateDir: string,
 ): ActorCommunicationSnapshot | undefined {
-  try {
-    return JSON.parse(
-      fs.readFileSync(snapshotFile(stateDir), "utf8"),
-    ) as ActorCommunicationSnapshot;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
+  return readJsonFileResilient<ActorCommunicationSnapshot | undefined>(
+    snapshotFile(stateDir),
+    undefined,
+  ).value;
 }
 
 export function readRoomContacts(

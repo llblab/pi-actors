@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `[Prompts]` Clarified that recipe registry warnings are actionable maintenance: invalid or blocking recipes should be fixed, removed, or disabled rather than ignored.
+- `[Backlog]` Pruned and refocused the backlog around reliability, actor-loop consolidation, protocol fixtures, follow-up deduplication, and portability reality checks.
+- `[State]` Added resilient JSON/JSONL state reader helpers and routed room/inspector reads through them so malformed state records degrade instead of breaking previews; room status now reports state diagnostic counts.
+
 ## 0.23.0: Actor Manifests, Inspection, and Runtime Hygiene
 
 - `[Tools]` Unified branch-envelope routing for direct branch messages and selected-recipient room multicast so both paths persist the same branch-local inbox shape before dispatching through the parent run mailbox.

@@ -43,153 +43,74 @@ No open hotfix items.
 
 ## Minor Backlog
 
-### M-01 Internal Protocol Contract Pack
+The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
 
-- Priority: Medium.
-- Goal: Add machine-readable internal schemas and fixtures for implementation, docs, tests, and inspector consistency.
-- Files:
-  - `schemas/actor-message.schema.json`.
-  - `schemas/actor-address.schema.json`.
-  - `schemas/run-state.schema.json`.
-  - `schemas/run-inbox-message.schema.json`.
-  - `schemas/run-outbox-event.schema.json`.
-  - `schemas/room-message.schema.json`.
-  - `schemas/room-roster.schema.json`.
-  - `schemas/communication-snapshot.schema.json`.
-  - `schemas/recipe.schema.json`.
-  - `fixtures/protocol/run-minimal.json`.
-  - `fixtures/protocol/message-branch.json`.
-  - `fixtures/protocol/message-room-join.json`.
-  - `fixtures/protocol/mailbox-contract.json`.
+### M-01 State Corruption Recovery
+
+- Priority: High.
+- Status: In progress; first slice centralizes resilient state readers and routes room/inspector reads through them.
+- Goal: Keep `inspect` useful when file-backed run, room, branch, or recipe state is partially corrupted.
+- Why now: The extension's core promise is local, inspectable, durable actor state. Corrupt JSON/JSONL should degrade visibility, not break the operator membrane.
+- Direction:
+  - Continue migrating repeated JSON/JSONL inspect paths to `lib/state-readers.ts`.
+  - Preserve valid records and report corrupt paths/counts.
+  - Do not silently rewrite canonical state without an explicit repair action.
 - Acceptance:
-  - Normalization outputs validate.
-  - Docs examples validate.
-  - Fixtures are usable by tests.
-  - Schemas are versioned with package version.
+  - Malformed JSONL lines do not kill inspect paths.
+  - Corrupt JSON files surface diagnostics with paths.
+  - Tests cover run, branch, room, and recipe-adjacent state where practical.
 
-### M-02 Unified Actor Event Base
+### M-02 Actor Loop Helper Minimal Core
 
-- Priority: Medium.
-- Goal: Add a shared base envelope for actor event-like records without forcing one storage file.
-- Target channels:
-  - `events`.
-  - `inbox`.
-  - `outbox`.
-  - `wake`.
-  - `room`.
-  - `branch`.
-- Acceptance:
-  - New append helpers generate ids consistently.
-  - Existing files remain readable.
-  - `inspect` can show id, correlation, and causation.
-  - No migration is forced.
-
-### M-04 Actor Loop Helper SDK
-
-- Priority: Medium.
-- Goal: Provide reusable helpers for mailbox-consuming actors so recipe authors do not rewrite loops.
+- Priority: High.
+- Goal: Provide one small reusable mailbox-consuming actor loop so recipe authors do not duplicate claim/handle/wake/poll logic.
+- Why now: Long-lived actors and worker recipes are the natural center of `pi-actors`; a minimal helper consolidates behavior without adding a broker or scheduler DSL.
 - Files:
   - `lib/actor-loop.ts`.
-  - `scripts/actor-loop.mjs`.
-- Capabilities:
-  - Initial reconciliation.
-  - Wake subscription.
-  - Polling fallback.
-  - Run and branch inbox claiming.
-  - Handled and failed status transitions.
-  - Outbox emission.
-  - Progress updates.
-  - Graceful stop handling.
+  - `scripts/actor-loop.mjs` only if a CLI wrapper is necessary.
+- Direction:
+  - Support initial reconciliation, advisory wake subscription, polling fallback, run inbox claiming, branch inbox claiming, handled/failed status transitions, progress, and graceful stop.
+  - Keep policy out: no task selection, no model choice, no project prompts.
 - Acceptance:
-  - A packaged demo recipe uses a mailbox-only control endpoint.
   - Concurrent wake and poll paths do not double-process messages.
   - Helper supports run inbox and branch inbox.
+  - A tiny demo/test actor uses mailbox-only control.
 
-### M-13 Packaged Actor Worker Recipe Template
+### M-03 Canonical Worker Recipe Template
 
-- Priority: Medium.
-- Goal: Add a canonical packaged recipe or template for a long-lived worker-backed branch actor.
+- Priority: High.
+- Depends on: M-02.
+- Goal: Add one canonical packaged worker recipe/template demonstrating the intended long-lived actor pattern.
+- Why now: The extension should teach one excellent actor loop rather than accumulate scenario-specific scripts.
 - Direction:
-  - Worker joins room.
-  - Worker declares mailbox accepts and emits.
-  - Worker claims branch inbox messages.
+  - Worker joins the default room.
+  - Worker declares typed mailbox accepts/emits.
+  - Worker claims branch inbox work.
   - Worker posts `task.claim`, `task.result`, and `awaiting_assignment`.
   - Worker handles `control.stop`.
 - Acceptance:
-  - Recipe demonstrates correct mailbox loop semantics.
-  - It is a recipe-authoring example, not a product feature.
+  - Demonstrates correct mailbox loop semantics.
+  - Stays a recipe-authoring reference, not a product workflow catalog.
+  - Actor skill links it as the canonical worker pattern.
 
-### M-17 Windows And Nix Portability Pass
-
-- Priority: Medium.
-- Goal: Strengthen current portability around FIFO, named-pipe, and mailbox-only paths without adding a new backend.
-- Direction:
-  - Doctor flags FIFO-only recipes on native Windows.
-  - Keep mailbox-only demo cross-platform.
-  - Document platform matrix.
-  - Cover named-pipe adapter with injected sender where practical.
-- Acceptance:
-  - Native Windows limitations are visible before launch.
-  - Mailbox-only recipe works cross-platform.
-  - Docs and tests cover the adapter split.
-
-### M-18 State Corruption Recovery
+### M-04 Protocol Contract Fixtures
 
 - Priority: Medium.
-- Goal: Add resilient JSON and JSONL state readers.
+- Goal: Freeze the current protocol behavior with compact internal fixtures before further surface growth.
+- Why now: `spawn`, `message`, `inspect`, mailbox contracts, artifacts, rooms, and run indexes now have enough shape to merit regression fixtures; schemas should document reality, not invent a new standard.
 - Direction:
-  - Malformed JSONL lines should not kill entire inspect paths.
-  - Corrupt JSON files should report diagnostics with paths.
-  - Consider optional `.corrupt` quarantine helper.
+  - Add fixtures for representative run state, actor message, run inbox/outbox, room message/roster, mailbox contract, artifact manifest, and recipe summary.
+  - Add lightweight schema or shape validation only where it protects existing behavior.
 - Acceptance:
-  - Inspect remains useful when partial state survives.
-  - Corrupt paths are reported clearly.
-  - Canonical state is not silently rewritten without explicit action.
+  - Public examples and fixtures validate in tests.
+  - No migration is forced.
+  - No external transport/MCP standard is introduced.
 
-### M-20 Spawn Preflight Mode
-
-- Priority: Medium.
-- Goal: Add dry-run launch planning for `spawn` and async recipe tool invocation.
-- Direction:
-  - Resolve recipe, imports, args, artifacts, state dir, command graph, and mailbox metadata.
-  - Do not start a process.
-  - Return warnings and resolved launch plan.
-- Acceptance:
-  - `preflight=true` returns a resolved plan.
-  - No process is spawned.
-  - Missing args and risky commands are reported before launch.
-
-### M-21 Run Restart And Reattach Policy
-
-- Priority: Medium.
-- Goal: Clarify and implement safe behavior for reused `run_id` and `state_dir`.
-- Direction:
-  - Active reuse fails closed.
-  - Terminal restart with same id is allowed under explicit semantics.
-  - Record generation or restarted time.
-  - Preserve previous terminal-state policy.
-- Acceptance:
-  - Active reuse remains blocked.
-  - Terminal restart records generation or `restartedAt`.
-  - Inspect shows restart semantics.
-  - Docs are updated.
-
-### M-22 Actor Address Helper CLI And Tooling
-
-- Priority: Medium.
-- Goal: Improve address normalization and diagnostics for recipe authors and tests.
-- Direction:
-  - Add helper functions or inspect view for address validation.
-  - Improve invalid-address diagnostics.
-- Acceptance:
-  - Diagnostics include expected forms.
-  - Examples cover branch, room, run, session, and tool addresses.
-  - No new public address kinds are added.
-
-### M-24 Coordinator Follow-Up Deduplication
+### M-05 Follow-Up Deduplication Hardening
 
 - Priority: Medium.
 - Goal: Suppress duplicate terminal transitions and outbox follow-ups across watcher reloads, session restarts, or line-counter resets.
+- Why now: Operator-facing observability should be calm and trustworthy as actor count grows.
 - Direction:
   - Use event id and stateDir for deduplication where available.
   - Preserve terminal handled semantics.
@@ -199,76 +120,42 @@ No open hotfix items.
   - Terminal handled state remains effective.
   - Tests cover restart and line-counter reset scenarios.
 
-### M-25 Documentation Refactor Runtime Contracts First
+### M-06 Portability Reality Pass
 
 - Priority: Medium.
-- Goal: Reorganize docs so implementation agents find stable contracts before examples.
-- Target order:
-  - `docs/runtime-contracts.md`.
-  - `docs/actor-messages.md`.
-  - `docs/async-runs.md`.
-  - `docs/tool-registry.md`.
-  - `docs/template-recipes.md`.
-  - `docs/command-templates.md`.
-  - `docs/recipe-authoring.md`.
-  - `docs/troubleshooting.md`.
+- Goal: Make current Linux/macOS/WSL/native-Windows behavior explicit without adding a new backend.
+- Why now: Mailbox-only paths and named-pipe support exist; operators need accurate diagnostics, not hidden platform assumptions.
+- Direction:
+  - Doctor flags FIFO-only recipes on native Windows.
+  - Keep mailbox-only actor loop/demo cross-platform.
+  - Document a small platform matrix.
+  - Cover named-pipe adapter with injected sender where practical.
 - Acceptance:
-  - No polling-first examples.
-  - Every example matches fixtures.
-  - Docs distinguish protocol semantics from Pi UI commands.
-  - No external standard or MCP work is introduced.
+  - Native Windows limitations are visible before launch.
+  - Mailbox-only recipe works cross-platform.
+  - Docs and tests cover the adapter split.
+
+## Explicitly Deferred
+
+These are valid ideas but not current focus. Reintroduce only with concrete evidence from real actor workflows.
+
+- Spawn preflight mode: useful later, but lower value than resilient inspect and actor-loop consolidation.
+- Run restart/reattach policy: risky for isolation; defer until corruption recovery and protocol fixtures are stronger.
+- Actor address helper CLI: keep diagnostics improving opportunistically inside existing parser/tests.
+- Documentation refactor: defer until the canonical actor loop and worker recipe exist; avoid rewriting docs twice.
+- Host-level tool unregistration: blocked on host API support.
+- Branch-local checkpoint semantics: wait for real collaborative branch-runner experiments.
+- Actor recipe feedback loop: keep advisory and operator-gated after real runs produce evidence.
 
 ## Suggested Milestone Order
 
 ```text
-Patch release:
-  H-01..H-12
+0.24 — Reliability membrane:
+  M-01, M-05
 
-Minor 0.23 — Contract consolidation:
-  M-01, M-02, M-03, M-12, M-25
+0.25 — Canonical actor loop:
+  M-02, M-03
 
-Minor 0.24 — Runtime/message reliability:
-  M-04, M-05, M-06, M-13, M-24
-
-Minor 0.25 — Operator hygiene:
-  M-07, M-08, M-09, M-14, M-15, M-16
-
-Minor 0.26 — Inspector and state scaling:
-  M-10, M-11, M-18, M-19, M-23
-
-Minor 0.27 — Portability and lifecycle polish:
-  M-17, M-20, M-21, M-22
+0.26 — Contract and portability consolidation:
+  M-04, M-06
 ```
-
-## Blocked Or Opportunistic Carry-Over
-
-### Branch-Local Checkpoint Semantics
-
-- Priority: Low.
-- Blocked by: At least one real collaborative branch-runner async-run experiment.
-- Goal: Validate whether `failure: "branch"`, node-level `retry`, and `recover` cleanup are enough for branch-local validation and bounded reattempts.
-- Exit:
-  - Record one decision: sufficient, documentation-only refinement needed, or propose one minimal command-template extension with tests.
-
-### Host-Level Tool Unregistration
-
-- Priority: Low.
-- Blocked by: Host API support for custom tool unregistration.
-- Goal: Remove stale dynamically registered tool definitions completely when the host API supports it.
-- Direction:
-  - Track pi extension API support for custom tool unregistration.
-  - Replace active-tool deactivation fallback with real unregister when available.
-  - Preserve current safe behavior: deleted tools should not remain active after reload.
-- Exit:
-  - Deleting a recipe file removes the corresponding runtime tool definition and active-tool entry without session restart.
-
-### Actor Recipe Feedback Loop
-
-- Priority: Low.
-- Goal: Turn actor recipe-context awareness into a practical improvement loop for packaged recipes and operator-owned recipe memory.
-- Direction:
-  - After real multi-agent runs, capture whether child actors report that recipe/import/mailbox/role boundaries fit the task.
-  - Keep the loop advisory and operator-gated.
-  - Prefer small recipe, README, and skill refinements over scenario catalogs.
-- Exit:
-  - At least one real run produces recipe-boundary feedback that is applied or explicitly rejected with rationale.

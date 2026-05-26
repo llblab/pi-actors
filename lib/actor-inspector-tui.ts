@@ -11,6 +11,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ActorMessage } from "./actor-messages.ts";
 import * as Limits from "./limits.ts";
 import * as Paths from "./paths.ts";
+import { readJsonFileResilient, readJsonlFileResilient } from "./state-readers.ts";
 
 export interface ActorInspectorPreview {
   body_preview?: string;
@@ -72,22 +73,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function readJsonLines(file: string): Record<string, unknown>[] {
-  try {
-    return fs
-      .readFileSync(file, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .flatMap((line) => {
-        try {
-          return [JSON.parse(line) as Record<string, unknown>];
-        } catch {
-          return [];
-        }
-      });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    return [];
-  }
+  return readJsonlFileResilient<Record<string, unknown>>(file).records;
 }
 
 function previewValue(
@@ -156,16 +142,10 @@ function readRoomRosterRecords(
   stateDir: string,
   room: string,
 ): Record<string, Record<string, unknown>> {
-  try {
-    return JSON.parse(
-      fs.readFileSync(
-        path.join(stateDir, "rooms", room, "roster.json"),
-        "utf8",
-      ),
-    ) as Record<string, Record<string, unknown>>;
-  } catch {
-    return {};
-  }
+  return readJsonFileResilient<Record<string, Record<string, unknown>>>(
+    path.join(stateDir, "rooms", room, "roster.json"),
+    {},
+  ).value;
 }
 
 function memberDisplay(

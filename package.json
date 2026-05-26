@@ -30,7 +30,7 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "pack:dry": "npm pack --dry-run",
     "validate": "npx tsc --noEmit && npm run build && npm run check && npm test && npm run pack:dry",
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node --check scripts/*.mjs",
+    "build": "node -e \"const fs=require('node:fs');fs.rmSync('dist',{recursive:true,force:true});fs.mkdirSync('dist',{recursive:true})\" && tsc -p tsconfig.build.json && node -e \"const fs=require('node:fs');fs.cpSync('scripts','dist/scripts',{recursive:true});fs.cpSync('recipes','dist/recipes',{recursive:true})\" && node --check dist/scripts/*.mjs",
     "prepack": "npm run build"
   },
   "files": [

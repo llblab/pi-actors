@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -37,6 +37,13 @@ async function prepareInstalledPackage(root: string): Promise<string> {
   await cp(join(process.cwd(), "recipes"), join(packageDir, "recipes"), { recursive: true });
   return packageDir;
 }
+
+test("build output includes packaged scripts and recipes under dist", async () => {
+  await access(join(process.cwd(), "dist", "scripts", "actor-worker.mjs"));
+  await access(join(process.cwd(), "dist", "scripts", "async-runner.mjs"));
+  await access(join(process.cwd(), "dist", "recipes", "actor-worker.json"));
+  await access(join(process.cwd(), "dist", "recipes", "utility-validate-recipe.json"));
+});
 
 test("installed extension entrypoint imports compiled dist runtime", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-entry-"));

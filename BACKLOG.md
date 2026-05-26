@@ -149,7 +149,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 - Why now: Recipes increasingly depend on helper scripts that import extension internals; compiling script logic closes the gap between source-tree development and installed package behavior.
 - Direction:
   - Keep stable executable recipe paths, preferably through thin `scripts/*.mjs` shims.
-  - Move reusable script logic to TypeScript modules or compiled script entrypoints.
+  - Keep entrypoint-specific logic in `scripts/*.ts`; promote it to `lib/*.ts` only when it becomes reusable domain behavior with a real second consumer.
   - Keep `npm run build` checking packaged script entrypoint syntax while compiled module migration proceeds.
   - Make installed scripts prefer `dist` runtime modules and avoid importing `.ts` from `node_modules`.
   - Preserve source-tree developer ergonomics without requiring global install.

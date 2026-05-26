@@ -32,7 +32,9 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 
 ## Repo Surfaces
 
-- `/scripts/*.mjs`: Thin helper processes for detached execution. Keep reusable logic in `/lib`.
+- `/scripts/*.mjs`: Stable executable shims for detached/helper processes.
+- `/scripts/*.ts`: Script-owned implementation logic that is not yet a reusable domain module; compile it into `dist/scripts`.
+- `/lib/*.ts`: Reusable domain behavior shared by the extension, scripts, recipes, or tests. Promote script logic here only when it has a real second consumer or clear domain ownership.
 - `/recipes/*.json`: Packaged standard recipe library. Keep recipes optional, composable, policy-light, and caller-configurable.
 - `/skills/actors/SKILL.md`: Dense practical reference for operating pi-actors itself.
 - `/skills/swarm/SKILL.md`: Bundled methodology skill for multi-agent standards, strategies, and portable examples.

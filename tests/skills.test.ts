@@ -53,14 +53,14 @@ test("Package extension entrypoint uses compiled dist output", () => {
 });
 
 test("Packaged skills are registered through dist metadata", () => {
-  assert.deepEqual(packageJson.pi.skills, [
-    "./dist/skills/actors/SKILL.md",
-    "./dist/skills/swarm/SKILL.md",
-  ]);
-  assert.deepEqual(
-    packageJson.pi.sourceSkills.map((path) => path.replace(/^\.\//, "")).sort(),
-    packagedSkillPaths,
-  );
+  assert.deepEqual(packageJson.pi.skills, ["./dist/skills"]);
+  assert.deepEqual(packageJson.pi.sourceSkills, ["./skills"]);
+});
+
+test("Auto-discovered extension contributes co-located skills", () => {
+  const extensionSource = readFileSync("index.ts", "utf8");
+  assert.match(extensionSource, /pi\.on\("resources_discover"/);
+  assert.match(extensionSource, /skillPaths:\s*\[EXTENSION_SKILLS_DIR\]/);
 });
 
 test("Packaged skill frontmatter scalar lines avoid extra colons", () => {

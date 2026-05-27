@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.24.6: Async Run Restart Status Hotfix
+
+- `[Async Runs]` Treat freshly spawned runner PIDs as running during a short Linux `/proc` identity grace window, preventing restart status checks from misclassifying a new run as `exited` before its command line is observable.
+
 ## 0.24.5: Auto-Discovered Skills Hotfix
 
 - `[Skills]` Auto-discovered source checkouts now contribute their co-located `skills/` directory through Pi resource discovery, so extension-local actors/swarm skills load even when `pi-actors` is used directly from `~/.pi/agent/extensions` instead of installed as a package.

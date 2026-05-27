@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.24.6",
+  "version": "0.24.7",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [

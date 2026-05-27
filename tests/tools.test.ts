@@ -1537,16 +1537,16 @@ test("Actor tools start, inspect, and stop run actors", async () => {
     assert.match(communication.content[0].text, new RegExp(`self=run:${runId}`));
     assert.equal(communication.details.communication.root, `run:${runId}`);
 
-    const cancelled = await message.execute(
+    const killed = await message.execute(
       "call-3",
-      { to: `run:${runId}`, type: "control.stop" },
+      { to: `run:${runId}`, type: "control.kill" },
       undefined,
       undefined,
       ctx,
     );
-    assert.match(cancelled.content[0].text, /type=control\.stop/);
-    assert.match(cancelled.content[0].text, /stopped=true/);
-    assert.doesNotMatch(cancelled.content[0].text, /state_dir|argv/);
+    assert.match(killed.content[0].text, /type=control\.kill/);
+    assert.match(killed.content[0].text, /stopped=true/);
+    assert.doesNotMatch(killed.content[0].text, /state_dir|argv/);
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
     if (retireStateDir) {
@@ -1561,7 +1561,7 @@ test("Actor tools start, inspect, and stop run actors", async () => {
   }
 });
 
-test("Actor message tool does not treat legacy runtime control types as termination aliases", async () => {
+test("Actor message tool only treats control.kill as runtime termination", async () => {
   const message = createActorMessageToolDefinition();
   const runId = `legacy-control-${process.pid}-${Date.now()}`;
   let stateDir = "";
@@ -1584,15 +1584,25 @@ test("Actor message tool does not treat legacy runtime control types as terminat
       ),
       /Run control FIFO not found/,
     );
-    const cancelled = await message.execute(
-      "call-actor-cancel",
-      { to: `run:${runId}`, type: "control.cancel" },
+    await assert.rejects(
+      () => message.execute(
+        "call-actor-cancel",
+        { to: `run:${runId}`, type: "control.cancel" },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /Run control FIFO not found/,
+    );
+    const killed = await message.execute(
+      "call-actor-kill",
+      { to: `run:${runId}`, type: "control.kill" },
       undefined,
       undefined,
       undefined,
     );
-    assert.match(cancelled.content[0].text, /type=control\.cancel/);
-    assert.match(cancelled.content[0].text, /stopped=true/);
+    assert.match(killed.content[0].text, /type=control\.kill/);
+    assert.match(killed.content[0].text, /stopped=true/);
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }

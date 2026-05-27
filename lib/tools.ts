@@ -1328,12 +1328,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
                 `Message type ${message.type} is not declared in mailbox.accepts for run:${address.value}.`,
               ]
             : [];
-        if (
-          message.type === "control.stop" ||
-          message.type === "control.cancel"
-        ) {
-          result = AsyncRuns.cancelRun(address.value);
-        } else if (message.type === "control.kill") {
+        if (message.type === "control.kill") {
           result = AsyncRuns.killRun(address.value);
         } else if (message.type === "control.archive") {
           result = AsyncRuns.archiveRun(address.value);

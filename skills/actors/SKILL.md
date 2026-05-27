@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.24.6
+  version: 0.24.7
 ---
 
 # Actors (pi-actors)
@@ -86,7 +86,7 @@ Envelope fields:
 - Useful: `summary`, `body`, `from`, `reply_to`, `correlation_id`, `metadata`.
 - Addresses: `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `tool:<name>`, `coordinator`, `session:<id>`.
 - Room posts require `from` from the same run (`run:<run>` or `branch:<run>/<branch>`).
-- Standard termination messages: `control.stop`, `control.cancel`, `control.kill`; terminal retention messages: `control.archive`, `control.prune`.
+- Runtime termination message: `control.kill` is the only documented actor message that kills a run. `control.stop` and `control.cancel` are actor-local mailbox vocabulary only when a recipe declares and handles them. Terminal retention messages: `control.archive`, `control.prune`.
 
 Check `inspect view=mailbox` before domain-specific messages.
 
@@ -152,7 +152,7 @@ When using actors as backlog implementers, avoid one-shot subagents that exit af
 4. Actor posts `task.result` and `awaiting_assignment`.
 5. Actor stays alive until the coordinator sends another `task.assign` or an explicit `control.stop`.
 
-Use `front`/`back` actors for opposite backlog ends when reducing overlap. Implementer workflows should be packaged as reusable recipe composition, not bespoke scripts: use `coordinator-locker` for queue/assignment/locking, subagent launcher recipes for execution cells, actor-message utility recipes for structured handoffs, and `lib/mailbox-loop.ts` helpers when writing mailbox-consuming workers. Mailbox loops should claim one run or branch inbox message at a time, mark success as `handled`, mark exceptions as `failed`, and treat `control.stop` / `control.cancel` / `control.kill` as standard stop messages; bounded drains may process available work until a stop message or max-message guard. If the existing recipe library cannot express the scenario, add missing reusable component recipes first, then compose the higher-level workflow from them. Supervisors should route coordinator assignments by `body.actor`, preserve the assignment as an object rather than a JSON string, and keep stopped-worker summaries tied to the original actor list.
+Use `front`/`back` actors for opposite backlog ends when reducing overlap. Implementer workflows should be packaged as reusable recipe composition, not bespoke scripts: use `coordinator-locker` for queue/assignment/locking, subagent launcher recipes for execution cells, actor-message utility recipes for structured handoffs, and `lib/mailbox-loop.ts` helpers when writing mailbox-consuming workers. Mailbox loops should claim one run or branch inbox message at a time, mark success as `handled`, mark exceptions as `failed`, and may treat declared recipe-local `control.stop` / `control.cancel` / `control.kill` messages as stop messages; bounded drains may process available work until a stop message or max-message guard. Only `control.kill` is the documented runtime action that kills the actor run. If the existing recipe library cannot express the scenario, add missing reusable component recipes first, then compose the higher-level workflow from them. Supervisors should route coordinator assignments by `body.actor`, preserve the assignment as an object rather than a JSON string, and keep stopped-worker summaries tied to the original actor list.
 
 Current packaged building blocks:
 
@@ -204,7 +204,7 @@ Minimal actor recipe:
   "args": ["path:path", "model:string"],
   "defaults": {},
   "mailbox": {
-    "accepts": ["control.stop", "control.cancel", "control.kill"],
+    "accepts": ["control.kill"],
     "emits": ["command.done", "run.done", "run.failed"]
   },
   "artifacts": { "report": "{path}/report.md" },

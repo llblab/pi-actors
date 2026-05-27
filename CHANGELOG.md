@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.24.7: Actor Message Kill Contract Hotfix
+
+- `[Actor Messages]` Narrowed runtime termination by actor message to `control.kill` only; `control.stop` and `control.cancel` now remain recipe-local mailbox vocabulary instead of aliases for killing/cancelling a run.
+- `[Docs]` Updated actor-message, async-run, and actor-skill guidance so only `control.kill` is documented as the action that kills an actor run.
+
 ## 0.24.6: Async Run Restart Status Hotfix
 
 - `[Async Runs]` Treat freshly spawned runner PIDs as running during a short Linux `/proc` identity grace window, preventing restart status checks and immediate run messages from misclassifying a new run as `exited` before its command line is observable.

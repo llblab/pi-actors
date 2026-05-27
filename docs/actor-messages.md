@@ -208,7 +208,7 @@ Runtime operations use the actor/message vocabulary:
 ```text
 create detached work -> spawn
 run-local control    -> message to run:<id>
-run stop/kill        -> message type control.stop/control.kill
+run force-kill       -> message type control.kill
 platform control     -> internal adapter selected from run state
 coordinator signal   -> message to coordinator/session
 tool execution       -> message to tool:<name>

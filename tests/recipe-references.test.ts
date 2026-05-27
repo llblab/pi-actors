@@ -485,7 +485,7 @@ test("Packaged actor worker recipe stays mailbox-only and cross-platform", () =>
   assert.doesNotMatch(template, /control\.fifo|mkfifo|named-pipe/);
 });
 
-test("Packaged async recipes expose actor-native termination controls", async () => {
+test("Packaged async recipes expose actor-native kill control", async () => {
   const recipeDir = join(__dirname, "..", "recipes");
   const asyncFiles = (await readdir(recipeDir)).filter((file) => {
     if (!file.endsWith(".json")) return false;
@@ -496,12 +496,9 @@ test("Packaged async recipes expose actor-native termination controls", async ()
   for (const file of asyncFiles) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
     const accepts = config?.mailbox?.accepts ?? [];
-    assert.deepEqual(
-      ["control.stop", "control.cancel", "control.kill"].filter(
-        (type) => !accepts.includes(type),
-      ),
-      [],
-      `${file} should expose actor-native termination controls`,
+    assert.ok(
+      accepts.includes("control.kill"),
+      `${file} should expose actor-native kill control`,
     );
   }
 });

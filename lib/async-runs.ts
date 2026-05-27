@@ -41,6 +41,7 @@ import { notifyRuntimeWake } from "./runtime-notifier.ts";
 
 const START_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
 const RUN_INBOX_LOCK_TIMEOUT_MS = 5000;
+const RUNNER_IDENTITY_GRACE_MS = 5000;
 
 export type AsyncRunLaunchSource = "spawn" | "tool";
 
@@ -377,6 +378,16 @@ function pidMatchesRun(pid: number, cwd: string, stateDir: string): boolean {
   }
 }
 
+function isWithinRunnerIdentityGrace(meta: Record<string, unknown>): boolean {
+  const createdAt =
+    typeof meta.createdAt === "string" ? Date.parse(meta.createdAt) : NaN;
+  return (
+    Number.isFinite(createdAt) &&
+    Date.now() - createdAt >= 0 &&
+    Date.now() - createdAt <= RUNNER_IDENTITY_GRACE_MS
+  );
+}
+
 function tailFile(path: string, lines: number): string {
   if (!existsSync(path)) return "";
   const content = readFileSync(path, "utf8").trimEnd();
@@ -658,7 +669,8 @@ export function getRunStatus(runOrDir: string): Record<string, unknown> {
     pid &&
     isAlive(pid) &&
     (!Array.isArray(meta.argv) ||
-      pidMatchesRun(pid, String(meta.cwd ?? ""), stateDir)),
+      pidMatchesRun(pid, String(meta.cwd ?? ""), stateDir) ||
+      isWithinRunnerIdentityGrace(meta)),
   );
   const status: AsyncRunStatus = result
     ? Number(result.code ?? 0) === 0
@@ -1240,7 +1252,10 @@ export async function sendRunMessage(
     throw new Error(`Run is not running: ${run}`);
   const pid = Number(status.pid || 0);
   if (!pid || !isAlive(pid)) throw new Error(`Run pid is not alive: ${run}`);
-  if (!pidMatchesRun(pid, String(status.cwd), stateDir))
+  if (
+    !pidMatchesRun(pid, String(status.cwd), stateDir) &&
+    !isWithinRunnerIdentityGrace(status)
+  )
     throw new Error(`Run pid owner mismatch: ${run}`);
   const endpoint = getRunControlEndpoint(status, stateDir);
   const payload = message.endsWith("\n") ? message : `${message}\n`;

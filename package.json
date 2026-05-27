@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.24.4",
+  "version": "0.24.5",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -35,9 +35,9 @@
   },
   "files": [
     "index.ts",
+    "dist",
     "lib",
     "scripts",
-    "dist",
     "recipes",
     "skills",
     "README.md",
@@ -56,12 +56,10 @@
       "./index.ts"
     ],
     "skills": [
-      "./dist/skills/actors/SKILL.md",
-      "./dist/skills/swarm/SKILL.md"
+      "./dist/skills"
     ],
     "sourceSkills": [
-      "./skills/actors/SKILL.md",
-      "./skills/swarm/SKILL.md"
+      "./skills"
     ],
     "image": "https://github.com/llblab/pi-actors/raw/main/banner.jpg"
   },

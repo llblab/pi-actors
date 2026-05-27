@@ -6,6 +6,8 @@
  */
 
 import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   ExtensionAPI,
@@ -22,6 +24,8 @@ import * as Runtime from "./lib/runtime.ts";
 import * as Temp from "./lib/temp.ts";
 import * as Tools from "./lib/tools.ts";
 
+const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
+const EXTENSION_SKILLS_DIR = join(EXTENSION_DIR, "skills");
 const CONFIG_PATH = Paths.getConfigPath();
 const TEMP_DIR = Paths.getExtensionTmpDir();
 const RUN_STATE_ROOT = Paths.getRunStateRoot();
@@ -298,6 +302,10 @@ export default function toolRegistryExtension(pi: ExtensionAPI) {
     },
     reservedToolNames: RESERVED_TOOL_NAMES,
     setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
+  });
+  pi.on("resources_discover", async () => {
+    if (!existsSync(EXTENSION_SKILLS_DIR)) return;
+    return { skillPaths: [EXTENSION_SKILLS_DIR] };
   });
   pi.on("session_start", async (_event, ctx) => {
     await Temp.prepareExtensionTempDir(TEMP_DIR);

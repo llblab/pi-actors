@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.24.5: Auto-Discovered Skills Hotfix
+
+- `[Skills]` Auto-discovered source checkouts now contribute their co-located `skills/` directory through Pi resource discovery, so extension-local actors/swarm skills load even when `pi-actors` is used directly from `~/.pi/agent/extensions` instead of installed as a package.
+- `[Packaging]` Kept package skill metadata directory-based for both `dist/skills` and source `skills`, preserving bundled skill discovery through package installs while the extension also contributes co-located skills at runtime.
+
 ## 0.24.4: Music Player Message Control Hotfix
 
 - `[Music Player]` Preserve typed actor-message envelopes for run-mailbox delivery so `player.<action>` messages dispatch by message type instead of relying on body payload text.

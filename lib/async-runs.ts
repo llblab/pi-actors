@@ -1252,7 +1252,10 @@ export async function sendRunMessage(
     throw new Error(`Run is not running: ${run}`);
   const pid = Number(status.pid || 0);
   if (!pid || !isAlive(pid)) throw new Error(`Run pid is not alive: ${run}`);
-  if (!pidMatchesRun(pid, String(status.cwd), stateDir))
+  if (
+    !pidMatchesRun(pid, String(status.cwd), stateDir) &&
+    !isWithinRunnerIdentityGrace(status)
+  )
     throw new Error(`Run pid owner mismatch: ${run}`);
   const endpoint = getRunControlEndpoint(status, stateDir);
   const payload = message.endsWith("\n") ? message : `${message}\n`;

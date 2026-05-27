@@ -4,7 +4,7 @@
 
 ## 0.24.6: Async Run Restart Status Hotfix
 
-- `[Async Runs]` Treat freshly spawned runner PIDs as running during a short Linux `/proc` identity grace window, preventing restart status checks from misclassifying a new run as `exited` before its command line is observable.
+- `[Async Runs]` Treat freshly spawned runner PIDs as running during a short Linux `/proc` identity grace window, preventing restart status checks and immediate run messages from misclassifying a new run as `exited` before its command line is observable.
 
 ## 0.24.5: Auto-Discovered Skills Hotfix
 

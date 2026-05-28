@@ -23,10 +23,11 @@ Inspect the discovered registry with:
 
 ```text
 inspect target=recipes view=status
+inspect target=recipes view=doctor
 inspect target=recipes view=summary verbose=true
 ```
 
-The summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled.
+The summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled. The doctor view keeps the same registry evidence but promotes an advisory action surface: compact output includes the highest-priority `top` remediation plus ordered actions for invalid/blocking, disabled, risky shell-boundary, and shadowed recipes. Verbose inspection keeps the structured `remediations`, `top_action`, diagnostic details, and blocked lower-priority candidate paths when a broken or disabled higher-priority recipe masks a fallback.
 
 ## Registering Tools
 

@@ -403,6 +403,10 @@ function diagnosticSeverity(message: string): "info" | "warning" | "error" {
 }
 
 function diagnosticSuggestedAction(message: string): string {
+  if (/world-writable|group-writable/i.test(message))
+    return "tighten recipe root permissions";
+  if (/invokes bash/i.test(message))
+    return "audit the trusted shell boundary and keep only if intentional";
   if (/must define template/i.test(message))
     return "add a template field or remove the recipe";
   if (/JSON|Expected|parse/i.test(message))
@@ -414,10 +418,6 @@ function diagnosticSuggestedAction(message: string): string {
     return "split large prompt or data into separate files";
   if (/repeat must/i.test(message))
     return "use a positive repeat count or an array-typed repeat source";
-  if (/world-writable|group-writable/i.test(message))
-    return "tighten recipe root permissions";
-  if (/invokes bash/i.test(message))
-    return "audit the trusted shell boundary or move details to recipe doctor";
   if (/shadows/i.test(message))
     return "confirm the active override or rename one recipe";
   if (/disabled/i.test(message))
@@ -455,6 +455,93 @@ function diagnosticDetails(
   });
 }
 
+function remediationForEntry(
+  entry: DiscoveredRecipe,
+  activePath: string | undefined,
+): Record<string, unknown> | undefined {
+  const riskyDiagnostics = entry.diagnostics.filter(
+    (message) => diagnosticSeverity(message) === "warning",
+  );
+  const blockedCandidate = entry.shadows[0];
+  if (entry.invalid) {
+    return {
+      id: entry.id,
+      kind: blockedCandidate ? "blocking_invalid" : "invalid",
+      severity: "error",
+      path: entry.path,
+      ...(blockedCandidate ? { blocked_candidate: blockedCandidate } : {}),
+      reason: blockedCandidate
+        ? "invalid higher-priority recipe blocks a lower-priority candidate"
+        : "recipe is invalid and cannot be exposed as a tool",
+      action: "fix recipe syntax/config, or disable/delete/archive it to restore fallback",
+    };
+  }
+  if (entry.disabled && entry.active) {
+    return {
+      id: entry.id,
+      kind: blockedCandidate ? "blocking_disabled" : "disabled",
+      severity: "warning",
+      path: entry.path,
+      ...(blockedCandidate ? { blocked_candidate: blockedCandidate } : {}),
+      reason: blockedCandidate
+        ? "disabled higher-priority recipe intentionally blocks a lower-priority candidate"
+        : "recipe is disabled and not exposed as a tool",
+      action: "keep disabled intentionally, re-enable, or delete/archive the file",
+    };
+  }
+  if (riskyDiagnostics.length > 0) {
+    return {
+      id: entry.id,
+      kind: "risky_shell_boundary",
+      severity: "warning",
+      path: entry.path,
+      reason: riskyDiagnostics[0],
+      action: "audit trusted command boundary; keep only if the recipe is local and intentional",
+    };
+  }
+  if (entry.shadowed) {
+    return {
+      id: entry.id,
+      kind: "shadowed",
+      severity: "info",
+      path: entry.path,
+      ...(activePath ? { active_path: activePath } : {}),
+      reason: activePath
+        ? `shadowed by ${activePath}`
+        : "shadowed by a higher-priority recipe",
+      action: "keep as fallback/component, merge, rename, delete, or archive",
+    };
+  }
+  return undefined;
+}
+
+function remediationRank(item: Record<string, unknown>): number {
+  const kind = String(item.kind ?? "");
+  if (kind === "blocking_invalid") return 0;
+  if (kind === "invalid") return 1;
+  if (kind === "blocking_disabled") return 2;
+  if (kind === "risky_shell_boundary") return 3;
+  if (kind === "disabled") return 4;
+  if (kind === "shadowed") return 5;
+  return 6;
+}
+
+function discoveryRemediations(
+  result: RecipeDiscoveryResult,
+): Array<Record<string, unknown>> {
+  return result.entries
+    .map((entry) =>
+      remediationForEntry(entry, result.active.get(entry.id)?.path),
+    )
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    .sort(
+      (a, b) =>
+        remediationRank(a) - remediationRank(b) ||
+        String(a.id).localeCompare(String(b.id)) ||
+        String(a.path).localeCompare(String(b.path)),
+    );
+}
+
 function recommendationForEntry(
   entry: DiscoveredRecipe,
   activePath: string | undefined,
@@ -483,6 +570,7 @@ export function summarizeDiscovery(
         String(a.id).localeCompare(String(b.id)) ||
         String(a.path).localeCompare(String(b.path)),
     );
+  const remediations = discoveryRemediations(result);
   return {
     active: [...result.active.values()]
       .map((entry) => ({
@@ -520,6 +608,8 @@ export function summarizeDiscovery(
       .map((entry) => ({ id: entry.id, path: entry.path }))
       .sort((a, b) => a.id.localeCompare(b.id)),
     recommendations,
+    remediations,
+    top_action: remediations[0],
     diagnostics: result.diagnostics,
     diagnostic_details: diagnosticDetails(result),
     integrity_manifest: createRecipeIntegrityManifest(result),

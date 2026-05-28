@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.25.0: Recipe Doctor Remediation UX
+
+- `[Recipe Doctor]` Added prioritized advisory remediations to recipe doctor output, including a compact top action, structured verbose remediation entries, blocked lower-priority candidates for invalid/disabled overrides, and ordered coverage for invalid, disabled, shadowed, and risky shell-boundary recipes.
+- `[Docs]` Documented the recipe doctor remediation surface in the tool registry guide.
+
 ## 0.24.8: Mailbox Loop Kill Contract Hotfix
 
 - `[Mailbox Loop]` Aligned generic mailbox-loop termination with the actor-message kill contract: only `control.kill` stops generic loop drains; `control.stop` and `control.cancel` remain actor-domain messages unless a recipe handles them explicitly.

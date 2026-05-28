@@ -470,6 +470,9 @@ function compactRecipeDoctor(summary: Record<string, unknown>): string {
   const details = Array.isArray(summary.diagnostic_details)
     ? (summary.diagnostic_details as Array<Record<string, unknown>>)
     : [];
+  const remediations = Array.isArray(summary.remediations)
+    ? (summary.remediations as Array<Record<string, unknown>>)
+    : [];
   const recommendations = Array.isArray(summary.recommendations)
     ? (summary.recommendations as Array<Record<string, unknown>>)
     : [];
@@ -479,12 +482,26 @@ function compactRecipeDoctor(summary: Record<string, unknown>): string {
     if (severity === "error" || severity === "warning" || severity === "info")
       counts[severity] += 1;
   }
+  const topAction = asRecord(summary.top_action);
   const lines = [
-    `recipes doctor errors=${counts.error} warnings=${counts.warning} info=${counts.info} recommendations=${recommendations.length}`,
+    `recipes doctor errors=${counts.error} warnings=${counts.warning} info=${counts.info} actions=${remediations.length} recommendations=${recommendations.length}`,
   ];
-  for (const detail of details.slice(0, 8)) {
+  if (Object.keys(topAction).length > 0) {
+    const action = compactPreview(
+      topAction.action,
+      Limits.DOCTOR_ACTION_PREVIEW_CHARS,
+    );
     lines.push(
-      `${String(detail.severity ?? "info")} id=${String(detail.id ?? "root")} action=${compactPreview(detail.action, Limits.DOCTOR_ACTION_PREVIEW_CHARS) ?? "inspect"}`,
+      `top severity=${String(topAction.severity ?? "info")} kind=${String(topAction.kind ?? "inspect")} id=${String(topAction.id ?? "root")} action=${action ?? "inspect"}`,
+    );
+  }
+  for (const item of remediations.slice(0, 8)) {
+    const action = compactPreview(item.action, Limits.DOCTOR_ACTION_PREVIEW_CHARS);
+    const blocked = item.blocked_candidate
+      ? ` blocked=${compactPreview(item.blocked_candidate, Limits.DOCTOR_ACTION_PREVIEW_CHARS)}`
+      : "";
+    lines.push(
+      `${String(item.severity ?? "info")} kind=${String(item.kind ?? "inspect")} id=${String(item.id ?? "root")}${blocked} action=${action ?? "inspect"}`,
     );
   }
   return `\n${lines.join("\n")}`;

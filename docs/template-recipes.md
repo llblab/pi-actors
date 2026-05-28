@@ -187,7 +187,7 @@ Recipes do not declare a second event-delivery policy. A running actor emits add
 ```json
 {
   "mailbox": {
-    "accepts": ["control.stop"],
+    "accepts": ["control.kill"],
     "emits": ["command.done", "run.done", "run.failed"]
   },
   "template": "run-subtask {prompt}"

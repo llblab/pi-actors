@@ -118,7 +118,7 @@ Steer it through messages:
 
 ```text
 message to=run:docs_review type=control.continue body=continue
-message to=run:docs_review type=control.stop body=stop
+message to=run:docs_review type=control.kill body=stop
 ```
 
 ## Actor Rooms

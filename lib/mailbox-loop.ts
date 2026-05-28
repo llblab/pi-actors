@@ -57,11 +57,7 @@ export function isMailboxLoopStopMessage(message: unknown): boolean {
     message && typeof message === "object" && "type" in message
       ? (message as { type?: unknown }).type
       : undefined;
-  return (
-    type === "control.stop" ||
-    type === "control.cancel" ||
-    type === "control.kill"
-  );
+  return type === "control.kill";
 }
 
 function messageId(

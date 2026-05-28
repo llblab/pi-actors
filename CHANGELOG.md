@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.24.8: Mailbox Loop Kill Contract Hotfix
+
+- `[Mailbox Loop]` Aligned generic mailbox-loop termination with the actor-message kill contract: only `control.kill` stops generic loop drains; `control.stop` and `control.cancel` remain actor-domain messages unless a recipe handles them explicitly.
+- `[Docs]` Updated worker and recipe guidance so backlog implementer shutdown examples use `control.kill` for runtime termination and describe `control.stop` as domain-local vocabulary.
+
 ## 0.24.7: Actor Message Kill Contract Hotfix
 
 - `[Actor Messages]` Narrowed runtime termination by actor message to `control.kill` only; `control.stop` and `control.cancel` now remain recipe-local mailbox vocabulary instead of aliases for killing/cancelling a run.

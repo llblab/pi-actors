@@ -199,4 +199,4 @@ Cross-platform smoke checklist:
 - Only play trusted local files or URLs.
 - Volume is clamped to `0..100` by the wrapper.
 - Prefer a stable `run_id` such as `music` when the operator expects to control the run by name.
-- Use `message type=control.kill` only when graceful `control.stop` cancellation fails.
+- Use `message type=control.kill` for runtime termination; `control.stop` is a player-domain pause/stop command, not a generic run-kill alias.

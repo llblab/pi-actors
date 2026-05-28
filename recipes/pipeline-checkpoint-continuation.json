@@ -22,8 +22,6 @@
     "accepts": [
       "control.reply",
       "control.revise",
-      "control.stop",
-      "control.cancel",
       "control.kill"
     ],
     "emits": [

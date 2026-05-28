@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.26.0: Actor Worker v2 and Package Contract Hardening
+
+- `[Actor Worker]` Promoted the packaged `actor-worker` into a v2 reference pattern with compact `worker-status.json`, optional per-task result artifacts under `worker-artifacts/`, stale-claim surfacing through status, and artifact metadata on `task.result` room messages.
+- `[Recipes]` Audited packaged async recipe mailbox contracts so `control.stop` and `control.cancel` remain declared only for actor-domain handlers such as locker/coordinator/music control, while generic async recipes expose `control.kill` for runtime termination.
+- `[Packaging]` Hardened dist package regressions with mirrored asset checks for `dist/scripts`, `dist/recipes`, `dist/fixtures`, and `dist/skills`, plus negative checks for stale dist files and source-only runtime imports in built script shims.
+- `[Skills]` Updated the actors skill recipe navigator to document the v2 worker pattern and its `control.kill` termination contract.
+
 ## 0.25.0: Recipe Doctor Remediation UX
 
 - `[Recipe Doctor]` Added prioritized advisory remediations to recipe doctor output, including a compact top action, structured verbose remediation entries, blocked lower-priority candidates for invalid/disabled overrides, and ordered coverage for invalid, disabled, shadowed, and risky shell-boundary recipes.

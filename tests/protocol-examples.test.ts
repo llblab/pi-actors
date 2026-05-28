@@ -50,7 +50,7 @@ const MAILBOX_CONTRACT_EXAMPLE = {
       "control.continue",
       "control.revise",
       "control.approve",
-      "control.stop",
+      "control.kill",
     ],
     emits: ["checkpoint.needs_scope", "branch.done", "run.done"],
   },
@@ -85,7 +85,7 @@ test("public protocol examples normalize and parse", () => {
     "control.continue",
     "control.revise",
     "control.approve",
-    "control.stop",
+    "control.kill",
   ]);
 });
 

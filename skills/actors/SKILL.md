@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.25.0
+  version: 0.26.0
 ---
 
 # Actors (pi-actors)
@@ -277,7 +277,7 @@ Use packaged recipes by name with `spawn file=<name>` for async actors, or regis
 - [`locker`](../../recipes/locker.json): modular queue + acquire/renew/release lease locks + journaled locker messages + platform-adapted control metadata.
 - [`utility-coordinator-lock-snapshot`](../../recipes/utility-coordinator-lock-snapshot.json): one-shot JSON snapshot of a coordinator-locker state directory.
 - [`music-player`](../../recipes/music-player.json): background local/URL/directory/playlist playback actor controlled by messages.
-- [`actor-worker`](../../recipes/actor-worker.json): canonical mailbox-backed branch worker demo that claims branch inbox work, emits room-visible task lifecycle messages, and stops on standard control messages.
+- [`actor-worker`](../../recipes/actor-worker.json): canonical mailbox-backed branch worker reference that claims branch inbox work, emits room-visible task lifecycle messages, writes compact `worker-status.json`, optionally writes per-task result artifacts under `worker-artifacts/`, surfaces stale-claim counts when `stale_claim_ms` is set, and terminates on `control.kill`.
 
 ### Subagent Atoms
 

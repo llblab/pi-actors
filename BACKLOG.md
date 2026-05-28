@@ -180,7 +180,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-09 Actor Worker v2
 
 - Priority: High.
-- Status: Open.
+- Status: Done.
 - Goal: Promote `actor-worker` from a minimal demo into the canonical standard-worker reference pattern.
 - Why now: Mailbox-loop semantics are now stable enough to show artifact production, compact status, and stale-claim recovery without adding a scheduler or broker.
 - Direction:
@@ -196,7 +196,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-10 Dist Package Contract Hardening
 
 - Priority: Medium.
-- Status: Open.
+- Status: Done.
 - Goal: Make the dist-first package contract difficult to regress after the 0.24 packaging shift.
 - Why now: `dist/` is now the default JS-only runtime surface and carries mirrored scripts, recipes, fixtures, and skills.
 - Direction:
@@ -211,7 +211,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-11 Actor Termination Semantics
 
 - Priority: Medium.
-- Status: Open; core mailbox-loop hotfix landed in 0.24.8.
+- Status: Done.
 - Goal: Make `control.kill` the canonical parent-to-actor termination action while keeping `control.stop` and `control.cancel` as actor-domain messages whose meaning depends on the actor protocol.
 - Why now: Mailbox workers need a clearer lifecycle boundary before v2 patterns harden. Treating `stop`, `cancel`, and `kill` as equivalent stop messages blurs actor termination with domain-specific task or playback control.
 - Remaining direction:
@@ -240,9 +240,5 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ## Suggested Milestone Order
 
 ```text
-0.25 — Worker maturity:
-  M-09
-
-0.26 — Package contract hardening and lifecycle semantics:
-  M-10, M-11
+Next milestone: choose from deferred items only after concrete actor workflow evidence appears.
 ```

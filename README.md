@@ -89,7 +89,7 @@ cat > ~/.pi/agent/recipes/docs_review.json <<'JSON'
   "async": true,
   "args": ["scope:path", "model:string"],
   "mailbox": {
-    "accepts": ["control.stop", "control.continue"],
+    "accepts": ["control.kill", "control.continue"],
     "emits": ["review.completed", "run.failed"]
   },
   "template": "pi -p --model {model} --no-tools \"Review {scope} for unclear actor-runtime onboarding. Return concise findings.\""

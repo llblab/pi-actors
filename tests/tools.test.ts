@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -1184,6 +1184,41 @@ test("Actor message tool rejects session messages from unowned runs", async () =
     await waitForFile(join(stateDir, "result.json"));
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("Spawn tool enriches shadowed recipe launch failures", async () => {
+  const definition = createSpawnToolDefinition();
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-actors-spawn-shadowed-"));
+  const recipesDir = join(agentDir, "recipes");
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  try {
+    await mkdir(recipesDir, { recursive: true });
+    await writeFile(join(recipesDir, "actor-worker.json"), "{ bad json", "utf8");
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    await assert.rejects(
+      () =>
+        definition.execute(
+          "call-spawn-shadowed-invalid",
+          { as: "run:spawn-shadowed-invalid", recipe: "actor-worker" },
+          undefined,
+          undefined,
+          { cwd: process.cwd() },
+        ),
+      (error: unknown) => {
+        assert(error instanceof Error);
+        assert.match(error.message, /reason=shadowed_invalid/);
+        assert.match(error.message, /active_path=.*actor-worker\.json/);
+        assert.match(error.message, /blocked_candidate=.*recipes\/actor-worker\.json/);
+        assert.match(error.message, /hint=inspect_recipes_doctor/);
+        assert.equal((error as unknown as Record<string, unknown>).reason, "shadowed_invalid");
+        return true;
+      },
+    );
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(agentDir, { recursive: true, force: true });
   }
 });
 

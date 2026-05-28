@@ -318,6 +318,9 @@ function readRecipeFile(file: string): AsyncRunStartParams {
   if (!config) {
     throw new Error(`Template recipe must define template: ${path}`);
   }
+  if (config.disabled === true) {
+    throw new Error(`Template recipe is disabled: ${path}`);
+  }
   return {
     ...(config as AsyncRunStartParams),
     file: path,

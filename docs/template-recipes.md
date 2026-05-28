@@ -105,7 +105,7 @@ Recipe priority only matters when two discovered recipes have the same filename 
 
 The high-priority user recipe directory is also the default tool set: recipes placed there are agent tools by location. This preserves the old advantage of a tool-only registry because listing `~/.pi/agent/recipes` shows the operator-managed tool surface. Packaged and ad hoc recipes are recipe components by default; they become tools only when copied or registered into the agent recipe root.
 
-Higher-priority files shadow lower-priority files with the same basename. Within one priority layer, same-id JSON shadows Markdown because JSON is the canonical precise format. A highest-priority invalid recipe is still visible and blocks fallback so operators do not accidentally run packaged behavior when a user override is broken. A highest-priority recipe with `disabled: true` also blocks fallback and intentionally disables that id.
+Higher-priority files shadow lower-priority files with the same basename. Within one priority layer, same-id JSON shadows Markdown because JSON is the canonical precise format. A highest-priority invalid recipe is still visible and blocks fallback so operators do not accidentally run packaged behavior when a user override is broken. A highest-priority recipe with `disabled: true` also blocks fallback, is not launchable, and intentionally disables that id. Healthy overrides are silent; failed bare-name launches caused by invalid or disabled shadowing include compact `reason=shadowed_invalid` or `reason=shadowed_disabled` diagnostics with the active path, blocked candidate, and recipe-doctor hint.
 
 ## Usage Metadata
 

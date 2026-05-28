@@ -328,6 +328,47 @@ test("Recipe discovery summary exposes active shadowed invalid and disabled entr
   }
 });
 
+test("Recipe discovery summary exposes prioritized doctor remediations", async () => {
+  const high = await mkdtemp(join(tmpdir(), "pi-actors-discovery-doctor-high-"));
+  const low = await mkdtemp(join(tmpdir(), "pi-actors-discovery-doctor-low-"));
+  try {
+    await writeFile(join(high, "broken.json"), "{ nope");
+    await writeRecipe(low, "broken", {
+      description: "Fallback",
+      template: "echo fallback",
+    });
+    await writeRecipe(high, "disabled-one", {
+      disabled: true,
+      template: "echo disabled",
+    });
+    await writeRecipe(low, "disabled-one", {
+      template: "echo fallback disabled",
+    });
+    await writeRecipe(high, "shell-risk", {
+      template: "bash -c 'echo risky'",
+    });
+
+    const summary = summarizeDiscovery(
+      discoverRecipeSources([{ root: high, defaultTool: true }, { root: low }]),
+    );
+    const remediations = summary.remediations as Array<Record<string, unknown>>;
+
+    assert.deepEqual(
+      remediations.map((item) => item.kind),
+      ["blocking_invalid", "blocking_disabled", "risky_shell_boundary", "shadowed", "shadowed"],
+    );
+    assert.deepEqual(summary.top_action, remediations[0]);
+    assert.equal(remediations[0].id, "broken");
+    assert.equal(
+      String(remediations[0].blocked_candidate).endsWith("broken.json"),
+      true,
+    );
+  } finally {
+    await rm(high, { recursive: true, force: true });
+    await rm(low, { recursive: true, force: true });
+  }
+});
+
 test("Recipe discovery disabled recipe blocks lower fallback", async () => {
   const high = await mkdtemp(join(tmpdir(), "pi-actors-discovery-high-"));
   const low = await mkdtemp(join(tmpdir(), "pi-actors-discovery-low-"));

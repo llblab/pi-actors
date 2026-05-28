@@ -165,7 +165,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-08 Recipe Doctor Remediation UX
 
 - Priority: High.
-- Status: Open.
+- Status: Done.
 - Goal: Turn recipe doctor output into an operator action surface, not just a diagnostic listing.
 - Why now: Recipe registry warnings are intentionally actionable; the next value is helping operators decide whether to fix, disable, delete, or inspect a recipe without hiding the warning.
 - Direction:
@@ -240,8 +240,8 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ## Suggested Milestone Order
 
 ```text
-0.25 — Operator remediation and worker maturity:
-  M-08, M-09
+0.25 — Worker maturity:
+  M-09
 
 0.26 — Package contract hardening and lifecycle semantics:
   M-10, M-11

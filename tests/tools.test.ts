@@ -136,10 +136,18 @@ test("Inspect tool reads recipe registry summaries", async () => {
       undefined,
     );
     assert.match(doctor.content[0].text, /recipes doctor errors=\d+/);
+    assert.match(doctor.content[0].text, /actions=\d+/);
+    assert.match(doctor.content[0].text, /top severity=/);
     assert.match(doctor.content[0].text, /action=/);
     assert.equal(
       (doctor.details.diagnostic_details as Array<Record<string, unknown>>).some(
         (detail) => detail.severity === "error" && detail.id === "broken",
+      ),
+      true,
+    );
+    assert.equal(
+      (doctor.details.remediations as Array<Record<string, unknown>>).some(
+        (item) => item.kind === "invalid" && item.id === "broken",
       ),
       true,
     );

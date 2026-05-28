@@ -2,7 +2,7 @@
 name: swarm
 description: Subagent orchestration with scoped locks and quorum consensus. Use for multi-model review, parallel scoped work, delegated audit, and coordinated subagent execution.
 metadata:
-  version: 0.29.2
+  version: 0.29.3
 ---
 
 # Swarm
@@ -284,6 +284,25 @@ Async run management is an adapter concern, not a portable Swarm script requirem
 `Cancellation boundary`: cancel only an owned active run when pid ownership or runtime ownership can be verified. Stale pid reuse must fail closed.
 
 `Reference binding`: Use a local generic async-run runtime or tool registry adapter. If the local runtime exposes a single action tool, bind these verbs as actions rather than adding more Swarm scripts. Swarm scripts themselves should stay atomic and narrowly specialized.
+
+## Stable Multi-Agent Review Rules
+
+- Prefer independent read-only reviewers for review swarms. Use shared room messages for coordination signals and observability, not for letting reviewers converge early, unless the task explicitly asks for collaborative discussion.
+- Treat communication logs as recipe-quality evidence. Timelines show whether agents coordinate clearly, emit useful summaries, over-chat, miss handoffs, choose poor message types, or need better mailbox/artifact conventions.
+- Smoke-test provider/model availability before launching expensive fanout, or choose a provider known to be configured in the environment. A failed provider fanout creates noisy run transitions without useful review signal.
+- Keep methodology and runtime split: Swarm chooses decomposition, quorum, lenses, lock discipline, and merge shape; the local runtime supplies actors, messages, files, locks, artifacts, and cancellation.
+
+## Persistent Implementer Pattern
+
+Use this pattern only when the work benefits from long-lived workers rather than one-shot subagents. Keep task selection with the coordinator and use reusable adapter cells for queues, locks, messages, and mailbox loops.
+
+1. Coordinator assigns a concrete task with `task.assign` or an adapter-equivalent envelope.
+2. Actor claims before editing or mutating shared state.
+3. Actor executes and validates the slice.
+4. Actor posts a result plus an explicit availability/blocked status.
+5. Actor stays alive until another assignment or an explicit runtime/domain stop.
+
+Use opposite-end or lens-specific implementers only to reduce overlap, not as a default. If a host adapter cannot express this scenario from reusable cells, add missing generic cells before packaging a broad workflow.
 
 ## `swarm_quorum`
 

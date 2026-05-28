@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.29.3: Actor Skill Context Hotfix
+
+- `[Skills]` Reconciled knowledge-surface layering across project and actor guidance, added a project topology map, moved multi-agent methodology from the actors runtime skill into the swarm skill, and split actor quick-start guidance from a deeper recipe/operating-pattern reference.
+
 ## 0.29.2: Legacy Migration Removal Hotfix
 
 - `[Registry]` Removed the old legacy tool-registry migration path now that recipe-file storage is the only maintained persistence surface.

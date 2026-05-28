@@ -15,6 +15,19 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 
 ## Topology
 
+```text
+Pi host
+  -> index.ts composition root
+     -> lib/tools.ts / prompts.ts        public tool + injected prompt surface
+     -> lib/runtime.ts / registry.ts     active user recipe tools
+     -> lib/recipe-*.ts                  packaged/user/candidate recipe discovery
+     -> lib/async-runs.ts                spawn lifecycle and run state
+     -> lib/actor-rooms.ts               room, roster, mailbox, communication log
+     -> scripts/*.mjs                    thin process entrypoints
+     -> recipes/*.json                   packaged actor components
+     -> skills/* + docs/*                agent guidance and transportable specs
+```
+
 - `/index.ts`: Minimal extension coordinator/composition root. It wires live pi ports and should avoid owning domain behavior.
 
 ## Domain Modules
@@ -55,8 +68,10 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 ## Knowledge Surfaces
 
 - Injected prompt: tiny bootstrap/reminder, never full docs.
+- Skill header: routing metadata that tells agents when to load a bundled skill.
+- Skill body: dense agent-facing operating manual for the matched concern.
 - README: public face of the project. Keep it current, focused, pruned, and limited to highest-signal scenarios.
-- `actors` skill: agent-facing manual for operating the extension and navigating bundled recipes.
+- `actors` skill: runtime/tooling manual for operating the extension and navigating high-value bundled recipes.
 - `swarm` skill: multi-agent methodology, strategies, standards, and portable examples.
 - `/docs`: detailed transportable standards read on demand.
 - `AGENTS.md`: durable project protocol for agents changing this repo.

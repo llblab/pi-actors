@@ -4,18 +4,20 @@
   "args": [
     "repo:path",
     "branch:string",
-    "poll_ms:int"
+    "poll_ms:int",
+    "stale_claim_ms:int",
+    "write_artifacts:bool"
   ],
   "defaults": {
     "repo": "~/.pi/agent/extensions/pi-actors",
     "branch": "worker",
-    "poll_ms": "1000"
+    "poll_ms": "1000",
+    "stale_claim_ms": "0",
+    "write_artifacts": "true"
   },
   "mailbox": {
     "accepts": [
       "task.assign",
-      "control.stop",
-      "control.cancel",
       "control.kill"
     ],
     "emits": [
@@ -29,7 +31,9 @@
     ]
   },
   "artifacts": {
-    "journal": "{state_dir}/worker-events.jsonl"
+    "journal": "{state_dir}/worker-events.jsonl",
+    "status": "{state_dir}/worker-status.json",
+    "results": "{state_dir}/worker-artifacts"
   },
-  "template": "{repo}/scripts/actor-worker.mjs --state-dir {state_dir} --run {run_id} --branch {branch} --poll-ms {poll_ms}"
+  "template": "{repo}/scripts/actor-worker.mjs --state-dir {state_dir} --run {run_id} --branch {branch} --poll-ms {poll_ms} --stale-claim-ms {stale_claim_ms} --write-artifacts {write_artifacts}"
 }

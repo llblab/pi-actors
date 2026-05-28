@@ -3,17 +3,20 @@
  * Zones: worker demo, mailbox loop recipe runtime
  */
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { appendRoomMessage, ensureRoomMember } from "./actor-rooms.ts";
+import { appendRoomMessage, ensureRoomMember, readBranchInboxMessages } from "./actor-rooms.ts";
 import { handleMailboxLoopOnce, isMailboxLoopStopMessage } from "./mailbox-loop.ts";
 
 interface ActorWorkerArgs {
+  artifact_dir?: string;
   branch?: string;
   poll_ms?: string | number;
   run?: string;
+  stale_claim_ms?: string | number;
   state_dir?: string;
+  write_artifacts?: string | boolean;
 }
 
 export function parseActorWorkerArgs(argv: string[]): ActorWorkerArgs {
@@ -41,12 +44,23 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+function enabled(value: unknown): boolean {
+  return value !== false && value !== "false" && value !== "0";
+}
+
+function safeName(value: unknown): string {
+  return String(value ?? "unknown").replaceAll(/[^A-Za-z0-9_.-]+/g, "_");
+}
+
 export async function runActorWorker(argv = process.argv.slice(2)): Promise<void> {
   const args = parseActorWorkerArgs(argv);
   const stateDir = String(args.state_dir ?? "");
   const run = String(args.run ?? "");
   const branch = String(args.branch ?? "worker");
   const pollMs = Math.max(50, Number(args.poll_ms ?? 1000));
+  const staleClaimMs = Math.max(0, Number(args.stale_claim_ms ?? 0));
+  const artifactDir = String(args.artifact_dir ?? join(stateDir, "worker-artifacts"));
+  const writeArtifacts = enabled(args.write_artifacts ?? true);
 
   if (!stateDir || !run) {
     throw new Error("usage: actor-worker.mjs --state-dir <dir> --run <id> [--branch worker] [--poll-ms 1000]");
@@ -55,12 +69,38 @@ export async function runActorWorker(argv = process.argv.slice(2)): Promise<void
   const branchAddress = `branch:${run}/${branch}`;
   const roomAddress = `room:${run}`;
   const journalPath = join(stateDir, "worker-events.jsonl");
+  const statusPath = join(stateDir, "worker-status.json");
+  if (writeArtifacts) mkdirSync(artifactDir, { recursive: true });
 
   function journal(event: string, data: Record<string, unknown> = {}): void {
     appendFileSync(
       journalPath,
       `${JSON.stringify({ event, ts: new Date().toISOString(), ...data })}\n`,
     );
+  }
+
+  function staleClaims(): number {
+    if (staleClaimMs <= 0) return 0;
+    const cutoff = Date.now() - staleClaimMs;
+    return readBranchInboxMessages(stateDir, run, branchAddress).filter((record) => {
+      if (record.status !== "claimed" || !record.claimed_at) return false;
+      const claimedAt = Date.parse(record.claimed_at);
+      return Number.isFinite(claimedAt) && claimedAt < cutoff;
+    }).length;
+  }
+
+  function status(state: string, data: Record<string, unknown> = {}): void {
+    writeFileSync(
+      statusPath,
+      `${JSON.stringify({ artifact_dir: artifactDir, branch, run, stale_claims: staleClaims(), state, ts: new Date().toISOString(), ...data }, null, 2)}\n`,
+    );
+  }
+
+  function writeResultArtifact(id: unknown, result: string): string | undefined {
+    if (!writeArtifacts) return undefined;
+    const path = join(artifactDir, `${safeName(id)}.txt`);
+    writeFileSync(path, `${result}\n`);
+    return path;
   }
 
   function room(type: string, summary: string, body: Record<string, unknown> = {}): void {
@@ -82,7 +122,10 @@ export async function runActorWorker(argv = process.argv.slice(2)): Promise<void
     `${branch} joined as mailbox worker`,
   );
   room("awaiting_assignment", `${branch} awaiting assignment`, { branch });
-  journal("worker.started", { branch, run });
+  journal("worker.started", { artifact_dir: artifactDir, branch, run, stale_claim_ms: staleClaimMs });
+  status("awaiting_assignment", { handled: 0, stale_claim_ms: staleClaimMs });
+
+  let handled = 0;
 
   let stopping = false;
   while (!stopping) {
@@ -93,6 +136,7 @@ export async function runActorWorker(argv = process.argv.slice(2)): Promise<void
           stopping = true;
           room("actor.leave", `${branch} stopping`, { branch, reason: message.type });
           journal("worker.stopping", { id: message.id, type: message.type });
+          status("stopping", { handled, reason: message.type });
           return;
         }
         room("task.claim", `${branch} claimed ${message.type}`, {
@@ -100,19 +144,31 @@ export async function runActorWorker(argv = process.argv.slice(2)): Promise<void
           id: message.id,
           type: message.type,
         });
+        const result = text(message.body);
+        const artifact = writeResultArtifact(message.id, result);
+        handled += 1;
         room("task.result", `${branch} handled ${message.type}`, {
+          artifact,
           branch,
           id: message.id,
-          result: text(message.body),
+          result,
           type: message.type,
         });
         room("awaiting_assignment", `${branch} awaiting assignment`, { branch });
-        journal("task.handled", { id: message.id, type: message.type });
+        journal("task.handled", { artifact, id: message.id, type: message.type });
+        status("awaiting_assignment", {
+          handled,
+          last_artifact: artifact,
+          last_id: message.id,
+          last_type: message.type,
+          stale_claim_ms: staleClaimMs,
+        });
       },
       { owner: branchAddress },
     );
     if (!result.handled) await sleep(pollMs);
   }
 
-  journal("worker.done", { branch, run });
+  journal("worker.done", { branch, handled, run });
+  status("done", { handled });
 }

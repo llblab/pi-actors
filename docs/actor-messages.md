@@ -164,7 +164,7 @@ Recipes can declare their conversational surface:
       "control.continue",
       "control.revise",
       "control.approve",
-      "control.stop"
+      "control.kill"
     ],
     "emits": ["checkpoint.needs_scope", "branch.done", "run.done"]
   }

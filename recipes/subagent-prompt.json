@@ -14,8 +14,6 @@
   },
   "mailbox": {
     "accepts": [
-      "control.stop",
-      "control.cancel",
       "control.kill"
     ],
     "emits": [

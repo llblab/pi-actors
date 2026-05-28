@@ -80,7 +80,7 @@ defaults:
   scope: docs
 mailbox:
   accepts:
-    - control.stop
+    - control.kill
 ---
 
 Human notes can explain intent, examples, or review guidance.
@@ -155,7 +155,7 @@ Use recipe-level `mailbox` to document the semantic messages a recipe actor acce
       "control.continue",
       "control.revise",
       "control.approve",
-      "control.stop"
+      "control.kill"
     ],
     "emits": ["checkpoint.needs_scope", "branch.done", "run.done"]
   }

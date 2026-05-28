@@ -219,7 +219,7 @@ defaults:
   suffix: "!"
 mailbox:
   accepts:
-    - control.stop
+    - control.kill
 ---
 
 Human notes are advisory.
@@ -474,15 +474,33 @@ test("Packaged recipes do not ship concrete model-version defaults", async () =>
 
 test("Packaged actor worker recipe stays mailbox-only and cross-platform", () => {
   const config = readResolvedRecipeConfig(join(getPackagedRecipeRoot(), "actor-worker.json"))!;
-  assert.deepEqual(config.mailbox?.accepts, [
-    "task.assign",
-    "control.stop",
-    "control.cancel",
-    "control.kill",
-  ]);
+  assert.deepEqual(config.mailbox?.accepts, ["task.assign", "control.kill"]);
   const template = JSON.stringify(config.template);
   assert.match(template, /actor-worker\.mjs/);
+  assert.match(template, /--stale-claim-ms/);
+  assert.match(template, /--write-artifacts/);
+  assert.deepEqual(Object.keys(config.artifacts ?? {}).sort(), ["journal", "results", "status"]);
   assert.doesNotMatch(template, /control\.fifo|mkfifo|named-pipe/);
+});
+
+test("Packaged async recipes declare stop and cancel only for actor-domain handlers", async () => {
+  const allowed = new Set(["coordinator-locker.json", "locker.json", "music-player.json"]);
+  const recipeDir = join(__dirname, "..", "recipes");
+  const asyncFiles = (await readdir(recipeDir)).filter((file) => {
+    if (!file.endsWith(".json")) return false;
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    return config?.async === true;
+  });
+
+  for (const file of asyncFiles) {
+    const accepts = readResolvedRecipeConfig(join(recipeDir, file))?.mailbox?.accepts ?? [];
+    const hasDomainStop = accepts.includes("control.stop") || accepts.includes("control.cancel");
+    assert.equal(
+      hasDomainStop,
+      allowed.has(file),
+      `${file} should declare stop/cancel only when actor-domain handling is meaningful`,
+    );
+  }
 });
 
 test("Packaged async recipes expose actor-native kill control", async () => {

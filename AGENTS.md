@@ -15,6 +15,19 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 
 ## Topology
 
+```text
+Pi host
+  -> index.ts composition root
+     -> lib/tools.ts / prompts.ts        public tool + injected prompt surface
+     -> lib/runtime.ts / registry.ts     active user recipe tools
+     -> lib/recipe-*.ts                  packaged/user/candidate recipe discovery
+     -> lib/async-runs.ts                spawn lifecycle and run state
+     -> lib/actor-rooms.ts               room, roster, mailbox, communication log
+     -> scripts/*.mjs                    thin process entrypoints
+     -> recipes/*.json                   packaged actor components
+     -> skills/* + docs/*                agent guidance and transportable specs
+```
+
 - `/index.ts`: Minimal extension coordinator/composition root. It wires live pi ports and should avoid owning domain behavior.
 
 ## Domain Modules

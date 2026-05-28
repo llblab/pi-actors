@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `[Skills]` Reconciled knowledge-surface layering across project and actor guidance, moved multi-agent methodology from the actors runtime skill into the swarm skill, and pruned the actor recipe navigator to prioritized entrypoints plus a deep-inventory link.
+- `[Skills]` Reconciled knowledge-surface layering across project and actor guidance, added a project topology map, moved multi-agent methodology from the actors runtime skill into the swarm skill, and split actor quick-start guidance from a deeper recipe/operating-pattern reference.
 
 ## 0.29.2: Legacy Migration Removal Hotfix
 

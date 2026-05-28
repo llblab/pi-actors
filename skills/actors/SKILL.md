@@ -250,83 +250,19 @@ Tool templates may be:
 
 The user recipe root is the default tool set by location. It accepts canonical JSON recipes and literate Markdown recipes with frontmatter plus fenced `template`/`json recipe` blocks; same-id JSON shadows Markdown in the same priority layer. Packaged recipes are lower-priority standard-library components and are not tools unless copied or registered into the agent recipe root. Ideal runtime behavior is reactive: create/edit/delete recipe files, validate them, then connect valid tools or surface diagnostics without requiring agents to hand-maintain a separate registry.
 
-## Recipe Navigator
+## Top Recipes
 
-Use packaged recipes by name with `spawn file=<name>` for async actors, or register/call them as tools when repeated use deserves a stable shortcut. Start with the small set below; use [`docs/recipe-library.md`](../../docs/recipe-library.md) for the full shipped inventory.
-
-High-value entrypoints:
+Use packaged recipes by name with `spawn file=<name>` for async actors, or register/call them as tools when repeated use deserves a stable shortcut.
 
 - [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json): room-visible swarm coordination with roles, rounds, optional locker, artifact synthesis, and `subagent_ttl_ms` for hard participant budgets.
 - [`pipeline-repo-health`](../../recipes/pipeline-repo-health.json): git/doc/validation evidence → normalized repository health report.
 - [`pipeline-release-readiness`](../../recipes/pipeline-release-readiness.json): changelog/package/skill/validation evidence → release review → artifact report.
-- [`pipeline-release-summary`](../../recipes/pipeline-release-summary.json): evidence-only release summary, risk checklist, and PR body draft artifact without release side effects.
 - [`actor-worker`](../../recipes/actor-worker.json): canonical mailbox-backed branch worker reference for claim/handle/status/artifact patterns.
 - [`coordinator-locker`](../../recipes/coordinator-locker.json): queue + lease locks + journaled coordinator messages for multi-actor ownership.
-- [`utility-run-ops-snapshot`](../../recipes/utility-run-ops-snapshot.json): compact run/message/recommendation evidence before deciding next operations.
-
-Common cells:
-
-- Subagents: [`subagent-prompt`](../../recipes/subagent-prompt.json), [`subagent-review-coordinator`](../../recipes/subagent-review-coordinator.json), [`subagent-quorum`](../../recipes/subagent-quorum.json), [`lens-swarm`](../../recipes/lens-swarm.json).
-- Artifacts/messages: [`utility-artifact-manifest`](../../recipes/utility-artifact-manifest.json), [`utility-artifact-write`](../../recipes/utility-artifact-write.json), [`utility-actor-message`](../../recipes/utility-actor-message.json).
-- Validation/state: [`utility-validation-wrapper`](../../recipes/utility-validation-wrapper.json), [`utility-validate-recipe`](../../recipes/utility-validate-recipe.json), [`utility-run-summary`](../../recipes/utility-run-summary.json), [`utility-run-state-files`](../../recipes/utility-run-state-files.json), [`utility-jsonl-tail`](../../recipes/utility-jsonl-tail.json).
-
-## Operating Patterns
-
-- **Short deterministic command**: call foreground registered tool or command template.
-- **Long job/service/fanout**: `spawn` async recipe, then inspect/messages/artifacts.
-- **One-off experiment**: inline `template`; promote after repeat use.
-- **Reusable workflow**: packaged or user recipe with public knobs, mailbox, artifacts, docs.
-- **Subagent/swarm execution**: compose packaged recipes/pipelines from smaller recipe cells; add missing generic cells to the extension rather than creating one-off external orchestration scripts.
-- **Consensus-first build**: when many lenses should shape one artifact, have proposer subagents post room messages, then one named implementer writes, one QA reviewer checks, and one finalizer emits `run.done`; do not ask every lens to mutate the same artifact.
-- **Coordinated workers**: spawn `coordinator-locker` when several actors need a shared queue, acquire/renew/release resource leases, or a journaled coordination point.
-- **Release/review pipeline**: pi-actors can prepare evidence, summaries, and artifacts; external actions such as commit, PR, merge, tag, and publish require the appropriate gated release workflow.
-
-## Complementary Methodology Engines
-
-pi-actors is the local execution engine for methodology skills. A methodology skill can define abstract patterns such as lens swarm, quorum, task cards, lock discipline, consensus-first build, or clean-context merge; pi-actors turns those patterns into concrete local actors, recipes, queues, leases, artifacts, and messages.
-
-Example mapping:
-
-```text
-methodology says: protect shared files
-pi-actors does: spawn coordinator-locker, enqueue tasks, lease resources
-
-methodology says: run reviewers then merge
-pi-actors does: spawn review pipeline, inspect messages/artifacts
-```
-
-Keep the split clean: methodology chooses coordination shape; pi-actors supplies addressable local machinery.
-
-## Lifecycle Discipline
-
-1. Choose existing recipe/tool when available.
-2. Spawn with a stable actor id for observable work.
-3. Inspect `status` after launch.
-4. Use notifications and `inspect`; do not busy-poll.
-5. Read `messages` and `artifacts`, not only stdout.
-6. Use `message` for explicit control or domain commands; treat direct branch messages as intended initiating work. Direct branch envelopes are queued under the recipient branch inbox and can be inspected with `inspect branch:<run>/<branch> view=mailbox`; queued entries have stable `id` values and internal `claimed` / `handled` / `failed` states for worker protocols and retries. Room messages are shared transcript/context.
-7. Promote repeated inline forms to recipes.
-8. Keep recipes small and shallow: files over 1 MiB or import chains deeper than 32 are rejected.
-9. Update docs/context when changing public behavior; if the change affects how agents operate this extension, update this skill and the bundled prompt guidance too.
-
-## Common Pitfalls
-
-- Treating actor mechanics as multi-agent methodology.
-- Repeating inline templates instead of promoting recipes.
-- Creating task-specific external orchestration scripts when the scenario belongs in pi-actors as a reusable recipe/pipeline with prompts, roles, artifact paths, and model/tool policy passed as args.
-- Embedding complex shell loops or Bash `${...}` parameter expansion directly in command templates; braces are pi-actors placeholders too, so put only generic trusted helper cells in packaged scripts when command-template composition is not enough.
-- Omitting stable run ids for work that needs follow-up.
-- Sending domain messages without checking `mailbox`.
-- Expecting current room messages to wake prompt-only subagents; use direct branch messages or a runner protocol for initiating work.
-- Reading only stdout and missing actor messages/artifacts.
-- Assuming every packaged message-controlled script is native-Windows-ready; core run control is platform-adapted, but Unix-tool scripts must be migrated recipe by recipe.
-- Baking local absolute paths into published docs or reusable recipes.
-- Creating recipes that perform external side effects without explicit operator gates.
-- Letting project insights live only in chat instead of updating BACKLOG/CHANGELOG/docs and, when agent behavior changes, the packaged skill or prompt guidance.
-- Preserving old runtime/event/FIFO vocabulary instead of `spawn`/`message`/`inspect` and actor messages.
 
 ## Deep References
 
+- `docs/actors-deep-reference.md` — recipe navigator, operating patterns, lifecycle discipline, pitfalls.
 - `docs/command-templates.md` — execution graph semantics.
 - `docs/template-recipes.md` — recipe storage, imports, defaults, references.
 - `docs/async-runs.md` — detached lifecycle, state, cancellation, observability.

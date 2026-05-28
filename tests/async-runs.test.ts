@@ -462,6 +462,23 @@ test("Async runs can start from recipe files with overrides", async () => {
   }
 });
 
+test("Async runs reject disabled recipe files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-disabled-"));
+  const file = join(root, "disabled.json");
+  try {
+    await writeFile(
+      file,
+      JSON.stringify({ disabled: true, template: "echo disabled" }, null, 2),
+    );
+    assert.throws(
+      () => startRun({ file, run_id: "disabled-run" }, process.cwd()),
+      /Template recipe is disabled:/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async runs can start from Markdown recipe files", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-md-"));
   const stateDir = join(root, "md-run");

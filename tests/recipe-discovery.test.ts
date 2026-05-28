@@ -5,13 +5,13 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { getPackagedRecipeRoot } from "../lib/paths.ts";
-import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, summarizeDiscovery } from "../lib/recipe-discovery.ts";
+import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, summarizeDiscovery } from "../lib/recipe-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
@@ -366,6 +366,56 @@ test("Recipe discovery summary exposes prioritized doctor remediations", async (
   } finally {
     await rm(high, { recursive: true, force: true });
     await rm(low, { recursive: true, force: true });
+  }
+});
+
+test("Recipe discovery exposes quiet launch diagnostics only for broken shadowing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
+  try {
+    const high = join(root, "user");
+    const low = join(root, "packaged");
+    await mkdir(high, { recursive: true });
+    await mkdir(low, { recursive: true });
+    await writeRecipe(low, "worker", {
+      template: "echo packaged",
+    });
+    await writeRecipe(high, "worker", {
+      template: "echo user override",
+    });
+    let result = discoverRecipeSources([
+      { root: high, defaultTool: true },
+      { root: low, defaultTool: false },
+    ]);
+    assert.equal(getShadowedLaunchDiagnostic(result, "worker"), undefined);
+
+    await writeRecipe(high, "worker", {
+      disabled: true,
+      template: "echo disabled override",
+    });
+    result = discoverRecipeSources([
+      { root: high, defaultTool: true },
+      { root: low, defaultTool: false },
+    ]);
+    assert.deepEqual(getShadowedLaunchDiagnostic(result, "worker"), {
+      active_path: join(high, "worker.json"),
+      blocked_candidate: join(low, "worker.json"),
+      hint: "inspect_recipes_doctor",
+      reason: "shadowed_disabled",
+    });
+
+    await writeFile(join(high, "worker.json"), "{ bad json", "utf8");
+    result = discoverRecipeSources([
+      { root: high, defaultTool: true },
+      { root: low, defaultTool: false },
+    ]);
+    assert.deepEqual(getShadowedLaunchDiagnostic(result, "worker"), {
+      active_path: join(high, "worker.json"),
+      blocked_candidate: join(low, "worker.json"),
+      hint: "inspect_recipes_doctor",
+      reason: "shadowed_invalid",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

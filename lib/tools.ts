@@ -710,6 +710,33 @@ function formatToolActorFailure(
   );
 }
 
+function shadowedRecipeLaunchDiagnostic(
+  recipe: unknown,
+): Record<string, unknown> | undefined {
+  if (typeof recipe !== "string" || recipe.includes("/") || recipe.includes("~"))
+    return undefined;
+  const discovery = RecipeDiscovery.discoverRecipeSources([
+    { root: Paths.getRecipeRoot(), defaultTool: true, mutableUsage: true },
+    { root: Paths.getPackagedRecipeRoot(), defaultTool: false },
+  ]);
+  return RecipeDiscovery.getShadowedLaunchDiagnostic(discovery, recipe);
+}
+
+function enhanceSpawnRecipeError(error: unknown, recipe: unknown): Error {
+  const diagnostic = shadowedRecipeLaunchDiagnostic(recipe);
+  if (!diagnostic) return error instanceof Error ? error : new Error(String(error));
+  const original = error instanceof Error ? error.message : String(error);
+  return Object.assign(
+    new Error(
+      `${original} reason=${diagnostic.reason} active_path=${diagnostic.active_path} blocked_candidate=${diagnostic.blocked_candidate} hint=${diagnostic.hint}`,
+    ),
+    {
+      ...diagnostic,
+      original_error: original,
+    },
+  );
+}
+
 function runIdFromActorAddress(
   address: string | undefined,
 ): string | undefined {
@@ -845,39 +872,45 @@ export function createSpawnToolDefinition<
       const runId = runIdFromActorAddress(
         typeof input.as === "string" ? input.as : undefined,
       );
-      const meta = AsyncRuns.startRun(
-        {
-          file:
-            typeof input.file === "string"
-              ? input.file
-              : typeof input.recipe === "string"
-                ? input.recipe
-                : undefined,
-          launch_source: "spawn",
-          ownerId: getRunOwnerId(ctx),
-          run_id: runId,
-          state_dir:
-            typeof input.state_dir === "string" ? input.state_dir : undefined,
-          ...(input.template !== undefined
-            ? {
-                template:
-                  input.template as AsyncRuns.AsyncRunStartParams["template"],
-              }
-            : {}),
-          values: asRecord(input.values),
-          ...(input.artifacts &&
-          typeof input.artifacts === "object" &&
-          !Array.isArray(input.artifacts)
-            ? {
-                artifacts: input.artifacts as Record<
-                  string,
-                  AsyncRuns.RunArtifactDeclaration
-                >,
-              }
-            : {}),
-        },
-        ctx.cwd,
-      );
+      const recipe =
+        typeof input.file === "string"
+          ? input.file
+          : typeof input.recipe === "string"
+            ? input.recipe
+            : undefined;
+      let meta: AsyncRuns.AsyncRunMeta;
+      try {
+        meta = AsyncRuns.startRun(
+          {
+            file: recipe,
+            launch_source: "spawn",
+            ownerId: getRunOwnerId(ctx),
+            run_id: runId,
+            state_dir:
+              typeof input.state_dir === "string" ? input.state_dir : undefined,
+            ...(input.template !== undefined
+              ? {
+                  template:
+                    input.template as AsyncRuns.AsyncRunStartParams["template"],
+                }
+              : {}),
+            values: asRecord(input.values),
+            ...(input.artifacts &&
+            typeof input.artifacts === "object" &&
+            !Array.isArray(input.artifacts)
+              ? {
+                  artifacts: input.artifacts as Record<
+                    string,
+                    AsyncRuns.RunArtifactDeclaration
+                  >,
+                }
+              : {}),
+          },
+          ctx.cwd,
+        );
+      } catch (error) {
+        throw enhanceSpawnRecipeError(error, recipe);
+      }
       ActorRooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
       ActorRooms.writeCommunicationSnapshot(meta.state_dir, String(meta.run));
       return {

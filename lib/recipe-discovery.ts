@@ -473,7 +473,8 @@ function remediationForEntry(
       reason: blockedCandidate
         ? "invalid higher-priority recipe blocks a lower-priority candidate"
         : "recipe is invalid and cannot be exposed as a tool",
-      action: "fix recipe syntax/config, or disable/delete/archive it to restore fallback",
+      action:
+        "fix recipe syntax/config, or disable/delete/archive it to restore fallback",
     };
   }
   if (entry.disabled && entry.active) {
@@ -486,7 +487,8 @@ function remediationForEntry(
       reason: blockedCandidate
         ? "disabled higher-priority recipe intentionally blocks a lower-priority candidate"
         : "recipe is disabled and not exposed as a tool",
-      action: "keep disabled intentionally, re-enable, or delete/archive the file",
+      action:
+        "keep disabled intentionally, re-enable, or delete/archive the file",
     };
   }
   if (riskyDiagnostics.length > 0) {
@@ -496,7 +498,8 @@ function remediationForEntry(
       severity: "warning",
       path: entry.path,
       reason: riskyDiagnostics[0],
-      action: "audit trusted command boundary; keep only if the recipe is local and intentional",
+      action:
+        "audit trusted command boundary; keep only if the recipe is local and intentional",
     };
   }
   if (entry.shadowed) {
@@ -555,6 +558,21 @@ function recommendationForEntry(
     };
   }
   return recommendation;
+}
+
+export function getShadowedLaunchDiagnostic(
+  result: RecipeDiscoveryResult,
+  id: string,
+): Record<string, unknown> | undefined {
+  const active = result.active.get(id.trim());
+  if (!active || active.shadows.length === 0) return undefined;
+  if (!active.invalid && !active.disabled) return undefined;
+  return {
+    active_path: active.path,
+    blocked_candidate: active.shadows[0],
+    hint: "inspect_recipes_doctor",
+    reason: active.invalid ? "shadowed_invalid" : "shadowed_disabled",
+  };
 }
 
 export function summarizeDiscovery(

@@ -247,18 +247,21 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Coordinator/session status exposes other-session counts without leaking unrelated run details by default.
   - Tests cover version inspection, session mismatch shape, and other-session count summaries.
 
-### M-13 Shadowed Recipe Launch UX
+### M-13 Shadowed Recipe Launch Diagnostics
 
 - Priority: High.
-- Status: Planned.
-- Goal: Make broken user recipes that shadow packaged/ad hoc candidates obvious at launch time.
+- Status: Done.
+- Goal: Make broken user recipes that shadow packaged/ad hoc candidates obvious only at the moment a launch already fails.
 - Why now: 0.26 dogfood found a broken `~/.pi/agent/recipes/actor-worker.json` shadowing the packaged `actor-worker`; Recipe Doctor exposed the evidence, but the launch path did not provide a direct hint.
 - Direction:
+  - Treat shadowing as a normal, intentional override mechanism; do not warn on healthy shadowing.
   - When recipe resolution or launch fails because the active user recipe is invalid/disabled and a lower-priority candidate exists, surface `reason=shadowed_invalid` or `reason=shadowed_disabled` where practical.
-  - Include active path, blocked candidate path, and compact hint: `inspect target=recipes view=doctor`.
-  - Keep remediation advisory only; do not auto-disable, delete, or rewrite user recipes.
+  - Treat disabled template recipes as non-launchable so disabled shadowing fails consistently instead of silently executing.
+  - Include minimal compact tokens: active path, blocked candidate path, and `hint=inspect_recipes_doctor`.
+  - Keep remediation advisory only; do not auto-disable, delete, rewrite, or nag about user recipes.
 - Acceptance:
-  - Launch failures caused by shadowing include a compact actionable hint.
+  - Healthy user overrides remain silent.
+  - Launch failures caused by invalid/disabled shadowing include a compact actionable hint.
   - Verbose details expose the active broken recipe and blocked fallback candidate.
   - Tests cover invalid and disabled user recipes shadowing a packaged candidate.
 
@@ -306,5 +309,5 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ## Suggested Milestone Order
 
 ```text
-Next milestone: M-13 Shadowed Recipe Launch UX.
+Next milestone: M-14 Session Mismatch Follow-through.
 ```

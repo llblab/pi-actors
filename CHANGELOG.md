@@ -2,10 +2,17 @@
 
 ## Unreleased
 
+## 0.28.0: Shadowed Recipe Launch Diagnostics
+
+- `[Spawn]` Added minimal shadowed-recipe diagnostics when a bare recipe launch already fails because an invalid or disabled higher-priority recipe blocks a lower-priority fallback; healthy recipe overrides remain silent.
+- `[Async Runs]` Treat disabled template recipes as non-launchable so disabled shadowing fails consistently instead of silently executing.
+- `[Docs]` Clarified the quiet shadowing contract, disabled recipe launch behavior, and recipe-doctor hint path.
+- `[Backlog]` Reframed shadowed recipe launch diagnostics as diagnostic-on-failure only, preserving shadowing as an intentional user override mechanism without startup warnings or automatic remediation.
+
 ## 0.27.1: Changelog and Backlog Hotfix
 
 - `[Changelog]` Moved the 0.27.0 runtime/session observability notes out of `Unreleased` into a proper release section so published package history matches the npm/tag release.
-- `[Backlog]` Marked M-12 complete and added the next evidence-backed candidates for shadowed recipe launch UX, session mismatch follow-through, and worker stale-claim dogfood.
+- `[Backlog]` Marked runtime/session observability complete and added the next evidence-backed candidates for shadowed recipe launch UX, session mismatch follow-through, and worker stale-claim dogfood.
 
 ## 0.27.0: Runtime and Session Observability UX
 

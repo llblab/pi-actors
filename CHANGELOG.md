@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.29.2: Legacy Migration Removal Hotfix
+
 - `[Registry]` Removed the old legacy tool-registry migration path now that recipe-file storage is the only maintained persistence surface.
 
 ## 0.29.1: Subagent TTL Kill Hotfix

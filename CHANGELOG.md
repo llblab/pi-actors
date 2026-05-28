@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `[Inspect]` Added `inspect target=tool:pi-actors view=status` as a runtime verification surface with loaded version, package root, source/dist mode, entrypoint path, recipe roots, and git commit when available.
+- `[Sessions]` Started structured session mismatch diagnostics with `reason=session_mismatch`, owner/current session fields, and compact inspect-session hints while preserving current ownership gates.
+- `[Sessions]` Added other-session run counts to coordinator/session status summaries so reload/resume states do not misleadingly report only `runs=0` without nearby context.
+
 ## 0.26.3: Branch Message Delivery UX Hotfix
 
 - `[Actor Messages]` Treat branch mailbox persistence as a successful queued outcome even when the parent run control endpoint is unavailable, returning compact `queued=true` delivery diagnostics instead of throwing an unframed tool error.

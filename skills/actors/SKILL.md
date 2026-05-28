@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.26.3
+  version: 0.27.0
 ---
 
 # Actors (pi-actors)
@@ -41,7 +41,7 @@ Trusted local capability
 - **Recipe**: saved JSON definition wrapping a template with args, defaults, imports, mailbox, artifacts, metadata, and optional `async: true`.
 - **Run actor**: one detached execution instance addressable as `run:<id>` with status, logs, messages, mailbox metadata, files, communication snapshot, and artifacts.
 - **Room actor**: shared timeline + roster endpoint addressable as `room:<run>`; every spawned run gets `room:<run>`.
-- **Tool actor**: registered persistent capability addressable as `tool:<name>` and callable through the generated tool or `message`.
+- **Tool actor**: registered persistent capability addressable as `tool:<name>` and callable through the generated tool or `message`. `tool:pi-actors` is reserved for runtime/status inspection.
 - **Coordinator/session**: the current pi session endpoint that receives bounded actor follow-ups.
 - **Mailbox**: public interaction contract: message types the actor accepts/emits.
 - **Artifact**: named durable output path declared by a recipe/run.
@@ -102,6 +102,7 @@ Check `inspect view=mailbox` before domain-specific messages.
 { "target": "room:repo-health", "view": "roster" }
 { "target": "room:repo-health", "view": "contacts" }
 { "target": "room:repo-health", "view": "previews" }
+{ "target": "tool:pi-actors", "view": "status" }
 { "target": "tool:music_player", "view": "status" }
 { "target": "recipes", "view": "status" }
 { "target": "coordinator", "view": "status" }

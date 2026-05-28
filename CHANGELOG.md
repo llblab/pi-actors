@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.28.1: Portable Agent Protocol Hotfix
+
 - `[Docs]` Removed a machine-local private validation skill reference from the repository agent protocol so extension guidance stays portable.
 
 ## 0.28.0: Shadowed Recipe Launch Diagnostics

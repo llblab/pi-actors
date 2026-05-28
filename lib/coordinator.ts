@@ -220,7 +220,21 @@ async function stopLocker(locker) {
   }
 }
 
-function runPi(prompt, model, thinking) {
+function terminateProcessGroup(child, signal) {
+  if (!child.pid) return;
+  try {
+    if (process.platform !== "win32") process.kill(-child.pid, signal);
+    else child.kill(signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // Process already exited.
+    }
+  }
+}
+
+function runPi(prompt, model, thinking, ttlMs = 0) {
   return new Promise((resolve) => {
     const args = [
       "--tools",
@@ -237,19 +251,53 @@ function runPi(prompt, model, thinking) {
     }
     args.push("-p", prompt);
 
-    const child = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("pi", args, {
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    let ttlTimer;
+    let forceTimer;
+    const clearTimers = () => {
+      if (ttlTimer) clearTimeout(ttlTimer);
+      if (forceTimer) clearTimeout(forceTimer);
+    };
+    if (ttlMs > 0) {
+      ttlTimer = setTimeout(() => {
+        timedOut = true;
+        stderr += `\nSubagent TTL expired after ${ttlMs}ms; terminating process group.\n`;
+        terminateProcessGroup(child, "SIGTERM");
+        forceTimer = setTimeout(() => terminateProcessGroup(child, "SIGKILL"), 1000);
+      }, ttlMs);
+    }
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
-    child.on("error", (error) =>
-      resolve({ code: 1, stdout, stderr: String(error) }),
-    );
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      resolve({
+        code: timedOut ? 124 : (code ?? (signal ? 1 : 0)),
+        killed: timedOut,
+        signal,
+        stderr,
+        stdout,
+        timed_out: timedOut,
+      });
+    });
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      resolve({ code: 1, stdout, stderr: String(error) });
+    });
   });
 }
 
@@ -294,7 +342,7 @@ async function synthesize(config, locker) {
   }
   const transcript = await readRoomTranscript(config);
   const prompt = `Synthesize this transcript into a concise Markdown artifact. Mission: ${config.mission}. Include: Title, Consensus, Roles, Protocol, Final Artifact Shape, Next Actions, Open Questions. Use only the transcript evidence below.\n\nTRANSCRIPT:\n${transcript.slice(-24000)}`;
-  const result = await runPi(prompt, config.model, config.thinking);
+  const result = await runPi(prompt, config.model, config.thinking, config.subagentTtlMs);
   const output = result.stdout.trim();
   const diagnostics = config.stats
     ? `\n\n## Diagnostics\n\nparticipant_attempts=${config.stats.participantAttempts}\nparticipant_success=${config.stats.participantSuccess}\nparticipant_failures=${config.stats.participantFailures}\nsynthesis_code=${result.code}\ntranscript_messages=${transcript.trim() ? transcript.split("\n").length : 0}\n`
@@ -417,7 +465,7 @@ async function executeParticipantPrompt(role, basePrompt, config) {
     finalPrompt += inboxSection;
   }
 
-  const result = await runPi(finalPrompt, config.model, config.thinking);
+  const result = await runPi(finalPrompt, config.model, config.thinking, config.subagentTtlMs);
 
   if (claimedIds.length > 0) {
     const finalStatus = result.code === 0 ? "handled" : "failed";
@@ -454,14 +502,14 @@ async function participantJoin(role, config) {
   const displayName = role.name;
   const address = `branch:${config.runId}/${role.name}`;
   const joinPrompt = `You are ${displayName}, ${role.persona}. Mission: ${config.mission}. Call tool message exactly once with to=${shellQuote(config.room)}, from=${shellQuote(address)}, type='actor.join', summary='${displayName} joined', body JSON {"role":${JSON.stringify(role.persona)},"display":${JSON.stringify(displayName)},"caps":["coordination","synthesis"],"claim":"coordinate on mission"}. Then print one short line.`;
-  await runPi(joinPrompt, config.model, config.thinking);
+  await runPi(joinPrompt, config.model, config.thinking, config.subagentTtlMs);
 }
 
 async function participantLeave(role, config) {
   const displayName = role.name;
   const address = `branch:${config.runId}/${role.name}`;
   const leavePrompt = `Call tool message exactly once with to=${shellQuote(config.room)}, from=${shellQuote(address)}, type='actor.leave', summary='${displayName} left', body='finished coordinated work'. Then print goodbye.`;
-  await runPi(leavePrompt, config.model, config.thinking);
+  await runPi(leavePrompt, config.model, config.thinking, config.subagentTtlMs);
 }
 
 // 1. consensus / swarm mode: iterative chat in a room
@@ -646,6 +694,7 @@ const config = {
   artifactPath: arg("artifact-path", ""),
   locker: boolArg("locker", false),
   lockerLeaseMs: numberArg("locker-lease-ms", 600000),
+  subagentTtlMs: numberArg("subagent-ttl-ms", 0),
   stats: {
     participantAttempts: 0,
     participantSuccess: 0,

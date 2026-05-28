@@ -11,6 +11,7 @@
     "delay:int",
     "locker:bool",
     "locker_lease_ms:int",
+    "subagent_ttl_ms:int",
     "artifact_path:path",
     "repo:path"
   ],
@@ -23,6 +24,7 @@
     "delay": "10",
     "locker": "false",
     "locker_lease_ms": "600000",
+    "subagent_ttl_ms": "0",
     "artifact_path": "{state_dir}/room-swarm-artifact.md",
     "repo": "~/.pi/agent/extensions/pi-actors"
   },
@@ -44,5 +46,5 @@
       "run.failed"
     ]
   },
-  "template": "{repo}/scripts/coordinator.mjs --run-id={run_id} --mode={mode} --mission={mission} --model={model} --thinking={thinking} --roles={roles} --roles-path={roles_path} --rounds={rounds} --delay={delay} --locker={locker} --locker-lease-ms={locker_lease_ms} --artifact-path={artifact_path}"
+  "template": "{repo}/scripts/coordinator.mjs --run-id={run_id} --mode={mode} --mission={mission} --model={model} --thinking={thinking} --roles={roles} --roles-path={roles_path} --rounds={rounds} --delay={delay} --locker={locker} --locker-lease-ms={locker_lease_ms} --subagent-ttl-ms={subagent_ttl_ms} --artifact-path={artifact_path}"
 }

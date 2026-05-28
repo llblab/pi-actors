@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.26.3: Branch Message Delivery UX Hotfix
+
+- `[Actor Messages]` Treat branch mailbox persistence as a successful queued outcome even when the parent run control endpoint is unavailable, returning compact `queued=true` delivery diagnostics instead of throwing an unframed tool error.
+- `[UX]` Preserve the compact action-output contract for branch `message` calls by keeping delivery diagnostics in the normal result formatter, including the leading blank-line separation used by other tool actions.
+
 ## 0.26.2: Terminal Progress Hotfix
 
 - `[Async Runs]` Keep `progress.json` aligned with terminal kill/cancel handling by writing `phase=killed` or `phase=cancelled` and clearing active subagent counts when a run is stopped by runtime control.

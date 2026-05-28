@@ -805,6 +805,9 @@ export function readRunStateIndex(
   });
   if (valid.some((entry) => !existsSync(join(entry.state_dir, "run.json"))))
     return undefined;
+  const indexedDirs = new Set(valid.map((entry) => resolve(entry.state_dir)));
+  const stateDirs = listRunStateDirs(stateRoot).map((stateDir) => resolve(stateDir));
+  if (stateDirs.some((stateDir) => !indexedDirs.has(stateDir))) return undefined;
   return valid;
 }
 
@@ -1403,6 +1406,25 @@ function markTerminalHandled(
   });
 }
 
+function markTerminalProgress(
+  stateDir: string,
+  phase: "cancelled" | "killed",
+): void {
+  const existing = readJson(join(stateDir, "progress.json"));
+  const progress =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  const { activeSubagents: _activeSubagents, ...rest } = progress;
+  writeJsonAtomic(join(stateDir, "progress.json"), {
+    ...rest,
+    completed: typeof progress.completed === "number" ? progress.completed : 0,
+    failures: Array.isArray(progress.failures) ? progress.failures : [],
+    phase,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 function stopRun(
   runOrDir: string,
   signal: NodeJS.Signals,
@@ -1425,6 +1447,8 @@ function stopRun(
     { flag: "a" },
   );
   markTerminalHandled(stateDir, { event, signal });
+  if (event === "run.kill") markTerminalProgress(stateDir, "killed");
+  if (event === "run.cancel") markTerminalProgress(stateDir, "cancelled");
   return { stopped: true, pid, signal, ...signalResult, state_dir: stateDir };
 }
 

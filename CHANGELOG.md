@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.26.2: Terminal Progress Hotfix
+
+- `[Async Runs]` Keep `progress.json` aligned with terminal kill/cancel handling by writing `phase=killed` or `phase=cancelled` and clearing active subagent counts when a run is stopped by runtime control.
+- `[Inspector]` Prevent killed runs from showing contradictory `status=killed` with `progress.phase=running`, preserving compact operator status trust after `control.kill`.
+
 ## 0.26.1: Coordinator Empty-Synthesis Hotfix
 
 - `[Coordinator]` Treat all-failed participant rounds and empty synthesis as a failed coordinator run instead of a clean success, preserving operator trust when swarm branches all exit non-zero.

@@ -1314,6 +1314,9 @@ test("Async run kill terminates matching stuck runs", async () => {
       signal: "SIGKILL",
       ts: handled.ts,
     });
+    const progress = status.progress as Record<string, unknown>;
+    assert.equal(progress.phase, "killed");
+    assert.equal(Object.hasOwn(progress, "activeSubagents"), false);
     assert.match(tailRun(stateDir), /run\.kill/);
   } finally {
     await rm(root, { recursive: true, force: true });

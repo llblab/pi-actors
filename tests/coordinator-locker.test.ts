@@ -139,6 +139,63 @@ test("coordinator fails when all participant rounds fail and synthesis is empty"
   }
 });
 
+test("coordinator kills timed-out subagent processes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-ttl-"));
+  try {
+    const fakeBin = join(root, "bin");
+    await mkdir(fakeBin, { recursive: true });
+    const fakePi = join(fakeBin, "pi");
+    const pidFile = join(root, "participant.pid");
+    await writeFile(
+      fakePi,
+      `#!/usr/bin/env bash
+if [[ "$*" == *"Round 1/1"* ]]; then
+  echo $$ > "${pidFile}"
+  trap '' TERM
+  sleep 30
+else
+  echo '# Mock output'
+fi
+`,
+      "utf8",
+    );
+    await chmod(fakePi, 0o755);
+    const artifact = join(root, "artifact.md");
+    const result = spawnSync(roomSwarmScript, [
+      "--run-id=ttl-kill-test",
+      "--mission=ttl kill boundary",
+      "--model=fake-model",
+      "--thinking=off",
+      "--rounds=1",
+      "--delay=0",
+      "--subagent-ttl-ms=100",
+      `--roles=${JSON.stringify([{ name: "only", persona: "tester" }])}`,
+      `--artifact-path=${artifact}`,
+    ], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        PI_CODING_AGENT_DIR: root,
+      },
+      timeout: 10000,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Subagent TTL expired after 100ms/);
+    assert.match(result.stderr, /All participant rounds failed: attempts=1/);
+    const pid = Number(await readFile(pidFile, "utf8"));
+    assert.equal(Number.isFinite(pid), true);
+    try {
+      process.kill(pid, 0);
+      assert.fail(`timed-out subagent process still alive: ${pid}`);
+    } catch (error) {
+      assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("coordinator rejects unknown modes before running default consensus", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-mode-"));
   try {

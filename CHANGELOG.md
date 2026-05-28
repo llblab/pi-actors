@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `[Coordinator]` Added `subagent_ttl_ms` / `--subagent-ttl-ms` to the room-swarm adapter so timed-out subagent `pi -p` processes are terminated instead of only awaited.
+
 ## 0.29.0: Candidate Recipe Memory
 
 - `[Spawn]` Capture inline spawn templates as non-registered candidate recipes under `~/.pi/agent/recipes/candidates`, making successful ad hoc actor patterns easy to replay by explicit path and promote manually.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.29.1: Subagent TTL Kill Hotfix
+
 - `[Coordinator]` Added `subagent_ttl_ms` / `--subagent-ttl-ms` to the room-swarm adapter so timed-out subagent `pi -p` processes are terminated instead of only awaited.
 
 ## 0.29.0: Candidate Recipe Memory

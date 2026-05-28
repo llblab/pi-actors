@@ -282,6 +282,40 @@ test(
   },
 );
 
+test("Actor message tool reports queued branch delivery when run control endpoint is missing", async () => {
+  const definition = createActorMessageToolDefinition();
+  const meta = startRun(
+    {
+      run_id: `branch-mailbox-fallback-${process.pid}-${Date.now()}`,
+      template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+    },
+    process.cwd(),
+  );
+  try {
+    const result = await definition.execute(
+      "call-branch-message-missing-control",
+      {
+        body: { decision: "approve" },
+        from: `run:${meta.run}`,
+        to: `branch:${meta.run}/worker`,
+        type: "task.assign",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /^\nto=branch:/);
+    assert.match(result.content[0].text, /message=not_sent/);
+    assert.match(result.content[0].text, /queued=true/);
+    assert.match(result.content[0].text, /delivery_error=/);
+    assert.equal(result.details.result.queued, true);
+    assert.equal(result.details.result.sent, false);
+  } finally {
+    cancelRun(meta.state_dir);
+    await rm(meta.state_dir, { recursive: true, force: true });
+  }
+});
+
 test("Actor message tool rejects cross-run branch senders before inbox writes", async () => {
   const definition = createActorMessageToolDefinition();
   const meta = startRun(
@@ -1452,20 +1486,18 @@ test("Inspect branch mailbox reports corrupted inbox record counts", async () =>
       process.cwd(),
     );
     stateDir = meta.state_dir;
-    await assert.rejects(
-      () => message.execute(
-        "call-branch-corrupt-seed",
-        {
-          from: `branch:${runId}/sender`,
-          to: `branch:${runId}/recipient`,
-          type: "task.assign",
-        },
-        undefined,
-        undefined,
-        undefined,
-      ),
-      /Run control FIFO not found/,
+    const seed = await message.execute(
+      "call-branch-corrupt-seed",
+      {
+        from: `branch:${runId}/sender`,
+        to: `branch:${runId}/recipient`,
+        type: "task.assign",
+      },
+      undefined,
+      undefined,
+      undefined,
     );
+    assert.match(seed.content[0].text, /queued=true/);
     await appendFile(join(stateDir, "branches", "recipient", "inbox.jsonl"), "bad json\n");
     const result = await inspect.execute(
       "call-branch-corrupt-inspect",

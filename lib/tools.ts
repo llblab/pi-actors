@@ -535,6 +535,7 @@ function compactActorMessageResult(
     `message=${result.sent === true || result.stopped === true ? "sent" : "not_sent"}`,
   ];
   if (result.bytes !== undefined) tokens.push(`bytes=${String(result.bytes)}`);
+  if (result.queued === true) tokens.push("queued=true");
   if (result.control) tokens.push(`control=${String(result.control)}`);
   if (result.outbox) tokens.push(`messages=${String(result.outbox)}`);
   if (result.message_count !== undefined)
@@ -546,6 +547,9 @@ function compactActorMessageResult(
   if (result.stopped === true) tokens.push("stopped=true");
   if (result.signal) tokens.push(`signal=${String(result.signal)}`);
   if (result.invoked === true) tokens.push("invoked=true");
+  if (result.delivery_error) {
+    tokens.push(`delivery_error=${compactPreview(result.delivery_error, 96)}`);
+  }
   return `\n${tokens.join(" ")}`;
 }
 
@@ -695,7 +699,24 @@ async function routeBranchEnvelope(
     recipient,
     branchMessage,
   );
-  return AsyncRuns.sendRunMessage(runId, JSON.stringify(branchMessage));
+  try {
+    return await AsyncRuns.sendRunMessage(runId, JSON.stringify(branchMessage));
+  } catch (error) {
+    const record = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
+    if (record.queued === true) {
+      return {
+        control_path: record.control_path,
+        control_type: record.control_type,
+        delivery_error: record.delivery_error ?? (error instanceof Error ? error.message : String(error)),
+        inbox_id: record.inbox_id,
+        queued: true,
+        run: runId,
+        sent: false,
+        state_dir: stateDir,
+      };
+    }
+    throw error;
+  }
 }
 
 function getRoomMulticastRecipients(

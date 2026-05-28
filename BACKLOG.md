@@ -228,7 +228,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-12 Runtime and Session Observability UX
 
 - Priority: High.
-- Status: Planned.
+- Status: Done.
 - Goal: Make reload/session/runtime mismatches visible without changing ownership or lifecycle policy.
 - Why now: 0.26 dogfood showed that actors, mailbox workers, and hotfixes work after a full Pi restart, but ordinary reloads can leave operators unsure which extension code is live. Session ownership mismatches also surface as terse strings instead of structured diagnostics or navigation hints.
 - Direction:
@@ -247,6 +247,49 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Coordinator/session status exposes other-session counts without leaking unrelated run details by default.
   - Tests cover version inspection, session mismatch shape, and other-session count summaries.
 
+### M-13 Shadowed Recipe Launch UX
+
+- Priority: High.
+- Status: Planned.
+- Goal: Make broken user recipes that shadow packaged/ad hoc candidates obvious at launch time.
+- Why now: 0.26 dogfood found a broken `~/.pi/agent/recipes/actor-worker.json` shadowing the packaged `actor-worker`; Recipe Doctor exposed the evidence, but the launch path did not provide a direct hint.
+- Direction:
+  - When recipe resolution or launch fails because the active user recipe is invalid/disabled and a lower-priority candidate exists, surface `reason=shadowed_invalid` or `reason=shadowed_disabled` where practical.
+  - Include active path, blocked candidate path, and compact hint: `inspect target=recipes view=doctor`.
+  - Keep remediation advisory only; do not auto-disable, delete, or rewrite user recipes.
+- Acceptance:
+  - Launch failures caused by shadowing include a compact actionable hint.
+  - Verbose details expose the active broken recipe and blocked fallback candidate.
+  - Tests cover invalid and disabled user recipes shadowing a packaged candidate.
+
+### M-14 Session Mismatch Follow-through
+
+- Priority: Medium.
+- Status: Planned.
+- Goal: Extend 0.27 structured session diagnostics consistently across room, branch, run, coordinator, and session workflows.
+- Why now: M-12 established the shape; dogfood should now make every ownership denial equally actionable without relaxing ownership gates.
+- Direction:
+  - Audit all session mismatch errors for consistent `reason`, owner/current session fields, and inspect-session hints.
+  - Keep read/write ownership policy unchanged.
+  - Update docs with session mismatch examples and recovery inspection paths.
+- Acceptance:
+  - Room, branch, run, coordinator, and session denials share the same compact/verbose shape.
+  - Tests cover representative inspect and message paths.
+
+### M-15 Worker Stale-Claim Dogfood
+
+- Priority: Medium.
+- Status: Planned.
+- Goal: Validate and harden actor-worker v2 stale-claim visibility under intentionally stale claimed branch messages.
+- Why now: M-09 exposed `stale_claims`; real dogfood should verify the operator can diagnose stuck claimed work before adding recovery policy.
+- Direction:
+  - Create deterministic stale claimed branch inbox fixtures or smoke tests.
+  - Verify `worker-status.json`, room events, and inspect surfaces make stale claims visible.
+  - Defer auto-recovery unless workflow evidence proves it is safe.
+- Acceptance:
+  - Stale claims are reproducible and visible in worker status.
+  - Tests cover stale-claim counting without adding scheduler/broker policy.
+
 ## Explicitly Deferred
 
 These are valid ideas but not current focus. Reintroduce only with concrete evidence from real actor workflows.
@@ -263,5 +306,5 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ## Suggested Milestone Order
 
 ```text
-Next milestone: M-12 Runtime and Session Observability UX.
+Next milestone: M-13 Shadowed Recipe Launch UX.
 ```

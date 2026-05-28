@@ -285,7 +285,7 @@ async function readRoomTranscript(config) {
 }
 
 async function synthesize(config, locker) {
-  if (!config.artifactPath) return;
+  if (!config.artifactPath) return { code: 0, empty: false };
   if (locker) {
     await writeLockerMessage(locker, {
       type: "lock.claim",
@@ -295,11 +295,15 @@ async function synthesize(config, locker) {
   const transcript = await readRoomTranscript(config);
   const prompt = `Synthesize this transcript into a concise Markdown artifact. Mission: ${config.mission}. Include: Title, Consensus, Roles, Protocol, Final Artifact Shape, Next Actions, Open Questions. Use only the transcript evidence below.\n\nTRANSCRIPT:\n${transcript.slice(-24000)}`;
   const result = await runPi(prompt, config.model, config.thinking);
+  const output = result.stdout.trim();
+  const diagnostics = config.stats
+    ? `\n\n## Diagnostics\n\nparticipant_attempts=${config.stats.participantAttempts}\nparticipant_success=${config.stats.participantSuccess}\nparticipant_failures=${config.stats.participantFailures}\nsynthesis_code=${result.code}\ntranscript_messages=${transcript.trim() ? transcript.split("\n").length : 0}\n`
+    : "";
   await writeFile(
     config.artifactPath,
-    result.stdout.trim()
+    output
       ? result.stdout
-      : "# Synthesis Artifact\n\nNo synthesis output.\n",
+      : `# Synthesis Artifact\n\nNo synthesis output.${diagnostics}\n`,
     "utf8",
   );
   if (locker) {
@@ -314,6 +318,7 @@ async function synthesize(config, locker) {
     });
   }
   process.stdout.write(`artifact=${config.artifactPath}\n`);
+  return { code: result.code, empty: !output };
 }
 
 async function readInboxLines(inboxPath) {
@@ -432,11 +437,17 @@ async function participantRound(role, round, config) {
   const address = `branch:${config.runId}/${role.name}`;
   const prompt = `You are ${displayName} (${address}), ${role.persona}. Mission: ${config.mission}. Round ${round}/${config.rounds}. First call inspect target=${config.room} view=previews lines=30 and inspect target=${config.room} view=contacts. Then call message once to ${config.room} from ${address} type=chat.message. Body: 2-4 sentences that react to a named participant, propose the next coordination step, and refine the shared artifact. Use contacts for peer names and addresses. End stdout with summary <=160 chars.`;
   const result = await executeParticipantPrompt(role, prompt, config);
+  if (config.stats) {
+    config.stats.participantAttempts += 1;
+    if (result.code === 0) config.stats.participantSuccess += 1;
+    else config.stats.participantFailures += 1;
+  }
   process.stdout.write(
     `[${role.name} round ${round}] code=${result.code}\n${result.stdout}\n`,
   );
   if (result.stderr.trim())
     process.stderr.write(`[${role.name} round ${round}] ${result.stderr}\n`);
+  return result;
 }
 
 async function participantJoin(role, config) {
@@ -635,6 +646,11 @@ const config = {
   artifactPath: arg("artifact-path", ""),
   locker: boolArg("locker", false),
   lockerLeaseMs: numberArg("locker-lease-ms", 600000),
+  stats: {
+    participantAttempts: 0,
+    participantSuccess: 0,
+    participantFailures: 0,
+  },
 };
 
 if (!config.model) {
@@ -650,7 +666,20 @@ try {
   const runMode = coordinatorModes[config.mode];
   if (!runMode) throw new Error(`Unknown coordinator mode: ${config.mode}`);
   await runMode(config, locker);
-  await synthesize(config, locker);
+  const synthesis = await synthesize(config, locker);
+  if (config.stats.participantAttempts > 0 && config.stats.participantSuccess === 0) {
+    failures.push(
+      `All participant rounds failed: attempts=${config.stats.participantAttempts}`,
+    );
+  }
+  if (synthesis?.empty && config.stats.participantFailures > 0) {
+    failures.push(
+      `Synthesis output was empty after participant failures: failures=${config.stats.participantFailures}`,
+    );
+  }
+  if (synthesis && synthesis.code !== 0) {
+    failures.push(`Synthesis command failed: code=${synthesis.code}`);
+  }
 } catch (globalError) {
   failures.push(`Global coordinator error: ${globalError.message}`);
 } finally {

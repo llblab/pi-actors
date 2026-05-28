@@ -100,6 +100,45 @@ test("room-swarm optional locker records artifact coordination", async () => {
   }
 });
 
+test("coordinator fails when all participant rounds fail and synthesis is empty", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-empty-"));
+  try {
+    const fakeBin = join(root, "bin");
+    await mkdir(fakeBin, { recursive: true });
+    const fakePi = join(fakeBin, "pi");
+    await writeFile(fakePi, "#!/usr/bin/env bash\nexit 1\n", "utf8");
+    await chmod(fakePi, 0o755);
+    const artifact = join(root, "artifact.md");
+    const result = spawnSync(roomSwarmScript, [
+      "--run-id=empty-synthesis-test",
+      "--mission=empty synthesis boundary",
+      "--model=fake-model",
+      "--thinking=off",
+      "--rounds=1",
+      "--delay=0",
+      `--roles=${JSON.stringify([{ name: "only", persona: "tester" }])}`,
+      `--artifact-path=${artifact}`,
+    ], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        PI_CODING_AGENT_DIR: root,
+      },
+      timeout: 10000,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /All participant rounds failed: attempts=1/);
+    assert.match(result.stderr, /Synthesis output was empty after participant failures: failures=1/);
+    const text = await readFile(artifact, "utf8");
+    assert.match(text, /No synthesis output/);
+    assert.match(text, /participant_attempts=1/);
+    assert.match(text, /participant_failures=1/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("coordinator rejects unknown modes before running default consensus", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-mode-"));
   try {

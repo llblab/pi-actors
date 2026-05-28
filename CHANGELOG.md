@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.26.1: Coordinator Empty-Synthesis Hotfix
+
+- `[Coordinator]` Treat all-failed participant rounds and empty synthesis as a failed coordinator run instead of a clean success, preserving operator trust when swarm branches all exit non-zero.
+- `[Artifacts]` Write compact diagnostics into empty synthesis artifacts, including participant attempt/success/failure counts and transcript size, so failed swarms leave actionable evidence instead of only `No synthesis output`.
+
 ## 0.26.0: Actor Worker v2 and Package Contract Hardening
 
 - `[Actor Worker]` Promoted the packaged `actor-worker` into a v2 reference pattern with compact `worker-status.json`, optional per-task result artifacts under `worker-artifacts/`, stale-claim surfacing through status, and artifact metadata on `task.result` room messages.

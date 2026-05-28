@@ -1207,7 +1207,7 @@ test("Inspect tool reads coordinator-owned runs", async () => {
         run_id: `coordinator-inspect-${process.pid}-${Date.now()}`,
         ownerId: "session-demo",
         retire_when: "children_terminal",
-        template: `${process.execPath} -e "console.log('ok')"`,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
@@ -1223,7 +1223,7 @@ test("Inspect tool reads coordinator-owned runs", async () => {
     assert.match(result.content[0].text, /retire_when=children_terminal/);
     assert.equal(result.details.runs.length, 1);
     assert.equal(result.details.runs[0].run, meta.run);
-    await waitForFile(join(stateDir, "result.json"));
+    cancelRun(stateDir);
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }
@@ -1251,7 +1251,7 @@ test("Inspect tool reads session runs", async () => {
       {
         run_id: `session-inspect-${process.pid}-${Date.now()}`,
         ownerId: "session-demo",
-        template: `${process.execPath} -e "console.log('ok')"`,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
@@ -1275,7 +1275,7 @@ test("Inspect tool reads session runs", async () => {
       undefined,
     );
     assert.equal(all.details.runs.some((run: { run: string }) => run.run === meta.run), true);
-    await waitForFile(join(stateDir, "result.json"));
+    cancelRun(stateDir);
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
   }

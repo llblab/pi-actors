@@ -1,6 +1,6 @@
 /**
  * File-discovered recipe registry helpers
- * Zones: recipe discovery, tool exposure, migration diagnostics
+ * Zones: recipe discovery, tool exposure, registry diagnostics
  * Owns filename identity discovery across prioritized recipe roots
  */
 
@@ -98,8 +98,7 @@ function listRecipeFiles(root: string): string[] {
     .filter(
       (entry) =>
         entry.isFile() &&
-        (entry.name.endsWith(".json") || entry.name.endsWith(".md")) &&
-        entry.name !== "legacy-tool-registry-migration-report.json",
+        (entry.name.endsWith(".json") || entry.name.endsWith(".md")),
     )
     .map((entry) => join(root, entry.name))
     .sort(

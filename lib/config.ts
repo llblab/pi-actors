@@ -1,6 +1,6 @@
 /**
  * Persistent tool registry config helpers
- * Zones: registry config, persistence, migration boundary
+ * Zones: registry config, persistence, normalization
  * Owns registered-tool config loading, normalization, unsupported-shape rejection, and serialization
  */
 

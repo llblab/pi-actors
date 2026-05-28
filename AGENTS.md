@@ -45,7 +45,7 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 
 ## Operating Principles
 
-- Prefer explicit migration boundaries over silent user-config rewrites.
+- Prefer explicit operator action over silent user-config rewrites.
 - Keep published documentation portable: use `~`, `<repo>`, or relative paths instead of machine-local absolute paths.
 - Preserve runtime output discipline because tool output flows directly into agent context.
 - Keep the project lens local-first and cybernetic: agents wrap durable local capabilities as actors, then use semantic tools and messages instead of repeatedly reconstructing shell commands.
@@ -82,7 +82,7 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 ## Recipes And Registry
 
 - `~/.pi/agent/recipes/*.json` is executable muscle memory: recipes there become persistent tools by location.
-- Preserve filename identity, atomic writes, explicit operator-gated migration paths, and local transportability.
+- Preserve filename identity, atomic writes, explicit operator-gated changes, and local transportability.
 - Packaged/ad hoc recipes outside the agent root are components, not user tools.
 - Tool definitions use `template`, not `script`, and built-in/core tool names must not be shadowed.
 - Packaged recipe growth is demand-driven: prefer reusable components over speculative scenario catalogs.

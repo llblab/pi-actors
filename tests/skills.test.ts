@@ -109,21 +109,19 @@ test("Packaged skill markdown links resolve inside package", () => {
   }
 });
 
-test("Packaged actors skill recipe navigator links every bundled recipe", () => {
+test("Packaged actors skill recipe navigator links prioritized recipes and deep inventory", () => {
   const actorSkill = readFileSync("skills/actors/SKILL.md", "utf8");
   const navigator = actorSkill.match(
     /## Recipe Navigator\n(?<body>[\s\S]*?)\n## Operating Patterns/,
   )?.groups?.body;
   assert.ok(navigator, "actors skill should contain a Recipe Navigator section");
+  assert.match(navigator, /docs\/recipe-library\.md/);
 
-  const recipeFiles = readdirSync("recipes")
-    .filter((name) => name.endsWith(".json"))
-    .sort();
   const linkedRecipes = [...navigator.matchAll(/\.\.\/\.\.\/recipes\/([^\)]+\.json)/g)]
     .map((match) => match[1])
     .sort();
-
-  assert.deepEqual(linkedRecipes, recipeFiles);
+  assert.ok(linkedRecipes.length >= 5, "navigator should keep high-value entrypoints");
+  assert.ok(linkedRecipes.length < readdirSync("recipes").filter((name) => name.endsWith(".json")).length);
   for (const recipeFile of linkedRecipes) {
     assert.ok(existsSync(join("recipes", recipeFile)), `${recipeFile} should exist`);
   }

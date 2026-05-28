@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `[Skills]` Reconciled knowledge-surface layering across project and actor guidance, moved multi-agent methodology from the actors runtime skill into the swarm skill, and pruned the actor recipe navigator to prioritized entrypoints plus a deep-inventory link.
+
 ## 0.29.2: Legacy Migration Removal Hotfix
 
 - `[Registry]` Removed the old legacy tool-registry migration path now that recipe-file storage is the only maintained persistence surface.

@@ -55,8 +55,10 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 ## Knowledge Surfaces
 
 - Injected prompt: tiny bootstrap/reminder, never full docs.
+- Skill header: routing metadata that tells agents when to load a bundled skill.
+- Skill body: dense agent-facing operating manual for the matched concern.
 - README: public face of the project. Keep it current, focused, pruned, and limited to highest-signal scenarios.
-- `actors` skill: agent-facing manual for operating the extension and navigating bundled recipes.
+- `actors` skill: runtime/tooling manual for operating the extension and navigating high-value bundled recipes.
 - `swarm` skill: multi-agent methodology, strategies, standards, and portable examples.
 - `/docs`: detailed transportable standards read on demand.
 - `AGENTS.md`: durable project protocol for agents changing this repo.

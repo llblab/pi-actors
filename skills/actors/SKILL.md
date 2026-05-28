@@ -132,37 +132,14 @@ The table is compact and optimistic by default: bounded body previews, capped no
 
 Let terminal notifications arrive; avoid sleep-poll loops except during diagnosis.
 
-## Stable Multi-Actor Review Rules
+## Runtime Communication Rules
 
-- Prefer independent read-only reviewers for review swarms. Use shared room messages for coordination signals and observability, not for letting reviewers converge early, unless the task explicitly asks for collaborative discussion.
-- Treat inspector-visible communication logs as recipe-quality evidence. Full room/direct timelines show whether recipes coordinate clearly, emit useful summaries, over-chat, miss handoffs, choose poor message types, or need better mailbox/artifact conventions. Use `inspect room:<run> view=messages|previews`, `inspect run:<id> view=communication`, and the actor inspector table/full-message views to improve recipes after real runs.
-- Smoke-test provider/model availability before launching expensive fanout, or choose a provider known to be configured in this environment. A failed provider fanout creates noisy run transitions without useful review signal.
 - Keep one public communication model: `spawn` creates actors, `message` sends typed envelopes, and `inspect` observes. Avoid adding public side channels or storage nouns when a normal actor address/view can express the operation.
 - Keep route and semantic type separate. Direct, room, coordinator, and session messages may share `type`; delivery behavior comes from `to`.
+- Treat inspector-visible communication logs as recipe evidence. Use `inspect room:<run> view=messages|previews`, `inspect run:<id> view=communication`, and the actor inspector table/full-message views to improve mailbox/artifact conventions after real runs.
 - Any UI, summary, or aggregate view that scans run directories must apply coordinator/session ownership filters before exposing summaries or body previews.
 - Treat `communication.json` as visible actor context, not a global mutable truth table. Run-level snapshots should identify the run actor; branch-local snapshots should identify the branch actor.
 - Prefer same-run provenance checks on lateral actor routes. If `from` is accepted for room or branch routes, validate that it belongs to the addressed run.
-
-## Persistent Backlog Implementers
-
-When using actors as backlog implementers, avoid one-shot subagents that exit after one task. Use long-lived branch actors and keep task selection with the coordinator:
-
-1. Coordinator assigns a concrete backlog slice with `task.assign`.
-2. Actor posts `task.claim` to `room:<run>` before editing.
-3. Actor executes and validates the slice.
-4. Actor posts `task.result` and `awaiting_assignment`.
-5. Actor stays alive until the coordinator sends another `task.assign` or an explicit `control.kill`.
-
-Use `front`/`back` actors for opposite backlog ends when reducing overlap. Implementer workflows should be packaged as reusable recipe composition, not bespoke scripts: use `coordinator-locker` for queue/assignment/locking, subagent launcher recipes for execution cells, actor-message utility recipes for structured handoffs, and `lib/mailbox-loop.ts` helpers when writing mailbox-consuming workers. Mailbox loops should claim one run or branch inbox message at a time, mark success as `handled`, mark exceptions as `failed`, and treat only `control.kill` as the generic loop termination message; `control.stop` and `control.cancel` are actor-domain messages only when the recipe declares and handles them. Bounded drains may process available work until `control.kill` or a max-message guard. If the existing recipe library cannot express the scenario, add missing reusable component recipes first, then compose the higher-level workflow from them. Supervisors should route coordinator assignments by `body.actor`, preserve the assignment as an object rather than a JSON string, and keep stopped-worker summaries tied to the original actor list.
-
-Current packaged building blocks:
-
-- `coordinator-locker`: long-lived queue/lock coordinator for assignment and resource ownership.
-- `subagent-prompt`, `subagent-tools`, `subagents-prompts`: execution launchers for one or many agent prompts.
-- `utility-actor-message`: deterministic actor-message envelope construction for handoffs/results.
-- `utility-run-ops-snapshot` and `pipeline-async-run-ops`: inspect live runs/messages before deciding the next assignment.
-
-The missing higher-level persistent backlog-implementer workflow is intentionally future work until it can be expressed from reusable recipe cells.
 
 ## Command Template Standard
 
@@ -275,42 +252,23 @@ The user recipe root is the default tool set by location. It accepts canonical J
 
 ## Recipe Navigator
 
-Use packaged recipes by name with `spawn file=<name>` for async actors, or register/call them as tools when repeated use deserves a stable shortcut. The links below point to recipe files shipped with this extension; read the JSON for args, defaults, mailbox, artifacts, and imports.
+Use packaged recipes by name with `spawn file=<name>` for async actors, or register/call them as tools when repeated use deserves a stable shortcut. Start with the small set below; use [`docs/recipe-library.md`](../../docs/recipe-library.md) for the full shipped inventory.
 
-### Coordination and Services
+High-value entrypoints:
 
-- [`coordinator-locker`](../../recipes/coordinator-locker.json): queue + acquire/renew/release lease locks + journaled coordinator messages + platform-adapted control metadata.
-- [`locker`](../../recipes/locker.json): modular queue + acquire/renew/release lease locks + journaled locker messages + platform-adapted control metadata.
-- [`utility-coordinator-lock-snapshot`](../../recipes/utility-coordinator-lock-snapshot.json): one-shot JSON snapshot of a coordinator-locker state directory.
-- [`music-player`](../../recipes/music-player.json): background local/URL/directory/playlist playback actor controlled by messages.
-- [`actor-worker`](../../recipes/actor-worker.json): canonical mailbox-backed branch worker reference that claims branch inbox work, emits room-visible task lifecycle messages, writes compact `worker-status.json`, optionally writes per-task result artifacts under `worker-artifacts/`, surfaces stale-claim counts when `stale_claim_ms` is set, and terminates on `control.kill`.
-
-### Subagent Atoms
-
-- Launchers: [`subagent-prompt`](../../recipes/subagent-prompt.json), [`subagent-tools`](../../recipes/subagent-tools.json), [`subagents-prompts`](../../recipes/subagents-prompts.json).
-- Review chain: [`subagent-review`](../../recipes/subagent-review.json), [`subagent-verify`](../../recipes/subagent-verify.json), [`subagent-merge`](../../recipes/subagent-merge.json), [`subagent-judge`](../../recipes/subagent-judge.json), [`subagent-normalize`](../../recipes/subagent-normalize.json).
-- Planning/evidence: [`subagent-plan`](../../recipes/subagent-plan.json), [`subagent-task-card`](../../recipes/subagent-task-card.json), [`subagent-evidence-map`](../../recipes/subagent-evidence-map.json), [`subagent-contradiction-map`](../../recipes/subagent-contradiction-map.json), [`subagent-critic`](../../recipes/subagent-critic.json).
-- Handoffs: [`subagent-checkpoint`](../../recipes/subagent-checkpoint.json), [`subagent-followup`](../../recipes/subagent-followup.json), [`subagent-message`](../../recipes/subagent-message.json), [`subagent-artifact`](../../recipes/subagent-artifact.json), [`subagent-conflict-report`](../../recipes/subagent-conflict-report.json).
-- Composition: [`subagent-quorum`](../../recipes/subagent-quorum.json), [`subagent-review-coordinator`](../../recipes/subagent-review-coordinator.json), [`lens-swarm`](../../recipes/lens-swarm.json).
-
-### Pipelines
-
+- [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json): room-visible swarm coordination with roles, rounds, optional locker, artifact synthesis, and `subagent_ttl_ms` for hard participant budgets.
+- [`pipeline-repo-health`](../../recipes/pipeline-repo-health.json): git/doc/validation evidence → normalized repository health report.
 - [`pipeline-release-readiness`](../../recipes/pipeline-release-readiness.json): changelog/package/skill/validation evidence → release review → artifact report.
 - [`pipeline-release-summary`](../../recipes/pipeline-release-summary.json): evidence-only release summary, risk checklist, and PR body draft artifact without release side effects.
-- [`pipeline-repo-health`](../../recipes/pipeline-repo-health.json): git/doc/validation evidence → normalized repository health report.
-- [`pipeline-async-run-ops`](../../recipes/pipeline-async-run-ops.json): run summary + selected run messages → operations report.
-- [`pipeline-docs-maintenance`](../../recipes/pipeline-docs-maintenance.json): docs index/review/planning → maintenance artifact.
-- Artifacts: [`pipeline-artifact-report`](../../recipes/pipeline-artifact-report.json), [`pipeline-artifact-write`](../../recipes/pipeline-artifact-write.json), [`pipeline-artifact-bundle`](../../recipes/pipeline-artifact-bundle.json).
-- Review gates: [`pipeline-quorum-review`](../../recipes/pipeline-quorum-review.json), [`pipeline-review-readiness`](../../recipes/pipeline-review-readiness.json).
-- Task-first workflows: [`pipeline-architect-coordinator`](../../recipes/pipeline-architect-coordinator.json), [`pipeline-research-synthesis`](../../recipes/pipeline-research-synthesis.json), [`pipeline-development-tasking`](../../recipes/pipeline-development-tasking.json), [`pipeline-checkpoint-continuation`](../../recipes/pipeline-checkpoint-continuation.json), [`pipeline-media-library`](../../recipes/pipeline-media-library.json), [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json). For room swarms, choose `mode` from `consensus`, `pipeline`, `fanout`, or `pool`; prefer `roles_path` for custom role JSON and keep role `name` ASCII-safe for branch addresses. Set `subagent_ttl_ms` when participant processes need a hard kill budget. Use `locker=true` when the swarm needs a coordinator-locker-backed artifact lock and journal.
+- [`actor-worker`](../../recipes/actor-worker.json): canonical mailbox-backed branch worker reference for claim/handle/status/artifact patterns.
+- [`coordinator-locker`](../../recipes/coordinator-locker.json): queue + lease locks + journaled coordinator messages for multi-actor ownership.
+- [`utility-run-ops-snapshot`](../../recipes/utility-run-ops-snapshot.json): compact run/message/recommendation evidence before deciding next operations.
 
-### Utilities
+Common cells:
 
-- Repo/release evidence: [`utility-git-status`](../../recipes/utility-git-status.json), [`utility-git-log`](../../recipes/utility-git-log.json), [`utility-changelog-head`](../../recipes/utility-changelog-head.json), [`utility-changelog-section`](../../recipes/utility-changelog-section.json), [`utility-package-summary`](../../recipes/utility-package-summary.json), [`utility-skill-summary`](../../recipes/utility-skill-summary.json).
-- Validation/state: [`utility-validation-wrapper`](../../recipes/utility-validation-wrapper.json), [`utility-validate-recipe`](../../recipes/utility-validate-recipe.json), [`utility-run-summary`](../../recipes/utility-run-summary.json), [`utility-run-ops-snapshot`](../../recipes/utility-run-ops-snapshot.json), [`utility-run-state-files`](../../recipes/utility-run-state-files.json), [`utility-jsonl-tail`](../../recipes/utility-jsonl-tail.json).
-- Artifacts/media/messages: [`utility-artifact-manifest`](../../recipes/utility-artifact-manifest.json), [`utility-artifact-write`](../../recipes/utility-artifact-write.json), [`utility-actor-message`](../../recipes/utility-actor-message.json), [`utility-markdown-index`](../../recipes/utility-markdown-index.json), [`utility-playlist-scan`](../../recipes/utility-playlist-scan.json), [`utility-playlist-build`](../../recipes/utility-playlist-build.json).
-
-Deep inventory: [`docs/recipe-library.md`](../../docs/recipe-library.md).
+- Subagents: [`subagent-prompt`](../../recipes/subagent-prompt.json), [`subagent-review-coordinator`](../../recipes/subagent-review-coordinator.json), [`subagent-quorum`](../../recipes/subagent-quorum.json), [`lens-swarm`](../../recipes/lens-swarm.json).
+- Artifacts/messages: [`utility-artifact-manifest`](../../recipes/utility-artifact-manifest.json), [`utility-artifact-write`](../../recipes/utility-artifact-write.json), [`utility-actor-message`](../../recipes/utility-actor-message.json).
+- Validation/state: [`utility-validation-wrapper`](../../recipes/utility-validation-wrapper.json), [`utility-validate-recipe`](../../recipes/utility-validate-recipe.json), [`utility-run-summary`](../../recipes/utility-run-summary.json), [`utility-run-state-files`](../../recipes/utility-run-state-files.json), [`utility-jsonl-tail`](../../recipes/utility-jsonl-tail.json).
 
 ## Operating Patterns
 

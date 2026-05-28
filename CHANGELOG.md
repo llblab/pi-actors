@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.27.1: Changelog and Backlog Hotfix
+
+- `[Changelog]` Moved the 0.27.0 runtime/session observability notes out of `Unreleased` into a proper release section so published package history matches the npm/tag release.
+- `[Backlog]` Marked M-12 complete and added the next evidence-backed candidates for shadowed recipe launch UX, session mismatch follow-through, and worker stale-claim dogfood.
+
+## 0.27.0: Runtime and Session Observability UX
+
 - `[Inspect]` Added `inspect target=tool:pi-actors view=status` as a runtime verification surface with loaded version, package root, source/dist mode, entrypoint path, recipe roots, and git commit when available.
 - `[Sessions]` Started structured session mismatch diagnostics with `reason=session_mismatch`, owner/current session fields, and compact inspect-session hints while preserving current ownership gates.
 - `[Sessions]` Added other-session run counts to coordinator/session status summaries so reload/resume states do not misleadingly report only `runs=0` without nearby context.

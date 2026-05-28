@@ -575,6 +575,18 @@ export function getShadowedLaunchDiagnostic(
   };
 }
 
+export function listCandidateRecipes(root: string): Array<Record<string, unknown>> {
+  return listRecipeFiles(root).map((path) => {
+    const id = RecipeReferences.getRecipeIdFromPath(path);
+    const config = RecipeReferences.readRawRecipeConfig(path);
+    return {
+      id,
+      path,
+      ...(config?.description ? { description: config.description } : {}),
+    };
+  });
+}
+
 export function summarizeDiscovery(
   result: RecipeDiscoveryResult,
 ): Record<string, unknown> {

@@ -5,7 +5,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import * as ActorMessages from "./actor-messages.ts";
@@ -183,6 +183,7 @@ function compactAsyncRunStatus(value: unknown): string {
     tokens.push(`failures=${failures}`);
   if (result.code !== undefined) tokens.push(`code=${String(result.code)}`);
   if (result.killed === true) tokens.push("killed=true");
+  if (status.candidate_recipe) tokens.push(`candidate_recipe=${String(status.candidate_recipe)}`);
   return `\n${tokens.join(" ")}`;
 }
 
@@ -574,10 +575,13 @@ function compactRecipeRegistry(summary: Record<string, unknown>): string {
   const diagnostics = Array.isArray(summary.diagnostics)
     ? summary.diagnostics.length
     : 0;
+  const candidates = Array.isArray(summary.candidates)
+    ? summary.candidates.length
+    : 0;
   const recommendations = Array.isArray(summary.recommendations)
     ? summary.recommendations.length
     : 0;
-  return `\nrecipes active=${active} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} recommendations=${recommendations} diagnostics=${diagnostics}`;
+  return `\nrecipes active=${active} candidates=${candidates} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} recommendations=${recommendations} diagnostics=${diagnostics}`;
 }
 
 function compactActorMessageResult(
@@ -720,6 +724,50 @@ function shadowedRecipeLaunchDiagnostic(
     { root: Paths.getPackagedRecipeRoot(), defaultTool: false },
   ]);
   return RecipeDiscovery.getShadowedLaunchDiagnostic(discovery, recipe);
+}
+
+function candidateRecipeName(run: string): string {
+  return `${run.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "spawn"}.json`;
+}
+
+function candidateRecipeDefaults(values: Record<string, unknown>): Record<string, unknown> | undefined {
+  const ignored = new Set([
+    "actor_address",
+    "communication_file",
+    "default_room",
+    "run_id",
+    "state_dir",
+  ]);
+  const defaults = Object.fromEntries(
+    Object.entries(values).filter(([key]) => !ignored.has(key)),
+  );
+  return Object.keys(defaults).length > 0 ? defaults : undefined;
+}
+
+function writeSpawnCandidateRecipe(
+  input: Record<string, unknown>,
+  meta: AsyncRuns.AsyncRunMeta,
+): string | undefined {
+  if (
+    process.env.NODE_TEST_CONTEXT &&
+    process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST !== "1"
+  )
+    return undefined;
+  if (input.template === undefined || input.file !== undefined || input.recipe !== undefined)
+    return undefined;
+  const root = Paths.getRecipeCandidateRoot();
+  mkdirSync(root, { recursive: true });
+  const path = join(root, candidateRecipeName(String(meta.run)));
+  const defaults = candidateRecipeDefaults(meta.values);
+  const recipe = {
+    async: true,
+    description: `Candidate recipe captured from spawn run ${String(meta.run)}`,
+    ...(meta.artifacts ? { artifacts: meta.artifacts } : {}),
+    ...(defaults ? { defaults } : {}),
+    template: input.template,
+  };
+  writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`, { flag: "wx" });
+  return path;
 }
 
 function enhanceSpawnRecipeError(error: unknown, recipe: unknown): Error {
@@ -911,6 +959,10 @@ export function createSpawnToolDefinition<
       } catch (error) {
         throw enhanceSpawnRecipeError(error, recipe);
       }
+      const candidateRecipe = writeSpawnCandidateRecipe(input, meta);
+      const details = candidateRecipe
+        ? { ...meta, candidate_recipe: candidateRecipe }
+        : meta;
       ActorRooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
       ActorRooms.writeCommunicationSnapshot(meta.state_dir, String(meta.run));
       return {
@@ -918,13 +970,13 @@ export function createSpawnToolDefinition<
           {
             type: "text" as const,
             text: maybeJsonText(
-              meta,
+              details,
               input.verbose === true,
-              compactAsyncRunStatus(meta),
+              compactAsyncRunStatus(details),
             ),
           },
         ],
-        details: meta,
+        details,
       };
     },
   };
@@ -1031,7 +1083,11 @@ export function createInspectToolDefinition<TContext = unknown>(
           },
           { root: deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot() },
         ]);
-        const summary = RecipeDiscovery.summarizeDiscovery(discovered);
+        const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
+        const summary = {
+          ...RecipeDiscovery.summarizeDiscovery(discovered),
+          candidates: RecipeDiscovery.listCandidateRecipes(join(recipeRoot, "candidates")),
+        };
         return {
           content: [
             {

@@ -36,6 +36,10 @@ export function getRecipeRoot(agentDir = getAgentDir()): string {
   return join(agentDir, "recipes");
 }
 
+export function getRecipeCandidateRoot(agentDir = getAgentDir()): string {
+  return join(getRecipeRoot(agentDir), "candidates");
+}
+
 export function getPackagedRecipeRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const compiledRoot = resolve(here, "..", "..", "recipes");

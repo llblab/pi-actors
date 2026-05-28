@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.29.0: Candidate Recipe Memory
+
+- `[Spawn]` Capture inline spawn templates as non-registered candidate recipes under `~/.pi/agent/recipes/candidates`, making successful ad hoc actor patterns easy to replay by explicit path and promote manually.
+- `[Inspect]` Add candidate recipe counts and verbose candidate metadata to recipe registry inspection without registering candidates as tools.
+- `[Skills]` Documented the two-layer executable memory model: candidate recipes as a proving ground and root recipes as active tool memory.
+
 ## 0.28.1: Portable Agent Protocol Hotfix
 
 - `[Docs]` Removed a machine-local private validation skill reference from the repository agent protocol so extension guidance stays portable.

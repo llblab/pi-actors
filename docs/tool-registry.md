@@ -10,6 +10,7 @@ The registry source is location-discovered recipes, not a live tool-only JSON fi
 
 - `~/.pi/agent/recipes/*.json` and `*.md` are the highest-priority user recipe root and the operator-managed tool set.
 - Recipes in that root are tools by location.
+- `~/.pi/agent/recipes/candidates/*.json` are captured inline-spawn candidates, not registered tools; promote one by moving or copying it up one level into `~/.pi/agent/recipes`. `inspect target=recipes view=summary` reports their count, and verbose output lists their paths/descriptions for explicit replay by file path.
 - Packaged pi-actors recipes are the lower-priority standard library of declarative actor config components, not automatically registered tools.
 - Ad hoc recipe files outside the user recipe root are components unless explicitly registered/copied into `~/.pi/agent/recipes`.
 - Recipe identity is the filename basename; `~/.pi/agent/recipes/docs_review.json` and `docs_review.md` both have id/tool name `docs_review`.

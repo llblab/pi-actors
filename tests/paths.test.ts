@@ -13,6 +13,7 @@ import {
   getConfigPath,
   getExtensionTmpDir,
   getPackagedRecipeRoot,
+  getRecipeCandidateRoot,
   getRecipeRoot,
   getRunStateRoot,
 } from "../lib/paths.ts";
@@ -42,6 +43,10 @@ test("Run state root lives under the extension tmp dir", () => {
 
 test("Recipe root lives under the agent dir", () => {
   assert.equal(getRecipeRoot("/agent"), "/agent/recipes");
+});
+
+test("Recipe candidate root lives below the recipe root", () => {
+  assert.equal(getRecipeCandidateRoot("/agent"), "/agent/recipes/candidates");
 });
 
 test("Packaged recipe root resolves to the repository recipes directory", () => {

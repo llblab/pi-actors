@@ -11,7 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { getPackagedRecipeRoot } from "../lib/paths.ts";
-import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, summarizeDiscovery } from "../lib/recipe-discovery.ts";
+import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, listCandidateRecipes, summarizeDiscovery } from "../lib/recipe-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
@@ -414,6 +414,25 @@ test("Recipe discovery exposes quiet launch diagnostics only for broken shadowin
       hint: "inspect_recipes_doctor",
       reason: "shadowed_invalid",
     });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipe discovery lists candidate recipes outside the active tool root", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-candidates-"));
+  try {
+    await writeRecipe(root, "draft", {
+      description: "Draft capability",
+      template: "echo draft",
+    });
+    assert.deepEqual(listCandidateRecipes(root), [
+      {
+        description: "Draft capability",
+        id: "draft",
+        path: join(root, "draft.json"),
+      },
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

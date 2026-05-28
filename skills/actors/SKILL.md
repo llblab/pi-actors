@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.28.1
+  version: 0.29.0
 ---
 
 # Actors (pi-actors)
@@ -235,11 +235,16 @@ Priority for same-id recipes:
 
 Only matching filename ids compete. Higher priority shadows lower priority; within one priority layer, same-id JSON shadows Markdown. An invalid or `disabled: true` higher-priority recipe blocks fallback so the agent does not silently run standard-library behavior when a user override is broken or intentionally disabled.
 
-Muscle-memory lens: `~/.pi/agent/recipes/*.json` and `*.md` are the agent's capability memory. Every recipe in that directory becomes an easy-to-call tool automatically and survives into later sessions. Agents grow this memory either by calling `register_tool`, which writes recipe files there under the hood, or by deliberately editing those recipe files. Treat this directory like `MEMORY.md` for executable habits: useful local patterns belong there; packaged recipes elsewhere are reusable components, not tools.
+Muscle-memory lens: pi-actors has two durable executable-memory layers.
+
+1. `~/.pi/agent/recipes/*.json` and `*.md` are the agent's active capability memory. Every recipe in that directory becomes an easy-to-call tool automatically and survives into later sessions. Descriptions matter here because they become the tool's operator-facing title/context.
+2. `~/.pi/agent/recipes/candidates/*.json` is candidate memory captured from successful inline `spawn template=...` runs. Candidates are not registered tools and do not enter the injected tool surface. They remain reusable by explicit path, e.g. `spawn file="~/.pi/agent/recipes/candidates/<name>.json"`, and can be promoted by moving or copying one level up into `~/.pi/agent/recipes`.
+
+Agents grow active memory by calling `register_tool` or by deliberate recipe-file edits. They grow candidate memory by trying ad hoc actors successfully. Treat both as executable habits: candidates are the workbench/proving ground; root recipes are promoted muscle memory.
 
 Usage lens: user recipes may carry extension-maintained launch metadata such as `usage.calls` and `usage.last_called`. The extension increments the counter when it starts that concrete recipe; agents should not hand-edit counters as part of normal recipe maintenance. Treat usage as evidence for usefulness analysis: heavily used recipes are good candidates for promotion, documentation, or stronger tests; unused recipes are cleanup candidates. Do not use failure counts as a primary usefulness signal because failures may reflect bad caller judgment rather than bad recipes. Do not delete or demote solely from counters without operator approval.
 
-Promotion lens: successful transient/ad hoc actor runs are evidence, not commands. If the run was repeatable, parameterized, safe enough, and likely useful later, the agent may promote it by calling `register_tool` with a concise name, typed args/defaults, and a reviewed template or recipe path. Do not wait for UI buttons; do not auto-register every success; do not persist temp paths, secrets, one-off prompts, or project-private assumptions without normalization and approval.
+Promotion lens: successful transient/ad hoc actor runs are evidence, not commands. Inline spawns leave candidate recipes as replayable evidence, not active tools. If a candidate is repeatable, parameterized, safe enough, and likely useful later, the agent may promote it by moving/copying it into `~/.pi/agent/recipes` or by calling `register_tool` with a concise name, typed args/defaults, and a reviewed template or recipe path. Do not auto-register every success; do not promote temp paths, secrets, one-off prompts, or project-private assumptions without normalization and approval.
 
 Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memory set. For each stale, duplicate, too-specific, or low-value recipe, choose one explicit action: keep as a tool, move it out of the agent recipe root to retain recipe-only memory, merge into a better recipe, or delete/archive the file. Prefer moving over deletion when the recipe may still be useful as a component. Never silently remove tools during unrelated work.
 

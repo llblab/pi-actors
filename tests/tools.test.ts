@@ -94,7 +94,7 @@ test("Inspect tool reads recipe registry summaries", async () => {
     const packagedRecipes = join(root, "packaged");
     await import("node:fs/promises").then((fs) =>
       Promise.all([
-        fs.mkdir(userRecipes, { recursive: true }),
+        fs.mkdir(join(userRecipes, "candidates"), { recursive: true }),
         fs.mkdir(packagedRecipes, { recursive: true }),
       ]),
     );
@@ -111,6 +111,10 @@ test("Inspect tool reads recipe registry summaries", async () => {
       join(packagedRecipes, "stdlib.json"),
       JSON.stringify({ description: "Stdlib", template: "echo stdlib" }),
     );
+    await writeFile(
+      join(userRecipes, "candidates", "draft.json"),
+      JSON.stringify({ description: "Draft", template: "echo draft" }),
+    );
 
     const definition = createInspectToolDefinition({
       packagedRecipeRoot: packagedRecipes,
@@ -125,8 +129,10 @@ test("Inspect tool reads recipe registry summaries", async () => {
     );
 
     assert.match(result.content[0].text, /recipes active=4/);
+    assert.match(result.content[0].text, /candidates=1/);
     assert.match(result.content[0].text, /invalid=1/);
     assert.equal((result.details.active as unknown[]).length, 4);
+    assert.equal((result.details.candidates as unknown[]).length, 1);
 
     const doctor = await definition.execute(
       "call-inspect-recipes-doctor",
@@ -1225,8 +1231,12 @@ test("Spawn tool enriches shadowed recipe launch failures", async () => {
 test("Spawn tool starts run actors with artifact metadata", async () => {
   const definition = createSpawnToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousCandidateTestFlag = process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST;
   let stateDir = "";
   try {
+    process.env.PI_CODING_AGENT_DIR = root;
+    process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST = "1";
     const runId = `spawned-${process.pid}-${Date.now()}`;
     const result = await definition.execute(
       "call-spawn",
@@ -1244,6 +1254,14 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
     );
     stateDir = String(result.details.state_dir);
     assert.match(result.content[0].text, /run=spawned-/);
+    assert.match(result.content[0].text, /candidate_recipe=.*recipes\/candidates\/spawned-/);
+    const candidateRecipe = JSON.parse(
+      await readFile(String(result.details.candidate_recipe), "utf8"),
+    );
+    assert.equal(candidateRecipe.async, true);
+    assert.equal(candidateRecipe.template, `${process.execPath} -e "console.log('spawned')"`);
+    assert.deepEqual(candidateRecipe.artifacts, result.details.artifacts);
+    assert.equal(candidateRecipe.defaults, undefined);
     assert.deepEqual(result.details.artifacts, {
       missing: { path: `${stateDir}/missing.md`, required: true },
       report: { path: `${stateDir}/report.md`, kind: "markdown", media_type: "text/markdown", required: true },
@@ -1277,6 +1295,10 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
 
     await waitForFile(join(stateDir, "result.json"));
   } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (previousCandidateTestFlag === undefined) delete process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST;
+    else process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST = previousCandidateTestFlag;
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }

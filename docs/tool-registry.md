@@ -19,15 +19,18 @@ Because the user recipe directory is sticky agent muscle memory, runtime launche
 
 `register_tool` is the preferred agent-facing mutation API. It creates, updates, and deletes recipe files in `~/.pi/agent/recipes`; agents do not need to edit the files directly for normal registration. Direct file edits are still valid for operators and advanced agents. Runtime behavior is reactive: file creation, deletion, or edits in the user recipe root trigger validation and tool-set refresh, with invalid recipes surfaced as diagnostics rather than silently ignored.
 
-Inspect the discovered registry with:
+Inspect the loaded pi-actors runtime and discovered registry with:
 
 ```text
+inspect target=tool:pi-actors view=status
 inspect target=recipes view=status
 inspect target=recipes view=doctor
 inspect target=recipes view=summary verbose=true
 ```
 
-The summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled. The doctor view keeps the same registry evidence but promotes an advisory action surface: compact output includes the highest-priority `top` remediation plus ordered actions for invalid/blocking, disabled, risky shell-boundary, and shadowed recipes. Verbose inspection keeps the structured `remediations`, `top_action`, diagnostic details, and blocked lower-priority candidate paths when a broken or disabled higher-priority recipe masks a fallback.
+`tool:pi-actors` is a reserved runtime-status actor: it reports the loaded package version, package root, source/dist mode, entrypoint path, recipe roots, and git commit when available. Use it after reloads to confirm which extension code is actually live.
+
+The recipe summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled. The doctor view keeps the same registry evidence but promotes an advisory action surface: compact output includes the highest-priority `top` remediation plus ordered actions for invalid/blocking, disabled, risky shell-boundary, and shadowed recipes. Verbose inspection keeps the structured `remediations`, `top_action`, diagnostic details, and blocked lower-priority candidate paths when a broken or disabled higher-priority recipe masks a fallback.
 
 ## Registering Tools
 

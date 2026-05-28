@@ -714,7 +714,7 @@ test("Actor message tool rejects same-run branch room posts across session owner
         undefined,
         { sessionManager: { getSessionId: () => "nested-subagent-session" } },
       ),
-      /owned by session:parent-session; current session is nested-subagent-session/,
+      /reason=session_mismatch owner_session=parent-session current_session=nested-subagent-session/,
     );
   } finally {
     await rm(meta.state_dir, { recursive: true, force: true });
@@ -747,7 +747,7 @@ test("Actor message tool rejects branch messages across session ownership", asyn
         undefined,
         { sessionManager: { getSessionId: () => "current-session" } },
       ),
-      /owned by session:other-session; current session is current-session/,
+      /reason=session_mismatch owner_session=other-session current_session=current-session/,
     );
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
@@ -791,6 +791,21 @@ test("Actor message tool rejects anonymous or cross-run room messages", async ()
   } finally {
     await rm(meta.state_dir, { recursive: true, force: true });
   }
+});
+
+test("Inspect tool reads pi-actors runtime status", async () => {
+  const definition = createInspectToolDefinition();
+  const result = await definition.execute(
+    "call-inspect-runtime-status",
+    { target: "tool:pi-actors", view: "status" },
+    undefined,
+    undefined,
+    undefined,
+  );
+  assert.match(result.content[0].text, /pi-actors version=/);
+  assert.match(result.content[0].text, /mode=(source|dist)/);
+  assert.equal(result.details.package_name, "@llblab/pi-actors");
+  assert.equal(typeof result.details.entrypoint, "string");
 });
 
 test("Inspect tool reads tool actor contracts", async () => {
@@ -1064,7 +1079,7 @@ test("Actor message tool rejects run messages across session ownership", async (
         undefined,
         { sessionManager: { getSessionId: () => "current-session" } },
       ),
-      /owned by session:other-session; current session is current-session/,
+      /reason=session_mismatch owner_session=other-session current_session=current-session/,
     );
     await waitForFile(join(stateDir, "result.json"));
   } finally {
@@ -1097,7 +1112,7 @@ test("Actor message tool rejects kill control across session ownership", async (
         undefined,
         { sessionManager: { getSessionId: () => "current-session" } },
       ),
-      /owned by session:other-session; current session is current-session/,
+      /reason=session_mismatch owner_session=other-session current_session=current-session/,
     );
     await waitForFile(join(stateDir, "result.json"));
   } finally {
@@ -1131,7 +1146,7 @@ test("Actor message tool rejects coordinator messages across session ownership",
         undefined,
         { sessionManager: { getSessionId: () => "current-session" } },
       ),
-      /owned by session:other-session; current session is current-session/,
+      /reason=session_mismatch owner_session=other-session current_session=current-session/,
     );
     await waitForFile(join(stateDir, "result.json"));
   } finally {
@@ -1280,6 +1295,7 @@ test("Inspect tool requires session context for coordinator inventory", async ()
 test("Inspect tool reads session runs", async () => {
   const definition = createInspectToolDefinition();
   let stateDir = "";
+  let otherStateDir = "";
   try {
     const meta = startRun(
       {
@@ -1289,7 +1305,16 @@ test("Inspect tool reads session runs", async () => {
       },
       process.cwd(),
     );
+    const other = startRun(
+      {
+        run_id: `session-inspect-other-${process.pid}-${Date.now()}`,
+        ownerId: "other-session",
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
     stateDir = meta.state_dir;
+    otherStateDir = other.state_dir;
     const result = await definition.execute(
       "call-inspect-session",
       { target: "session:session-demo", view: "status", status: "running" },
@@ -1298,8 +1323,11 @@ test("Inspect tool reads session runs", async () => {
       undefined,
     );
     assert.match(result.content[0].text, /session=session-demo/);
+    assert.match(result.content[0].text, /other_sessions=/);
+    assert.match(result.content[0].text, /other_runs=/);
     assert.equal(result.details.runs.length, 1);
     assert.equal(result.details.runs[0].run, meta.run);
+    assert.equal(Number(result.details.other_runs) >= 1, true);
 
     const all = await definition.execute(
       "call-inspect-all",
@@ -1310,8 +1338,10 @@ test("Inspect tool reads session runs", async () => {
     );
     assert.equal(all.details.runs.some((run: { run: string }) => run.run === meta.run), true);
     cancelRun(stateDir);
+    cancelRun(otherStateDir);
   } finally {
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    if (otherStateDir) await rm(otherStateDir, { recursive: true, force: true });
   }
 });
 
@@ -1337,7 +1367,7 @@ test("Inspect tool rejects run views across session ownership", async () => {
         undefined,
         { sessionManager: { getSessionId: () => "current-session" } },
       ),
-      /owned by session:other-session; current session is current-session/,
+      /reason=session_mismatch owner_session=other-session current_session=current-session/,
     );
     await waitForFile(join(stateDir, "result.json"));
   } finally {

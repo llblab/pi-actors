@@ -4,6 +4,10 @@
  * Owns generated runtime tool schemas and the register_tool management tool schema
  */
 
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 import * as ActorMessages from "./actor-messages.ts";
 import * as ActorRooms from "./actor-rooms.ts";
 import * as AsyncRuns from "./async-runs.ts";
@@ -424,12 +428,30 @@ function compactActorFiles(status: Record<string, unknown>): string {
   return `\nrun=${run}${artifactText}${files.length ? ` files=${files.join(",")}` : ""}`;
 }
 
+function summarizeOtherSessions(
+  currentSession: string,
+  allRuns: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  const otherRuns = allRuns.filter(
+    (run) => run.ownerId && run.ownerId !== currentSession,
+  );
+  return {
+    other_runs: otherRuns.length,
+    other_sessions: new Set(otherRuns.map((run) => run.ownerId)).size,
+  };
+}
+
 function compactSessionRuns(
   session: string,
   runs: Array<Record<string, unknown>>,
+  summary: Record<string, unknown> = {},
 ): string {
-  if (runs.length === 0) return `\nsession=${session} runs=0`;
-  return `\nsession=${session} runs=${runs.length}\n${runs
+  const suffix = [
+    summary.other_sessions !== undefined ? `other_sessions=${String(summary.other_sessions)}` : "",
+    summary.other_runs !== undefined ? `other_runs=${String(summary.other_runs)}` : "",
+  ].filter(Boolean).join(" ");
+  if (runs.length === 0) return `\nsession=${session} runs=0${suffix ? ` ${suffix}` : ""}`;
+  return `\nsession=${session} runs=${runs.length}${suffix ? ` ${suffix}` : ""}\n${runs
     .map((run) => {
       const tokens = [
         `run=${String(run.run ?? "")}`,
@@ -441,6 +463,39 @@ function compactSessionRuns(
       return tokens.join(" ");
     })
     .join("\n")}`;
+}
+
+function getPiActorsRuntimeStatus(): Record<string, unknown> {
+  const packagedRecipeRoot = Paths.getPackagedRecipeRoot();
+  const packageRoot = dirname(packagedRecipeRoot);
+  const packageJsonPath = join(packageRoot, "package.json");
+  const packageJson = existsSync(packageJsonPath)
+    ? JSON.parse(readFileSync(packageJsonPath, "utf8")) as Record<string, unknown>
+    : {};
+  let git_commit: string | undefined;
+  try {
+    git_commit = execFileSync("git", ["-C", packageRoot, "rev-parse", "--short", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    git_commit = undefined;
+  }
+  const entrypoint = new URL(import.meta.url).pathname;
+  return {
+    entrypoint,
+    git_commit,
+    mode: entrypoint.includes("/dist/") ? "dist" : "source",
+    package_name: packageJson.name ?? "@llblab/pi-actors",
+    package_root: packageRoot,
+    recipe_root: Paths.getRecipeRoot(),
+    packaged_recipe_root: packagedRecipeRoot,
+    version: packageJson.version ?? "unknown",
+  };
+}
+
+function compactPiActorsRuntimeStatus(status: Record<string, unknown>): string {
+  return `\npi-actors version=${String(status.version)} mode=${String(status.mode)} path=${String(status.package_root)} entrypoint=${String(status.entrypoint)}${status.git_commit ? ` git=${String(status.git_commit)}` : ""}`;
 }
 
 function compactToolActor(name: string, tool: Record<string, unknown>): string {
@@ -871,8 +926,17 @@ function assertRunAccessibleToContext(
   const status = AsyncRuns.getRunStatus(runId);
   const sessionId = getContextSessionId(ctx);
   if (sessionId && status.ownerId && status.ownerId !== sessionId) {
-    throw new Error(
-      `run:${runId} is owned by session:${status.ownerId}; current session is ${sessionId}.`,
+    throw Object.assign(
+      new Error(
+        `run:${runId} reason=session_mismatch owner_session=${status.ownerId} current_session=${sessionId} hint=inspect_session:${status.ownerId}`,
+      ),
+      {
+        current_session: sessionId,
+        hint: `inspect target=session:${status.ownerId} view=status`,
+        owner_session: status.ownerId,
+        reason: "session_mismatch",
+        run: runId,
+      },
     );
   }
   return status;
@@ -961,24 +1025,24 @@ export function createInspectToolDefinition<TContext = unknown>(
           );
         }
         const session = requireContextSessionId(ctx, "inspect coordinator");
-        const runs = AsyncRuns.listRuns(
+        const allRuns = AsyncRuns.listRuns(
           undefined,
           typeof input.status === "string" ? input.status : undefined,
-        )
-          .map((run) => AsyncRuns.getRunStatus(String(run.state_dir)))
-          .filter((run) => run.ownerId === session);
+        ).map((run) => AsyncRuns.getRunStatus(String(run.state_dir)));
+        const runs = allRuns.filter((run) => run.ownerId === session);
+        const sessionSummary = summarizeOtherSessions(session, allRuns);
         return {
           content: [
             {
               type: "text" as const,
               text: maybeJsonText(
-                { session, runs },
+                { session, runs, ...sessionSummary },
                 input.verbose === true,
-                compactSessionRuns(session, runs),
+                compactSessionRuns(session, runs, sessionSummary),
               ),
             },
           ],
-          details: { session, runs },
+          details: { session, runs, ...sessionSummary },
         };
       }
       if (address.kind === "session") {
@@ -987,29 +1051,50 @@ export function createInspectToolDefinition<TContext = unknown>(
             "inspect session:<id> supports view=status or view=runs.",
           );
         }
-        const runs = AsyncRuns.listRuns(
+        const allRuns = AsyncRuns.listRuns(
           undefined,
           typeof input.status === "string" ? input.status : undefined,
-        )
-          .map((run) => AsyncRuns.getRunStatus(String(run.state_dir)))
-          .filter(
-            (run) => address.value === "all" || run.ownerId === address.value,
-          );
+        ).map((run) => AsyncRuns.getRunStatus(String(run.state_dir)));
+        const runs = allRuns.filter(
+          (run) => address.value === "all" || run.ownerId === address.value,
+        );
+        const sessionSummary = address.value === "all"
+          ? {}
+          : summarizeOtherSessions(address.value || "", allRuns);
         return {
           content: [
             {
               type: "text" as const,
               text: maybeJsonText(
-                { session: address.value, runs },
+                { session: address.value, runs, ...sessionSummary },
                 input.verbose === true,
-                compactSessionRuns(address.value || "", runs),
+                compactSessionRuns(address.value || "", runs, sessionSummary),
               ),
             },
           ],
-          details: { session: address.value, runs },
+          details: { session: address.value, runs, ...sessionSummary },
         };
       }
       if (address.kind === "tool" && address.value) {
+        if (address.value === "pi-actors") {
+          if (view !== "status") {
+            throw new Error("inspect tool:pi-actors supports view=status.");
+          }
+          const details = getPiActorsRuntimeStatus();
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: maybeJsonText(
+                  details,
+                  input.verbose === true,
+                  compactPiActorsRuntimeStatus(details),
+                ),
+              },
+            ],
+            details,
+          };
+        }
         if (view !== "status" && view !== "schema") {
           throw new Error(
             "inspect tool:<name> supports view=status or view=schema.",

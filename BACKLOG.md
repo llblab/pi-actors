@@ -225,12 +225,35 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Packaged recipes declare `stop`/`cancel` only when the actor-specific behavior is meaningful.
   - Tests assert that generic mailbox-loop termination is not triggered by `control.stop` or `control.cancel`.
 
+### M-12 Runtime and Session Observability UX
+
+- Priority: High.
+- Status: Planned.
+- Goal: Make reload/session/runtime mismatches visible without changing ownership or lifecycle policy.
+- Why now: 0.26 dogfood showed that actors, mailbox workers, and hotfixes work after a full Pi restart, but ordinary reloads can leave operators unsure which extension code is live. Session ownership mismatches also surface as terse strings instead of structured diagnostics or navigation hints.
+- Direction:
+  - Add an intentional runtime/version inspection surface that reports loaded package version, entrypoint path, source/dist mode, package root, recipe roots, and git commit when available.
+  - Make session ownership denials structured in tool details with compact `reason=session_mismatch owner_session=... current_session=...` text and hints to inspect the owning session.
+  - Make coordinator/session status show when other sessions or other-session runs exist so `runs=0` is not misleading after reload or resume.
+  - Document reload vs full restart verification in the actors/swarm guidance.
+  - Opportunistically improve invalid shadowing recipe launch hints only if it stays diagnostic-only.
+- Non-goals:
+  - No cross-session force kill.
+  - No session attach/adopt/reparent policy.
+  - No relaxation of current ownership gates.
+- Acceptance:
+  - Operators can verify the loaded pi-actors version/path from an inspect/tool surface after reload.
+  - Session mismatch responses carry structured details and a compact human hint.
+  - Coordinator/session status exposes other-session counts without leaking unrelated run details by default.
+  - Tests cover version inspection, session mismatch shape, and other-session count summaries.
+
 ## Explicitly Deferred
 
 These are valid ideas but not current focus. Reintroduce only with concrete evidence from real actor workflows.
 
 - Spawn preflight mode: useful later, but lower value than resilient inspect and mailbox-loop consolidation.
 - Run restart/reattach policy: risky for isolation; defer until corruption recovery and protocol fixtures are stronger.
+- Cross-session force kill or attach/adopt/reparent: useful later, but ownership policy should not change until observability makes current boundaries clear.
 - Actor address helper CLI: keep diagnostics improving opportunistically inside existing parser/tests.
 - Documentation refactor: defer until the canonical mailbox loop and worker recipe exist; avoid rewriting docs twice.
 - Host-level tool unregistration: blocked on host API support.
@@ -240,5 +263,5 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ## Suggested Milestone Order
 
 ```text
-Next milestone: choose from deferred items only after concrete actor workflow evidence appears.
+Next milestone: M-12 Runtime and Session Observability UX.
 ```

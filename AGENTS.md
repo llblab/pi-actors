@@ -130,7 +130,6 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 - `npm test`: Focused regression tests for extracted pure domains.
 - `npm run pack:dry`: Verify package contents and npm metadata.
 - `npm run conformance`: Compact protocol conformance runner for actor/recipe behavior.
-- `bash ~/.pi/agent/skills/abcd-context/scripts/validate-context.sh`: Validate context split, links, and README/docs reachability.
 
 ## Pre-Task Preparation
 

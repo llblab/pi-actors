@@ -211,15 +211,13 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 ### M-11 Actor Termination Semantics
 
 - Priority: Medium.
-- Status: Open.
+- Status: Open; core mailbox-loop hotfix landed in 0.24.8.
 - Goal: Make `control.kill` the canonical parent-to-actor termination action while keeping `control.stop` and `control.cancel` as actor-domain messages whose meaning depends on the actor protocol.
 - Why now: Mailbox workers need a clearer lifecycle boundary before v2 patterns harden. Treating `stop`, `cancel`, and `kill` as equivalent stop messages blurs actor termination with domain-specific task or playback control.
-- Direction:
-  - Document `control.kill` as the universal lifecycle action for a parent/supervisor terminating an actor or run.
-  - Reframe `control.stop` as actor-defined domain control, such as stopping music playback or ending an actor-specific loop when that actor declares it.
-  - Reframe `control.cancel` as actor-defined domain control, such as cancelling the current subagent task while keeping the worker actor alive for later assignments.
-  - Split mailbox-loop helper semantics so lifecycle termination detection is distinct from general control-message detection.
-  - While the package is pre-1.0, allow a small intentional minor-version contract break: remove legacy treatment that aliases `control.stop` or `control.cancel` to actor termination.
+- Remaining direction:
+  - Audit packaged recipe `mailbox.accepts` declarations so `control.stop` and `control.cancel` appear only when actor-specific behavior is meaningful.
+  - Preserve `control.kill` as the universal lifecycle action for a parent/supervisor terminating an actor or run.
+  - Reframe any remaining docs that imply `control.stop` or `control.cancel` are generic runtime termination aliases.
   - Do not preserve compatibility shims for the old stop/cancel-as-termination behavior before the first 1.0 major release unless a concrete safety issue appears during implementation.
 - Acceptance:
   - Docs and actors skill advertise `control.kill` as canonical parent-to-actor termination.

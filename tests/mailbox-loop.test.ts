@@ -109,19 +109,20 @@ test("Mailbox loop marks failed handler messages", async () => {
   }
 });
 
-test("Mailbox loop recognizes standard stop messages", () => {
-  assert.equal(isMailboxLoopStopMessage({ type: "control.stop" }), true);
-  assert.equal(isMailboxLoopStopMessage({ type: "control.cancel" }), true);
+test("Mailbox loop recognizes only control.kill as a termination message", () => {
+  assert.equal(isMailboxLoopStopMessage({ type: "control.stop" }), false);
+  assert.equal(isMailboxLoopStopMessage({ type: "control.cancel" }), false);
   assert.equal(isMailboxLoopStopMessage({ type: "control.kill" }), true);
   assert.equal(isMailboxLoopStopMessage({ type: "task.assign" }), false);
 });
 
-test("Mailbox loop drains available branch messages until stop", async () => {
+test("Mailbox loop drains available branch messages until kill", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-loop-drain-"));
   try {
     for (const [type, body] of [
       ["task.assign", "first"],
-      ["control.stop", "stop"],
+      ["control.stop", "domain stop"],
+      ["control.kill", "kill"],
       ["task.assign", "after"],
     ] as const) {
       appendBranchInboxMessage(stateDir, "demo", "branch:demo/worker", {
@@ -146,14 +147,14 @@ test("Mailbox loop drains available branch messages until stop", async () => {
       { owner: "loop-test" },
     );
 
-    assert.deepEqual(seen, ["first", "stop"]);
-    assert.equal(result.handled, 2);
+    assert.deepEqual(seen, ["first", "domain stop", "kill"]);
+    assert.equal(result.handled, 3);
     assert.equal(result.stopped, true);
     assert.deepEqual(
       readBranchInboxMessages(stateDir, "demo", "branch:demo/worker").map(
         (message) => message.status,
       ),
-      ["handled", "handled", "queued"],
+      ["handled", "handled", "handled", "queued"],
     );
   } finally {
     await rm(stateDir, { recursive: true, force: true });

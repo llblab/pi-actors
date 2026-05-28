@@ -146,7 +146,7 @@ The stable loop is:
 2. Actor posts `task.claim` to `room:<run>` before editing.
 3. Actor completes the slice, validates, and posts `task.result` plus `awaiting_assignment`.
 4. Actor remains alive and waits for the next coordinator message.
-5. Coordinator either sends another `task.assign` or sends `control.stop` after confirming no actionable work remains.
+5. Coordinator either sends another `task.assign` or sends `control.kill` after confirming no actionable work remains.
 
 Implementer recipes should declare this contract in `mailbox.accepts` and `mailbox.emits`. They should not self-terminate after a successful slice, and they should not silently self-select a new task unless the coordinator deliberately configured that policy for the run. This keeps task choice centralized while preserving actor-local execution autonomy.
 

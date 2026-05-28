@@ -8,7 +8,6 @@ import * as Config from "./config.ts";
 import type { RegisteredToolExec } from "./execution.ts";
 import * as Paths from "./paths.ts";
 import * as RecipeDiscovery from "./recipe-discovery.ts";
-import * as RecipeMigration from "./recipe-migration.ts";
 import * as Tools from "./tools.ts";
 
 export interface RuntimeContext {
@@ -142,20 +141,6 @@ export function createAutoToolsRuntime(
     const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
     const packagedRecipeRoot =
       deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot();
-    const migration = RecipeMigration.migrateLegacyToolRegistry({
-      configPath: deps.configPath,
-      recipeRoot,
-      reservedToolNames: deps.reservedToolNames,
-    });
-    warnings.push(...migration.warnings);
-    if (migration.conflicts.length > 0)
-      warnings.push(
-        `Recipe migration conflicts: ${migration.conflicts.join(", ")}`,
-      );
-    if (migration.invalid.length > 0)
-      warnings.push(
-        `Recipe migration invalid entries: ${migration.invalid.join(", ")}`,
-      );
     const discovered = RecipeDiscovery.discoverRecipeSources([
       { root: recipeRoot, defaultTool: true, mutableUsage: true },
       { root: packagedRecipeRoot },

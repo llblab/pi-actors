@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { recordRecipeLaunch } from "../lib/recipe-usage.ts";
+import { recordRecipeLaunch } from "../lib/recipes-usage.ts";
 
 async function readJson(path: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;

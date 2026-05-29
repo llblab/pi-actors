@@ -50,7 +50,7 @@ test("Entrypoint stays free of direct typebox and environment access", () => {
   assert.equal(indexSource.includes("process.env"), false);
 });
 
-test("Entrypoint delegates register_tool definition to the tools domain", () => {
+test("Entrypoint delegates tool family composition to tools", () => {
   assert.match(indexSource, /Tools\.createCoreActorToolDefinitions/);
   assert.match(toolsSource, /createRegisterToolDefinition/);
   assert.equal(indexSource.includes('name: "register_tool"'), false);

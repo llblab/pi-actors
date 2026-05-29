@@ -1,7 +1,7 @@
 /**
- * Tool output formatting helpers
- * Zones: tool execution, output formatting, temp artifacts
- * Owns stdout/stderr failure formatting, tail truncation, and full-output temp-file persistence
+ * Registered tool execution output.
+ * Zones: command execution results, bounded output formatting, temp artifacts
+ * Owns stdout/stderr failure formatting, tail truncation, and full-output temp-file persistence.
  */
 
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

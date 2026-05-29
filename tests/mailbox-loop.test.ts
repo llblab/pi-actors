@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { appendBranchInboxMessage, readBranchInboxMessages } from "../lib/actor-rooms.ts";
+import { appendBranchInboxMessage, readBranchInboxMessages } from "../lib/rooms.ts";
 import {
   drainMailboxLoopMessages,
   handleMailboxLoopOnce,

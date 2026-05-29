@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { writeJsonAtomic } from "./file-state.ts";
 
-interface RecipeUsageRecord {
+interface RecipesUsageRecord {
   calls?: number;
   direct_calls?: number;
   fingerprint?: string;
@@ -62,7 +62,7 @@ export function recordRecipeLaunch(
   try {
     const raw = JSON.parse(readFileSync(path, "utf8"));
     if (!isRecord(raw)) return false;
-    const usage: RecipeUsageRecord = isRecord(raw.usage) ? raw.usage : {};
+    const usage: RecipesUsageRecord = isRecord(raw.usage) ? raw.usage : {};
     const fingerprint = getRecipeFingerprint(raw);
     const changed =
       typeof usage.fingerprint === "string" &&

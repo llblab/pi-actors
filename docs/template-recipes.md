@@ -69,7 +69,7 @@ A file-backed recipe's id comes from its filename, not a JSON `name` field. Lega
 
 ## Markdown Authoring
 
-Markdown recipes use `.md` files with YAML-like frontmatter for recipe metadata and one fenced executable block for the recipe/template body. Runtime behavior comes only from frontmatter plus the fenced block; surrounding prose is advisory for humans and future recipe-context use.
+Markdown recipes use `.md` files with YAML-like frontmatter for recipe metadata and one fenced executable block for the recipe/template body. Runtime behavior comes only from frontmatter plus the fenced block; surrounding prose is advisory for humans and future recipes-context use.
 
 ````markdown
 ---

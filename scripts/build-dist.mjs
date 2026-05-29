@@ -5,7 +5,7 @@
  *
  * This is intentionally standalone: it is package/build glue, not reusable
  * actor-domain behavior. It cleans dist, compiles TypeScript, mirrors runtime
- * assets, and syntax-checks packaged script shims.
+ * assets, and syntax-checks packaged scripts.
  */
 
 import { spawnSync } from "node:child_process";

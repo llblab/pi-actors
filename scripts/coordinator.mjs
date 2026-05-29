@@ -1,27 +1,749 @@
 #!/usr/bin/env node
 
 /**
- * Multi-actor coordinator helper shim.
+ * Multi-actor coordinator script.
  *
- * Runtime logic lives in lib/coordinator.ts and is compiled to
- * dist/lib/coordinator.js for installed JS-only packages.
+ * Owns room-swarm coordination modes, optional locker composition,
+ * participant process lifecycles, and artifact synthesis for the packaged
+ * coordinator recipe surfaces. Kept as a script because no non-script domain
+ * consumes this implementation.
  */
 
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
-function packageRoot() {
-  return dirname(dirname(fileURLToPath(import.meta.url)));
+let currentArgv = process.argv.slice(2);
+
+function arg(name, fallback = "") {
+  const prefix = `--${name}=`;
+  const value = currentArgv.find((item) => item.startsWith(prefix));
+  return value ? value.slice(prefix.length) : fallback;
 }
 
-function mainModulePath() {
-  const root = packageRoot();
-  const compiled = join(root, "dist", "lib", "coordinator.js");
-  return existsSync(compiled) ? compiled : join(root, "lib", "coordinator.ts");
+function numberArg(name, fallback) {
+  const value = Number(arg(name, String(fallback)));
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
-const { runCoordinator } = await import(pathToFileURL(mainModulePath()).href);
+function boolArg(name, fallback = false) {
+  const value = arg(name, String(fallback)).trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(value);
+}
+
+function normalizeRoles(value) {
+  if (!Array.isArray(value)) throw new Error("roles must be an array");
+  return value.map((role, index) => ({
+    name: String(role.name ?? `actor-${index + 1}`),
+    persona: String(role.persona ?? role.role ?? "room participant"),
+  }));
+}
+
+function parseRoles(raw) {
+  if (!raw.trim()) return defaultRoles;
+  try {
+    return normalizeRoles(JSON.parse(raw));
+  } catch {
+    return raw.split(",").map((item, index) => ({
+      name: item.trim() || `actor-${index + 1}`,
+      persona: "room participant",
+    }));
+  }
+}
+
+async function loadRoles(raw, path) {
+  if (path.trim())
+    return normalizeRoles(JSON.parse(await readFile(path, "utf8")));
+  return parseRoles(raw);
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function agentDir() {
+  return process.env.PI_CODING_AGENT_DIR || `${process.env.HOME}/.pi/agent`;
+}
+
+function runStateDir(runId) {
+  return `${agentDir()}/tmp/pi-actors/runs/${runId}`;
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const STATE_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
+const STATE_LOCK_TIMEOUT_MS = 5000;
+
+async function waitForPath(path, timeoutMs = 5000) {
+  const started = Date.now();
+  while (!existsSync(path)) {
+    if (Date.now() - started > timeoutMs)
+      throw new Error(`timed out waiting for ${path}`);
+    await sleep(50);
+  }
+}
+
+async function acquireStateLock(parentDir, name, label) {
+  await mkdir(parentDir, { recursive: true });
+  const lockDir = `${parentDir}/${name}`;
+  const started = Date.now();
+  while (true) {
+    try {
+      await mkdir(lockDir);
+      await writeFile(
+        `${lockDir}/owner.json`,
+        `${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() })}\n`,
+        "utf8",
+      );
+      return async () => rm(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      try {
+        const current = await stat(lockDir);
+        if (Date.now() - current.mtimeMs > STATE_LOCK_MAX_AGE_MS) {
+          await rm(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() - started > STATE_LOCK_TIMEOUT_MS) {
+        throw new Error(`${label} lock timed out.`, { cause: error });
+      }
+      await sleep(10);
+    }
+  }
+}
+
+async function acquireBranchInboxLock(runId, branchName) {
+  return acquireStateLock(
+    `${runStateDir(runId)}/branches/${branchName}`,
+    ".inbox.lock",
+    `Branch inbox ${branchName}`,
+  );
+}
+
+async function readLockerControl(locker) {
+  const controlJson = `${locker.stateDir}/control.json`;
+  await waitForPath(controlJson);
+  return JSON.parse(await readFile(controlJson, "utf8"));
+}
+
+function writeNamedPipeLine(path, line) {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(path);
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve();
+    };
+    socket.on("error", finish);
+    socket.on("connect", () => socket.end(line, () => finish()));
+  });
+}
+
+async function writeLockerMessage(locker, message) {
+  if (!locker) return;
+  const control = locker.control ?? (await readLockerControl(locker));
+  locker.control = control;
+  const line = `${JSON.stringify(message)}\n`;
+  if (control.type === "named-pipe")
+    await writeNamedPipeLine(control.path, line);
+  else await writeFile(control.path, line, { flag: "a" });
+  await sleep(50);
+}
+
+async function waitForLockerJournal(locker, pattern, timeoutMs = 2000) {
+  if (!locker) return;
+  const journalPath = `${locker.stateDir}/journal.jsonl`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (pattern.test(await readFile(journalPath, "utf8"))) return;
+    } catch {
+      // Journal may not exist yet.
+    }
+    await sleep(25);
+  }
+}
+
+function scriptPath(name) {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const root = here.endsWith(`${join("dist", "lib")}`)
+    ? dirname(here)
+    : dirname(here);
+  return join(root, "scripts", name);
+}
+
+async function startLocker(config) {
+  if (!config.locker) return undefined;
+  const lockerStateDir = `${runStateDir(config.runId)}/locker`;
+  await mkdir(lockerStateDir, { recursive: true });
+  const child = spawn(
+    scriptPath("locker.mjs"),
+    [
+      "serve",
+      "--state-dir",
+      lockerStateDir,
+      "--lease-ms",
+      String(config.lockerLeaseMs),
+    ],
+    {
+      env: { ...process.env, run_id: config.runId },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  child.stdout.on("data", (chunk) => process.stdout.write(`[locker] ${chunk}`));
+  child.stderr.on("data", (chunk) => process.stderr.write(`[locker] ${chunk}`));
+  const locker = { child, stateDir: lockerStateDir };
+  locker.control = await readLockerControl(locker);
+  await writeLockerMessage(locker, {
+    type: "lock.enqueue",
+    body: {
+      id: "coordinator-artifact",
+      task: "Own final artifact synthesis",
+      resources: [config.artifactPath || "artifact"],
+    },
+  });
+  return locker;
+}
+
+async function stopLocker(locker) {
+  if (!locker) return;
+  try {
+    await writeLockerMessage(locker, { type: "control.stop", body: {} });
+    await sleep(100);
+  } finally {
+    if (!locker.child.killed) locker.child.kill("SIGTERM");
+  }
+}
+
+function terminateProcessGroup(child, signal) {
+  if (!child.pid) return;
+  try {
+    if (process.platform !== "win32") process.kill(-child.pid, signal);
+    else child.kill(signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // Process already exited.
+    }
+  }
+}
+
+function runPi(prompt, model, thinking, ttlMs = 0) {
+  return new Promise((resolve) => {
+    const args = [
+      "--tools",
+      "inspect,message",
+      "--no-context-files",
+      "--no-skills",
+      "--no-session",
+    ];
+    if (model) {
+      args.push("--model", model);
+    }
+    if (thinking) {
+      args.push("--thinking", thinking);
+    }
+    args.push("-p", prompt);
+
+    const child = spawn("pi", args, {
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    let ttlTimer;
+    let forceTimer;
+    const clearTimers = () => {
+      if (ttlTimer) clearTimeout(ttlTimer);
+      if (forceTimer) clearTimeout(forceTimer);
+    };
+    if (ttlMs > 0) {
+      ttlTimer = setTimeout(() => {
+        timedOut = true;
+        stderr += `\nSubagent TTL expired after ${ttlMs}ms; terminating process group.\n`;
+        terminateProcessGroup(child, "SIGTERM");
+        forceTimer = setTimeout(() => terminateProcessGroup(child, "SIGKILL"), 1000);
+      }, ttlMs);
+    }
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      resolve({
+        code: timedOut ? 124 : (code ?? (signal ? 1 : 0)),
+        killed: timedOut,
+        signal,
+        stderr,
+        stdout,
+        timed_out: timedOut,
+      });
+    });
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      resolve({ code: 1, stdout, stderr: String(error) });
+    });
+  });
+}
+
+async function readRoomTranscript(config) {
+  const messagesPath = `${runStateDir(config.runId)}/rooms/main/messages.jsonl`;
+  try {
+    const raw = await readFile(messagesPath, "utf8");
+    return raw
+      .split("\n")
+      .filter(Boolean)
+      .slice(-160)
+      .map((line) => {
+        try {
+          const message = JSON.parse(line);
+          const from = String(message.from || "unknown").replace(
+            /^branch:[^/]+\//,
+            "",
+          );
+          const type = String(message.type || "message");
+          const body =
+            typeof message.body === "string"
+              ? message.body
+              : JSON.stringify(message.body ?? "");
+          return `${from} [${type}]: ${body}`;
+        } catch {
+          return line;
+        }
+      })
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
+async function synthesize(config, locker) {
+  if (!config.artifactPath) return { code: 0, empty: false };
+  if (locker) {
+    await writeLockerMessage(locker, {
+      type: "lock.claim",
+      body: { owner: "coordinator:synthesizer" },
+    });
+  }
+  const transcript = await readRoomTranscript(config);
+  const prompt = `Synthesize this transcript into a concise Markdown artifact. Mission: ${config.mission}. Include: Title, Consensus, Roles, Protocol, Final Artifact Shape, Next Actions, Open Questions. Use only the transcript evidence below.\n\nTRANSCRIPT:\n${transcript.slice(-24000)}`;
+  const result = await runPi(prompt, config.model, config.thinking, config.subagentTtlMs);
+  const output = result.stdout.trim();
+  const diagnostics = config.stats
+    ? `\n\n## Diagnostics\n\nparticipant_attempts=${config.stats.participantAttempts}\nparticipant_success=${config.stats.participantSuccess}\nparticipant_failures=${config.stats.participantFailures}\nsynthesis_code=${result.code}\ntranscript_messages=${transcript.trim() ? transcript.split("\n").length : 0}\n`
+    : "";
+  await writeFile(
+    config.artifactPath,
+    output
+      ? result.stdout
+      : `# Synthesis Artifact\n\nNo synthesis output.${diagnostics}\n`,
+    "utf8",
+  );
+  if (locker) {
+    await writeLockerMessage(locker, {
+      type: "lock.complete",
+      body: { id: "coordinator-artifact", artifact: config.artifactPath },
+    });
+    await waitForLockerJournal(locker, /lock\.complete/);
+    await writeLockerMessage(locker, {
+      type: "lock.release",
+      body: { resource: config.artifactPath },
+    });
+  }
+  process.stdout.write(`artifact=${config.artifactPath}\n`);
+  return { code: result.code, empty: !output };
+}
+
+async function readInboxLines(inboxPath) {
+  if (!existsSync(inboxPath)) return [];
+  const content = await readFile(inboxPath, "utf8");
+  return content
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+async function writeInboxMessages(inboxPath, messages) {
+  await writeFile(
+    inboxPath,
+    messages.map((message) => JSON.stringify(message)).join("\n") + "\n",
+    "utf8",
+  );
+}
+
+async function mutateBranchInbox(runId, branchName, mutate, fallback) {
+  const inboxPath = `${runStateDir(runId)}/branches/${branchName}/inbox.jsonl`;
+  const releaseLock = await acquireBranchInboxLock(runId, branchName);
+  try {
+    const messages = await readInboxLines(inboxPath);
+    const result = mutate(messages);
+    if (result.messages) await writeInboxMessages(inboxPath, result.messages);
+    return result.value;
+  } catch {
+    return fallback;
+  } finally {
+    await releaseLock();
+  }
+}
+
+async function claimQueuedInboxMessages(runId, branchName) {
+  return mutateBranchInbox(
+    runId,
+    branchName,
+    (messages) => {
+      const claimedAt = new Date().toISOString();
+      const queuedMessages = [];
+      const updated = messages.map((msg, index) => {
+        if (msg.status !== "queued" && msg.status) return msg;
+        const claimed = {
+          ...msg,
+          claimed_at: claimedAt,
+          id: msg.id || `legacy-${Date.now()}-${index}`,
+          status: "claimed",
+        };
+        queuedMessages.push(claimed);
+        return claimed;
+      });
+      return {
+        messages: queuedMessages.length > 0 ? updated : undefined,
+        value: queuedMessages,
+      };
+    },
+    [],
+  );
+}
+
+async function updateInboxMessagesStatus(runId, branchName, ids, status) {
+  await mutateBranchInbox(runId, branchName, (messages) => {
+    const idSet = new Set(ids);
+    const updated = messages.map((msg) => {
+      if (!msg.id || !idSet.has(msg.id)) return msg;
+      return { ...msg, [`${status}_at`]: new Date().toISOString(), status };
+    });
+    return { messages: updated, value: undefined };
+  });
+}
+
+async function executeParticipantPrompt(role, basePrompt, config) {
+  const branchName = role.name;
+  const queuedMessages = await claimQueuedInboxMessages(
+    config.runId,
+    branchName,
+  );
+
+  let finalPrompt = basePrompt;
+  const claimedIds = [];
+
+  if (queuedMessages.length > 0) {
+    let inboxSection =
+      "\n\nDIRECT INBOX MESSAGES FOR YOU (queued mailbox work):\n";
+    for (const msg of queuedMessages) {
+      const bodyText =
+        typeof msg.body === "string"
+          ? msg.body
+          : JSON.stringify(msg.body ?? "");
+      inboxSection += `- From: ${msg.from || "unknown"} (Type: ${msg.type || "message"})\n  Body: ${bodyText}\n`;
+      if (msg.id) claimedIds.push(msg.id);
+    }
+    inboxSection +=
+      "\nPlease acknowledge and address these direct messages in your response.\n";
+    finalPrompt += inboxSection;
+  }
+
+  const result = await runPi(finalPrompt, config.model, config.thinking, config.subagentTtlMs);
+
+  if (claimedIds.length > 0) {
+    const finalStatus = result.code === 0 ? "handled" : "failed";
+    await updateInboxMessagesStatus(
+      config.runId,
+      branchName,
+      claimedIds,
+      finalStatus,
+    );
+  }
+
+  return result;
+}
+
+async function participantRound(role, round, config) {
+  const displayName = role.name;
+  const address = `branch:${config.runId}/${role.name}`;
+  const prompt = `You are ${displayName} (${address}), ${role.persona}. Mission: ${config.mission}. Round ${round}/${config.rounds}. First call inspect target=${config.room} view=previews lines=30 and inspect target=${config.room} view=contacts. Then call message once to ${config.room} from ${address} type=chat.message. Body: 2-4 sentences that react to a named participant, propose the next coordination step, and refine the shared artifact. Use contacts for peer names and addresses. End stdout with summary <=160 chars.`;
+  const result = await executeParticipantPrompt(role, prompt, config);
+  if (config.stats) {
+    config.stats.participantAttempts += 1;
+    if (result.code === 0) config.stats.participantSuccess += 1;
+    else config.stats.participantFailures += 1;
+  }
+  process.stdout.write(
+    `[${role.name} round ${round}] code=${result.code}\n${result.stdout}\n`,
+  );
+  if (result.stderr.trim())
+    process.stderr.write(`[${role.name} round ${round}] ${result.stderr}\n`);
+  return result;
+}
+
+async function participantJoin(role, config) {
+  const displayName = role.name;
+  const address = `branch:${config.runId}/${role.name}`;
+  const joinPrompt = `You are ${displayName}, ${role.persona}. Mission: ${config.mission}. Call tool message exactly once with to=${shellQuote(config.room)}, from=${shellQuote(address)}, type='actor.join', summary='${displayName} joined', body JSON {"role":${JSON.stringify(role.persona)},"display":${JSON.stringify(displayName)},"caps":["coordination","synthesis"],"claim":"coordinate on mission"}. Then print one short line.`;
+  await runPi(joinPrompt, config.model, config.thinking, config.subagentTtlMs);
+}
+
+async function participantLeave(role, config) {
+  const displayName = role.name;
+  const address = `branch:${config.runId}/${role.name}`;
+  const leavePrompt = `Call tool message exactly once with to=${shellQuote(config.room)}, from=${shellQuote(address)}, type='actor.leave', summary='${displayName} left', body='finished coordinated work'. Then print goodbye.`;
+  await runPi(leavePrompt, config.model, config.thinking, config.subagentTtlMs);
+}
+
+// 1. consensus / swarm mode: iterative chat in a room
+async function runConsensus(config, locker) {
+  await Promise.all(config.roles.map((role) => participantJoin(role, config)));
+  for (let round = 1; round <= config.rounds; round += 1) {
+    await Promise.all(
+      config.roles.map((role) => participantRound(role, round, config)),
+    );
+    if (round < config.rounds && config.delay > 0)
+      await sleep(config.delay * 1000);
+  }
+  await Promise.all(config.roles.map((role) => participantLeave(role, config)));
+}
+
+// 2. pipeline mode: sequential step-by-step
+async function runPipeline(config, locker) {
+  for (const role of config.roles) {
+    await participantJoin(role, config);
+    for (let round = 1; round <= config.rounds; round += 1) {
+      await participantRound(role, round, config);
+      if (round < config.rounds && config.delay > 0)
+        await sleep(config.delay * 1000);
+    }
+    await participantLeave(role, config);
+  }
+}
+
+// 3. fanout mode: run completely parallel independent processes
+async function runFanout(config, locker) {
+  await Promise.all(
+    config.roles.map(async (role) => {
+      await participantJoin(role, config);
+      for (let round = 1; round <= config.rounds; round += 1) {
+        await participantRound(role, round, config);
+        if (round < config.rounds && config.delay > 0)
+          await sleep(config.delay * 1000);
+      }
+      await participantLeave(role, config);
+    }),
+  );
+}
+
+// 4. pool mode: dynamic task pulling from the locker queue
+async function runPool(config, locker) {
+  if (!locker) {
+    throw new Error("Pool mode requires locker enabled (--locker=true)");
+  }
+  // Enqueue a set of sub-tasks based on the mission splits (for demo/simulation, we enqueue 3 sub-tasks)
+  for (let index = 1; index <= 3; index += 1) {
+    await writeLockerMessage(locker, {
+      type: "lock.enqueue",
+      body: {
+        id: `subtask-${index}`,
+        task: `Execute subtask ${index} under mission: ${config.mission}`,
+        resources: [`resource-${index}`],
+      },
+    });
+  }
+
+  // Workers concurrently poll task queue
+  await Promise.all(
+    config.roles.map(async (role) => {
+      const address = `branch:${config.runId}/${role.name}`;
+      await participantJoin(role, config);
+
+      while (true) {
+        // Dequeue/Claim a task from the locker
+        await writeLockerMessage(locker, {
+          type: "lock.claim",
+          body: { owner: role.name },
+        });
+        await sleep(100);
+
+        // Check locks and queue state from locker snapshot
+        const lockerData = await readJsonFile(`${locker.stateDir}/locks.json`);
+        const assignedTask = Object.values(lockerData).find(
+          (lock) => lock.owner === role.name,
+        );
+
+        if (!assignedTask) {
+          // No task assigned or queue is empty
+          break;
+        }
+
+        const taskId = assignedTask.task;
+        const prompt = `You are ${role.name}, ${role.persona}. You have been assigned task ${taskId}: "${assignedTask.task}". Solve it as part of the overall mission: ${config.mission}. End your response with a clear summary.`;
+        const result = await executeParticipantPrompt(role, prompt, config);
+
+        process.stdout.write(
+          `[${role.name} completed ${taskId}] code=${result.code}\n${result.stdout}\n`,
+        );
+
+        // Report task completion back to locker and release resource locks
+        await writeLockerMessage(locker, {
+          type: "lock.complete",
+          body: { id: taskId, result: result.stdout },
+        });
+        // Release any locks associated with this resource
+        for (const [res, lock] of Object.entries(lockerData)) {
+          if (lock.owner === role.name) {
+            await writeLockerMessage(locker, {
+              type: "lock.release",
+              body: { resource: res },
+            });
+          }
+        }
+      }
+
+      await participantLeave(role, config);
+    }),
+  );
+}
+
+const coordinatorModes = {
+  consensus: runConsensus,
+  fanout: runFanout,
+  pipeline: runPipeline,
+  pool: runPool,
+};
+
+async function readJsonFile(path) {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+const defaultRoles = [
+  {
+    name: "mapper",
+    persona: "systems mapper; tracks shared structure and dependencies",
+  },
+  {
+    name: "memory",
+    persona: "memory keeper; preserves decisions and unresolved questions",
+  },
+  {
+    name: "risk",
+    persona: "risk scout; challenges weak coordination and missing owners",
+  },
+  {
+    name: "flow",
+    persona: "flow designer; turns scattered ideas into process rhythm",
+  },
+  {
+    name: "operator",
+    persona: "operator; converts ideas into concrete next actions",
+  },
+  {
+    name: "narrative",
+    persona: "narrative synthesizer; keeps the artifact coherent",
+  },
+  {
+    name: "interface",
+    persona: "interface designer; makes outputs visible and usable",
+  },
+  {
+    name: "facilitator",
+    persona: "facilitator; asks for consensus and convergence",
+  },
+];
+
+async function runCoordinator(argv = process.argv.slice(2)) {
+currentArgv = argv;
+const config = {
+  runId: arg(
+    "run-id",
+    process.env.run_id || process.env.RUN_ID || "coordinator-run",
+  ),
+  mode: arg("mode", "consensus"), // "consensus" (default/swarm), "pipeline", "fanout", "pool"
+  mission: arg(
+    "mission",
+    "Coordinate a shared artifact and converge on next actions",
+  ),
+  model: arg("model", ""),
+  thinking: arg("thinking", "off"),
+  roles: await loadRoles(arg("roles", ""), arg("roles-path", "")),
+  rounds: numberArg("rounds", 4),
+  delay: numberArg("delay", 10),
+  artifactPath: arg("artifact-path", ""),
+  locker: boolArg("locker", false),
+  lockerLeaseMs: numberArg("locker-lease-ms", 600000),
+  subagentTtlMs: numberArg("subagent-ttl-ms", 0),
+  stats: {
+    participantAttempts: 0,
+    participantSuccess: 0,
+    participantFailures: 0,
+  },
+};
+
+if (!config.model) {
+  console.error("--model is required");
+  process.exit(2);
+}
+config.room = `room:${config.runId}`;
+
+const failures = [];
+const locker = await startLocker(config);
+
+try {
+  const runMode = coordinatorModes[config.mode];
+  if (!runMode) throw new Error(`Unknown coordinator mode: ${config.mode}`);
+  await runMode(config, locker);
+  const synthesis = await synthesize(config, locker);
+  if (config.stats.participantAttempts > 0 && config.stats.participantSuccess === 0) {
+    failures.push(
+      `All participant rounds failed: attempts=${config.stats.participantAttempts}`,
+    );
+  }
+  if (synthesis?.empty && config.stats.participantFailures > 0) {
+    failures.push(
+      `Synthesis output was empty after participant failures: failures=${config.stats.participantFailures}`,
+    );
+  }
+  if (synthesis && synthesis.code !== 0) {
+    failures.push(`Synthesis command failed: code=${synthesis.code}`);
+  }
+} catch (globalError) {
+  failures.push(`Global coordinator error: ${globalError.message}`);
+} finally {
+  await stopLocker(locker);
+}
+
+if (failures.length > 0) {
+  console.error(failures.join("\n"));
+  process.exit(1);
+}
+}
 
 try {
   await runCoordinator(process.argv.slice(2));

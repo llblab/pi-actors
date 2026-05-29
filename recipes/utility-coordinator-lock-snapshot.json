@@ -9,5 +9,5 @@
     "state_dir": "~/.pi/agent/tmp/pi-actors/runs/coordinator-locker",
     "lines": "20"
   },
-  "template": "{repo}/scripts/coordinator-locker.mjs snapshot --state-dir {state_dir} --lines {lines}"
+  "template": "{repo}/scripts/locker.mjs snapshot --state-dir {state_dir} --lines {lines}"
 }

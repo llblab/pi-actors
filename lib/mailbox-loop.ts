@@ -1,14 +1,14 @@
 /**
- * Minimal mailbox loop helpers.
+ * Mailbox worker loop primitives.
  * Zones: mailbox-consuming actors, run/branch inbox claiming, handler status transitions
- * Owns small reusable primitives for recipe authors; scheduling and task policy stay outside.
+ * Owns reusable claim/handle/drain behavior across run and branch inboxes; scheduling and task policy stay outside.
  */
 
 import {
   claimBranchInboxMessage,
   updateBranchInboxMessageStatus,
   type BranchInboxRecord,
-} from "./actor-rooms.ts";
+} from "./rooms.ts";
 import {
   claimRunInboxMessage,
   updateRunInboxMessageStatus,

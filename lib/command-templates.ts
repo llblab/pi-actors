@@ -1,7 +1,7 @@
 /**
- * Command-template standard helpers
- * Zones: shared utils, local process execution, automation standard
- * Owns shell-free command-template splitting, placeholder defaults, composition expansion, executable path expansion, and direct execution
+ * Command-template execution standard.
+ * Zones: shell-free command parsing, placeholder expansion, local process execution, composition semantics
+ * Owns portable command-template parsing, expansion, risk checks, retries, timeouts, and direct execution.
  */
 
 import { spawn } from "node:child_process";

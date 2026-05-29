@@ -13,11 +13,11 @@ import { fileURLToPath } from "node:url";
 
 const conformanceSuites = [
   "tests/protocol-examples.test.ts",
-  "tests/recipe-discovery.test.ts",
+  "tests/recipes-discovery.test.ts",
   "tests/registry.test.ts",
-  "tests/runtime-registry.test.ts",
+  "tests/runtime.test.ts",
   "tests/async-runs.test.ts",
-  "tests/actor-rooms.test.ts",
+  "tests/rooms.test.ts",
   "tests/tools.test.ts",
 ];
 

@@ -1,5 +1,5 @@
 /**
- * Output formatting regression tests
+ * Registered tool execution output regression tests
  * Covers no-output formatting, failure formatting, and truncation notices
  */
 
@@ -12,7 +12,7 @@ import {
   formatOutput,
   formatToolText,
   truncateTailContent,
-} from "../lib/output.ts";
+} from "../lib/execution-output.ts";
 
 test("Tool text formatter prefixes exactly one newline", () => {
   assert.equal(formatToolText("hello"), "\nhello");

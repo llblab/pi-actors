@@ -10,8 +10,8 @@ import { join } from "node:path";
 
 import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
-import type { TemplateRecipeConfig } from "./recipe-references.ts";
-import * as RecipeReferences from "./recipe-references.ts";
+import type { TemplateRecipeConfig } from "./recipes-references.ts";
+import * as RecipesReferences from "./recipes-references.ts";
 import * as Schema from "./schema.ts";
 
 export interface DiscoveredRecipe {
@@ -43,13 +43,13 @@ export interface RecipeIntegrityManifestEntry {
   shadowed: boolean;
 }
 
-export interface RecipeDiscoveryResult {
+export interface RecipesDiscoveryResult {
   active: Map<string, DiscoveredRecipe>;
   entries: DiscoveredRecipe[];
   diagnostics: string[];
 }
 
-export interface RecipeDiscoverySource {
+export interface RecipesDiscoverySource {
   root?: string;
   file?: string;
   defaultTool?: boolean;
@@ -115,7 +115,7 @@ function getRecipeConfigDiagnostics(
   config: TemplateRecipeConfig | undefined,
 ): string[] {
   if (!config) {
-    const reason = RecipeReferences.diagnoseRawRecipeConfigFailure(file);
+    const reason = RecipesReferences.diagnoseRawRecipeConfigFailure(file);
     return [`Invalid recipe: ${file}${reason ? `: ${reason}` : ""}`];
   }
   const commandTemplateConfig =
@@ -134,9 +134,9 @@ function readDiscoveredRecipe(
   defaultTool = false,
   mutableUsage = false,
 ): DiscoveredRecipe {
-  const id = RecipeReferences.getRecipeIdFromPath(file);
+  const id = RecipesReferences.getRecipeIdFromPath(file);
   try {
-    const config = RecipeReferences.readResolvedRecipeConfig(file);
+    const config = RecipesReferences.readResolvedRecipeConfig(file);
     const invalid = !config;
     const disabled = config?.disabled === true;
     return {
@@ -174,7 +174,7 @@ function readDiscoveredRecipe(
   }
 }
 
-function filesForSource(source: RecipeDiscoverySource): Array<{
+function filesForSource(source: RecipesDiscoverySource): Array<{
   root: string;
   file: string;
   defaultTool: boolean;
@@ -201,7 +201,7 @@ function filesForSource(source: RecipeDiscoverySource): Array<{
     : [];
 }
 
-function getRecipeRootDiagnostics(sources: RecipeDiscoverySource[]): string[] {
+function getRecipeRootDiagnostics(sources: RecipesDiscoverySource[]): string[] {
   const diagnostics: string[] = [];
   const roots = new Set(
     sources
@@ -232,8 +232,8 @@ function getRecipeRootDiagnostics(sources: RecipeDiscoverySource[]): string[] {
 }
 
 export function discoverRecipeSources(
-  sources: RecipeDiscoverySource[],
-): RecipeDiscoveryResult {
+  sources: RecipesDiscoverySource[],
+): RecipesDiscoveryResult {
   const entries = sources.flatMap((source, priority) =>
     filesForSource(source).map(({ root, file, defaultTool, mutableUsage }) =>
       readDiscoveredRecipe(root, file, priority, defaultTool, mutableUsage),
@@ -286,7 +286,7 @@ export function discoverRecipeSources(
   return { active, entries, diagnostics };
 }
 
-export function discoverRecipes(roots: string[]): RecipeDiscoveryResult {
+export function discoverRecipes(roots: string[]): RecipesDiscoveryResult {
   return discoverRecipeSources(roots.map((root) => ({ root })));
 }
 
@@ -362,7 +362,7 @@ function cleanupRecommendation(
 }
 
 export function createRecipeIntegrityManifest(
-  result: RecipeDiscoveryResult,
+  result: RecipesDiscoveryResult,
 ): RecipeIntegrityManifestEntry[] {
   return result.entries
     .map((entry) => {
@@ -425,7 +425,7 @@ function diagnosticSuggestedAction(message: string): string {
 }
 
 function diagnosticDetails(
-  result: RecipeDiscoveryResult,
+  result: RecipesDiscoveryResult,
 ): Array<Record<string, unknown>> {
   const details: Array<Record<string, unknown>> = [];
   const seen = new Set<string>();
@@ -529,7 +529,7 @@ function remediationRank(item: Record<string, unknown>): number {
 }
 
 function discoveryRemediations(
-  result: RecipeDiscoveryResult,
+  result: RecipesDiscoveryResult,
 ): Array<Record<string, unknown>> {
   return result.entries
     .map((entry) =>
@@ -560,7 +560,7 @@ function recommendationForEntry(
 }
 
 export function getShadowedLaunchDiagnostic(
-  result: RecipeDiscoveryResult,
+  result: RecipesDiscoveryResult,
   id: string,
 ): Record<string, unknown> | undefined {
   const active = result.active.get(id.trim());
@@ -576,8 +576,8 @@ export function getShadowedLaunchDiagnostic(
 
 export function listDraftRecipes(root: string): Array<Record<string, unknown>> {
   return listRecipeFiles(root).map((path) => {
-    const id = RecipeReferences.getRecipeIdFromPath(path);
-    const config = RecipeReferences.readRawRecipeConfig(path);
+    const id = RecipesReferences.getRecipeIdFromPath(path);
+    const config = RecipesReferences.readRawRecipeConfig(path);
     return {
       id,
       path,
@@ -587,7 +587,7 @@ export function listDraftRecipes(root: string): Array<Record<string, unknown>> {
 }
 
 export function summarizeDiscovery(
-  result: RecipeDiscoveryResult,
+  result: RecipesDiscoveryResult,
 ): Record<string, unknown> {
   const recommendations = result.entries
     .map((entry) =>

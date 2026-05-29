@@ -8,7 +8,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { normalizeActorMessage, parseActorAddress } from "../lib/actor-messages.ts";
+import { normalizeActorMessage, parseActorAddress } from "../lib/messages.ts";
 
 const fixtureRoot = join(process.cwd(), "fixtures", "protocol");
 

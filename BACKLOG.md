@@ -41,6 +41,13 @@ Non-goals:
 
 No open hotfix items.
 
+## Backlog Curation Rules
+
+- Completed work belongs in `CHANGELOG.md`, not in `BACKLOG.md`.
+- File length alone is not a domain-split trigger: ~1000-line cohesive domain files are acceptable when ownership is clear.
+- Consider splitting only when a file crosses roughly 2000 lines, mixes real ownership zones, or hides a clearer domain boundary.
+- Prefer semantic compression before file splitting: fewer public nouns, consistent outcomes, compact diagnostics, and domain-owned constants/helpers.
+
 ## Minor Backlog
 
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
@@ -72,6 +79,20 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 - Acceptance:
   - Stale claims are reproducible and visible in worker status.
   - Tests cover stale-claim counting without adding scheduler/broker policy.
+
+### M-23 Tool Boundary Type Tightening
+
+- Priority: Low.
+- Status: Planned.
+- Goal: Remove avoidable `any` at the Pi/tool boundary where a narrow local type can express the real contract without broad rewiring.
+- Why now: `index.ts` still keeps runtime tool definitions in a `Map<string, any>`; this is small but visible in the composition root.
+- Direction:
+  - Add or reuse a narrow exported tool-definition type from the Pi adapter or tools domain.
+  - Keep SDK details behind `lib/pi.ts`.
+  - Do not introduce a broad type-modeling pass across every schema helper.
+- Acceptance:
+  - `index.ts` no longer uses `Map<string, any>` for actor tool definitions.
+  - TypeScript validation still passes without weakening public tool schemas.
 
 ### M-17 Message Delivery Outcome Contract
 
@@ -107,6 +128,20 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Promotion writes atomically and never auto-promotes.
   - Tests cover valid promotion, invalid candidate, name collision, and packaged-recipe shadowing.
   - Docs explain candidate memory vs active tool memory in one compact section.
+
+### M-24 Registry Path Naming Cleanup
+
+- Priority: Low.
+- Status: Planned.
+- Goal: Reduce legacy-storage naming noise without changing the persistent file path.
+- Why now: `legacy-tool-registry.json` is still a compatibility storage path, but helper names and tests should make clear that the stable path is retained intentionally.
+- Direction:
+  - Prefer neutral helper/test wording such as registry path or retained registry storage path.
+  - Keep the on-disk filename unchanged unless a separate migration is justified.
+  - Do not reintroduce legacy migration code.
+- Acceptance:
+  - Path helpers and tests no longer imply an unfinished migration.
+  - Existing registry storage compatibility remains unchanged.
 
 ### M-19 Recipe Doctor Risk Labels v2
 
@@ -193,4 +228,5 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ```text
 Next milestone: M-14 Session Mismatch Follow-through.
 Then: M-15 Worker Stale-Claim Dogfood → M-17 Message Delivery Outcome Contract → M-18 Candidate Recipe Promotion UX.
+Small cleanup lane: M-23 Tool Boundary Type Tightening → M-24 Registry Path Naming Cleanup.
 ```

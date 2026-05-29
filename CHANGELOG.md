@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.30.1: Backlog Curation Hotfix
+
+- `[Backlog]` Added curation rules clarifying that completed work belongs only in the changelog, that cohesive ~1000-line domain files are acceptable, and that file splitting should follow real ownership boundaries rather than line count alone.
+- `[Backlog]` Added small cleanup candidates for typed tool-boundary tightening and retained registry-path naming clarity without expanding the public actor surface.
+
 ## 0.30.0: Composition Root Compression
 
 - `[Entrypoint]` Added a narrow Pi SDK adapter domain, moved recipe live-reload mechanics into the runtime domain, moved run-state watcher, run UI observation state, and run notification formatting into observability, moved runtime path constants and co-located skill path discovery to the paths domain, grouped core actor tool definitions in the tools domain, and shifted actor-inspector command state/parsing/render selection into the actor-inspector domain so `index.ts` keeps only live Pi wiring.

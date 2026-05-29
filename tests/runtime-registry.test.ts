@@ -41,7 +41,7 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
 
     const notifications: string[] = [];
     const runtime = createAutoToolsRuntime({
-      configPath: join(root, "legacy-tool-registry.json"),
+      configPath: join(root, "tool-registry.json"),
       exec,
       getAllTools: () => [],
       packagedRecipeRoot,
@@ -80,7 +80,7 @@ test("Runtime suppresses routine bash wrapper startup warnings", async () => {
 
     const notifications: string[] = [];
     const runtime = createAutoToolsRuntime({
-      configPath: join(root, "legacy-tool-registry.json"),
+      configPath: join(root, "tool-registry.json"),
       exec,
       getAllTools: () => [],
       packagedRecipeRoot,
@@ -133,7 +133,7 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
     const registered: string[] = [];
     let activeTools = ["read"];
     const runtime = createAutoToolsRuntime({
-      configPath: join(root, "legacy-tool-registry.json"),
+      configPath: join(root, "tool-registry.json"),
       exec,
       getActiveTools: () => activeTools,
       getAllTools: () => [],

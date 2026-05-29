@@ -27,6 +27,12 @@ export type RegisterToolInput = Registry.RegisterToolInput;
 export type RegisterToolRuntimeDeps<TContext> =
   Registry.RegisterToolRuntimeDeps<TContext>;
 
+export interface ActorToolDefinition {
+  name: string;
+  execute?: (...args: never[]) => unknown;
+  [key: string]: unknown;
+}
+
 export interface CoreActorToolDefinitionDeps<TContext extends AsyncRunToolContext> {
   configPath: string;
   getActiveTools: () => string[];
@@ -222,7 +228,7 @@ function compactAsyncRunStatus(value: unknown): string {
     tokens.push(`failures=${failures}`);
   if (result.code !== undefined) tokens.push(`code=${String(result.code)}`);
   if (result.killed === true) tokens.push("killed=true");
-  const draftRecipe = status.draft_recipe ?? status.candidate_recipe;
+  const draftRecipe = status.draft_recipe;
   if (draftRecipe) tokens.push(`draft_recipe=${String(draftRecipe)}`);
   const nextActions = actorRunNextActions(run);
   if (nextActions.length > 0)
@@ -627,8 +633,8 @@ function compactRecipeDoctor(summary: Record<string, unknown>): string {
       item.action,
       Limits.DOCTOR_ACTION_PREVIEW_CHARS,
     );
-    const blocked = item.blocked_candidate
-      ? ` blocked=${compactPreview(item.blocked_candidate, Limits.DOCTOR_ACTION_PREVIEW_CHARS)}`
+    const blocked = item.blocked_fallback
+      ? ` blocked=${compactPreview(item.blocked_fallback, Limits.DOCTOR_ACTION_PREVIEW_CHARS)}`
       : "";
     lines.push(
       `${String(item.severity ?? "info")} kind=${String(item.kind ?? "inspect")} id=${String(item.id ?? "root")}${blocked} action=${action ?? "inspect"}`,
@@ -683,11 +689,7 @@ function compactRecipeRegistry(summary: Record<string, unknown>): string {
   const diagnostics = Array.isArray(summary.diagnostics)
     ? summary.diagnostics.length
     : 0;
-  const drafts = Array.isArray(summary.drafts)
-    ? summary.drafts.length
-    : Array.isArray(summary.candidates)
-      ? summary.candidates.length
-      : 0;
+  const drafts = Array.isArray(summary.drafts) ? summary.drafts.length : 0;
   const recommendations = Array.isArray(summary.recommendations)
     ? summary.recommendations.length
     : 0;
@@ -873,11 +875,11 @@ function shadowedRecipeLaunchDiagnostic(
   return RecipeDiscovery.getShadowedLaunchDiagnostic(discovery, recipe);
 }
 
-function candidateRecipeName(run: string): string {
+function draftRecipeName(run: string): string {
   return `${run.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "spawn"}.json`;
 }
 
-function candidateRecipeDefaults(
+function draftRecipeDefaults(
   values: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   const ignored = new Set([
@@ -893,13 +895,13 @@ function candidateRecipeDefaults(
   return Object.keys(defaults).length > 0 ? defaults : undefined;
 }
 
-function writeSpawnCandidateRecipe(
+function writeSpawnDraftRecipe(
   input: Record<string, unknown>,
   meta: AsyncRuns.AsyncRunMeta,
 ): string | undefined {
   if (
     process.env.NODE_TEST_CONTEXT &&
-    process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST !== "1"
+    process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST !== "1"
   )
     return undefined;
   if (
@@ -908,10 +910,10 @@ function writeSpawnCandidateRecipe(
     input.recipe !== undefined
   )
     return undefined;
-  const root = Paths.getRecipeCandidateRoot();
+  const root = Paths.getRecipeDraftRoot();
   mkdirSync(root, { recursive: true });
-  const path = join(root, candidateRecipeName(String(meta.run)));
-  const defaults = candidateRecipeDefaults(meta.values);
+  const path = join(root, draftRecipeName(String(meta.run)));
+  const defaults = draftRecipeDefaults(meta.values);
   const recipe = {
     async: true,
     description: `Draft recipe captured from spawn run ${String(meta.run)}`,
@@ -930,7 +932,7 @@ function enhanceSpawnRecipeError(error: unknown, recipe: unknown): Error {
   const original = error instanceof Error ? error.message : String(error);
   return Object.assign(
     new Error(
-      `${original} reason=${diagnostic.reason} active_path=${diagnostic.active_path} blocked_candidate=${diagnostic.blocked_candidate} hint=${diagnostic.hint}`,
+      `${original} reason=${diagnostic.reason} active_path=${diagnostic.active_path} blocked_fallback=${diagnostic.blocked_fallback} hint=${diagnostic.hint}`,
     ),
     {
       ...diagnostic,
@@ -1118,13 +1120,11 @@ export function createSpawnToolDefinition<
       } catch (error) {
         throw enhanceSpawnRecipeError(error, recipe);
       }
-      const candidateRecipe = writeSpawnCandidateRecipe(input, meta);
+      const draftRecipe = writeSpawnDraftRecipe(input, meta);
       const nextActions = actorRunNextActions(meta.run);
       const details = {
         ...meta,
-        ...(candidateRecipe
-          ? { candidate_recipe: candidateRecipe, draft_recipe: candidateRecipe }
-          : {}),
+        ...(draftRecipe ? { draft_recipe: draftRecipe } : {}),
         next_actions: nextActions,
       };
       ActorRooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
@@ -1275,12 +1275,7 @@ export function createInspectToolDefinition<TContext = unknown>(
         const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
         const summaryBase = {
           ...RecipeDiscovery.summarizeDiscovery(discovered),
-          drafts: RecipeDiscovery.listCandidateRecipes(
-            join(recipeRoot, "candidates"),
-          ),
-          candidates: RecipeDiscovery.listCandidateRecipes(
-            join(recipeRoot, "candidates"),
-          ),
+          drafts: RecipeDiscovery.listDraftRecipes(join(recipeRoot, "drafts")),
         };
         const summary = {
           ...summaryBase,
@@ -1943,7 +1938,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
 
 export function createCoreActorToolDefinitions<TContext extends AsyncRunToolContext>(
   deps: CoreActorToolDefinitionDeps<TContext>,
-): any[] {
+): ActorToolDefinition[] {
   return [
     createRegisterToolDefinition<TContext>({
       configPath: deps.configPath,

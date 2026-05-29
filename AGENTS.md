@@ -20,7 +20,7 @@ Pi host
   -> index.ts composition root
      -> lib/tools.ts / prompts.ts        public tool + injected prompt surface
      -> lib/runtime.ts / registry.ts     active user recipe tools
-     -> lib/recipe-*.ts                  packaged/user/candidate recipe discovery
+     -> lib/recipe-*.ts                  packaged/user/draft recipe discovery
      -> lib/async-runs.ts                spawn lifecycle and run state
      -> lib/actor-rooms.ts               room, roster, mailbox, communication log
      -> scripts/*.mjs                    thin process entrypoints
@@ -45,8 +45,8 @@ Pi host
 
 ## Repo Surfaces
 
-- `/scripts/*.mjs`: Stable executable shims for detached/helper processes.
-- `/lib/*.ts`: Compiled domain and script-entrypoint logic. Keep `scripts/*.mjs` lightweight and move substantive behavior into named domain modules so `dist/lib` is the JS-only runtime surface. This intentionally grows a standard library: script-born behavior should gain a clear domain name when reuse is plausible. Exception: self-contained application/build scripts with no expected second consumer, such as `music-player.mjs` or `build-dist.mjs`, may remain standalone `.mjs` files.
+- `/scripts/*.mjs`: Stable executables for detached/helper processes. Keep script-only release/build/glue behavior standalone when it has no plausible second consumer.
+- `/lib/*.ts`: Compiled domains and shared script-entrypoint logic. Move substantive script behavior into named domain modules only when reuse, tests, packaged JS-only execution, or clear ownership justifies it. Do not create a lib domain solely to keep a tiny script shim thin.
 - `/recipes/*.json`: Packaged standard recipe library. Keep recipes optional, composable, policy-light, and caller-configurable.
 - `/skills/actors/SKILL.md`: Dense practical reference for operating pi-actors itself.
 - `/skills/swarm/SKILL.md`: Bundled methodology skill for multi-agent standards, strategies, and portable examples.
@@ -62,6 +62,7 @@ Pi host
 - Keep published documentation portable: use `~`, `<repo>`, or relative paths instead of machine-local absolute paths.
 - Preserve runtime output discipline because tool output flows directly into agent context.
 - Optimize every actor-facing surface for signal over volume: prefer compact state-backed hints and fewer concepts over broad explanatory prose or speculative guidance.
+- Until a stable release greater than `1.x.x`, favor context compression over compatibility shims: do not preserve legacy actor-facing names, aliases, fields, env vars, paths, or docs solely for backward compatibility when a clearer current term exists. Remove compatibility layers in the same slice that renames a concept, and record the break in `CHANGELOG.md`.
 - Keep the project lens local-first and cybernetic: agents wrap durable local capabilities as actors, then use semantic tools and messages instead of repeatedly reconstructing shell commands.
 - Design recipes as agent-callable tools: make prompts, scopes, paths, models, and policy knobs public args/defaults when the caller should decide them at invocation time.
 - Decompose oversized bullets into sublists or hierarchy; long flat list items are a context-smell.

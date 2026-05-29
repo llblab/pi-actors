@@ -102,7 +102,7 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     onChange: () =>
       activeRunContext && scheduleRunEventUpdate(activeRunContext),
   });
-  const actorToolDefinitions = new Map<string, any>();
+  const actorToolDefinitions = new Map<string, Tools.ActorToolDefinition>();
   const runtime = Runtime.createAutoToolsRuntime({
     configPath: Paths.EXTENSION_RUNTIME_PATHS.configPath,
     exec: CommandTemplates.execCommandTemplate,

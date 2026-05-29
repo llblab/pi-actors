@@ -24,7 +24,7 @@ export interface ExtensionRuntimePaths {
 }
 
 export function getConfigPath(agentDir = getAgentDir()): string {
-  return join(agentDir, "legacy-tool-registry.json");
+  return join(agentDir, "tool-registry.json");
 }
 
 export function getExtensionTmpDir(
@@ -63,8 +63,8 @@ export function getRecipeRoot(agentDir = getAgentDir()): string {
   return join(agentDir, "recipes");
 }
 
-export function getRecipeCandidateRoot(agentDir = getAgentDir()): string {
-  return join(getRecipeRoot(agentDir), "candidates");
+export function getRecipeDraftRoot(agentDir = getAgentDir()): string {
+  return join(getRecipeRoot(agentDir), "drafts");
 }
 
 export function getPackagedRecipeRoot(): string {

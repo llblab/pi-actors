@@ -10,7 +10,7 @@ The registry source is location-discovered recipes, not a live tool-only JSON fi
 
 - `~/.pi/agent/recipes/*.json` and `*.md` are the highest-priority user recipe root and the operator-managed tool set.
 - Recipes in that root are tools by location.
-- `~/.pi/agent/recipes/candidates/*.json` stores captured inline-spawn draft recipes, not registered tools. The directory name is retained for compatibility; model-facing output calls them drafts. Promote one by moving or copying it up one level into `~/.pi/agent/recipes`. `inspect target=recipes view=summary` reports their count, and verbose output lists their paths/descriptions for explicit replay by file path.
+- `~/.pi/agent/recipes/drafts/*.json` stores captured inline-spawn draft recipes, not registered tools. Promote one by moving or copying it up one level into `~/.pi/agent/recipes`. `inspect target=recipes view=summary` reports their count, and verbose output lists their paths/descriptions for explicit replay by file path.
 - Packaged pi-actors recipes are the lower-priority standard library of declarative actor config components, not automatically registered tools.
 - Ad hoc recipe files outside the user recipe root are components unless explicitly registered/copied into `~/.pi/agent/recipes`.
 - Recipe identity is the filename basename; `~/.pi/agent/recipes/docs_review.json` and `docs_review.md` both have id/tool name `docs_review`.
@@ -31,9 +31,9 @@ inspect target=recipes view=summary verbose=true
 
 `tool:pi-actors` is a reserved runtime-status actor: it reports the loaded package version, package root, source/dist mode, entrypoint path, recipe roots, and git commit when available. Use it after reloads to confirm which extension code is actually live.
 
-The recipe summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled. The doctor view keeps the same registry evidence but promotes an advisory action surface: compact output includes the highest-priority `top` remediation plus ordered actions for invalid/blocking, disabled, risky shell-boundary, and shadowed recipes. Verbose inspection keeps the structured `remediations`, `top_action`, diagnostic details, and blocked lower-priority candidate paths when a broken or disabled higher-priority recipe masks a fallback.
+The recipe summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled. The doctor view keeps the same registry evidence but promotes an advisory action surface: compact output includes the highest-priority `top` remediation plus ordered actions for invalid/blocking, disabled, risky shell-boundary, and shadowed recipes. Verbose inspection keeps the structured `remediations`, `top_action`, diagnostic details, and blocked lower-priority fallback paths when a broken or disabled higher-priority recipe masks a fallback.
 
-Routine shadowing is quiet. If a bare `spawn` recipe launch already fails because an invalid or `disabled: true` user recipe blocks a lower-priority candidate, the launch error adds compact tokens such as `reason=shadowed_invalid` or `reason=shadowed_disabled`, `active_path`, `blocked_candidate`, and `hint=inspect_recipes_doctor`.
+Routine shadowing is quiet. If a bare `spawn` recipe launch already fails because an invalid or `disabled: true` user recipe blocks a lower-priority fallback, the launch error adds compact tokens such as `reason=shadowed_invalid` or `reason=shadowed_disabled`, `active_path`, `blocked_fallback`, and `hint=inspect_recipes_doctor`.
 
 ## Registering Tools
 

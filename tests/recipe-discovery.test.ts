@@ -11,7 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { getPackagedRecipeRoot } from "../lib/paths.ts";
-import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, listCandidateRecipes, summarizeDiscovery } from "../lib/recipe-discovery.ts";
+import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, listDraftRecipes, summarizeDiscovery } from "../lib/recipe-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
@@ -360,7 +360,7 @@ test("Recipe discovery summary exposes prioritized doctor remediations", async (
     assert.deepEqual(summary.top_action, remediations[0]);
     assert.equal(remediations[0].id, "broken");
     assert.equal(
-      String(remediations[0].blocked_candidate).endsWith("broken.json"),
+      String(remediations[0].blocked_fallback).endsWith("broken.json"),
       true,
     );
   } finally {
@@ -398,7 +398,7 @@ test("Recipe discovery exposes quiet launch diagnostics only for broken shadowin
     ]);
     assert.deepEqual(getShadowedLaunchDiagnostic(result, "worker"), {
       active_path: join(high, "worker.json"),
-      blocked_candidate: join(low, "worker.json"),
+      blocked_fallback: join(low, "worker.json"),
       hint: "inspect_recipes_doctor",
       reason: "shadowed_disabled",
     });
@@ -410,7 +410,7 @@ test("Recipe discovery exposes quiet launch diagnostics only for broken shadowin
     ]);
     assert.deepEqual(getShadowedLaunchDiagnostic(result, "worker"), {
       active_path: join(high, "worker.json"),
-      blocked_candidate: join(low, "worker.json"),
+      blocked_fallback: join(low, "worker.json"),
       hint: "inspect_recipes_doctor",
       reason: "shadowed_invalid",
     });
@@ -419,14 +419,14 @@ test("Recipe discovery exposes quiet launch diagnostics only for broken shadowin
   }
 });
 
-test("Recipe discovery lists candidate recipes outside the active tool root", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-candidates-"));
+test("Recipe discovery lists draft recipes outside the active tool root", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-drafts-"));
   try {
     await writeRecipe(root, "draft", {
       description: "Draft capability",
       template: "echo draft",
     });
-    assert.deepEqual(listCandidateRecipes(root), [
+    assert.deepEqual(listDraftRecipes(root), [
       {
         description: "Draft capability",
         id: "draft",

@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.32.0
+  version: 0.33.0
 ---
 
 # Actors (pi-actors)
@@ -213,7 +213,7 @@ Only matching filename ids compete. Higher priority shadows lower priority; with
 Muscle-memory lens: pi-actors has two durable executable-memory layers.
 
 1. `~/.pi/agent/recipes/*.json` and `*.md` are the agent's active capability memory. Every recipe in that directory becomes an easy-to-call tool automatically and survives into later sessions. Descriptions matter here because they become the tool's operator-facing title/context.
-2. `~/.pi/agent/recipes/candidates/*.json` is draft memory captured from successful inline `spawn template=...` runs. The directory name is retained for compatibility; treat these as drafts, not active tools. Drafts do not enter the injected tool surface. They remain reusable by explicit path, e.g. `spawn file="~/.pi/agent/recipes/candidates/<name>.json"`, and can be promoted by moving or copying one level up into `~/.pi/agent/recipes`.
+2. `~/.pi/agent/recipes/drafts/*.json` is draft memory captured from successful inline `spawn template=...` runs. Drafts do not enter the injected tool surface. They remain reusable by explicit path, e.g. `spawn file="~/.pi/agent/recipes/drafts/<name>.json"`, and can be promoted by moving or copying one level up into `~/.pi/agent/recipes`.
 
 Agents grow active memory by calling `register_tool` or by deliberate recipe-file edits. They grow draft memory by trying ad hoc actors successfully. Treat both as executable habits: drafts are the workbench/proving ground; root recipes are promoted muscle memory.
 

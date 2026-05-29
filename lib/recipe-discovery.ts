@@ -461,16 +461,16 @@ function remediationForEntry(
   const riskyDiagnostics = entry.diagnostics.filter(
     (message) => diagnosticSeverity(message) === "warning",
   );
-  const blockedCandidate = entry.shadows[0];
+  const blockedFallback = entry.shadows[0];
   if (entry.invalid) {
     return {
       id: entry.id,
-      kind: blockedCandidate ? "blocking_invalid" : "invalid",
+      kind: blockedFallback ? "blocking_invalid" : "invalid",
       severity: "error",
       path: entry.path,
-      ...(blockedCandidate ? { blocked_candidate: blockedCandidate } : {}),
-      reason: blockedCandidate
-        ? "invalid higher-priority recipe blocks a lower-priority candidate"
+      ...(blockedFallback ? { blocked_fallback: blockedFallback } : {}),
+      reason: blockedFallback
+        ? "invalid higher-priority recipe blocks a lower-priority fallback"
         : "recipe is invalid and cannot be exposed as a tool",
       action:
         "fix recipe syntax/config, or disable/delete/archive it to restore fallback",
@@ -479,12 +479,12 @@ function remediationForEntry(
   if (entry.disabled && entry.active) {
     return {
       id: entry.id,
-      kind: blockedCandidate ? "blocking_disabled" : "disabled",
+      kind: blockedFallback ? "blocking_disabled" : "disabled",
       severity: "warning",
       path: entry.path,
-      ...(blockedCandidate ? { blocked_candidate: blockedCandidate } : {}),
-      reason: blockedCandidate
-        ? "disabled higher-priority recipe intentionally blocks a lower-priority candidate"
+      ...(blockedFallback ? { blocked_fallback: blockedFallback } : {}),
+      reason: blockedFallback
+        ? "disabled higher-priority recipe intentionally blocks a lower-priority fallback"
         : "recipe is disabled and not exposed as a tool",
       action:
         "keep disabled intentionally, re-enable, or delete/archive the file",
@@ -568,13 +568,13 @@ export function getShadowedLaunchDiagnostic(
   if (!active.invalid && !active.disabled) return undefined;
   return {
     active_path: active.path,
-    blocked_candidate: active.shadows[0],
+    blocked_fallback: active.shadows[0],
     hint: "inspect_recipes_doctor",
     reason: active.invalid ? "shadowed_invalid" : "shadowed_disabled",
   };
 }
 
-export function listCandidateRecipes(root: string): Array<Record<string, unknown>> {
+export function listDraftRecipes(root: string): Array<Record<string, unknown>> {
   return listRecipeFiles(root).map((path) => {
     const id = RecipeReferences.getRecipeIdFromPath(path);
     const config = RecipeReferences.readRawRecipeConfig(path);

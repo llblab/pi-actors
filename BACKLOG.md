@@ -67,20 +67,6 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Stale claims are reproducible and visible in worker status.
   - Tests cover stale-claim counting without adding scheduler/broker policy.
 
-### M-23 Tool Boundary Type Tightening
-
-- Priority: Low.
-- Status: Planned.
-- Goal: Remove avoidable `any` at the Pi/tool boundary where a narrow local type can express the real contract without broad rewiring.
-- Why now: `index.ts` still keeps runtime tool definitions in a `Map<string, any>`; this is small but visible in the composition root.
-- Direction:
-  - Add or reuse a narrow exported tool-definition type from the Pi adapter or tools domain.
-  - Keep SDK details behind `lib/pi.ts`.
-  - Do not introduce a broad type-modeling pass across every schema helper.
-- Acceptance:
-  - `index.ts` no longer uses `Map<string, any>` for actor tool definitions.
-  - TypeScript validation still passes without weakening public tool schemas.
-
 ### M-17 Message Delivery Outcome Contract
 
 - Priority: High.
@@ -103,7 +89,7 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 - Priority: High.
 - Status: Planned.
 - Goal: Make successful ad hoc actor patterns easy to promote manually from draft memory into active user recipe memory.
-- Why now: Draft recipes under `~/.pi/agent/recipes/candidates` are replayable but intentionally not active tools; the directory name is retained for compatibility, and the two-stage memory model now needs an explicit operator-gated promotion path.
+- Why now: Draft recipes under `~/.pi/agent/recipes/drafts` are replayable but intentionally not active tools, and the two-stage memory model needs an explicit operator-gated promotion path.
 - Direction:
   - List draft recipes with source run, timestamp, fingerprint, description/template preview, and validation status.
   - Promote a selected draft to `~/.pi/agent/recipes/<name>.json` only through an explicit action or explicit tool argument.
@@ -115,20 +101,6 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Promotion writes atomically and never auto-promotes.
   - Tests cover valid promotion, invalid draft, name collision, and packaged-recipe shadowing.
   - Docs explain draft memory vs active tool memory in one compact section.
-
-### M-24 Registry Path Naming Cleanup
-
-- Priority: Low.
-- Status: Planned.
-- Goal: Reduce legacy-storage naming noise without changing the persistent file path.
-- Why now: `legacy-tool-registry.json` is still a compatibility storage path, but helper names and tests should make clear that the stable path is retained intentionally.
-- Direction:
-  - Prefer neutral helper/test wording such as registry path or retained registry storage path.
-  - Keep the on-disk filename unchanged unless a separate migration is justified.
-  - Do not reintroduce legacy migration code.
-- Acceptance:
-  - Path helpers and tests no longer imply an unfinished migration.
-  - Existing registry storage compatibility remains unchanged.
 
 ### M-19 Recipe Doctor Risk Labels v2
 

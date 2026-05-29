@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+## 0.34.1: Message Delivery Outcome Hotfix
+
+- `[Dogfood]` Added a deterministic actor-worker stale-claim smoke covering an intentionally claimed branch inbox record; the worker now reports stale claim counts in both `worker-status.json` and its awaiting-assignment room event without adding auto-recovery or scheduler policy.
+- `[Messages]` Completed the M-17 message delivery outcome contract by normalizing public message results with `delivered`, `persisted`, `queued`, `forwarded`, `consumer`, and `reason` fields across run, branch, room, coordinator, session, and tool destinations; room multicast now also exposes per-recipient branch delivery outcomes.
+- `[Backlog]` Closed M-15 Worker Stale-Claim Dogfood and M-17 Message Delivery Outcome Contract after adding delivery-result coverage for run, branch, room, coordinator, session, tool, and ownership-denied paths.
+
 ## 0.34.0: Actor Kernel Domain Compression
 
 - `[Domains]` Compressed the actor kernel into explicit domain families: `tools.ts` remains the public tool-family owner while `tools-*` owns message, inspect, spawn, register, local execution, response, access, and mailbox-contract behavior; `async-runs.ts` remains the lifecycle facade while `runs-*` owns artifacts, mailbox, process control, delivery, outbox, index, retention, status, start guards, and identity internals.

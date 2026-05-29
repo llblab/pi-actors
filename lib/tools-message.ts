@@ -144,6 +144,76 @@ function getRoomMulticastRecipients(
   });
 }
 
+function normalizeDeliveryOutcome(
+  address: Messages.ActorAddress,
+  result: Record<string, unknown>,
+): Record<string, unknown> {
+  if (result.reason) return result;
+  if (address.kind === "run") {
+    if (result.stopped === true) {
+      return {
+        ...result,
+        consumer: "run-control",
+        delivered: true,
+        persisted: true,
+        reason: "control_applied",
+      };
+    }
+    return {
+      ...result,
+      consumer: result.control_type ?? result.control ?? "run-control",
+      delivered: result.sent === true && result.queued !== true,
+      persisted: true,
+      reason: result.delivery_error
+        ? "delivery_failed_persisted"
+        : result.queued === true
+          ? "queued_mailbox"
+          : "delivered",
+    };
+  }
+  if (address.kind === "branch") {
+    return {
+      ...result,
+      consumer: "branch-mailbox",
+      delivered: result.sent === true,
+      persisted: true,
+      reason: result.delivery_error
+        ? "branch_persisted_parent_unavailable"
+        : "branch_persisted_forwarded",
+    };
+  }
+  if (address.kind === "room") {
+    return {
+      ...result,
+      consumer: "room-timeline",
+      delivered: true,
+      forwarded: Number(result.multicast_count ?? 0) > 0,
+      persisted: true,
+      reason: "room_persisted",
+    };
+  }
+  if (address.kind === "tool") {
+    return {
+      ...result,
+      consumer: "tool",
+      delivered: true,
+      persisted: false,
+      reason: "tool_invoked",
+    };
+  }
+  if (address.kind === "coordinator" || address.kind === "session") {
+    return {
+      ...result,
+      consumer: "run-outbox",
+      delivered: false,
+      persisted: true,
+      queued: true,
+      reason: `${address.kind}_outbox_persisted`,
+    };
+  }
+  return result;
+}
+
 function actorMessageNextActions(
   message: Messages.ActorMessage,
   result: Record<string, unknown>,
@@ -183,7 +253,15 @@ function compactActorMessageResult(
     `message=${result.sent === true || result.stopped === true ? "sent" : "not_sent"}`,
   ];
   if (result.bytes !== undefined) tokens.push(`bytes=${String(result.bytes)}`);
+  if (result.delivered !== undefined)
+    tokens.push(`delivered=${String(result.delivered)}`);
   if (result.queued === true) tokens.push("queued=true");
+  if (result.persisted !== undefined)
+    tokens.push(`persisted=${String(result.persisted)}`);
+  if (result.forwarded !== undefined)
+    tokens.push(`forwarded=${String(result.forwarded)}`);
+  if (result.consumer) tokens.push(`consumer=${String(result.consumer)}`);
+  if (result.reason) tokens.push(`reason=${String(result.reason)}`);
   if (result.control) tokens.push(`control=${String(result.control)}`);
   if (result.outbox) tokens.push(`messages=${String(result.outbox)}`);
   if (result.message_count !== undefined)
@@ -364,17 +442,24 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           address.room,
           message,
         );
-        await Promise.all(
-          recipients.map((recipient) =>
-            routeBranchEnvelope(stateDir, runId, recipient, message, {
-              source: "room-multicast",
-            }),
+        const multicastResults = await Promise.all(
+          recipients.map(async (recipient) =>
+            normalizeDeliveryOutcome(
+              { kind: "branch", branch: recipient.split("/").at(-1), value: runId },
+              await routeBranchEnvelope(stateDir, runId, recipient, message, {
+                source: "room-multicast",
+              }),
+            ),
           ),
         );
         result = {
           ...roomResult,
           ...(recipients.length > 0
-            ? { multicast: recipients, multicast_count: recipients.length }
+            ? {
+                multicast: recipients,
+                multicast_count: recipients.length,
+                multicast_results: multicastResults,
+              }
             : {}),
         };
       } else if (address.kind === "tool" && address.value) {
@@ -461,6 +546,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           `message currently supports run:<id>, branch:<run>/<branch>, room:<run>, tool:<name>, coordinator, and session:<id> destinations; unsupported destination: ${message.to}`,
         );
       }
+      result = normalizeDeliveryOutcome(address, result);
       const nextActions = actorMessageNextActions(message, result);
       const resultWithNext = nextActions.length
         ? { ...result, next_actions: nextActions }

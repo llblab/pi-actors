@@ -237,6 +237,10 @@ test(
       );
       assert.match(result.content[0].text, new RegExp(`to=branch:${runId}/reviewer-a`));
       assert.match(result.content[0].text, /message=sent/);
+      assert.equal(result.details.result.persisted, true);
+      assert.equal(result.details.result.delivered, true);
+      assert.equal(result.details.result.consumer, "branch-mailbox");
+      assert.equal(result.details.result.reason, "branch_persisted_forwarded");
       await waitForFile(messageFile);
       const envelope = JSON.parse(await readFile(messageFile, "utf8"));
       assert.equal(envelope.from, `branch:${runId}/builder-a`);
@@ -330,6 +334,10 @@ test("Actor message tool reports queued branch delivery when run control endpoin
     assert.match(result.content[0].text, /next=.*inspect_target=branch:/);
     assert.equal(result.details.result.queued, true);
     assert.equal(result.details.result.sent, false);
+    assert.equal(result.details.result.persisted, true);
+    assert.equal(result.details.result.delivered, false);
+    assert.equal(result.details.result.consumer, "branch-mailbox");
+    assert.equal(result.details.result.reason, "branch_persisted_parent_unavailable");
     assert.deepEqual(result.details.result.next_actions, [
       `inspect target=branch:${meta.run}/worker view=mailbox`,
       `inspect target=run:${meta.run} view=status`,
@@ -405,6 +413,10 @@ test("Actor message and inspect tools support room timelines and rosters", async
     );
     assert.match(joinResult.content[0].text, new RegExp(`to=room:${run}`));
     assert.match(joinResult.content[0].text, /message=sent/);
+    assert.equal(joinResult.details.result.persisted, true);
+    assert.equal(joinResult.details.result.delivered, true);
+    assert.equal(joinResult.details.result.consumer, "room-timeline");
+    assert.equal(joinResult.details.result.reason, "room_persisted");
     assert.match(joinResult.content[0].text, /room=main/);
     assert.match(joinResult.content[0].text, /roster=1/);
 
@@ -578,11 +590,26 @@ test(
       undefined,
       undefined,
     );
+    assert.equal(result.details.result.persisted, true);
+    assert.equal(result.details.result.delivered, true);
+    assert.equal(result.details.result.forwarded, true);
+    assert.equal(result.details.result.consumer, "room-timeline");
+    assert.equal(result.details.result.reason, "room_persisted");
     assert.equal(result.details.result.multicast_count, 2);
     assert.deepEqual(result.details.result.multicast, [
       `branch:${meta.run}/builder`,
       `branch:${meta.run}/reviewer`,
     ]);
+    assert.equal(
+      Array.isArray(result.details.result.multicast_results),
+      true,
+    );
+    assert.deepEqual(
+      result.details.result.multicast_results.map(
+        (item: Record<string, unknown>) => item.reason,
+      ),
+      ["branch_persisted_forwarded", "branch_persisted_forwarded"],
+    );
     const inbox = (await readFile(join(meta.state_dir, "inbox.jsonl"), "utf8"))
       .trim()
       .split("\n")
@@ -899,6 +926,10 @@ test("Actor message tool routes tool actors to executable tools", async () => {
   assert.deepEqual(calls[0].params, { text: "hello" });
   assert.equal(calls[0].ctx, ctx);
   assert.equal(result.details.result.tool, "echo");
+  assert.equal(result.details.result.delivered, true);
+  assert.equal(result.details.result.persisted, false);
+  assert.equal(result.details.result.consumer, "tool");
+  assert.equal(result.details.result.reason, "tool_invoked");
 });
 
 test("Actor message tool preserves target tool failure shape", async () => {
@@ -967,6 +998,11 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
     );
     assert.match(result.content[0].text, /to=coordinator/);
     assert.match(result.content[0].text, /messages=outbox\.jsonl/);
+    assert.equal(result.details.result.persisted, true);
+    assert.equal(result.details.result.queued, true);
+    assert.equal(result.details.result.delivered, false);
+    assert.equal(result.details.result.consumer, "run-outbox");
+    assert.equal(result.details.result.reason, "coordinator_outbox_persisted");
     const event = JSON.parse(await readFile(join(stateDir, "outbox.jsonl"), "utf8"));
     assert.equal(event.to, "coordinator");
     assert.equal(event.from, "run:sender");
@@ -1031,6 +1067,11 @@ test("Actor message tool routes session messages through owned run outboxes", as
     );
     assert.match(result.content[0].text, /to=session:session-target/);
     assert.match(result.content[0].text, /messages=outbox\.jsonl/);
+    assert.equal(result.details.result.persisted, true);
+    assert.equal(result.details.result.queued, true);
+    assert.equal(result.details.result.delivered, false);
+    assert.equal(result.details.result.consumer, "run-outbox");
+    assert.equal(result.details.result.reason, "session_outbox_persisted");
     const event = JSON.parse(await readFile(join(stateDir, "outbox.jsonl"), "utf8"));
     assert.equal(event.to, "session:session-target");
     assert.equal(event.from, `run:${runId}`);
@@ -1564,6 +1605,11 @@ test("Inspect tool reads run mailbox inbox entries", async () => {
       undefined,
     );
     assert.match(String(sent.details.result.warnings?.[0]), /not declared in mailbox\.accepts/);
+    assert.equal(sent.details.result.queued, true);
+    assert.equal(sent.details.result.persisted, true);
+    assert.equal(sent.details.result.delivered, false);
+    assert.equal(sent.details.result.consumer, "mailbox");
+    assert.equal(sent.details.result.reason, "queued_mailbox");
     const inspected = await inspect.execute(
       "call-inspect-run-mailbox-inbox",
       { target: `run:${runId}`, view: "mailbox" },

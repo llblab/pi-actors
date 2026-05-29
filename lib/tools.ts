@@ -222,8 +222,8 @@ function compactAsyncRunStatus(value: unknown): string {
     tokens.push(`failures=${failures}`);
   if (result.code !== undefined) tokens.push(`code=${String(result.code)}`);
   if (result.killed === true) tokens.push("killed=true");
-  if (status.candidate_recipe)
-    tokens.push(`candidate_recipe=${String(status.candidate_recipe)}`);
+  const draftRecipe = status.draft_recipe ?? status.candidate_recipe;
+  if (draftRecipe) tokens.push(`draft_recipe=${String(draftRecipe)}`);
   const nextActions = actorRunNextActions(run);
   if (nextActions.length > 0)
     tokens.push(`next=${nextActions.map((action) => action.replaceAll(/\s+/g, "_")).join("|")}`);
@@ -451,6 +451,15 @@ function compactArtifactPath(value: unknown): string {
   return String(record.path ?? "<missing>");
 }
 
+function artifactNextActions(run: unknown, artifacts: Record<string, unknown>): string[] {
+  const id = String(run ?? "").trim();
+  if (!id || Object.keys(artifacts).length === 0) return [];
+  return [
+    `inspect target=run:${id} view=artifacts verbose=true`,
+    `inspect target=run:${id} view=messages`,
+  ];
+}
+
 function compactActorFiles(status: Record<string, unknown>): string {
   const run = String(status.run ?? "<unknown>");
   const artifacts = asRecord(status.artifacts);
@@ -469,7 +478,11 @@ function compactActorFiles(status: Record<string, unknown>): string {
         .map(([key, value]) => `${key}:${compactArtifactPath(value)}`)
         .join(",")}`
     : "";
-  return `\nrun=${run}${artifactText}${files.length ? ` files=${files.join(",")}` : ""}`;
+  const nextActions = artifactNextActions(run, artifacts);
+  const nextText = nextActions.length
+    ? ` next=${nextActions.map((action) => action.replaceAll(/\s+/g, "_")).join("|")}`
+    : "";
+  return `\nrun=${run}${artifactText}${files.length ? ` files=${files.join(",")}` : ""}${nextText}`;
 }
 
 function summarizeOtherSessions(
@@ -621,7 +634,41 @@ function compactRecipeDoctor(summary: Record<string, unknown>): string {
       `${String(item.severity ?? "info")} kind=${String(item.kind ?? "inspect")} id=${String(item.id ?? "root")}${blocked} action=${action ?? "inspect"}`,
     );
   }
+  const nextActions = Array.isArray(summary.next_actions)
+    ? (summary.next_actions as string[])
+    : [];
+  if (nextActions.length > 0) lines[0] = `${lines[0]}${compactNextActions(nextActions)}`;
   return `\n${lines.join("\n")}`;
+}
+
+function recipeRegistryNextActions(summary: Record<string, unknown>, view: string): string[] {
+  const actions: string[] = [];
+  const drafts = Array.isArray(summary.drafts)
+    ? (summary.drafts as Array<Record<string, unknown>>)
+    : [];
+  const invalid = Array.isArray(summary.invalid) ? summary.invalid.length : 0;
+  const diagnostics = Array.isArray(summary.diagnostics)
+    ? summary.diagnostics.length
+    : 0;
+  const topAction = asRecord(summary.top_action);
+  if (view !== "doctor" && (invalid > 0 || diagnostics > 0)) {
+    actions.push("inspect target=recipes view=doctor");
+  }
+  if (view === "doctor" && typeof topAction.action === "string") {
+    actions.push(String(topAction.action));
+  }
+  if (drafts.length > 0) {
+    actions.push("inspect target=recipes view=summary verbose=true");
+    const firstPath = typeof drafts[0]?.path === "string" ? drafts[0].path : undefined;
+    if (firstPath) actions.push(`spawn file=${firstPath}`);
+  }
+  return [...new Set(actions)].slice(0, 4);
+}
+
+function compactNextActions(actions: string[]): string {
+  return actions.length
+    ? ` next=${actions.map((action) => action.replaceAll(/\s+/g, "_")).join("|")}`
+    : "";
 }
 
 function compactRecipeRegistry(summary: Record<string, unknown>): string {
@@ -636,13 +683,43 @@ function compactRecipeRegistry(summary: Record<string, unknown>): string {
   const diagnostics = Array.isArray(summary.diagnostics)
     ? summary.diagnostics.length
     : 0;
-  const candidates = Array.isArray(summary.candidates)
-    ? summary.candidates.length
-    : 0;
+  const drafts = Array.isArray(summary.drafts)
+    ? summary.drafts.length
+    : Array.isArray(summary.candidates)
+      ? summary.candidates.length
+      : 0;
   const recommendations = Array.isArray(summary.recommendations)
     ? summary.recommendations.length
     : 0;
-  return `\nrecipes active=${active} candidates=${candidates} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} recommendations=${recommendations} diagnostics=${diagnostics}`;
+  const nextActions = Array.isArray(summary.next_actions)
+    ? (summary.next_actions as string[])
+    : [];
+  return `\nrecipes active=${active} drafts=${drafts} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} recommendations=${recommendations} diagnostics=${diagnostics}${compactNextActions(nextActions)}`;
+}
+
+function actorMessageNextActions(
+  message: ActorMessages.ActorMessage,
+  result: Record<string, unknown>,
+): string[] {
+  const actions: string[] = [];
+  const address = ActorMessages.parseActorAddress(message.to);
+  if (result.delivery_error || result.sent === false) {
+    if (address.kind === "run" && address.value) {
+      actions.push(`inspect target=run:${address.value} view=status`);
+      actions.push(`inspect target=run:${address.value} view=mailbox`);
+    } else if (address.kind === "branch" && address.value) {
+      actions.push(`inspect target=branch:${address.value}/${address.branch ?? "main"} view=mailbox`);
+      actions.push(`inspect target=run:${address.value} view=status`);
+    }
+  }
+  if (result.queued === true) {
+    if (address.kind === "branch" && address.value) {
+      actions.push(`inspect target=branch:${address.value}/${address.branch ?? "main"} view=mailbox`);
+    } else if (address.kind === "run" && address.value) {
+      actions.push(`inspect target=run:${address.value} view=mailbox`);
+    }
+  }
+  return [...new Set(actions)].slice(0, 3);
 }
 
 function compactActorMessageResult(
@@ -670,6 +747,11 @@ function compactActorMessageResult(
   if (result.delivery_error) {
     tokens.push(`delivery_error=${compactPreview(result.delivery_error, 96)}`);
   }
+  const nextActions = Array.isArray(result.next_actions)
+    ? (result.next_actions as string[])
+    : actorMessageNextActions(message, result);
+  if (nextActions.length > 0)
+    tokens.push(`next=${nextActions.map((action) => action.replaceAll(/\s+/g, "_")).join("|")}`);
   return `\n${tokens.join(" ")}`;
 }
 
@@ -832,7 +914,7 @@ function writeSpawnCandidateRecipe(
   const defaults = candidateRecipeDefaults(meta.values);
   const recipe = {
     async: true,
-    description: `Candidate recipe captured from spawn run ${String(meta.run)}`,
+    description: `Draft recipe captured from spawn run ${String(meta.run)}`,
     ...(meta.artifacts ? { artifacts: meta.artifacts } : {}),
     ...(defaults ? { defaults } : {}),
     template: input.template,
@@ -1040,7 +1122,9 @@ export function createSpawnToolDefinition<
       const nextActions = actorRunNextActions(meta.run);
       const details = {
         ...meta,
-        ...(candidateRecipe ? { candidate_recipe: candidateRecipe } : {}),
+        ...(candidateRecipe
+          ? { candidate_recipe: candidateRecipe, draft_recipe: candidateRecipe }
+          : {}),
         next_actions: nextActions,
       };
       ActorRooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
@@ -1084,6 +1168,33 @@ function requireContextSessionId(ctx: unknown, actor: string): string {
   return sessionId;
 }
 
+function sessionMismatchError(input: {
+  currentSession?: string;
+  expectedSession?: string;
+  run?: string;
+  target?: string;
+}): Error {
+  const ownerSession = input.expectedSession ?? "none";
+  const currentSession = input.currentSession ?? "none";
+  const actor = input.run ? `run:${input.run}` : (input.target ?? "session");
+  const hintTarget = input.expectedSession
+    ? `session:${input.expectedSession}`
+    : "session:all";
+  return Object.assign(
+    new Error(
+      `${actor} reason=session_mismatch owner_session=${ownerSession} current_session=${currentSession} hint=inspect_session:${input.expectedSession ?? "all"}`,
+    ),
+    {
+      current_session: input.currentSession,
+      hint: `inspect target=${hintTarget} view=status`,
+      owner_session: input.expectedSession,
+      reason: "session_mismatch",
+      run: input.run,
+      target: input.target,
+    },
+  );
+}
+
 function assertRunAccessibleToContext(
   runId: string,
   ctx: unknown,
@@ -1091,18 +1202,11 @@ function assertRunAccessibleToContext(
   const status = AsyncRuns.getRunStatus(runId);
   const sessionId = getContextSessionId(ctx);
   if (sessionId && status.ownerId && status.ownerId !== sessionId) {
-    throw Object.assign(
-      new Error(
-        `run:${runId} reason=session_mismatch owner_session=${status.ownerId} current_session=${sessionId} hint=inspect_session:${status.ownerId}`,
-      ),
-      {
-        current_session: sessionId,
-        hint: `inspect target=session:${status.ownerId} view=status`,
-        owner_session: status.ownerId,
-        reason: "session_mismatch",
-        run: runId,
-      },
-    );
+    throw sessionMismatchError({
+      currentSession: sessionId,
+      expectedSession: String(status.ownerId),
+      run: runId,
+    });
   }
   return status;
 }
@@ -1120,7 +1224,7 @@ export function createInspectToolDefinition<TContext = unknown>(
     name: "inspect",
     label: "Inspect",
     description:
-      "Intentionally inspect an actor at decision points, after follow-ups, or during diagnosis instead of polling. Supports run:<id> views: status, tail, messages, artifacts, files, mailbox, communication; room:<run> status/messages/previews/roster/contacts; coordinator/session status; and tool:<name> status/schema.",
+      "Intentionally inspect actors at decision points, after follow-ups, or during diagnosis instead of polling. Core targets are run:<id> and tool:<name>; advanced targets include branch:<run>/<branch>, room:<run>, coordinator, session:<id>, and session:all.",
     parameters: objectSchema(
       {
         lines: stringSchema("Line count for tail/messages views. Default 40."),
@@ -1128,13 +1232,13 @@ export function createInspectToolDefinition<TContext = unknown>(
           "Optional session run filter: all, running, active, terminal, done, failed, cancelled, killed, or exited.",
         ),
         target: stringSchema(
-          "Actor address to inspect, e.g. run:<id>, room:<run>, coordinator, session:<id>, session:all, or tool:<name>.",
+          "Actor address to inspect, e.g. run:<id> or tool:<name>; advanced: branch:<run>/<branch>, room:<run>, coordinator, session:<id>, session:all.",
         ),
         verbose: booleanSchema(
           "Return full JSON instead of compact text where available.",
         ),
         view: stringSchema(
-          "Inspection view: status, tail, messages, artifacts, files, mailbox, communication, roster, or contacts.",
+          "Inspection view. Core run views: status, tail, messages, artifacts, files, mailbox. Advanced views include communication, roster, and contacts.",
         ),
       },
       ["target", "view"],
@@ -1169,11 +1273,18 @@ export function createInspectToolDefinition<TContext = unknown>(
           { root: deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot() },
         ]);
         const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
-        const summary = {
+        const summaryBase = {
           ...RecipeDiscovery.summarizeDiscovery(discovered),
+          drafts: RecipeDiscovery.listCandidateRecipes(
+            join(recipeRoot, "candidates"),
+          ),
           candidates: RecipeDiscovery.listCandidateRecipes(
             join(recipeRoot, "candidates"),
           ),
+        };
+        const summary = {
+          ...summaryBase,
+          next_actions: recipeRegistryNextActions(summaryBase, view),
         };
         return {
           content: [
@@ -1488,7 +1599,14 @@ export function createInspectToolDefinition<TContext = unknown>(
               | undefined,
           );
           const details = artifactManifest
-            ? { ...status, artifact_manifest: artifactManifest }
+            ? {
+                ...status,
+                artifact_manifest: artifactManifest,
+                next_actions: artifactNextActions(
+                  status.run ?? runId,
+                  asRecord(status.artifacts),
+                ),
+              }
             : status;
           return {
             content: [
@@ -1574,7 +1692,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
     name: "message",
     label: "Message",
     description:
-      "Send one typed addressed message to steer an existing actor instead of restarting it. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, room:<run> timelines/rosters, tool:<name> calls, and coordinator/session-bound run messages.",
+      "Send one typed addressed message to steer an existing actor instead of restarting it. Core routes are run:<id> and tool:<name>; advanced routes include branch:<run>/<branch>, room:<run> group timelines, coordinator, and session:<id>.",
     parameters: objectSchema(
       {
         body: unionSchema([
@@ -1596,7 +1714,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         reply_to: stringSchema("Optional message id this message replies to."),
         summary: stringSchema("Optional short human-facing summary."),
         to: stringSchema(
-          "Destination actor address, e.g. run:<id>, branch:<run>/<branch>, room:<run>, coordinator, session:<id>, or tool:<name>.",
+          "Destination actor address, e.g. run:<id> or tool:<name>; advanced: branch:<run>/<branch>, room:<run>, coordinator, session:<id>.",
         ),
         type: stringSchema(
           "Semantic message type, e.g. control.approve or checkpoint.needs_scope.",
@@ -1765,14 +1883,20 @@ export function createActorMessageToolDefinition<TContext = unknown>(
         const senderStatus = assertRunAccessibleToContext(sender.value, ctx);
         if (address.kind === "session") {
           if (!senderStatus.ownerId) {
-            throw new Error(
-              `message to session:${address.value} requires sender run owner ${address.value}; got no owner.`,
-            );
+            throw sessionMismatchError({
+              currentSession: undefined,
+              expectedSession: address.value,
+              run: sender.value,
+              target: `session:${address.value}`,
+            });
           }
           if (senderStatus.ownerId !== address.value) {
-            throw new Error(
-              `message to session:${address.value} requires sender run owner ${address.value}; got ${senderStatus.ownerId}.`,
-            );
+            throw sessionMismatchError({
+              currentSession: String(senderStatus.ownerId),
+              expectedSession: address.value,
+              run: sender.value,
+              target: `session:${address.value}`,
+            });
           }
         }
         result = AsyncRuns.appendRunOutboxEvent(sender.value, {
@@ -1796,18 +1920,22 @@ export function createActorMessageToolDefinition<TContext = unknown>(
           `message currently supports run:<id>, branch:<run>/<branch>, room:<run>, tool:<name>, coordinator, and session:<id> destinations; unsupported destination: ${message.to}`,
         );
       }
+      const nextActions = actorMessageNextActions(message, result);
+      const resultWithNext = nextActions.length
+        ? { ...result, next_actions: nextActions }
+        : result;
       return {
         content: [
           {
             type: "text" as const,
             text: maybeJsonText(
-              { message, result },
+              { message, result: resultWithNext },
               input.verbose === true,
-              compactActorMessageResult(message, result),
+              compactActorMessageResult(message, resultWithNext),
             ),
           },
         ],
-        details: { message, result },
+        details: { message, result: resultWithNext },
       };
     },
   };

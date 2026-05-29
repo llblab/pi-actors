@@ -133,10 +133,19 @@ test("Inspect tool reads recipe registry summaries", async () => {
     );
 
     assert.match(result.content[0].text, /recipes active=4/);
-    assert.match(result.content[0].text, /candidates=1/);
+    assert.match(result.content[0].text, /drafts=1/);
+    assert.doesNotMatch(result.content[0].text, /candidates=1/);
     assert.match(result.content[0].text, /invalid=1/);
+    assert.match(result.content[0].text, /next=.*inspect_target=recipes_view=doctor/);
+    assert.match(result.content[0].text, /next=.*spawn_file=.*recipes\/candidates\/draft\.json/);
     assert.equal((result.details.active as unknown[]).length, 4);
+    assert.equal((result.details.drafts as unknown[]).length, 1);
     assert.equal((result.details.candidates as unknown[]).length, 1);
+    assert.deepEqual(result.details.next_actions, [
+      "inspect target=recipes view=doctor",
+      "inspect target=recipes view=summary verbose=true",
+      join(userRecipes, "candidates", "draft.json"),
+    ].map((action, index) => index === 2 ? `spawn file=${action}` : action));
 
     const doctor = await definition.execute(
       "call-inspect-recipes-doctor",
@@ -149,6 +158,8 @@ test("Inspect tool reads recipe registry summaries", async () => {
     assert.match(doctor.content[0].text, /actions=\d+/);
     assert.match(doctor.content[0].text, /top severity=/);
     assert.match(doctor.content[0].text, /action=/);
+    assert.match(doctor.content[0].text, /next=/);
+    assert.equal(Array.isArray(doctor.details.next_actions), true);
     assert.equal(
       (doctor.details.diagnostic_details as Array<Record<string, unknown>>).some(
         (detail) => detail.severity === "error" && detail.id === "broken",
@@ -320,8 +331,13 @@ test("Actor message tool reports queued branch delivery when run control endpoin
     assert.match(result.content[0].text, /message=not_sent/);
     assert.match(result.content[0].text, /queued=true/);
     assert.match(result.content[0].text, /delivery_error=/);
+    assert.match(result.content[0].text, /next=.*inspect_target=branch:/);
     assert.equal(result.details.result.queued, true);
     assert.equal(result.details.result.sent, false);
+    assert.deepEqual(result.details.result.next_actions, [
+      `inspect target=branch:${meta.run}/worker view=mailbox`,
+      `inspect target=run:${meta.run} view=status`,
+    ]);
   } finally {
     cancelRun(meta.state_dir);
     await rm(meta.state_dir, { recursive: true, force: true });
@@ -1057,7 +1073,7 @@ test("Actor message tool rejects session messages from differently owned runs", 
         undefined,
         undefined,
       ),
-      /requires sender run owner other-session; got session-owner/,
+      /reason=session_mismatch owner_session=other-session current_session=session-owner hint=inspect_session:other-session/,
     );
     await waitForFile(join(stateDir, "result.json"));
   } finally {
@@ -1191,7 +1207,7 @@ test("Actor message tool rejects session messages from unowned runs", async () =
         undefined,
         undefined,
       ),
-      /requires sender run owner target-session; got no owner/,
+      /reason=session_mismatch owner_session=target-session current_session=none hint=inspect_session:target-session/,
     );
     await waitForFile(join(stateDir, "result.json"));
   } finally {
@@ -1262,15 +1278,17 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
     assert.match(result.content[0].text, /run=spawned-/);
     assert.match(result.content[0].text, /next=inspect_target=run:spawned-/);
     assert.match(result.content[0].text, /message_to=run:spawned-/);
-    assert.match(result.content[0].text, /candidate_recipe=.*recipes\/candidates\/spawned-/);
+    assert.match(result.content[0].text, /draft_recipe=.*recipes\/candidates\/spawned-/);
+    assert.doesNotMatch(result.content[0].text, /candidate_recipe=/);
     assert.deepEqual(result.details.next_actions, [
       `inspect target=run:${runId} view=status`,
       `inspect target=run:${runId} view=messages`,
       `message to=run:${runId} type=<actor.action>`,
     ]);
     const candidateRecipe = JSON.parse(
-      await readFile(String(result.details.candidate_recipe), "utf8"),
+      await readFile(String(result.details.draft_recipe), "utf8"),
     );
+    assert.equal(result.details.candidate_recipe, result.details.draft_recipe);
     assert.equal(candidateRecipe.async, true);
     assert.equal(candidateRecipe.template, `${process.execPath} -e "console.log('spawned')"`);
     assert.deepEqual(candidateRecipe.artifacts, result.details.artifacts);
@@ -1293,6 +1311,10 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
     assert.equal(typeof artifacts.details.artifact_manifest.report.sha256, "string");
     assert.equal(artifacts.details.artifact_manifest.missing.exists, false);
     assert.equal(artifacts.details.artifact_manifest.missing.required, true);
+    assert.deepEqual(artifacts.details.next_actions, [
+      `inspect target=run:${runId} view=artifacts verbose=true`,
+      `inspect target=run:${runId} view=messages`,
+    ]);
     const roster = JSON.parse(
       await readFile(join(stateDir, "rooms", "main", "roster.json"), "utf8"),
     );

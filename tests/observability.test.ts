@@ -265,7 +265,7 @@ test("Run observability detects terminal transitions", () => {
   ]);
   assert.equal(
     formatRunTransitionMessage(transitions[0]),
-    "Run review completed successfully.\nArtifacts:\n- Base: `artifacts`\n- Files: `report.md`\nUse inspect target=run:review view=status or view=tail if the result needs inspection.",
+    "Run review completed successfully.\nArtifacts:\n- Base: `artifacts`\n- Files: `report.md`\nNext actions: inspect target=run:review view=status | inspect target=run:review view=artifacts | inspect target=run:review view=messages",
   );
   assert.equal(previous.get("review"), "done");
 });
@@ -313,10 +313,13 @@ test("Run observability suggests persistence for successful transient spawns", a
     await writeRun(root, "scratch", "done", [], 0, undefined, undefined, "spawn");
     const [transition] = detectRunTransitions(previous, summarizeRuns(root));
     assert.equal(shouldSuggestRecipePersistence(transition), true);
+    const message = formatRunTransitionMessage(transition);
     assert.match(
-      formatRunTransitionMessage(transition),
+      message,
       /ask the operator whether to save it as a durable recipe\/tool/,
     );
+    assert.match(message, /Next actions: inspect target=run:scratch view=status/);
+    assert.match(message, /inspect target=run:scratch view=messages/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -332,10 +335,12 @@ test("Run observability suggests persistence for successful external recipes", (
     tool: "pipeline_demo",
   };
   assert.equal(shouldSuggestRecipePersistence(transition), true);
+  const message = formatRunTransitionMessage(transition);
   assert.match(
-    formatRunTransitionMessage(transition),
+    message,
     /copy or register it as a durable tool recipe under ~\/\.pi\/agent\/recipes/,
   );
+  assert.match(message, /Next actions: inspect target=run:demo view=status/);
 });
 
 test("Run observability does not suggest persistence for saved user recipes", () => {
@@ -417,7 +422,7 @@ test("Run observability reports cancelled terminal transitions clearly", () => {
   ]);
   assert.equal(
     formatRunTransitionMessage(transitions[0]),
-    "Run music was cancelled. Use inspect target=run:music view=status or view=tail if analysis is needed.",
+    "Run music was cancelled.\nNext actions: inspect target=run:music view=status | inspect target=run:music view=tail | inspect target=run:music view=messages",
   );
   assert.equal(getRunTransitionNotificationType(transitions[0]), "info");
   assert.equal(shouldSendRunTransitionFollowUp(transitions[0]), false);

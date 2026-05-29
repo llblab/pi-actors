@@ -61,6 +61,7 @@ Pi host
 - Prefer explicit operator action over silent user-config rewrites.
 - Keep published documentation portable: use `~`, `<repo>`, or relative paths instead of machine-local absolute paths.
 - Preserve runtime output discipline because tool output flows directly into agent context.
+- Optimize every actor-facing surface for signal over volume: prefer compact state-backed hints and fewer concepts over broad explanatory prose or speculative guidance.
 - Keep the project lens local-first and cybernetic: agents wrap durable local capabilities as actors, then use semantic tools and messages instead of repeatedly reconstructing shell commands.
 - Design recipes as agent-callable tools: make prompts, scopes, paths, models, and policy knobs public args/defaults when the caller should decide them at invocation time.
 - Decompose oversized bullets into sublists or hierarchy; long flat list items are a context-smell.
@@ -80,6 +81,7 @@ Pi host
 ## Public Actor Model
 
 - Preserve the public verbs: `spawn`, `message`, `inspect`.
+- Keep the model-facing concept ladder minimal: core is run actors, typed messages, intentional inspection, artifacts, and recipe/tool memory; group messaging, roster, branches, sessions, and diagnostics are advanced surfaces.
 - Prefer one typed actor-message envelope for upward, downward, lateral, parent/branch, and branch/parent messages.
 - Prefer actor addresses and inspect views over exposing FIFO, outbox, or status mechanics as public concepts.
 - Keep route and semantic type separate: delivery behavior comes from `to`, while `type` describes intent.
@@ -116,6 +118,7 @@ Pi host
 ## State, IO, And Safety
 
 - Tool stdout and temp state must stay bounded and local.
+- Feedback hints must be evidence-backed, bounded, and action-shaped; prefer `next_actions` pointing to existing verbs over prose, and avoid hints when no concrete next step is justified.
 - Keep tail truncation, full-output temp files, failure formatting, and centralized limits intact.
 - Published docs must not include machine-local absolute paths.
 - Any view scanning run directories must apply coordinator/session ownership filters before exposing summaries or previews.

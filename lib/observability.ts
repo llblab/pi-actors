@@ -1021,19 +1021,31 @@ function formatRecipePersistenceSuggestion(transition: RunTransition): string {
   return `\nAgent note: this actor was spawned directly and completed successfully. If this pattern fits this machine's recurring workflow, ask the operator whether to save it as a durable recipe/tool under ~/.pi/agent/recipes with register_tool. Do not auto-save without confirmation.`;
 }
 
+function formatTransitionNextActions(transition: RunTransition): string {
+  const actions = [
+    `inspect target=run:${transition.run} view=status`,
+    transition.to === "done" && Object.keys(transition.artifacts ?? {}).length > 0
+      ? `inspect target=run:${transition.run} view=artifacts`
+      : `inspect target=run:${transition.run} view=tail`,
+    `inspect target=run:${transition.run} view=messages`,
+  ].filter(Boolean);
+  return `\nNext actions: ${actions.join(" | ")}`;
+}
+
 export function formatRunTransitionMessage(transition: RunTransition): string {
   const artifacts = formatNamedArtifacts(transition.artifacts);
   const runFiles = formatRunFileList(getRunArtifacts(transition));
   const persistenceSuggestion = formatRecipePersistenceSuggestion(transition);
+  const nextActions = formatTransitionNextActions(transition);
   if (transition.to === "done")
-    return `Run ${transition.run} completed successfully.${artifacts}${runFiles}\nUse inspect target=run:${transition.run} view=status or view=tail if the result needs inspection.${persistenceSuggestion}`;
+    return `Run ${transition.run} completed successfully.${artifacts}${runFiles}${nextActions}${persistenceSuggestion}`;
   if (transition.to === "failed")
-    return `Run ${transition.run} failed.${artifacts}${runFiles}\nUse inspect target=run:${transition.run} view=status or view=tail for details.`;
+    return `Run ${transition.run} failed.${artifacts}${runFiles}${nextActions}`;
   if (transition.to === "cancelled")
-    return `Run ${transition.run} was cancelled. Use inspect target=run:${transition.run} view=status or view=tail if analysis is needed.`;
+    return `Run ${transition.run} was cancelled.${nextActions}`;
   if (transition.to === "killed")
-    return `Run ${transition.run} was force-killed. Use inspect target=run:${transition.run} view=status or view=tail if analysis is needed.`;
+    return `Run ${transition.run} was force-killed.${nextActions}`;
   if (transition.to === "exited")
-    return `Run ${transition.run} exited before writing a result. Use inspect target=run:${transition.run} view=status or view=tail if analysis is needed.`;
-  return `Run ${transition.run} finished with status ${transition.to}. Use inspect target=run:${transition.run} view=status or view=tail if analysis is needed.`;
+    return `Run ${transition.run} exited before writing a result.${nextActions}`;
+  return `Run ${transition.run} finished with status ${transition.to}.${nextActions}`;
 }

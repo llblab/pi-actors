@@ -207,7 +207,8 @@ Rules:
 - User recipes override same-name lower-priority recipes;
 - Same-id JSON recipes shadow Markdown recipes in the same priority layer;
 - Packaged recipes are standard-library components, not automatically installed operator policy;
-- `register_tool` creates, updates, lists, or deletes user recipe files through the normal agent interface.
+- Draft recipes in `~/.pi/agent/recipes/drafts/` are replayable memory, not active tools;
+- `register_tool` creates, updates, lists, deletes, or explicitly promotes draft recipe files through the normal agent interface.
 
 Example foreground tool:
 
@@ -225,6 +226,14 @@ register_tool name=docs_review \
   template="docs_review" \
   args="scope:path,model:string"
 ```
+
+Promote a successful captured draft only after an explicit operator decision:
+
+```text
+register_tool name=docs_review draft=~/.pi/agent/recipes/drafts/spawned-run.json
+```
+
+Promotion validates the draft, writes `~/.pi/agent/recipes/<name>.json`, preserves the draft, and rejects collisions unless `update=true` is supplied.
 
 Inspect the discovered registry:
 

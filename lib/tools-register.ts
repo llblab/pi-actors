@@ -36,6 +36,7 @@ export function createRegisterToolDefinition<TContext>(
         description: stringSchema(
           Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.description,
         ),
+        draft: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.draft),
         name: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name),
         state_dir: stringSchema(
           Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.state_dir,

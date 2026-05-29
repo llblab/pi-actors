@@ -38,6 +38,8 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",
   description:
     "Describe what the tool does for the LLM. Required unless deleting; omitted updates keep the old description.",
+  draft:
+    "Promote a draft recipe path from ~/.pi/agent/recipes/drafts into an active named recipe under ~/.pi/agent/recipes. Requires name; use update=true to overwrite.",
   async:
     "Set true for a co-located async template recipe. Omit for ordinary command templates or file-backed recipe references.",
   state_dir:

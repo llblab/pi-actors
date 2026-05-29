@@ -53,24 +53,6 @@ No open hotfix items.
 
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
 
-### M-18 Draft Recipe Promotion UX
-
-- Priority: High.
-- Status: Planned.
-- Goal: Make successful ad hoc actor patterns easy to promote manually from draft memory into active user recipe memory.
-- Why now: Draft recipes under `~/.pi/agent/recipes/drafts` are replayable but intentionally not active tools, and the two-stage memory model needs an explicit operator-gated promotion path.
-- Direction:
-  - List draft recipes with source run, timestamp, fingerprint, description/template preview, and validation status.
-  - Promote a selected draft to `~/.pi/agent/recipes/<name>.json` only through an explicit action or explicit tool argument.
-  - Run recipe validation/doctor before writing and expose collision/shadowing diagnostics.
-  - Preserve draft files unless deletion is explicitly requested.
-  - Prefer extending existing registry/tool surfaces over adding a new public noun.
-- Acceptance:
-  - Draft recipes remain non-tools until promotion.
-  - Promotion writes atomically and never auto-promotes.
-  - Tests cover valid promotion, invalid draft, name collision, and packaged-recipe shadowing.
-  - Docs explain draft memory vs active tool memory in one compact section.
-
 ### M-19 Recipe Doctor Risk Labels v2
 
 - Priority: Medium.
@@ -154,7 +136,7 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ## Suggested Milestone Order
 
 ```text
-Next milestone: M-18 Draft Recipe Promotion UX.
-Then: M-19 Recipe Doctor Risk Labels v2.
+Next milestone: M-19 Recipe Doctor Risk Labels v2.
+Then: M-20 Runtime Recipe Triage.
 Small cleanup lane: continue opportunistic domain polish only when a real ownership boundary appears.
 ```

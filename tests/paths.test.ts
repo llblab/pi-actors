@@ -13,7 +13,7 @@ import {
   getConfigPath,
   getExtensionTmpDir,
   getPackagedRecipeRoot,
-  getRecipeCandidateRoot,
+  getRecipeDraftRoot,
   getRecipeRoot,
   getRunStateRoot,
 } from "../lib/paths.ts";
@@ -29,8 +29,8 @@ test("Agent dir honors PI_CODING_AGENT_DIR", () => {
   );
 });
 
-test("Config path points to the legacy tool registry under the agent dir", () => {
-  assert.equal(getConfigPath("/agent"), "/agent/legacy-tool-registry.json");
+test("Config path points to the tool registry under the agent dir", () => {
+  assert.equal(getConfigPath("/agent"), "/agent/tool-registry.json");
 });
 
 test("Extension tmp dir lives under the pi agent tmp tree", () => {
@@ -45,8 +45,8 @@ test("Recipe root lives under the agent dir", () => {
   assert.equal(getRecipeRoot("/agent"), "/agent/recipes");
 });
 
-test("Recipe candidate root lives below the recipe root", () => {
-  assert.equal(getRecipeCandidateRoot("/agent"), "/agent/recipes/candidates");
+test("Recipe draft root lives below the recipe root", () => {
+  assert.equal(getRecipeDraftRoot("/agent"), "/agent/recipes/drafts");
 });
 
 test("Packaged recipe root resolves to the repository recipes directory", () => {

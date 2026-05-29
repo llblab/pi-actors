@@ -97,7 +97,6 @@ test("build output includes compiled modules for TypeScript-backed script shims"
     "actor-worker",
     "async-runner",
     "coordinator",
-    "conformance",
     "locker",
     "recipe-utils",
     "validate-recipe",

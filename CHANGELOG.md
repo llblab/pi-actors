@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.33.0: Signal-First Compatibility Pruning
+
+- `[Breaking]` Removed pre-1.x compatibility shims for draft recipe terminology: draft captures now live under `~/.pi/agent/recipes/drafts`, recipe inspection no longer emits `candidates`, spawn details no longer emit `candidate_recipe`, and shadow diagnostics use `blocked_fallback` instead of `blocked_candidate`.
+- `[Context]` Documented the pre-stable policy that context compression wins over compatibility aliases until after a stable release greater than `1.x.x`; rename slices should remove legacy actor-facing names, fields, env vars, paths, and docs instead of carrying shims.
+- `[Breaking]` Renamed retained registry storage from `legacy-tool-registry.json` to `tool-registry.json`, removing the stale compatibility noun from runtime path helpers and tests.
+- `[Types]` Added a narrow actor tool-definition type and removed the remaining `Map<string, any>` from the composition root without expanding SDK type exposure.
+- `[Scripts]` Collapsed the conformance runner back into a standalone script and removed its one-off lib domain, documenting that script-only glue should stay self-contained unless reuse or packaged runtime constraints justify a domain.
+
 ## 0.32.0: Actor Surface Minimization
 
 - `[Context]` Added durable signal/noise guidance for actor-facing surfaces: keep the model-facing concept ladder minimal, make feedback hints state-backed and action-shaped, and avoid speculative advisory prose.

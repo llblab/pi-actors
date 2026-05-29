@@ -1,33 +1,49 @@
 #!/usr/bin/env node
 
 /**
- * Internal conformance runner shim.
+ * Internal conformance runner.
  *
- * Runtime logic lives in lib/conformance.ts and is compiled to
- * dist/lib/conformance.js for installed JS-only packages.
+ * This script is intentionally standalone package/release glue rather than a
+ * lib domain: it only selects regression suites and formats their summary.
  */
 
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const conformanceSuites = [
+  "tests/protocol-examples.test.ts",
+  "tests/recipe-discovery.test.ts",
+  "tests/registry.test.ts",
+  "tests/runtime-registry.test.ts",
+  "tests/async-runs.test.ts",
+  "tests/actor-rooms.test.ts",
+  "tests/tools.test.ts",
+];
 
 function packageRoot() {
   return dirname(dirname(fileURLToPath(import.meta.url)));
 }
 
-function mainModulePath() {
-  const root = packageRoot();
-  const compiled = join(root, "dist", "lib", "conformance.js");
-  return existsSync(compiled) ? compiled : join(root, "lib", "conformance.ts");
-}
+const result = spawnSync(
+  process.execPath,
+  ["--experimental-strip-types", "--test", ...conformanceSuites],
+  { cwd: packageRoot(), encoding: "utf8", stdio: "pipe" },
+);
 
-const { runConformance } = await import(pathToFileURL(mainModulePath()).href);
-const report = runConformance(packageRoot());
+const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+const summary = output
+  .split("\n")
+  .filter((line) =>
+    /^ℹ (tests|pass|fail|cancelled|skipped|todo|duration_ms) /.test(line),
+  )
+  .join("\n");
 
 console.log("pi-actors conformance");
-console.log(`suites ${report.suites}`);
-if (report.summary) console.log(report.summary);
-if (report.code !== 0) {
-  console.error(report.output.trimEnd());
-  process.exit(report.code);
+console.log(`suites ${conformanceSuites.length}`);
+
+if (summary) console.log(summary);
+if ((result.status ?? 1) !== 0) {
+  console.error(output.trimEnd());
+  process.exit(result.status ?? 1);
 }

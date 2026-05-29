@@ -33,7 +33,7 @@ async function waitForFile(path: string): Promise<void> {
 
 function createRegistryDeps() {
   return {
-    configPath: "/tmp/legacy-tool-registry.json",
+    configPath: "/tmp/tool-registry.json",
     getActiveTools: () => [],
     getExternalToolConflict: () => undefined,
     getTools: () => new Map<string, RegisteredTool>(),
@@ -98,7 +98,7 @@ test("Inspect tool reads recipe registry summaries", async () => {
     const packagedRecipes = join(root, "packaged");
     await import("node:fs/promises").then((fs) =>
       Promise.all([
-        fs.mkdir(join(userRecipes, "candidates"), { recursive: true }),
+        fs.mkdir(join(userRecipes, "drafts"), { recursive: true }),
         fs.mkdir(packagedRecipes, { recursive: true }),
       ]),
     );
@@ -116,7 +116,7 @@ test("Inspect tool reads recipe registry summaries", async () => {
       JSON.stringify({ description: "Stdlib", template: "echo stdlib" }),
     );
     await writeFile(
-      join(userRecipes, "candidates", "draft.json"),
+      join(userRecipes, "drafts", "draft.json"),
       JSON.stringify({ description: "Draft", template: "echo draft" }),
     );
 
@@ -134,17 +134,15 @@ test("Inspect tool reads recipe registry summaries", async () => {
 
     assert.match(result.content[0].text, /recipes active=4/);
     assert.match(result.content[0].text, /drafts=1/);
-    assert.doesNotMatch(result.content[0].text, /candidates=1/);
     assert.match(result.content[0].text, /invalid=1/);
     assert.match(result.content[0].text, /next=.*inspect_target=recipes_view=doctor/);
-    assert.match(result.content[0].text, /next=.*spawn_file=.*recipes\/candidates\/draft\.json/);
+    assert.match(result.content[0].text, /next=.*spawn_file=.*recipes\/drafts\/draft\.json/);
     assert.equal((result.details.active as unknown[]).length, 4);
     assert.equal((result.details.drafts as unknown[]).length, 1);
-    assert.equal((result.details.candidates as unknown[]).length, 1);
     assert.deepEqual(result.details.next_actions, [
       "inspect target=recipes view=doctor",
       "inspect target=recipes view=summary verbose=true",
-      join(userRecipes, "candidates", "draft.json"),
+      join(userRecipes, "drafts", "draft.json"),
     ].map((action, index) => index === 2 ? `spawn file=${action}` : action));
 
     const doctor = await definition.execute(
@@ -1237,7 +1235,7 @@ test("Spawn tool enriches shadowed recipe launch failures", async () => {
         assert(error instanceof Error);
         assert.match(error.message, /reason=shadowed_invalid/);
         assert.match(error.message, /active_path=.*actor-worker\.json/);
-        assert.match(error.message, /blocked_candidate=.*recipes\/actor-worker\.json/);
+        assert.match(error.message, /blocked_fallback=.*recipes\/actor-worker\.json/);
         assert.match(error.message, /hint=inspect_recipes_doctor/);
         assert.equal((error as unknown as Record<string, unknown>).reason, "shadowed_invalid");
         return true;
@@ -1254,11 +1252,11 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
   const definition = createSpawnToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-"));
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  const previousCandidateTestFlag = process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST;
+  const previousDraftTestFlag = process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST;
   let stateDir = "";
   try {
     process.env.PI_CODING_AGENT_DIR = root;
-    process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST = "1";
+    process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST = "1";
     const runId = `spawned-${process.pid}-${Date.now()}`;
     const result = await definition.execute(
       "call-spawn",
@@ -1278,21 +1276,19 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
     assert.match(result.content[0].text, /run=spawned-/);
     assert.match(result.content[0].text, /next=inspect_target=run:spawned-/);
     assert.match(result.content[0].text, /message_to=run:spawned-/);
-    assert.match(result.content[0].text, /draft_recipe=.*recipes\/candidates\/spawned-/);
-    assert.doesNotMatch(result.content[0].text, /candidate_recipe=/);
+    assert.match(result.content[0].text, /draft_recipe=.*recipes\/drafts\/spawned-/);
     assert.deepEqual(result.details.next_actions, [
       `inspect target=run:${runId} view=status`,
       `inspect target=run:${runId} view=messages`,
       `message to=run:${runId} type=<actor.action>`,
     ]);
-    const candidateRecipe = JSON.parse(
+    const draftRecipe = JSON.parse(
       await readFile(String(result.details.draft_recipe), "utf8"),
     );
-    assert.equal(result.details.candidate_recipe, result.details.draft_recipe);
-    assert.equal(candidateRecipe.async, true);
-    assert.equal(candidateRecipe.template, `${process.execPath} -e "console.log('spawned')"`);
-    assert.deepEqual(candidateRecipe.artifacts, result.details.artifacts);
-    assert.equal(candidateRecipe.defaults, undefined);
+    assert.equal(draftRecipe.async, true);
+    assert.equal(draftRecipe.template, `${process.execPath} -e "console.log('spawned')"`);
+    assert.deepEqual(draftRecipe.artifacts, result.details.artifacts);
+    assert.equal(draftRecipe.defaults, undefined);
     assert.deepEqual(result.details.artifacts, {
       missing: { path: `${stateDir}/missing.md`, required: true },
       report: { path: `${stateDir}/report.md`, kind: "markdown", media_type: "text/markdown", required: true },
@@ -1332,8 +1328,8 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    if (previousCandidateTestFlag === undefined) delete process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST;
-    else process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST = previousCandidateTestFlag;
+    if (previousDraftTestFlag === undefined) delete process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST;
+    else process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST = previousDraftTestFlag;
     if (stateDir) await rm(stateDir, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }

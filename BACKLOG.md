@@ -47,24 +47,11 @@ No open hotfix items.
 - File length alone is not a domain-split trigger: ~1000-line cohesive domain files are acceptable when ownership is clear.
 - Consider splitting only when a file crosses roughly 2000 lines, mixes real ownership zones, or hides a clearer domain boundary.
 - Prefer semantic compression before file splitting: fewer public nouns, consistent outcomes, compact diagnostics, and domain-owned constants/helpers.
+- Preserve signal/noise balance: feedback should be state-backed, compact, and action-shaped; do not add advisory prose just because a surface exists.
 
 ## Minor Backlog
 
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
-
-### M-14 Session Mismatch Follow-through
-
-- Priority: Medium.
-- Status: Planned.
-- Goal: Extend 0.27 structured session diagnostics consistently across room, branch, run, coordinator, and session workflows.
-- Why now: M-12 established the shape; dogfood should now make every ownership denial equally actionable without relaxing ownership gates.
-- Direction:
-  - Audit all session mismatch errors for consistent `reason`, owner/current session fields, and inspect-session hints.
-  - Keep read/write ownership policy unchanged.
-  - Update docs with session mismatch examples and recovery inspection paths.
-- Acceptance:
-  - Room, branch, run, coordinator, and session denials share the same compact/verbose shape.
-  - Tests cover representative inspect and message paths.
 
 ### M-15 Worker Stale-Claim Dogfood
 
@@ -111,23 +98,23 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Room messages distinguish timeline append success from forwarded branch-targeted copies.
   - Tests cover at least run, branch, room, coordinator, and ownership-denied outcomes.
 
-### M-18 Candidate Recipe Promotion UX
+### M-18 Draft Recipe Promotion UX
 
 - Priority: High.
 - Status: Planned.
-- Goal: Make successful ad hoc actor patterns easy to promote manually from candidate memory into active user recipe memory.
-- Why now: Candidate recipes under `~/.pi/agent/recipes/candidates` are replayable but intentionally not active tools; the two-stage memory model now needs an explicit operator-gated promotion path.
+- Goal: Make successful ad hoc actor patterns easy to promote manually from draft memory into active user recipe memory.
+- Why now: Draft recipes under `~/.pi/agent/recipes/candidates` are replayable but intentionally not active tools; the directory name is retained for compatibility, and the two-stage memory model now needs an explicit operator-gated promotion path.
 - Direction:
-  - List candidate recipes with source run, timestamp, fingerprint, description/template preview, and validation status.
-  - Promote a selected candidate to `~/.pi/agent/recipes/<name>.json` only through an explicit action or explicit tool argument.
+  - List draft recipes with source run, timestamp, fingerprint, description/template preview, and validation status.
+  - Promote a selected draft to `~/.pi/agent/recipes/<name>.json` only through an explicit action or explicit tool argument.
   - Run recipe validation/doctor before writing and expose collision/shadowing diagnostics.
-  - Preserve candidate files unless deletion is explicitly requested.
+  - Preserve draft files unless deletion is explicitly requested.
   - Prefer extending existing registry/tool surfaces over adding a new public noun.
 - Acceptance:
-  - Candidate recipes remain non-tools until promotion.
+  - Draft recipes remain non-tools until promotion.
   - Promotion writes atomically and never auto-promotes.
-  - Tests cover valid promotion, invalid candidate, name collision, and packaged-recipe shadowing.
-  - Docs explain candidate memory vs active tool memory in one compact section.
+  - Tests cover valid promotion, invalid draft, name collision, and packaged-recipe shadowing.
+  - Docs explain draft memory vs active tool memory in one compact section.
 
 ### M-24 Registry Path Naming Cleanup
 
@@ -166,10 +153,10 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
 - Priority: Medium.
 - Status: Planned.
 - Goal: Add one compact operator triage view that answers what needs attention right now without performing repairs.
-- Why now: Runtime status, recipe doctor, candidates, stale claims, session mismatches, failed runs, and other-session counts are currently separate bounded surfaces.
+- Why now: Runtime status, recipe doctor, drafts, stale claims, session mismatches, failed runs, and other-session counts are currently separate bounded surfaces.
 - Direction:
   - Add `inspect target=tool:pi-actors view=triage` or an equivalent existing inspect surface.
-  - Summarize runtime version/mode, active runs, other-session runs, invalid or blocking recipes, high-risk recipes, candidate recipes, stale worker claims, recent failed runs, attention messages, and suggested next inspect actions.
+  - Summarize runtime version/mode, active runs, other-session runs, invalid or blocking recipes, high-risk recipes, draft recipes, stale worker claims, recent failed runs, attention messages, and suggested next inspect actions.
   - Keep every warning tied to a next inspect/action hint.
   - Do not auto-repair, auto-prune, relax ownership, or hide detailed source-of-truth views.
 - Acceptance:
@@ -226,7 +213,7 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ## Suggested Milestone Order
 
 ```text
-Next milestone: M-14 Session Mismatch Follow-through.
-Then: M-15 Worker Stale-Claim Dogfood → M-17 Message Delivery Outcome Contract → M-18 Candidate Recipe Promotion UX.
+Next milestone: M-15 Worker Stale-Claim Dogfood.
+Then: M-17 Message Delivery Outcome Contract → M-18 Draft Recipe Promotion UX.
 Small cleanup lane: M-23 Tool Boundary Type Tightening → M-24 Registry Path Naming Cleanup.
 ```

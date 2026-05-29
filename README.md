@@ -66,16 +66,21 @@ The npm package is dist-first for JavaScript-only runtimes: default Pi metadata 
 
 ## Address Surface
 
-Actors and coordination endpoints are addressed with compact route strings:
+Core actor addresses stay small:
 
 ```text
-run:<id>               one detached actor run
-branch:<run>/<branch>  branch-local actor endpoint
-room:<run>             shared run-local task room
-coordinator            launching coordinator attention path
+run:<id>      one detached actor run
+tool:<name>   executable registered tool actor
+```
+
+Advanced coordination/debug addresses are available when a recipe or workflow needs them:
+
+```text
+branch:<run>/<branch>  branch-local worker endpoint
+room:<run>             group-message timeline plus roster for one run
+coordinator            compatibility alias for the current session coordination path
 session:               current session actor surface
-session:all            cross-session inventory surface
-tool:<name>            executable registered tool
+session:all            cross-session inventory surface for diagnostics
 ```
 
 Actor messages use one envelope shape:
@@ -140,9 +145,9 @@ message to=run:docs_review type=control.continue body=continue
 message to=run:docs_review type=control.kill body=stop
 ```
 
-## Actor Rooms
+## Group Messaging And Roster
 
-Every spawned run can have a shared room at `room:<run>`. A room is not a broker and not a chat app. It is a run-local coordination surface: append-only timeline, compact roster, member discovery, and previews.
+Every spawned run can have advanced group messaging at `room:<run>`. Treat this as a run-local timeline plus roster for coordinated actors, not as a core chat/broker concept.
 
 Actors can join, post, leave, and discover peers:
 
@@ -155,7 +160,7 @@ message \
   body='{"role":"reviewer","caps":["security-review"],"claim":"Review auth boundary risks"}'
 ```
 
-Inspect the room intentionally:
+Inspect group messages and roster intentionally:
 
 ```text
 inspect target=room:review view=status
@@ -165,7 +170,7 @@ inspect target=room:review view=contacts
 inspect target=room:review view=messages
 ```
 
-Room posts require a same-run sender, so unrelated runs do not pollute the roster. Direct messages and room messages use the same envelope; only the address changes. Direct `branch:<run>/<branch>` messages are private: they are forwarded through the parent run mailbox and recorded in the recipient branch inbox for worker protocols that consume queued branch work. For selected-recipient multicast, send to `room:<run>` with `metadata.recipients` set to same-run `branch:<run>/<branch>` addresses; this keeps one room transcript entry while forwarding branch-targeted copies.
+Group posts require a same-run sender, so unrelated runs do not pollute the roster. Direct messages and group messages use the same envelope; only the address changes. Direct `branch:<run>/<branch>` messages are private: they are forwarded through the parent run mailbox and recorded in the recipient branch inbox for worker protocols that consume queued branch work. For selected-recipient multicast, send to `room:<run>` with `metadata.recipients` set to same-run `branch:<run>/<branch>` addresses; this keeps one visible transcript entry while forwarding branch-targeted copies.
 
 ## Actor Inspector
 

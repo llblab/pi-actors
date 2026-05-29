@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.32.0: Actor Surface Minimization
+
+- `[Context]` Added durable signal/noise guidance for actor-facing surfaces: keep the model-facing concept ladder minimal, make feedback hints state-backed and action-shaped, and avoid speculative advisory prose.
+- `[Backlog]` Added critical concept-surface compression and actor feedback-loop strengthening tracks to guide the next minimization-focused development cycle.
+- `[Concepts]` Compressed model-facing language by presenting captured inline-spawn recipes as drafts, treating `room:<run>` as advanced group messaging plus roster, demoting coordinator/session/debug views from golden-path guidance, and keeping compatibility names/paths as storage details rather than core onboarding nouns.
+- `[Feedback]` Added bounded next-action hints to recipe registry/doctor inspection, artifact inspection, delivery-fallback message results, and terminal run follow-ups so state-backed surfaces point back to `inspect`, `message`, `spawn`, or draft promotion without polling or auto-repair.
+- `[Sessions]` Normalized session-directed message ownership failures onto the same structured `reason=session_mismatch`, owner/current session, and inspect-session hint shape used by run, branch, room, and coordinator ownership denials.
+
 ## 0.31.0: Agent Adoption Ergonomics
 
 - `[Adoption]` Added a compact actor-mode trigger rule to the injected prompt, actors skill, README, and async-run docs so models prefer `spawn → message → inspect` for long-lived, stateful, follow-up, artifact, service, fanout, and resumable work while keeping short foreground checks as ordinary tools.

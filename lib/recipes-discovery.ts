@@ -574,14 +574,43 @@ export function getShadowedLaunchDiagnostic(
   };
 }
 
+function templatePreview(value: unknown): string | undefined {
+  const rendered =
+    typeof value === "string"
+      ? value
+      : value === undefined
+        ? undefined
+        : JSON.stringify(value);
+  return rendered && rendered.length > 120
+    ? `${rendered.slice(0, 117)}...`
+    : rendered;
+}
+
 export function listDraftRecipes(root: string): Array<Record<string, unknown>> {
   return listRecipeFiles(root).map((path) => {
     const id = RecipesReferences.getRecipeIdFromPath(path);
+    const bytes = readFileSync(path);
+    const stat = statSync(path);
     const config = RecipesReferences.readRawRecipeConfig(path);
+    const resolved = RecipesReferences.readResolvedRecipeConfig(path);
+    const diagnostics = getRecipeConfigDiagnostics(path, resolved);
+    const sourceRun = String(config?.description ?? "").match(
+      /spawn run ([^\s]+)/,
+    )?.[1];
+    const preview = templatePreview(config?.template);
     return {
       id,
       path,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      size: bytes.byteLength,
+      created_at: stat.birthtime.toISOString(),
+      modified_at: stat.mtime.toISOString(),
+      valid: Boolean(resolved),
+      diagnostics,
       ...(config?.description ? { description: config.description } : {}),
+      ...(sourceRun ? { source_run: sourceRun } : {}),
+      ...(config?.async !== undefined ? { async: config.async } : {}),
+      ...(preview ? { template_preview: preview } : {}),
     };
   });
 }

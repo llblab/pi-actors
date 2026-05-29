@@ -50,9 +50,177 @@ test("Register tool definition exposes a JSON schema with no required fields", (
   assert.equal(properties.name.type, "string");
   assert.equal(properties.async.type, "boolean");
   assert.equal(properties.state_dir.type, "string");
+  assert.equal(properties.draft.type, "string");
   assert.equal(properties.values.type, "object");
   assert.equal(properties.update.type, "boolean");
   assert.equal(Array.isArray(properties.template.anyOf), true);
+});
+
+test("Register tool promotes draft recipes into active tools", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-promote-draft-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const draftRoot = join(recipeRoot, "drafts");
+    await mkdir(draftRoot, { recursive: true });
+    const draftPath = join(draftRoot, "captured.json");
+    await writeFile(
+      draftPath,
+      JSON.stringify({ description: "Captured", template: "echo promoted" }),
+    );
+    const tools = new Map<string, RegisteredTool>();
+    const active: string[] = [];
+    const definition = createRegisterToolDefinition({
+      ...createRegistryDeps(),
+      configPath: join(root, "tool-registry.json"),
+      getActiveTools: () => active,
+      getTools: () => tools,
+      recipeRoot,
+      registerRuntimeTool: (tool) => tools.set(tool.name, tool),
+      setActiveTools: (names) => active.splice(0, active.length, ...names),
+    });
+
+    const result = await definition.execute(
+      "call-promote-draft",
+      { name: "promoted_tool", draft: draftPath },
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    assert.match(result.content[0].text, /Registered tool "promoted_tool" from draft recipe/);
+    assert.equal(result.details.promoted, true);
+    assert.equal(result.details.config, join(recipeRoot, "promoted_tool.json"));
+    assert.equal(result.details.draft, draftPath);
+    assert.equal(tools.has("promoted_tool"), true);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(recipeRoot, "promoted_tool.json"), "utf8")),
+      { description: "Captured", template: "echo promoted" },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Register tool rejects draft promotion name collisions unless update is explicit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-promote-collision-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const draftRoot = join(recipeRoot, "drafts");
+    await mkdir(draftRoot, { recursive: true });
+    const draftPath = join(draftRoot, "captured.json");
+    await writeFile(
+      draftPath,
+      JSON.stringify({ description: "Captured", template: "echo promoted" }),
+    );
+    await writeFile(
+      join(recipeRoot, "existing_tool.json"),
+      JSON.stringify({ description: "Existing", template: "echo existing" }),
+    );
+    const definition = createRegisterToolDefinition({
+      ...createRegistryDeps(),
+      configPath: join(root, "tool-registry.json"),
+      recipeRoot,
+    });
+
+    await assert.rejects(
+      definition.execute(
+        "call-promote-collision",
+        { name: "existing_tool", draft: draftPath },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /already registered.*update=true/,
+    );
+    assert.deepEqual(
+      JSON.parse(await readFile(join(recipeRoot, "existing_tool.json"), "utf8")),
+      { description: "Existing", template: "echo existing" },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Promoted draft recipes surface packaged shadowing in recipe inspection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-promote-shadow-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const packagedRoot = join(root, "packaged");
+    const draftRoot = join(recipeRoot, "drafts");
+    await mkdir(draftRoot, { recursive: true });
+    await mkdir(packagedRoot, { recursive: true });
+    await writeFile(
+      join(packagedRoot, "stdlib_tool.json"),
+      JSON.stringify({ description: "Stdlib", template: "echo stdlib" }),
+    );
+    const draftPath = join(draftRoot, "captured.json");
+    await writeFile(
+      draftPath,
+      JSON.stringify({ description: "Captured", template: "echo promoted" }),
+    );
+    const register = createRegisterToolDefinition({
+      ...createRegistryDeps(),
+      configPath: join(root, "tool-registry.json"),
+      recipeRoot,
+    });
+    await register.execute(
+      "call-promote-shadow",
+      { name: "stdlib_tool", draft: draftPath },
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    const inspect = createInspectToolDefinition({
+      packagedRecipeRoot: packagedRoot,
+      recipeRoot,
+    });
+    const result = await inspect.execute(
+      "call-inspect-promote-shadow",
+      { target: "recipes", view: "summary", verbose: true },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.equal(
+      (result.details.shadowed as Array<Record<string, unknown>>).some(
+        (entry) => entry.id === "stdlib_tool" && String(entry.path).includes("packaged"),
+      ),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Register tool rejects invalid draft promotion before writing active recipes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-promote-invalid-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const draftRoot = join(recipeRoot, "drafts");
+    await mkdir(draftRoot, { recursive: true });
+    const draftPath = join(draftRoot, "broken.json");
+    await writeFile(draftPath, JSON.stringify({ description: "Broken" }));
+    const definition = createRegisterToolDefinition({
+      ...createRegistryDeps(),
+      configPath: join(root, "tool-registry.json"),
+      recipeRoot,
+    });
+
+    await assert.rejects(
+      definition.execute(
+        "call-promote-invalid-draft",
+        { name: "broken_tool", draft: draftPath },
+        undefined,
+        undefined,
+        undefined,
+      ),
+      /Draft recipe is invalid/,
+    );
+    await assert.rejects(readFile(join(recipeRoot, "broken_tool.json"), "utf8"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Spawn tool definition exposes actor creation schema", () => {
@@ -137,6 +305,10 @@ test("Inspect tool reads recipe registry summaries", async () => {
     assert.match(result.content[0].text, /next=.*spawn_file=.*recipes\/drafts\/draft\.json/);
     assert.equal((result.details.active as unknown[]).length, 4);
     assert.equal((result.details.drafts as unknown[]).length, 1);
+    const draft = (result.details.drafts as Array<Record<string, unknown>>)[0];
+    assert.equal(draft.valid, true);
+    assert.equal(typeof draft.sha256, "string");
+    assert.equal(draft.template_preview, "echo draft");
     assert.deepEqual(result.details.next_actions, [
       "inspect target=recipes view=doctor",
       "inspect target=recipes view=summary verbose=true",

@@ -5,7 +5,7 @@
  */
 
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import * as CommandTemplates from "./command-templates.ts";
 import * as Config from "./config.ts";
@@ -22,6 +22,7 @@ export interface RegisterToolInput {
   async?: boolean;
   state_dir?: string;
   template?: CommandTemplates.CommandTemplateValue | null;
+  draft?: string;
   args?: string;
   update?: boolean;
   values?: Record<string, unknown>;
@@ -32,6 +33,8 @@ export interface RegisterToolResultDetails {
   async?: boolean;
   config?: string;
   defaults?: Record<string, string>;
+  draft?: string;
+  promoted?: boolean;
   recipeName?: string;
   state_dir?: string;
   template?: CommandTemplates.CommandTemplateValue;
@@ -93,6 +96,93 @@ function getToolRecipePath<TContext>(
   name: string,
 ): string {
   return join(getRecipeRoot(deps), `${name}.json`);
+}
+
+function assertDraftPath<TContext>(
+  deps: RegisterToolRuntimeDeps<TContext>,
+  draft: string,
+): string {
+  const draftRoot = resolve(getRecipeRoot(deps), "drafts");
+  const path = resolve(draft);
+  const relation = relative(draftRoot, path);
+  if (
+    relation === "" ||
+    relation.startsWith("..") ||
+    resolve(relation) === relation
+  ) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        `Draft must be under ${draftRoot}. Use inspect target=recipes view=summary to list drafts.`,
+      ),
+    );
+  }
+  if (!existsSync(path)) {
+    throw new Error(ExecutionOutput.formatToolText(`Draft not found: ${path}`));
+  }
+  return path;
+}
+
+function promoteDraftRecipe<TContext>(
+  name: string,
+  input: RegisterToolInput,
+  ctx: TContext,
+  deps: RegisterToolRuntimeDeps<TContext>,
+): RegisterToolResult {
+  const draftPath = assertDraftPath(deps, String(input.draft ?? ""));
+  const targetPath = getToolRecipePath(deps, name);
+  const tools = deps.getTools();
+  const existing = tools.get(name);
+  const conflict = deps.getExternalToolConflict(name);
+  if (conflict) throw new Error(ExecutionOutput.formatToolText(conflict));
+  if ((existing || existsSync(targetPath)) && !input.update) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        `Tool "${name}" already registered. Use update=true to overwrite.`,
+      ),
+    );
+  }
+  const config = RecipesReferences.readResolvedRecipeConfig(draftPath);
+  if (!config) {
+    const reason = RecipesReferences.diagnoseRawRecipeConfigFailure(draftPath);
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        `Draft recipe is invalid${reason ? `: ${reason}` : "."}`,
+      ),
+    );
+  }
+  const promoted = buildConfig(
+    name,
+    {
+      ...input,
+      description: input.description ?? config.description,
+      template: draftPath,
+    },
+    existing,
+  );
+  const raw = RecipesReferences.readRawRecipeConfig(draftPath)!;
+  mkdirSync(dirname(targetPath), { recursive: true });
+  writeJsonAtomic(targetPath, raw);
+  promoted.template = targetPath;
+  promoted.sourcePath = targetPath;
+  tools.set(name, promoted);
+  deps.registerRuntimeTool(promoted);
+  deps.notify(ctx, `Promoted draft recipe: ${name}`, "info");
+  return {
+    content: [
+      textContent(
+        ExecutionOutput.formatToolText(
+          `${existing ? "Updated" : "Registered"} tool "${name}" from draft recipe.`,
+        ),
+      ),
+    ],
+    details: {
+      args: promoted.args,
+      config: targetPath,
+      draft: draftPath,
+      promoted: true,
+      tool: name,
+    } as RegisterToolResultDetails & Record<string, unknown>,
+  };
 }
 
 function persistToolRecipe<TContext>(
@@ -283,6 +373,9 @@ export async function executeRegisterTool<TContext>(
     throw new Error(
       ExecutionOutput.formatToolText(`Reserved tool name: ${name}`),
     );
+  }
+  if (typeof input.draft === "string" && input.draft.trim()) {
+    return promoteDraftRecipe(name, input, ctx, deps);
   }
   const templateProvided = Object.hasOwn(input, "template");
   const template = getInputTemplate(input.template);

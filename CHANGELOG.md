@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `[Recipes]` Completed M-18 Draft Recipe Promotion UX: `inspect target=recipes view=summary verbose=true` now exposes draft timestamps, fingerprints, validation state, source run when known, and template previews, while `register_tool name=<tool> draft=<path>` promotes a validated draft into active recipe memory without deleting the draft and rejects collisions unless `update=true` is explicit.
+
 ## 0.34.1: Message Delivery Outcome Hotfix
 
 - `[Dogfood]` Added a deterministic actor-worker stale-claim smoke covering an intentionally claimed branch inbox record; the worker now reports stale claim counts in both `worker-status.json` and its awaiting-assignment room event without adding auto-recovery or scheduler policy.

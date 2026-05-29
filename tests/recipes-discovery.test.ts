@@ -426,13 +426,14 @@ test("Recipe discovery lists draft recipes outside the active tool root", async 
       description: "Draft capability",
       template: "echo draft",
     });
-    assert.deepEqual(listDraftRecipes(root), [
-      {
-        description: "Draft capability",
-        id: "draft",
-        path: join(root, "draft.json"),
-      },
-    ]);
+    const [draft] = listDraftRecipes(root);
+    assert.equal(draft.description, "Draft capability");
+    assert.equal(draft.id, "draft");
+    assert.equal(draft.path, join(root, "draft.json"));
+    assert.equal(draft.valid, true);
+    assert.equal(draft.template_preview, "echo draft");
+    assert.equal(typeof draft.sha256, "string");
+    assert.equal(typeof draft.created_at, "string");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -10,7 +10,7 @@ The registry source is location-discovered recipes, not a live tool-only JSON fi
 
 - `~/.pi/agent/recipes/*.json` and `*.md` are the highest-priority user recipe root and the operator-managed tool set.
 - Recipes in that root are tools by location.
-- `~/.pi/agent/recipes/drafts/*.json` stores captured inline-spawn draft recipes, not registered tools. Promote one by moving or copying it up one level into `~/.pi/agent/recipes`. `inspect target=recipes view=summary` reports their count, and verbose output lists their paths/descriptions for explicit replay by file path.
+- `~/.pi/agent/recipes/drafts/*.json` stores captured inline-spawn draft recipes, not registered tools. Promote one with `register_tool name=<tool_name> draft=<draft_path>` or by manually moving/copying it up one level into `~/.pi/agent/recipes`. `inspect target=recipes view=summary` reports their count, and verbose output lists their paths, timestamps, fingerprints, validation state, source run when known, descriptions, and template previews for explicit replay or promotion.
 - Packaged pi-actors recipes are the lower-priority standard library of declarative actor config components, not automatically registered tools.
 - Ad hoc recipe files outside the user recipe root are components unless explicitly registered/copied into `~/.pi/agent/recipes`.
 - Recipe identity is the filename basename; `~/.pi/agent/recipes/docs_review.json` and `docs_review.md` both have id/tool name `docs_review`.
@@ -51,7 +51,7 @@ register_tool name=call_subagent \
   template="pi -p --model {model} --no-tools {prompt}" args="prompt:string,model:string"
 ```
 
-Use `update=true` to overwrite an existing tool. Omit `template` and co-located recipe fields during update to keep the previous execution binding.
+Use `update=true` to overwrite an existing tool. Omit `template` and co-located recipe fields during update to keep the previous execution binding. To promote a captured draft, pass `name` plus `draft` with a path under `~/.pi/agent/recipes/drafts`; promotion validates the draft before writing `~/.pi/agent/recipes/<name>.json`, preserves the draft file, rejects name collisions unless `update=true`, and leaves shadowing evidence visible through `inspect target=recipes view=summary` or `view=doctor`.
 
 `template` may also be a standard command-template sequence for multi-step tools. Timeout is disabled by default; add explicit positive `timeout` values when individual steps should fail closed:
 

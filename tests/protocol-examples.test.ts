@@ -4,16 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { normalizeActorMessage, parseActorAddress } from "../lib/actor-messages.ts";
+import { normalizeActorMessage, parseActorAddress } from "../lib/messages.ts";
 import {
   appendRoomMessage,
   readRoomMessages,
   readRoomRoster,
-} from "../lib/actor-rooms.ts";
-import {
-  createInspectToolDefinition,
-  createSpawnToolDefinition,
-} from "../lib/tools.ts";
+} from "../lib/rooms.ts";
+import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
+import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
 
 const MESSAGE_ENVELOPE_EXAMPLE = {
   to: "run:review",

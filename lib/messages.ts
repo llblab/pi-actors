@@ -1,7 +1,7 @@
 /**
- * Actor message protocol helpers.
- * Zones: 0.10 draft communication protocol, addressed messages, mailbox metadata
- * Owns pure validation/normalization for the semantic message envelope; transport routing stays in adapters.
+ * Actor message protocol.
+ * Zones: addressed envelopes, address parsing, route normalization
+ * Owns pure validation/normalization for semantic actor messages; transport routing stays in adapters.
  */
 
 export type ActorAddressKind =

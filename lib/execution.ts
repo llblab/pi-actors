@@ -6,7 +6,11 @@
 
 import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
-import { formatFailureOutput, formatOutput, formatToolText } from "./output.ts";
+import {
+  formatFailureOutput,
+  formatOutput,
+  formatToolText,
+} from "./execution-output.ts";
 import * as Schema from "./schema.ts";
 
 export interface ToolExecOptions {

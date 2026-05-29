@@ -10,7 +10,7 @@ import type { CommandTemplateValue } from "./command-templates.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import { writeJsonAtomic } from "./file-state.ts";
 import { normalizeToolName } from "./identity.ts";
-import * as RecipeReferences from "./recipe-references.ts";
+import * as RecipesReferences from "./recipes-references.ts";
 import * as Schema from "./schema.ts";
 
 export interface RegisteredTool {
@@ -19,7 +19,7 @@ export interface RegisteredTool {
   args: string[];
   defaults: Record<string, string>;
   argTypes?: Record<string, Schema.ToolArgType>;
-  recipe?: RecipeReferences.TemplateRecipeConfig;
+  recipe?: RecipesReferences.TemplateRecipeConfig;
   template?: CommandTemplateValue;
   storedArgs?: string[];
   storedDefaults?: Record<string, string>;
@@ -141,7 +141,7 @@ export function normalizeStoredTool(
   }
   const recipeName =
     keyedRecipeName ?? (typeof record.async === "boolean" ? name : undefined);
-  const recipe: RecipeReferences.TemplateRecipeConfig | undefined = recipeName
+  const recipe: RecipesReferences.TemplateRecipeConfig | undefined = recipeName
     ? {
         name: recipeName,
         ...(typeof record.async === "boolean" ? { async: record.async } : {}),
@@ -156,14 +156,14 @@ export function normalizeStoredTool(
           : {}),
       }
     : undefined;
-  const isRecipe = RecipeReferences.isRecipeTool(template, recipe);
-  const recipeTemplate = RecipeReferences.getRecipeTemplate(template);
+  const isRecipe = RecipesReferences.isRecipeTool(template, recipe);
+  const recipeTemplate = RecipesReferences.getRecipeTemplate(template);
   const argTemplate = recipeTemplate ?? template;
   const description =
     typeof record.description === "string" && record.description.trim()
       ? record.description.trim()
       : isRecipe
-        ? `${recipe?.async === true || RecipeReferences.isAsyncRecipeReference(template) ? "Start async" : "Execute"} template recipe: ${recipe?.name ?? formatTemplateForDescription(template)}`
+        ? `${recipe?.async === true || RecipesReferences.isAsyncRecipeReference(template) ? "Start async" : "Execute"} template recipe: ${recipe?.name ?? formatTemplateForDescription(template)}`
         : `Execute command template: ${formatTemplateForDescription(template)}`;
   const declarations = Schema.normalizeStoredToolArgDeclarations(
     record.args,
@@ -199,7 +199,7 @@ export function normalizeStoredTool(
     args:
       isRecipe && storedArgs !== undefined
         ? Schema.getExplicitToolArgNames(storedArgs)
-        : RecipeReferences.isRecipeReference(template) && !recipeTemplate
+        : RecipesReferences.isRecipeReference(template) && !recipeTemplate
           ? Schema.getExplicitToolArgNames(storedArgs)
           : Schema.getToolArgNames(argTemplateConfig),
     defaults: declarations.defaults,

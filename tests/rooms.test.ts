@@ -20,7 +20,7 @@ import {
   readRoomRoster,
   updateBranchInboxMessageStatus,
   writeCommunicationSnapshot,
-} from "../lib/actor-rooms.ts";
+} from "../lib/rooms.ts";
 import { readRuntimeWakeEvents } from "../lib/runtime-notifier.ts";
 
 const execFileAsync = promisify(execFile);
@@ -344,7 +344,7 @@ test("Actor rooms preserve concurrent branch inbox appends", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-branch-inbox-concurrent-"));
   try {
     const script = `
-      import { appendBranchInboxMessage } from ${JSON.stringify(join(process.cwd(), "lib", "actor-rooms.ts"))};
+      import { appendBranchInboxMessage } from ${JSON.stringify(join(process.cwd(), "lib", "rooms.ts"))};
       appendBranchInboxMessage(process.argv[1], "demo", "branch:demo/worker", {
         body: { index: Number(process.argv[2]) },
         from: "branch:demo/sender-" + process.argv[2],
@@ -486,7 +486,7 @@ test("Actor rooms preserve concurrent multi-process appends", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-room-concurrent-"));
   try {
     const script = `
-      import { appendRoomMessage } from ${JSON.stringify(join(process.cwd(), "lib", "actor-rooms.ts"))};
+      import { appendRoomMessage } from ${JSON.stringify(join(process.cwd(), "lib", "rooms.ts"))};
       appendRoomMessage(process.argv[1], "main", {
         body: { index: Number(process.argv[2]) },
         from: "branch:demo/worker-" + process.argv[2],

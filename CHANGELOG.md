@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.34.0: Actor Kernel Domain Compression
+
+- `[Domains]` Compressed the actor kernel into explicit domain families: `tools.ts` remains the public tool-family owner while `tools-*` owns message, inspect, spawn, register, local execution, response, access, and mailbox-contract behavior; `async-runs.ts` remains the lifecycle facade while `runs-*` owns artifacts, mailbox, process control, delivery, outbox, index, retention, status, start guards, and identity internals.
+- `[Domains]` Removed redundant internal `actor-` prefixes and renamed the recipe family to plural `recipes-*`, leaving public actor-named recipe/script/docs surfaces intact while making core library ownership match the `tools-*` and `runs-*` convention.
+- `[Scripts]` Collapsed script-only runner, worker, validator, recipe-utils, locker, and coordinator library shims back into their owning `scripts/*.mjs` entrypoints; reusable lifecycle, room, mailbox-loop, command-template, and recipe-reference primitives remain in `lib/`.
+- `[Context]` Reversed the thin-script default, polished ownership headers, and kept completed script-autonomy/domain-compression work in the changelog instead of the backlog.
+- `[Tests]` Mirrored renamed domains in test filenames and extended installed-package contract coverage to ensure stale renamed lib domains are absent from `dist/lib` while packaged JS-only script execution still works.
 
 ## 0.33.0: Signal-First Compatibility Pruning
 

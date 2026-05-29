@@ -11,13 +11,11 @@ import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
 import { cancelRun, startRun } from "../lib/async-runs.ts";
-import {
-  createActorMessageToolDefinition,
-  createInspectToolDefinition,
-  createRegisterToolDefinition,
-  createRuntimeToolDefinition,
-  createSpawnToolDefinition,
-} from "../lib/tools.ts";
+import { createActorMessageToolDefinition } from "../lib/tools-message.ts";
+import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
+import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
+import { createRegisterToolDefinition } from "../lib/tools-register.ts";
+import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 
 async function waitForFile(path: string): Promise<void> {
   for (let i = 0; i < 40; i++) {

@@ -9,8 +9,8 @@ import { existsSync, watch, type FSWatcher } from "node:fs";
 import * as Config from "./config.ts";
 import type { RegisteredToolExec } from "./execution.ts";
 import * as Paths from "./paths.ts";
-import * as RecipeDiscovery from "./recipe-discovery.ts";
-import * as Tools from "./tools.ts";
+import * as RecipesDiscovery from "./recipes-discovery.ts";
+import * as ToolsLocal from "./tools-local.ts";
 
 export interface RuntimeContext {
   hasUI: boolean;
@@ -31,7 +31,7 @@ export interface ToolRegistryRuntimeDeps {
   getActiveTools?: () => string[];
   getAllTools: () => ToolInfoLike[];
   registerTool: (
-    definition: ReturnType<typeof Tools.createRuntimeToolDefinition>,
+    definition: ReturnType<typeof ToolsLocal.createRuntimeToolDefinition>,
   ) => void;
   reservedToolNames: Set<string>;
   setActiveTools?: (toolNames: string[]) => void;
@@ -100,7 +100,7 @@ export function createAutoToolsRuntime(
   function registerRuntimeTool(cfg: Config.RegisteredTool) {
     const fingerprint = getToolFingerprint(cfg);
     if (runtimeToolFingerprints.get(cfg.name) === fingerprint) return;
-    deps.registerTool(Tools.createRuntimeToolDefinition(cfg, deps.exec));
+    deps.registerTool(ToolsLocal.createRuntimeToolDefinition(cfg, deps.exec));
     runtimeTools.add(cfg.name);
     runtimeToolFingerprints.set(cfg.name, fingerprint);
   }
@@ -148,7 +148,7 @@ export function createAutoToolsRuntime(
     const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
     const packagedRecipeRoot =
       deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot();
-    const discovered = RecipeDiscovery.discoverRecipeSources([
+    const discovered = RecipesDiscovery.discoverRecipeSources([
       { root: recipeRoot, defaultTool: true, mutableUsage: true },
       { root: packagedRecipeRoot },
     ]);
@@ -156,7 +156,7 @@ export function createAutoToolsRuntime(
     tools.clear();
     for (const entry of discovered.active.values()) {
       try {
-        const cfg = RecipeDiscovery.toRegisteredTool(entry);
+        const cfg = RecipesDiscovery.toRegisteredTool(entry);
         if (cfg) tools.set(cfg.name, cfg);
       } catch (error) {
         warnings.push(

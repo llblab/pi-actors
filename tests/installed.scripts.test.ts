@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { appendBranchInboxMessage } from "../lib/actor-rooms.ts";
+import { appendBranchInboxMessage } from "../lib/rooms.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -83,26 +83,34 @@ async function assertMissing(path: string): Promise<void> {
 
 test("dist package contract excludes stale renamed files and source runtime imports", async () => {
   await assertMissing(join(process.cwd(), "dist", "index.ts"));
-  await assertMissing(join(process.cwd(), "dist", "lib", "mailbox-worker.js"));
+  for (const staleLib of [
+    "actor-inspector-tui",
+    "actor-messages",
+    "actor-recipe-context",
+    "actor-rooms",
+    "actor-tools",
+    "actor-worker",
+    "async-runner",
+    "coordinator",
+    "locker",
+    "mailbox-worker",
+    "output",
+    "recipe-context",
+    "recipe-discovery",
+    "recipe-references",
+    "recipe-usage",
+    "recipe-utils",
+    "run-executor",
+    "validate-recipe",
+  ]) {
+    await assertMissing(join(process.cwd(), "dist", "lib", `${staleLib}.js`));
+    await assertMissing(join(process.cwd(), "dist", "lib", `${staleLib}.d.ts`));
+  }
   for (const script of await readdir(join(process.cwd(), "dist", "scripts"))) {
     if (!script.endsWith(".mjs")) continue;
     const text = await readFile(join(process.cwd(), "dist", "scripts", script), "utf8");
     assert.doesNotMatch(text, /\.\.\/lib\/.*\.ts/);
     assert.doesNotMatch(text, /node_modules.*\.ts/);
-  }
-});
-
-test("build output includes compiled modules for TypeScript-backed script shims", async () => {
-  for (const module of [
-    "actor-worker",
-    "async-runner",
-    "coordinator",
-    "locker",
-    "recipe-utils",
-    "validate-recipe",
-  ]) {
-    await access(join(process.cwd(), "dist", "lib", `${module}.js`));
-    await access(join(process.cwd(), "dist", "lib", `${module}.d.ts`));
   }
 });
 
@@ -258,7 +266,6 @@ test("installed validate-recipe avoids importing TypeScript from node_modules", 
     const report = JSON.parse(stdout);
     assert.equal(report.ok, true);
     assert.equal(report.passed, 1);
-    assert.equal(await readTextIfExists(join(root, ".type-strip-lib", "validate-recipe.ts")), "");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

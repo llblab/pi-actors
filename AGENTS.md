@@ -18,12 +18,12 @@ Treat this extension as an experimental self-evolution membrane for the agent ha
 ```text
 Pi host
   -> index.ts composition root
-     -> lib/tools.ts / prompts.ts        public tool + injected prompt surface
+     -> lib/tools*.ts / prompts.ts      public tool + injected prompt surface
      -> lib/runtime.ts / registry.ts     active user recipe tools
-     -> lib/recipe-*.ts                  packaged/user/draft recipe discovery
+     -> lib/recipes-*.ts                 packaged/user/draft recipe discovery
      -> lib/async-runs.ts                spawn lifecycle and run state
-     -> lib/actor-rooms.ts               room, roster, mailbox, communication log
-     -> scripts/*.mjs                    thin process entrypoints
+     -> lib/rooms.ts               room, roster, mailbox, communication log
+     -> scripts/*.mjs                    self-contained process entrypoints
      -> recipes/*.json                   packaged actor components
      -> skills/* + docs/*                agent guidance and transportable specs
 ```
@@ -34,19 +34,29 @@ Pi host
 
 - `/lib/*.ts`: Flat Domain DAG modules for cohesive reusable behavior.
   - `command-templates.ts`: portable command-template execution graph.
+  - `tools-access.ts`: shared public tool access/session ownership guards and normalized mismatch diagnostics.
+  - `tools-mailbox.ts`: mailbox contract normalization and accepted/emitted message type helpers for public tool responses.
   - `schema.ts`: tool arg declarations and placeholder-derived schemas.
   - `identity.ts`, `paths.ts`, `config.ts`: names, paths, and persistence.
   - `registry.ts`, `runtime.ts`: register/update/delete, load/conflict/registration coordination.
-  - `execution.ts`, `output.ts`, `limits.ts`: registered-tool execution and bounded output.
-  - `recipe-references.ts`, `recipe-discovery.ts`, `recipe-usage.ts`: recipe graph, discovery, and usage metadata.
-  - `async-runs.ts`, `runtime-notifier.ts`, `mailbox-loop.ts`: detached run state, wake notifications, and mailbox worker helpers.
-  - `actor-rooms.ts`, `actor-inspector-tui.ts`, `observability.ts`: rooms, communication previews, and ambient run status.
-  - `prompts.ts`, `tools.ts`, `temp.ts`: LLM-facing copy, pi-facing tool definitions, and temp cleanup.
+  - `execution.ts`, `execution-output.ts`, `limits.ts`: registered-tool execution and bounded output.
+  - `recipes-references.ts`, `recipes-discovery.ts`, `recipes-usage.ts`: recipe graph, discovery, and usage metadata.
+  - `async-runs.ts`: detached run lifecycle facade; `runs-*` subdomains own artifacts, start guards, status, indexes, inbox/outbox, delivery, process control, and retention internals.
+  - `runtime-notifier.ts`, `mailbox-loop.ts`: wake notifications and reusable run/branch mailbox worker loops.
+  - `messages.ts`, `rooms.ts`, `recipes-context.ts`, `inspector.ts`, `observability.ts`: addressed message protocol, rooms, recipe prompt context, communication previews, and ambient run status.
+  - `prompts.ts`, `temp.ts`: LLM-facing copy and temp cleanup.
+  - `tools.ts`: public tool family composition and reserved tool names.
+  - `tools-message.ts`: public `message` tool behavior, including run controls, branch/room routing, tool actor invocation, and delivery feedback.
+  - `tools-inspect.ts`: public `inspect` tool behavior, including recipe registry, room/session/tool/run views, and observation formatting.
+  - `tools-spawn.ts`: public `spawn` tool behavior, including actor launch, draft recipe capture, and launch diagnostics.
+  - `tools-local.ts`: saved local capability execution, generated schemas, value normalization, and async recipe launch.
+  - `tools-register.ts`: public `register_tool` behavior and schema for persisted local capability registration.
+  - `tools-response.ts`: compact model-facing responses and next-action rendering shared by public tool execution paths.
 
 ## Repo Surfaces
 
-- `/scripts/*.mjs`: Stable executables for detached/helper processes. Keep script-only release/build/glue behavior standalone when it has no plausible second consumer.
-- `/lib/*.ts`: Compiled domains and shared script-entrypoint logic. Move substantive script behavior into named domain modules only when reuse, tests, packaged JS-only execution, or clear ownership justifies it. Do not create a lib domain solely to keep a tiny script shim thin.
+- `/scripts/*.mjs`: Stable executables for detached/helper processes. Prefer self-contained script ownership; do not preemptively move script logic into `lib/` just to make scripts thin.
+- `/lib/*.ts`: Compiled reusable domains for the extension/runtime. Move script behavior into `lib/` only when it has real non-script consumers or belongs to an existing reusable domain. Packaged JS-only execution, tests, or shim neatness alone do not justify a new `lib/` domain.
 - `/recipes/*.json`: Packaged standard recipe library. Keep recipes optional, composable, policy-light, and caller-configurable.
 - `/skills/actors/SKILL.md`: Dense practical reference for operating pi-actors itself.
 - `/skills/swarm/SKILL.md`: Bundled methodology skill for multi-agent standards, strategies, and portable examples.
@@ -62,6 +72,7 @@ Pi host
 - Keep published documentation portable: use `~`, `<repo>`, or relative paths instead of machine-local absolute paths.
 - Preserve runtime output discipline because tool output flows directly into agent context.
 - Optimize every actor-facing surface for signal over volume: prefer compact state-backed hints and fewer concepts over broad explanatory prose or speculative guidance.
+- Split broad domains proactively when the current name becomes a generic bucket. Prefer concise domain names that match actual ownership. `tools.ts` is the public tool family owner; decomposed tool subdomains use `tools-<part>.ts` (`tools-message.ts`, `tools-inspect.ts`, `tools-spawn.ts`) under that family. Keep only genuinely cross-family domains unprefixed (`schema.ts`); tool-only helpers stay under `tools-*`. If a `tools-*` helper becomes reused by non-tools domains, remove the `tools-` prefix in the same slice and update ownership comments/imports so the name matches its broader responsibility. Avoid redundant internal `actor-` file prefixes in this actor-scoped package unless the file is deliberately tied to a public actor-named recipe/script/docs surface.
 - Until a stable release greater than `1.x.x`, favor context compression over compatibility shims: do not preserve legacy actor-facing names, aliases, fields, env vars, paths, or docs solely for backward compatibility when a clearer current term exists. Remove compatibility layers in the same slice that renames a concept, and record the break in `CHANGELOG.md`.
 - Keep the project lens local-first and cybernetic: agents wrap durable local capabilities as actors, then use semantic tools and messages instead of repeatedly reconstructing shell commands.
 - Design recipes as agent-callable tools: make prompts, scopes, paths, models, and policy knobs public args/defaults when the caller should decide them at invocation time.

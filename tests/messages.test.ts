@@ -5,7 +5,7 @@ import {
   formatActorAddress,
   normalizeActorMessage,
   parseActorAddress,
-} from "../lib/actor-messages.ts";
+} from "../lib/messages.ts";
 
 test("Actor addresses parse and format supported endpoint kinds", () => {
   assert.deepEqual(parseActorAddress("coordinator"), { kind: "coordinator" });

@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { getPackagedRecipeRoot } from "../lib/paths.ts";
-import { buildRecipeContextRecords, getRecipeIdFromPath, readResolvedRecipeConfig, resolveRecipePath } from "../lib/recipe-references.ts";
+import { buildRecipeContextRecords, getRecipeIdFromPath, readResolvedRecipeConfig, resolveRecipePath } from "../lib/recipes-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

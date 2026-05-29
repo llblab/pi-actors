@@ -137,7 +137,11 @@ export async function runActorWorker(argv = process.argv.slice(2)) {
     { display: branch, role: "worker", status: "present" },
     `${branch} joined as mailbox worker`,
   );
-  room("awaiting_assignment", `${branch} awaiting assignment`, { branch });
+  room("awaiting_assignment", `${branch} awaiting assignment`, {
+    branch,
+    stale_claim_ms: staleClaimMs,
+    stale_claims: staleClaims(),
+  });
   journal("worker.started", {
     artifact_dir: artifactDir,
     branch,

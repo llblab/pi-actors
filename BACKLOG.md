@@ -53,37 +53,6 @@ No open hotfix items.
 
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
 
-### M-15 Worker Stale-Claim Dogfood
-
-- Priority: Medium.
-- Status: Planned.
-- Goal: Validate and harden actor-worker v2 stale-claim visibility under intentionally stale claimed branch messages.
-- Why now: M-09 exposed `stale_claims`; real dogfood should verify the operator can diagnose stuck claimed work before adding recovery policy.
-- Direction:
-  - Create deterministic stale claimed branch inbox fixtures or smoke tests.
-  - Verify `worker-status.json`, room events, and inspect surfaces make stale claims visible.
-  - Defer auto-recovery unless workflow evidence proves it is safe.
-- Acceptance:
-  - Stale claims are reproducible and visible in worker status.
-  - Tests cover stale-claim counting without adding scheduler/broker policy.
-
-### M-17 Message Delivery Outcome Contract
-
-- Priority: High.
-- Status: Planned.
-- Goal: Normalize `message` results so operators can distinguish delivered, queued, persisted, forwarded, unsupported, and ownership-denied outcomes.
-- Why now: Branch message UX already treats durable branch mailbox persistence as a successful queued outcome when a parent endpoint is unavailable; that local fix should become a consistent message-result membrane.
-- Direction:
-  - Define compact delivery fields: `queued`, `delivered`, `persisted`, `forwarded`, `consumer`, `reason`, and `hint`.
-  - Apply the shape to `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `coordinator`, `session:`, and `tool:<name>` where meaningful.
-  - Reuse M-14 session mismatch shape for ownership-denied outcomes.
-  - Do not claim guaranteed live consumption unless a known consumer exists.
-  - Do not add a broker, distributed delivery semantics, or a new public noun.
-- Acceptance:
-  - Branch messages clearly report queued/persisted state and known worker-consumer state where available.
-  - Room messages distinguish timeline append success from forwarded branch-targeted copies.
-  - Tests cover at least run, branch, room, coordinator, and ownership-denied outcomes.
-
 ### M-18 Draft Recipe Promotion UX
 
 - Priority: High.
@@ -185,7 +154,7 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ## Suggested Milestone Order
 
 ```text
-Next milestone: M-15 Worker Stale-Claim Dogfood.
-Then: M-17 Message Delivery Outcome Contract → M-18 Draft Recipe Promotion UX.
+Next milestone: M-18 Draft Recipe Promotion UX.
+Then: M-19 Recipe Doctor Risk Labels v2.
 Small cleanup lane: continue opportunistic domain polish only when a real ownership boundary appears.
 ```

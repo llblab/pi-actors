@@ -2,7 +2,7 @@
 name: actors
 description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.30.1
+  version: 0.30.2
 ---
 
 # Actors (pi-actors)
@@ -87,6 +87,7 @@ Envelope fields:
 - Addresses: `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `tool:<name>`, `coordinator`, `session:<id>`.
 - Room posts require `from` from the same run (`run:<run>` or `branch:<run>/<branch>`).
 - Runtime termination message: `control.kill` is the only documented actor message that kills a run. `control.stop` and `control.cancel` are actor-local mailbox vocabulary only when a recipe declares and handles them. Terminal retention messages: `control.archive`, `control.prune`.
+- Long-lived child processes should remain in the run-owned process group unless the recipe implements an explicit daemon termination bridge; do not leave unowned detached services behind `control.kill`.
 
 Check `inspect view=mailbox` before domain-specific messages.
 

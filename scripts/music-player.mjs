@@ -804,7 +804,6 @@ function playOne(ctx, player, volume, track, index, count) {
     const [command, args] = playerCommand(ctx, player, volume, track);
     writeStatus(ctx, "playing", index, count, track, player, "");
     const child = spawn(command, args, {
-      detached: process.platform !== "win32",
       stdio: ["ignore", "inherit", "inherit"],
     });
     ctx.child = child;

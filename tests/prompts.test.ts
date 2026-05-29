@@ -35,6 +35,14 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Command templates stay sync/);
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /Actor-mode trigger: if work may outlive this turn/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /spawn -> message -> inspect instead of ad hoc shell backgrounding/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
     /Recipe imports are local variables/,
   );
   assert.match(
@@ -43,7 +51,11 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /README and docs are not automatically in context/,
+    /read the bundled actors skill first/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /README\/docs are not automatically in context/,
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,

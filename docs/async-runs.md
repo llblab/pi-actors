@@ -6,6 +6,8 @@ Async runs are detached executions of a template recipe or inline command templa
 
 **Scope:** run id, state path, runner pid, process-group cancellation, logs, status, tail, list, script-authored actor messages, run-local control messages, cancel, force-kill, terminal result state, ambient activity indicators, and extension-owned temp storage. No scheduler, queue daemon, workflow DSL, distributed worker, or second execution language.
 
+Actor-mode trigger: choose an async run when work may outlive the current turn, needs later steering or inspection, produces artifacts/follow-ups, runs as a service, fans out, or should become repeatable recipe memory. Keep short foreground checks in ordinary tools/templates.
+
 Layer boundary: async-run configuration may inject lifecycle values such as `{run_id}` and `{state_dir}` and may choose detached execution through `async: true`, but it does not add command-template graph syntax. Recipe imports and recipe-local references belong to the template-recipe layer; status, control messages, actor messages, cancel, and kill belong to the async-run layer.
 
 ---

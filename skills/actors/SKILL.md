@@ -1,13 +1,13 @@
 ---
 name: actors
-description: Highest-density practical guide for pi-actors. Read this skill whenever prompt and tools are not enough for spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
+description: Required practical guide for non-trivial pi-actors use. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.30.2
+  version: 0.31.0
 ---
 
 # Actors (pi-actors)
 
-`pi-actors` turns trusted local capabilities into addressable actors. This skill is the compact operator/reference layer for the extension itself: tools, nouns, lifecycle, message protocol, recipes, and common edge cases. It is not a multi-agent strategy guide; use a swarm skill for decomposition, quorum design, reviewer lenses, and consensus methodology.
+`pi-actors` turns trusted local capabilities into addressable actors. This skill is the required practical layer for any non-trivial pi-actors use or repo change: tools, nouns, lifecycle, message protocol, recipes, and common edge cases. It is not a multi-agent strategy guide; use a swarm skill for decomposition, quorum design, reviewer lenses, and consensus methodology.
 
 Maintain this skill as the extension's agent-facing manual. When implementation changes reveal new durable mechanics, invariants, warnings, or safer operating patterns, update this skill alongside code/docs so future agents learn the current actor model instead of rediscovering it.
 
@@ -47,6 +47,8 @@ Trusted local capability
 - **Artifact**: named durable output path declared by a recipe/run.
 
 ## Three Verbs
+
+Actor-mode trigger: if work may outlive this turn, needs steering/follow-up/artifacts, runs as a service, fans out, or should be resumed/inspected later, use `spawn → message → inspect` instead of ad hoc shell backgrounding. Keep short foreground checks as normal tools.
 
 ### `spawn` — create a run actor
 

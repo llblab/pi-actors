@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.31.0: Agent Adoption Ergonomics
+
+- `[Adoption]` Added a compact actor-mode trigger rule to the injected prompt, actors skill, README, and async-run docs so models prefer `spawn → message → inspect` for long-lived, stateful, follow-up, artifact, service, fanout, and resumable work while keeping short foreground checks as ordinary tools.
+- `[Skills]` Reframed the bundled actors skill as required practical guidance for non-trivial actor use or pi-actors changes, and made the injected prompt route agents to it before improvising actor workflows.
+- `[Tools]` Strengthened `spawn`, `message`, and `inspect` descriptions with adoption cues that steer models away from ad hoc shell backgrounding, actor restarts, and polling loops.
+- `[Spawn]` Added explicit next-action feedback to spawn results so newly created actors immediately suggest inspect/message chains instead of leaving agents to infer the next step.
+- `[Docs]` Added a task-first “when to use actors” golden path to the README without adding public verbs or scheduler/service-manager concepts.
+
 ## 0.30.2: Music Player Kill Hotfix
 
 - `[Music Player]` Kept backend player processes inside the async run process group so `control.kill` can terminate an active music-player run without leaving detached `cvlc`/player children alive.

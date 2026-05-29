@@ -187,12 +187,23 @@ function formatFailureCount(value: unknown): number | undefined {
   return Array.isArray(value) ? value.length : undefined;
 }
 
+function actorRunNextActions(run: unknown): string[] {
+  const id = String(run ?? "").trim();
+  if (!id) return [];
+  return [
+    `inspect target=run:${id} view=status`,
+    `inspect target=run:${id} view=messages`,
+    `message to=run:${id} type=<actor.action>`,
+  ];
+}
+
 function compactAsyncRunStatus(value: unknown): string {
   const status = asRecord(value);
   const progress = asRecord(status.progress);
   const result = asRecord(status.result);
+  const run = String(status.run ?? "<unknown>");
   const tokens = [
-    `run=${String(status.run ?? "<unknown>")}`,
+    `run=${run}`,
     `status=${String(status.status ?? "unknown")}`,
   ];
   if (status.tool) tokens.push(`tool=${String(status.tool)}`);
@@ -213,6 +224,9 @@ function compactAsyncRunStatus(value: unknown): string {
   if (result.killed === true) tokens.push("killed=true");
   if (status.candidate_recipe)
     tokens.push(`candidate_recipe=${String(status.candidate_recipe)}`);
+  const nextActions = actorRunNextActions(run);
+  if (nextActions.length > 0)
+    tokens.push(`next=${nextActions.map((action) => action.replaceAll(/\s+/g, "_")).join("|")}`);
   return `\n${tokens.join(" ")}`;
 }
 
@@ -942,7 +956,7 @@ export function createSpawnToolDefinition<
     name: "spawn",
     label: "Spawn",
     description:
-      "Create an addressable actor from a recipe file or inline command template. Currently spawns run:<id> actors backed by async runs.",
+      "Create an addressable actor from a recipe file or inline command template. Use instead of ad hoc shell backgrounding for work that may outlive this turn, needs steering/follow-up/artifacts, runs as a service, fans out, or should be inspected later. Currently spawns run:<id> actors backed by async runs.",
     parameters: objectSchema(
       {
         artifacts: looseObjectSchema(
@@ -1023,9 +1037,12 @@ export function createSpawnToolDefinition<
         throw enhanceSpawnRecipeError(error, recipe);
       }
       const candidateRecipe = writeSpawnCandidateRecipe(input, meta);
-      const details = candidateRecipe
-        ? { ...meta, candidate_recipe: candidateRecipe }
-        : meta;
+      const nextActions = actorRunNextActions(meta.run);
+      const details = {
+        ...meta,
+        ...(candidateRecipe ? { candidate_recipe: candidateRecipe } : {}),
+        next_actions: nextActions,
+      };
       ActorRooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
       ActorRooms.writeCommunicationSnapshot(meta.state_dir, String(meta.run));
       return {
@@ -1103,7 +1120,7 @@ export function createInspectToolDefinition<TContext = unknown>(
     name: "inspect",
     label: "Inspect",
     description:
-      "Intentionally inspect an actor. Supports run:<id> views: status, tail, messages, artifacts, files, mailbox, communication; room:<run> status/messages/previews/roster/contacts; coordinator/session status; and tool:<name> status/schema.",
+      "Intentionally inspect an actor at decision points, after follow-ups, or during diagnosis instead of polling. Supports run:<id> views: status, tail, messages, artifacts, files, mailbox, communication; room:<run> status/messages/previews/roster/contacts; coordinator/session status; and tool:<name> status/schema.",
     parameters: objectSchema(
       {
         lines: stringSchema("Line count for tail/messages views. Default 40."),
@@ -1557,7 +1574,7 @@ export function createActorMessageToolDefinition<TContext = unknown>(
     name: "message",
     label: "Message",
     description:
-      "Send one typed addressed message. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, room:<run> timelines/rosters, tool:<name> calls, and coordinator/session-bound run messages.",
+      "Send one typed addressed message to steer an existing actor instead of restarting it. Routes to run:<id> mailboxes, branch:<run>/<branch> mailboxes, room:<run> timelines/rosters, tool:<name> calls, and coordinator/session-bound run messages.",
     parameters: objectSchema(
       {
         body: unionSchema([

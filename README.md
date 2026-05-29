@@ -29,7 +29,26 @@ inspect  intentionally read state, logs, messages, contracts, or artifacts
 
 Everything else is an adapter until proven otherwise.
 
-Use `spawn` when work may outlive the current turn. Use `message` when the actor should be steered rather than restarted. Use `inspect` at decision points, after actor follow-ups, or during diagnosis. Do not build polling loops as the default coordination pattern.
+Use `spawn` when work may outlive the current turn. Use `message` when the actor should be steered rather than restarted. Use `inspect` at decision points, after actor follow-ups, or during diagnosis. For non-trivial actor use, load the bundled `actors` skill before improvising. Do not build polling loops as the default coordination pattern.
+
+## When To Use Actors
+
+Use actor-mode instead of ad hoc shell backgrounding when work is:
+
+- Long-running or likely to outlive this agent turn.
+- Stateful, resumable, or something you will need to inspect later.
+- Expected to produce named artifacts or follow-up messages.
+- A service, worker, media process, fanout, subagent, or pipeline.
+- A repeatable local capability worth promoting into recipe memory.
+
+Keep ordinary foreground tools for short checks such as `rg`, `ls`, quick tests, and one-shot transforms. The golden path is:
+
+```text
+create actor        -> spawn
+steer actor         -> message
+read state/results  -> inspect
+repeatable pattern  -> promote to recipe/tool memory
+```
 
 ## Install
 

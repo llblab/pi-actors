@@ -60,6 +60,8 @@ test("Register tool definition exposes a JSON schema with no required fields", (
 test("Spawn tool definition exposes actor creation schema", () => {
   const definition = createSpawnToolDefinition();
   assert.equal(definition.name, "spawn");
+  assert.match(definition.description, /instead of ad hoc shell backgrounding/);
+  assert.match(definition.description, /may outlive this turn/);
   assert.deepEqual(definition.parameters.required, []);
   const properties = definition.parameters.properties as Record<string, any>;
   assert.equal(properties.artifacts.type, "object");
@@ -78,6 +80,8 @@ test("Spawn tool definition exposes actor creation schema", () => {
 test("Inspect tool definition exposes intentional observation schema", () => {
   const definition = createInspectToolDefinition();
   assert.equal(definition.name, "inspect");
+  assert.match(definition.description, /after follow-ups/);
+  assert.match(definition.description, /instead of polling/);
   assert.deepEqual(definition.parameters.required, ["target", "view"]);
   const properties = definition.parameters.properties as Record<string, any>;
   assert.equal(properties.target.type, "string");
@@ -178,6 +182,8 @@ test("Inspect tool reads recipe registry summaries", async () => {
 test("Actor message tool definition exposes concentrated message schema", () => {
   const definition = createActorMessageToolDefinition();
   assert.equal(definition.name, "message");
+  assert.match(definition.description, /steer an existing actor/);
+  assert.match(definition.description, /instead of restarting/);
   assert.deepEqual(definition.parameters.required, ["to", "type"]);
   const properties = definition.parameters.properties as Record<string, any>;
   assert.equal(properties.to.type, "string");
@@ -1254,7 +1260,14 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
     );
     stateDir = String(result.details.state_dir);
     assert.match(result.content[0].text, /run=spawned-/);
+    assert.match(result.content[0].text, /next=inspect_target=run:spawned-/);
+    assert.match(result.content[0].text, /message_to=run:spawned-/);
     assert.match(result.content[0].text, /candidate_recipe=.*recipes\/candidates\/spawned-/);
+    assert.deepEqual(result.details.next_actions, [
+      `inspect target=run:${runId} view=status`,
+      `inspect target=run:${runId} view=messages`,
+      `message to=run:${runId} type=<actor.action>`,
+    ]);
     const candidateRecipe = JSON.parse(
       await readFile(String(result.details.candidate_recipe), "utf8"),
     );
@@ -1624,6 +1637,7 @@ test("Actor tools start, inspect, and stop run actors", async () => {
     );
     stateDir = String(started.details.state_dir);
     assert.match(started.content[0].text, new RegExp(`run=${runId} status=running pid=\\d+`));
+    assert.match(started.content[0].text, new RegExp(`next=inspect_target=run:${runId}_view=status`));
     assert.doesNotMatch(started.content[0].text, /argv|template|values/);
 
     await writeFile(

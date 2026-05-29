@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.30.0: Composition Root Compression
+
+- `[Entrypoint]` Added a narrow Pi SDK adapter domain, moved recipe live-reload mechanics into the runtime domain, moved run-state watcher, run UI observation state, and run notification formatting into observability, moved runtime path constants and co-located skill path discovery to the paths domain, grouped core actor tool definitions in the tools domain, and shifted actor-inspector command state/parsing/render selection into the actor-inspector domain so `index.ts` keeps only live Pi wiring.
+- `[Backlog]` Added focused next-minor candidates for message delivery outcomes, candidate recipe promotion, recipe risk labels, runtime triage, packaged recipe QA, and wake/watcher chaos fixtures while deferring broader golden-flow documentation until the core diagnostic surfaces settle.
+
 ## 0.29.3: Actor Skill Context Hotfix
 
 - `[Skills]` Reconciled knowledge-surface layering across project and actor guidance, added a project topology map, moved multi-agent methodology from the actors runtime skill into the swarm skill, and split actor quick-start guidance from a deeper recipe/operating-pattern reference.

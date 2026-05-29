@@ -4,6 +4,8 @@
  * Owns persisted tool loading, conflict detection, runtime registration, and warning notification
  */
 
+import { existsSync, watch, type FSWatcher } from "node:fs";
+
 import * as Config from "./config.ts";
 import type { RegisteredToolExec } from "./execution.ts";
 import * as Paths from "./paths.ts";
@@ -45,6 +47,11 @@ export interface ToolRegistryRuntime {
     type: "info" | "warning" | "error",
   ): void;
   registerRuntimeTool(cfg: Config.RegisteredTool): void;
+}
+
+export interface RecipeToolReloadWatcher {
+  close(): void;
+  watch(ctx: RuntimeContext): void;
 }
 
 export function createAutoToolsRuntime(
@@ -177,5 +184,53 @@ export function createAutoToolsRuntime(
     loadTools,
     notify,
     registerRuntimeTool,
+  };
+}
+
+export function createRecipeToolReloadWatcher(
+  runtime: Pick<ToolRegistryRuntime, "loadTools">,
+): RecipeToolReloadWatcher {
+  let reloadTimeout: NodeJS.Timeout | undefined;
+  let rootWatcher: FSWatcher | undefined;
+  let failureNotified = false;
+  const close = (): void => {
+    rootWatcher?.close();
+    rootWatcher = undefined;
+    if (reloadTimeout) clearTimeout(reloadTimeout);
+    reloadTimeout = undefined;
+  };
+  const notifyFailure = (ctx: RuntimeContext): void => {
+    if (failureNotified) return;
+    failureNotified = true;
+    ctx.ui.notify(
+      "Recipe live reload watcher failed; restart the session or use register_tool again to refresh recipe tools.",
+      "warning",
+    );
+  };
+  const scheduleReload = (ctx: RuntimeContext): void => {
+    failureNotified = false;
+    if (reloadTimeout) clearTimeout(reloadTimeout);
+    reloadTimeout = setTimeout(() => {
+      runtime.loadTools(ctx);
+      ctx.ui.notify("Recipe tools refreshed from ~/.pi/agent/recipes", "info");
+    }, 150);
+    reloadTimeout.unref?.();
+  };
+  return {
+    close,
+    watch(ctx: RuntimeContext): void {
+      const recipeRoot = Paths.getRecipeRoot();
+      if (rootWatcher || !existsSync(recipeRoot)) return;
+      try {
+        rootWatcher = watch(recipeRoot, () => scheduleReload(ctx));
+        rootWatcher.on("error", () => {
+          rootWatcher?.close();
+          rootWatcher = undefined;
+          notifyFailure(ctx);
+        });
+      } catch {
+        notifyFailure(ctx);
+      }
+    },
   };
 }

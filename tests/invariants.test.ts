@@ -13,6 +13,14 @@ const indexSource = await readFile(
   new URL("../index.ts", import.meta.url),
   "utf8",
 );
+const runtimeSource = await readFile(
+  new URL("../lib/runtime.ts", import.meta.url),
+  "utf8",
+);
+const toolsSource = await readFile(
+  new URL("../lib/tools.ts", import.meta.url),
+  "utf8",
+);
 const changelogSource = await readFile(
   new URL("../CHANGELOG.md", import.meta.url),
   "utf8",
@@ -43,13 +51,15 @@ test("Entrypoint stays free of direct typebox and environment access", () => {
 });
 
 test("Entrypoint delegates register_tool definition to the tools domain", () => {
-  assert.match(indexSource, /Tools\.createRegisterToolDefinition/);
+  assert.match(indexSource, /Tools\.createCoreActorToolDefinitions/);
+  assert.match(toolsSource, /createRegisterToolDefinition/);
   assert.equal(indexSource.includes('name: "register_tool"'), false);
 });
 
-test("Entrypoint reports recipe watcher failures", () => {
-  assert.match(indexSource, /Recipe live reload watcher failed/);
-  assert.match(indexSource, /notifyRecipeWatcherFailure\(ctx\)/);
+test("Runtime reports recipe watcher failures", () => {
+  assert.match(indexSource, /Runtime\.createRecipeToolReloadWatcher/);
+  assert.match(runtimeSource, /Recipe live reload watcher failed/);
+  assert.match(runtimeSource, /notifyFailure\(ctx\)/);
 });
 
 const publicGuidanceFiles = [
@@ -78,7 +88,11 @@ test("Public guidance avoids stale concrete model aliases", () => {
   for (const file of files) {
     const content = readFileSync(file, "utf8");
     for (const pattern of staleModelAliases) {
-      assert.doesNotMatch(content, pattern, `${file} should not mention ${pattern}`);
+      assert.doesNotMatch(
+        content,
+        pattern,
+        `${file} should not mention ${pattern}`,
+      );
     }
   }
 });
@@ -86,7 +100,11 @@ test("Public guidance avoids stale concrete model aliases", () => {
 test("Operator guidance uses snake_case docs review examples", () => {
   for (const file of operatorGuidanceFiles) {
     const content = readFileSync(file, "utf8");
-    assert.doesNotMatch(content, /docs-review/, `${file} should use docs_review`);
+    assert.doesNotMatch(
+      content,
+      /docs-review/,
+      `${file} should use docs_review`,
+    );
   }
 });
 
@@ -115,16 +133,25 @@ test("Operator guidance avoids stale FIFO queue wording", () => {
 test("Platform guidance makes native Windows FIFO limits visible", () => {
   const readme = readFileSync("README.md", "utf8");
   const asyncRuns = readFileSync("docs/async-runs.md", "utf8");
-  assert.match(readme, /FIFO control endpoints[\s\S]*Not supported; use mailbox or named pipe/);
+  assert.match(
+    readme,
+    /FIFO control endpoints[\s\S]*Not supported; use mailbox or named pipe/,
+  );
   assert.match(asyncRuns, /FIFO endpoint[\s\S]*Rejected before delivery/);
-  assert.match(asyncRuns, /Mailbox-only endpoint[\s\S]*Use for cross-platform workers/);
+  assert.match(
+    asyncRuns,
+    /Mailbox-only endpoint[\s\S]*Use for cross-platform workers/,
+  );
 });
 
 test("Unreleased changelog items avoid version literals", () => {
-  const unreleased = changelogSource.match(
-    /^## Unreleased\n(?<body>[\s\S]*?)(?=^## \d+\.\d+\.\d+)/m,
-  )?.groups?.body ?? "";
-  for (const line of unreleased.split("\n").filter((line) => line.startsWith("- `"))) {
+  const unreleased =
+    changelogSource.match(
+      /^## Unreleased\n(?<body>[\s\S]*?)(?=^## \d+\.\d+\.\d+)/m,
+    )?.groups?.body ?? "";
+  for (const line of unreleased
+    .split("\n")
+    .filter((line) => line.startsWith("- `"))) {
     assert.doesNotMatch(
       line,
       /\b\d+\.\d+\.\d+\b/,
@@ -137,7 +164,8 @@ test("Music player backend enum stays aligned across recipe docs and script", ()
   const recipe = JSON.parse(readFileSync("recipes/music-player.json", "utf8"));
   const recipePlayers = recipe.args
     .find((arg: string) => arg.startsWith("player:enum("))
-    ?.match(/^player:enum\((?<values>[^)]+)\)$/)?.groups?.values.split(",");
+    ?.match(/^player:enum\((?<values>[^)]+)\)$/)
+    ?.groups?.values.split(",");
   assert.deepEqual(recipePlayers, [
     "auto",
     "mpv",
@@ -150,11 +178,13 @@ test("Music player backend enum stays aligned across recipe docs and script", ()
 
   const docs = readFileSync("docs/recipe-library.md", "utf8");
   const docsPlayers = docs
-    .match(/player:enum\((?<values>[^)]+)\)=auto/)?.groups?.values.split(",");
+    .match(/player:enum\((?<values>[^)]+)\)=auto/)
+    ?.groups?.values.split(",");
   assert.deepEqual(docsPlayers, recipePlayers);
 
   const script = readFileSync("scripts/music-player.mjs", "utf8");
   const usagePlayers = script
-    .match(/Supported players: (?<values>[^.]+)\./)?.groups?.values.split(", ");
+    .match(/Supported players: (?<values>[^.]+)\./)
+    ?.groups?.values.split(", ");
   assert.deepEqual(usagePlayers, recipePlayers);
 });

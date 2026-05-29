@@ -17,6 +17,12 @@ export function getAgentDir(
     : join(homedir(), ".pi", "agent");
 }
 
+export interface ExtensionRuntimePaths {
+  configPath: string;
+  runStateRoot: string;
+  tempDir: string;
+}
+
 export function getConfigPath(agentDir = getAgentDir()): string {
   return join(agentDir, "legacy-tool-registry.json");
 }
@@ -30,6 +36,27 @@ export function getExtensionTmpDir(
 
 export function getRunStateRoot(agentDir = getAgentDir()): string {
   return join(getExtensionTmpDir(agentDir), "runs");
+}
+
+export function getExtensionRuntimePaths(
+  agentDir = getAgentDir(),
+): ExtensionRuntimePaths {
+  return {
+    configPath: getConfigPath(agentDir),
+    runStateRoot: getRunStateRoot(agentDir),
+    tempDir: getExtensionTmpDir(agentDir),
+  };
+}
+
+export const EXTENSION_RUNTIME_PATHS = getExtensionRuntimePaths();
+
+export function getExtensionSkillsDir(extensionUrl: string): string {
+  return join(dirname(fileURLToPath(extensionUrl)), "skills");
+}
+
+export function getExistingExtensionSkillPaths(extensionUrl: string): string[] {
+  const skillsDir = getExtensionSkillsDir(extensionUrl);
+  return existsSync(skillsDir) ? [skillsDir] : [];
 }
 
 export function getRecipeRoot(agentDir = getAgentDir()): string {

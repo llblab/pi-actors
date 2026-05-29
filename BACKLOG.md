@@ -45,226 +45,6 @@ No open hotfix items.
 
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
 
-### M-01 State Corruption Recovery
-
-- Priority: High.
-- Status: Done.
-- Goal: Keep `inspect` useful when file-backed run, room, branch, or recipe state is partially corrupted.
-- Why now: The extension's core promise is local, inspectable, durable actor state. Corrupt JSON/JSONL should degrade visibility, not break the operator membrane.
-- Direction:
-  - Continue migrating repeated JSON/JSONL inspect paths to `lib/state-readers.ts`.
-  - Preserve valid records and report corrupt paths/counts.
-  - Do not silently rewrite canonical state without an explicit repair action.
-- Acceptance:
-  - Malformed JSONL lines do not kill inspect paths.
-  - Corrupt JSON files surface diagnostics with paths.
-  - Tests cover run, branch, room, and recipe-adjacent state where practical.
-
-### M-02 Actor Loop Helper Minimal Core
-
-- Priority: High.
-- Status: Done.
-- Goal: Provide one small reusable mailbox loop so recipe authors do not duplicate claim/handle/status logic.
-- Why now: Long-lived actors and worker recipes are the natural center of `pi-actors`; a minimal helper consolidates behavior without adding a broker or scheduler DSL.
-- Files:
-  - `lib/mailbox-loop.ts`.
-- Direction:
-  - Support run inbox claiming, branch inbox claiming, handled/failed status transitions, bounded drains, duplicate-claim protection, and graceful stop-message detection.
-  - Defer live wake subscription and polling wrappers until the canonical worker recipe needs them.
-  - Keep policy out: no task selection, no model choice, no project prompts.
-- Acceptance:
-  - Helper supports run inbox and branch inbox.
-  - Claim/handle/fail transitions are covered by tests.
-  - Duplicate branch claims do not double-process one message.
-  - Bounded drains stop on standard control messages.
-
-### M-03 Canonical Worker Recipe Template
-
-- Priority: High.
-- Status: Done.
-- Depends on: M-02.
-- Goal: Add one canonical packaged worker recipe/template demonstrating the intended long-lived actor pattern.
-- Why now: The extension should teach one excellent mailbox loop rather than accumulate scenario-specific scripts.
-- Direction:
-  - Worker joins the default room.
-  - Worker declares typed mailbox accepts/emits.
-  - Worker claims branch inbox work.
-  - Worker posts `task.claim`, `task.result`, and `awaiting_assignment`.
-  - Worker handles `control.stop`.
-- Acceptance:
-  - Demonstrates correct mailbox loop semantics.
-  - Stays a recipe-authoring reference, not a product workflow catalog.
-  - Actor skill links it as the canonical worker pattern.
-
-### M-04 Protocol Contract Fixtures
-
-- Priority: Medium.
-- Status: Done.
-- Goal: Freeze the current protocol behavior with compact internal fixtures before further surface growth.
-- Why now: `spawn`, `message`, `inspect`, mailbox contracts, artifacts, rooms, and run indexes now have enough shape to merit regression fixtures; schemas should document reality, not invent a new standard.
-- Direction:
-  - Add fixtures for representative run state, actor message, run inbox/outbox, room message/roster, mailbox contract, artifact manifest, and recipe summary.
-  - Add lightweight schema or shape validation only where it protects existing behavior.
-- Acceptance:
-  - Public examples and fixtures validate in tests.
-  - No migration is forced.
-  - No external transport/MCP standard is introduced.
-
-### M-05 Follow-Up Deduplication Hardening
-
-- Priority: Medium.
-- Status: Done.
-- Goal: Suppress duplicate terminal transitions and outbox follow-ups across watcher reloads, session restarts, or line-counter resets.
-- Why now: Operator-facing observability should be calm and trustworthy as actor count grows.
-- Direction:
-  - Continue using event id and stateDir for deduplication where available.
-  - Preserve terminal handled semantics.
-  - Simulate watcher restart in tests.
-- Acceptance:
-  - Duplicate follow-up is suppressed after reasonable watcher reset.
-  - Terminal handled state remains effective.
-  - Tests cover restart and line-counter reset scenarios.
-
-### M-06 Portability Reality Pass
-
-- Priority: Medium.
-- Status: Done.
-- Goal: Make current Linux/macOS/WSL/native-Windows behavior explicit without adding a new backend.
-- Why now: Mailbox-only paths and named-pipe support exist; operators need accurate diagnostics, not hidden platform assumptions.
-- Direction:
-  - Doctor flags FIFO-only recipes on native Windows.
-  - Keep mailbox-only worker demo cross-platform.
-  - Document a small platform matrix.
-  - Cover named-pipe adapter with injected sender where practical.
-- Acceptance:
-  - Native Windows limitations are visible before launch.
-  - Mailbox-only recipe works cross-platform.
-  - Docs and tests cover the adapter split.
-
-### M-07 Compiled Script Entrypoints
-
-- Priority: Medium.
-- Status: Done.
-- Goal: Bring packaged script entrypoints under the build so installed npm recipes run against compiled runtime code.
-- Why now: Recipes increasingly depend on helper scripts that import extension internals; compiling script logic closes the gap between source-tree development and installed package behavior.
-- Direction:
-  - Keep stable executable recipe paths through thin `scripts/*.mjs` shims.
-  - Keep substantive reusable script logic in compiled `lib/*.ts` modules so scripts stay lightweight runners and `dist/lib` is the JS-only runtime surface; allow self-contained application scripts to remain standalone `.mjs` when no reuse is expected.
-  - Keep `npm run build` checking packaged script entrypoint syntax while compiled module migration proceeds.
-  - Make installed scripts prefer `dist` runtime modules and avoid importing `.ts` from `node_modules`.
-  - Preserve source-tree developer ergonomics without requiring global install.
-  - Expose compiled JS as the default Node-compatible extension entrypoint and source TS/skill paths as optional metadata for TypeScript-native runtimes.
-  - Treat `dist/` as the JS-only distributive tree: mirror runtime assets (`scripts/`, `recipes/`, `fixtures/`, and `skills/`) there during build and point default package metadata at those dist assets.
-  - Track each converted script with a compiled module existence regression so shim drift is caught before packaging.
-- Acceptance:
-  - `npm run build` covers packaged script logic, not only extension library code.
-  - Installed-script tests prove packaged recipes do not import TypeScript from `node_modules`.
-  - `npm run pack:dry` includes expected compiled/script files.
-  - Recipe paths remain stable or migrations are explicitly documented.
-
-### M-08 Recipe Doctor Remediation UX
-
-- Priority: High.
-- Status: Done.
-- Goal: Turn recipe doctor output into an operator action surface, not just a diagnostic listing.
-- Why now: Recipe registry warnings are intentionally actionable; the next value is helping operators decide whether to fix, disable, delete, or inspect a recipe without hiding the warning.
-- Direction:
-  - Summarize invalid, blocking, shadowed, disabled, and risky shell-boundary entries with compact recommended actions.
-  - Keep remediation advisory by default; no automatic mutation of user recipes.
-  - Preserve detailed diagnostics through verbose inspection.
-- Acceptance:
-  - `inspect target=recipes view=doctor` identifies the highest-priority actionable maintenance item.
-  - Blocking invalid recipes include the blocked lower-priority candidate when available.
-  - Tests cover at least invalid/blocking, disabled, shadowed, and risky shell diagnostics.
-
-### M-09 Actor Worker v2
-
-- Priority: High.
-- Status: Done.
-- Goal: Promote `actor-worker` from a minimal demo into the canonical standard-worker reference pattern.
-- Why now: Mailbox-loop semantics are now stable enough to show artifact production, compact status, and stale-claim recovery without adding a scheduler or broker.
-- Direction:
-  - Add optional task result artifact writing.
-  - Expose compact worker status for `inspect` and room events.
-  - Add stale-claim recovery or timeout semantics where they fit the mailbox-loop helper.
-  - Preserve policy-light behavior: no model choice, prompt design, or project task selection.
-- Acceptance:
-  - Worker can produce a durable artifact path for handled work.
-  - Stale claimed work can be surfaced or recovered deterministically.
-  - The actors skill documents the v2 worker pattern.
-
-### M-10 Dist Package Contract Hardening
-
-- Priority: Medium.
-- Status: Done.
-- Goal: Make the dist-first package contract difficult to regress after the 0.24 packaging shift.
-- Why now: `dist/` is now the default JS-only runtime surface and carries mirrored scripts, recipes, fixtures, and skills.
-- Direction:
-  - Add package-layout checks for default metadata, source metadata, mirrored assets, and compiled script-domain modules.
-  - Add negative checks for stale renamed dist files and source-only runtime imports from installed packages.
-  - Keep source files packaged for TypeScript-native runtimes unless a future package-size decision changes that explicitly.
-- Acceptance:
-  - `npm run validate` fails if default Pi metadata points outside `dist` unexpectedly.
-  - Installed-package tests cover every script shim that imports compiled domain logic.
-  - Pack dry assertions cover `dist/scripts`, `dist/recipes`, `dist/fixtures`, and `dist/skills`.
-
-### M-11 Actor Termination Semantics
-
-- Priority: Medium.
-- Status: Done.
-- Goal: Make `control.kill` the canonical parent-to-actor termination action while keeping `control.stop` and `control.cancel` as actor-domain messages whose meaning depends on the actor protocol.
-- Why now: Mailbox workers need a clearer lifecycle boundary before v2 patterns harden. Treating `stop`, `cancel`, and `kill` as equivalent stop messages blurs actor termination with domain-specific task or playback control.
-- Remaining direction:
-  - Audit packaged recipe `mailbox.accepts` declarations so `control.stop` and `control.cancel` appear only when actor-specific behavior is meaningful.
-  - Preserve `control.kill` as the universal lifecycle action for a parent/supervisor terminating an actor or run.
-  - Reframe any remaining docs that imply `control.stop` or `control.cancel` are generic runtime termination aliases.
-  - Do not preserve compatibility shims for the old stop/cancel-as-termination behavior before the first 1.0 major release unless a concrete safety issue appears during implementation.
-- Acceptance:
-  - Docs and actors skill advertise `control.kill` as canonical parent-to-actor termination.
-  - Mailbox-loop helpers/tests distinguish actor termination from actor-domain `stop`/`cancel` handling.
-  - Packaged recipes declare `stop`/`cancel` only when the actor-specific behavior is meaningful.
-  - Tests assert that generic mailbox-loop termination is not triggered by `control.stop` or `control.cancel`.
-
-### M-12 Runtime and Session Observability UX
-
-- Priority: High.
-- Status: Done.
-- Goal: Make reload/session/runtime mismatches visible without changing ownership or lifecycle policy.
-- Why now: 0.26 dogfood showed that actors, mailbox workers, and hotfixes work after a full Pi restart, but ordinary reloads can leave operators unsure which extension code is live. Session ownership mismatches also surface as terse strings instead of structured diagnostics or navigation hints.
-- Direction:
-  - Add an intentional runtime/version inspection surface that reports loaded package version, entrypoint path, source/dist mode, package root, recipe roots, and git commit when available.
-  - Make session ownership denials structured in tool details with compact `reason=session_mismatch owner_session=... current_session=...` text and hints to inspect the owning session.
-  - Make coordinator/session status show when other sessions or other-session runs exist so `runs=0` is not misleading after reload or resume.
-  - Document reload vs full restart verification in the actors/swarm guidance.
-  - Opportunistically improve invalid shadowing recipe launch hints only if it stays diagnostic-only.
-- Non-goals:
-  - No cross-session force kill.
-  - No session attach/adopt/reparent policy.
-  - No relaxation of current ownership gates.
-- Acceptance:
-  - Operators can verify the loaded pi-actors version/path from an inspect/tool surface after reload.
-  - Session mismatch responses carry structured details and a compact human hint.
-  - Coordinator/session status exposes other-session counts without leaking unrelated run details by default.
-  - Tests cover version inspection, session mismatch shape, and other-session count summaries.
-
-### M-13 Shadowed Recipe Launch Diagnostics
-
-- Priority: High.
-- Status: Done.
-- Goal: Make broken user recipes that shadow packaged/ad hoc candidates obvious only at the moment a launch already fails.
-- Why now: 0.26 dogfood found a broken `~/.pi/agent/recipes/actor-worker.json` shadowing the packaged `actor-worker`; Recipe Doctor exposed the evidence, but the launch path did not provide a direct hint.
-- Direction:
-  - Treat shadowing as a normal, intentional override mechanism; do not warn on healthy shadowing.
-  - When recipe resolution or launch fails because the active user recipe is invalid/disabled and a lower-priority candidate exists, surface `reason=shadowed_invalid` or `reason=shadowed_disabled` where practical.
-  - Treat disabled template recipes as non-launchable so disabled shadowing fails consistently instead of silently executing.
-  - Include minimal compact tokens: active path, blocked candidate path, and `hint=inspect_recipes_doctor`.
-  - Keep remediation advisory only; do not auto-disable, delete, rewrite, or nag about user recipes.
-- Acceptance:
-  - Healthy user overrides remain silent.
-  - Launch failures caused by invalid/disabled shadowing include a compact actionable hint.
-  - Verbose details expose the active broken recipe and blocked fallback candidate.
-  - Tests cover invalid and disabled user recipes shadowing a packaged candidate.
-
 ### M-14 Session Mismatch Follow-through
 
 - Priority: Medium.
@@ -293,6 +73,107 @@ The backlog is intentionally pruned to the 20% of work most likely to deliver 80
   - Stale claims are reproducible and visible in worker status.
   - Tests cover stale-claim counting without adding scheduler/broker policy.
 
+### M-17 Message Delivery Outcome Contract
+
+- Priority: High.
+- Status: Planned.
+- Goal: Normalize `message` results so operators can distinguish delivered, queued, persisted, forwarded, unsupported, and ownership-denied outcomes.
+- Why now: Branch message UX already treats durable branch mailbox persistence as a successful queued outcome when a parent endpoint is unavailable; that local fix should become a consistent message-result membrane.
+- Direction:
+  - Define compact delivery fields: `queued`, `delivered`, `persisted`, `forwarded`, `consumer`, `reason`, and `hint`.
+  - Apply the shape to `run:<id>`, `branch:<run>/<branch>`, `room:<run>`, `coordinator`, `session:`, and `tool:<name>` where meaningful.
+  - Reuse M-14 session mismatch shape for ownership-denied outcomes.
+  - Do not claim guaranteed live consumption unless a known consumer exists.
+  - Do not add a broker, distributed delivery semantics, or a new public noun.
+- Acceptance:
+  - Branch messages clearly report queued/persisted state and known worker-consumer state where available.
+  - Room messages distinguish timeline append success from forwarded branch-targeted copies.
+  - Tests cover at least run, branch, room, coordinator, and ownership-denied outcomes.
+
+### M-18 Candidate Recipe Promotion UX
+
+- Priority: High.
+- Status: Planned.
+- Goal: Make successful ad hoc actor patterns easy to promote manually from candidate memory into active user recipe memory.
+- Why now: Candidate recipes under `~/.pi/agent/recipes/candidates` are replayable but intentionally not active tools; the two-stage memory model now needs an explicit operator-gated promotion path.
+- Direction:
+  - List candidate recipes with source run, timestamp, fingerprint, description/template preview, and validation status.
+  - Promote a selected candidate to `~/.pi/agent/recipes/<name>.json` only through an explicit action or explicit tool argument.
+  - Run recipe validation/doctor before writing and expose collision/shadowing diagnostics.
+  - Preserve candidate files unless deletion is explicitly requested.
+  - Prefer extending existing registry/tool surfaces over adding a new public noun.
+- Acceptance:
+  - Candidate recipes remain non-tools until promotion.
+  - Promotion writes atomically and never auto-promotes.
+  - Tests cover valid promotion, invalid candidate, name collision, and packaged-recipe shadowing.
+  - Docs explain candidate memory vs active tool memory in one compact section.
+
+### M-19 Recipe Doctor Risk Labels v2
+
+- Priority: Medium.
+- Status: Planned.
+- Goal: Evolve recipe doctor into a compact capability-risk membrane without pretending to sandbox trusted local execution.
+- Why now: Recipe doctor already has remediation UX; the next useful slice is deterministic advisory risk classification for local capabilities.
+- Direction:
+  - Add advisory labels such as `risk.shell`, `risk.eval`, `risk.broad_fs_write`, `risk.destructive_fs`, `risk.network`, `risk.external_side_effect`, `risk.long_running`, `risk.platform_specific`, and `risk.secret_touching`.
+  - Keep labels advisory and deterministic; do not block execution unless existing validation already blocks it.
+  - Expose compact risk summaries in `inspect target=recipes view=doctor` and verbose per-recipe labels.
+  - Keep launch-time warnings quiet except for already-failing or clearly dangerous cases.
+  - Preserve honest wording: trusted local execution, not isolation.
+- Acceptance:
+  - Risk labels are deterministic and tested.
+  - Existing risky shell-boundary diagnostics remain intact.
+  - Doctor output stays compact by default.
+  - README/docs do not introduce sandbox or security-boundary claims.
+
+### M-20 Runtime Triage Surface
+
+- Priority: Medium.
+- Status: Planned.
+- Goal: Add one compact operator triage view that answers what needs attention right now without performing repairs.
+- Why now: Runtime status, recipe doctor, candidates, stale claims, session mismatches, failed runs, and other-session counts are currently separate bounded surfaces.
+- Direction:
+  - Add `inspect target=tool:pi-actors view=triage` or an equivalent existing inspect surface.
+  - Summarize runtime version/mode, active runs, other-session runs, invalid or blocking recipes, high-risk recipes, candidate recipes, stale worker claims, recent failed runs, attention messages, and suggested next inspect actions.
+  - Keep every warning tied to a next inspect/action hint.
+  - Do not auto-repair, auto-prune, relax ownership, or hide detailed source-of-truth views.
+- Acceptance:
+  - Triage output is compact enough for agent context.
+  - Healthy and degraded states are covered by tests.
+  - Detailed inspect/doctor/status views remain source of truth.
+
+### M-21 Packaged Recipe QA Matrix
+
+- Priority: Medium.
+- Status: Planned.
+- Goal: Prevent packaged recipes from drifting into inconsistent mailbox, artifact, platform, or package-root behavior.
+- Why now: Packaged recipes are standard-library components; they should be boringly consistent before operators copy or register them as durable local capabilities.
+- Direction:
+  - Add an internal QA check over `recipes/*.json` for descriptions, async mailbox contracts, termination vocabulary, artifact declarations, platform notes, installed-package-safe helper paths, and compiled shim coverage.
+  - Keep `control.kill` as generic runtime termination and allow `control.stop` / `control.cancel` only as actor-domain vocabulary.
+  - Fail with exact recipe/path/key diagnostics.
+  - Avoid a broad recipe-library rewrite beyond violations discovered by the check.
+- Acceptance:
+  - QA runs under an existing validation command or a clearly named subcheck used by `npm run validate`.
+  - Tests/fixtures cover at least one positive and one negative case.
+  - Packaged recipes remain optional components, not policy workflows.
+
+### M-22 Wake and Watcher Chaos Fixtures
+
+- Priority: Medium.
+- Status: Planned.
+- Goal: Harden the invariant that durable files are canonical and wake notifications are advisory acceleration.
+- Why now: Wake, watcher, line-counter, and JSONL resilience are central to operator trust as actor counts grow.
+- Direction:
+  - Add deterministic fixtures for watcher restart, line-counter reset, duplicate terminal events, missing wake with present inbox record, wake before file catch-up, corrupt JSONL with later valid records, and killed run with stale progress phase.
+  - Preserve event-driven observability without reintroducing polling-first coordination examples.
+  - Keep tests fast and local.
+- Acceptance:
+  - Duplicate follow-ups do not reappear.
+  - Missing wake does not lose durable messages.
+  - Corrupt records degrade inspect but do not kill it.
+  - Killed/stale progress states remain diagnosable.
+
 ## Explicitly Deferred
 
 These are valid ideas but not current focus. Reintroduce only with concrete evidence from real actor workflows.
@@ -301,6 +182,7 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 - Run restart/reattach policy: risky for isolation; defer until corruption recovery and protocol fixtures are stronger.
 - Cross-session force kill or attach/adopt/reparent: useful later, but ownership policy should not change until observability makes current boundaries clear.
 - Actor address helper CLI: keep diagnostics improving opportunistically inside existing parser/tests.
+- Golden flow docs and flow conformance runner: useful after M-14, M-15, M-17, and M-18 make the diagnostic and promotion surfaces stable.
 - Documentation refactor: defer until the canonical mailbox loop and worker recipe exist; avoid rewriting docs twice.
 - Host-level tool unregistration: blocked on host API support.
 - Branch-local checkpoint semantics: wait for real collaborative branch-runner experiments.
@@ -310,4 +192,5 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 
 ```text
 Next milestone: M-14 Session Mismatch Follow-through.
+Then: M-15 Worker Stale-Claim Dogfood → M-17 Message Delivery Outcome Contract → M-18 Candidate Recipe Promotion UX.
 ```

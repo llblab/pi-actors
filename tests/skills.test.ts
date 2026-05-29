@@ -39,7 +39,11 @@ test("Packaged skills metadata versions match package version", () => {
     "skills/swarm/SKILL.md",
   ]);
   for (const skillPath of packagedSkillPaths) {
-    assert.equal(readSkillMetadataVersion(skillPath), packageJson.version, skillPath);
+    assert.equal(
+      readSkillMetadataVersion(skillPath),
+      packageJson.version,
+      skillPath,
+    );
   }
 });
 
@@ -59,8 +63,10 @@ test("Packaged skills are registered through dist metadata", () => {
 
 test("Auto-discovered extension contributes co-located skills", () => {
   const extensionSource = readFileSync("index.ts", "utf8");
+  const pathsSource = readFileSync("lib/paths.ts", "utf8");
   assert.match(extensionSource, /pi\.on\("resources_discover"/);
-  assert.match(extensionSource, /skillPaths:\s*\[EXTENSION_SKILLS_DIR\]/);
+  assert.match(extensionSource, /Paths\.getExistingExtensionSkillPaths/);
+  assert.match(pathsSource, /getExtensionSkillsDir/);
 });
 
 test("Packaged skill frontmatter scalar lines avoid extra colons", () => {
@@ -91,7 +97,11 @@ test("Packaged swarm skill stays independent of pi-actors concrete runtime", () 
   for (const path of listMarkdownFiles("skills/swarm")) {
     const content = readFileSync(path, "utf8");
     for (const pattern of forbiddenPatterns) {
-      assert.doesNotMatch(content, pattern, `${path} should not mention ${pattern}`);
+      assert.doesNotMatch(
+        content,
+        pattern,
+        `${path} should not mention ${pattern}`,
+      );
     }
   }
 });
@@ -118,12 +128,20 @@ test("Packaged actors skill top recipes link prioritized recipes and deep invent
   assert.match(actorSkill, /docs\/actors-deep-reference\.md/);
   assert.match(actorSkill, /docs\/recipe-library\.md/);
 
-  const linkedRecipes = [...topRecipes.matchAll(/\.\.\/\.\.\/recipes\/([^\)]+\.json)/g)]
+  const linkedRecipes = [
+    ...topRecipes.matchAll(/\.\.\/\.\.\/recipes\/([^\)]+\.json)/g),
+  ]
     .map((match) => match[1])
     .sort();
   assert.equal(linkedRecipes.length, 5, "top recipes should stay curated");
-  assert.ok(linkedRecipes.length < readdirSync("recipes").filter((name) => name.endsWith(".json")).length);
+  assert.ok(
+    linkedRecipes.length <
+      readdirSync("recipes").filter((name) => name.endsWith(".json")).length,
+  );
   for (const recipeFile of linkedRecipes) {
-    assert.ok(existsSync(join("recipes", recipeFile)), `${recipeFile} should exist`);
+    assert.ok(
+      existsSync(join("recipes", recipeFile)),
+      `${recipeFile} should exist`,
+    );
   }
 });

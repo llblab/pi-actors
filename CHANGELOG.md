@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## 0.34.0: Actor Kernel Domain Compression
+
+- `[Context]` Added a critical tools-domain split track and durable naming guidance: split broad buckets proactively, use `tool-<verb>.ts` for independent public agent-tool domains when deleting `tools.ts`, reserve `tools-<part>.ts` only for a retained `tools.ts` aggregate-root architecture, keep non-tool domains unprefixed, and avoid new `utils` or compatibility barrels when direct owned-domain imports work.
+- `[Domains]` Started the `tools.ts` split by moving JSON schema builders into `schema.ts` and compact response helpers into the tool-family response path, reducing the remaining tool bucket to public tool composition rather than generic schema ownership.
+- `[Domains]` Moved the public `message` actor tool behavior into `tools-message.ts`, including run controls, branch/room delivery, tool actor invocation, and compact delivery next actions.
+- `[Domains]` Moved shared session ownership guards and normalized mismatch diagnostics into `tools-access.ts` so public tools can share one access contract without copying ownership checks.
+- `[Domains]` Moved mailbox contract normalization and accepted/emitted type extraction into `tools-mailbox.ts`, removing duplicated mailbox metadata handling from message and inspect tool paths.
+- `[Domains]` Added `tools-response.ts` for compact public tool responses and next-action rendering shared by spawn, inspect, and registered tool paths; moved recipe registry compact summaries and doctor/import next-action rendering into it.
+- `[Domains]` Moved the public `inspect` actor tool behavior into `tools-inspect.ts`, including recipe registry inspection, room/session/tool/run views, and inspect-specific compact observation formatting.
+- `[Domains]` Moved the public `spawn` actor tool behavior into `tools-spawn.ts`, including actor launch, draft recipe capture, shadowed recipe launch diagnostics, and spawn next-action feedback.
+- `[Domains]` Removed the over-thin `tool-context.ts` extraction and kept tool execution context types local to the domains that use them.
+- `[Domains]` Moved saved local capability execution into `tools-local.ts`, including generated schemas, argument usage hints, runtime value normalization, and async recipe launch behavior.
+- `[Domains]` Moved public `register_tool` behavior into `tools-register.ts`, including the register schema and registry mutation bridge for persisted local capabilities.
+- `[Domains]` Kept `tools.ts` as the public tool-family composition owner, moved decomposed behavior into `tools-*` subdomains, removed the redundant `actor-tools.ts` prefix because this package is already actor-scoped, and documented that any `tools-*` helper reused by non-tools domains must drop the prefix in the same slice.
+- `[Domains]` Removed redundant internal `actor-` prefixes from core library domains: `inspector.ts`, `messages.ts`, `recipes-context.ts`, and `rooms.ts`; public recipe/script/docs names that intentionally expose actor terminology stay unchanged.
+- `[Scripts]` Collapsed the one-off `run-executor.ts`, `worker.ts`, `validate-recipe.ts`, `recipe-utils.ts`, `locker.ts`, and `coordinator.ts` domains into their owning scripts; reusable lifecycle, room, mailbox, and recipe-reference primitives stay in `lib/`, while public scripts own their executable control loops directly.
+- `[Domains]` Started decomposing the oversized `async-runs.ts` lifecycle aggregate into `runs-*` subdomains, moving artifact manifest handling to `runs-artifacts.ts`, durable run inbox locking/claim handling to `runs-mailbox.ts`, process-control signal helpers to `runs-control.ts`, outbox event parsing/payload formatting to `runs-outbox.ts`, run-state index discovery/rebuild logic to `runs-index.ts`, id normalization to `runs-identity.ts`, archive/prune retention behavior to `runs-retention.ts`, process identity/liveness checks to `runs-process.ts`, run message delivery to `runs-messages.ts`, status/log derivation to `runs-status.ts`, and start lock/reuse guards to `runs-start.ts` while preserving the `async-runs.ts` facade.
+- `[Context]` Reversed the thin-script default: `scripts/*.mjs` should own script-only executable behavior, and behavior should move into `lib/` only for real non-script reuse or existing reusable domain ownership; packaging/tests/shim neatness alone no longer justify a lib domain.
+- `[Context]` Polished domain ownership headers after the file moves so command templates, actor messages, rooms, recipe context, inspector previews, and mailbox loops describe their actual reasons to change without generic helper wording.
+- `[Domains]` Renamed generic `output.ts` to `execution-output.ts` so registered-tool stdout/stderr truncation and temp artifact formatting are tied to the execution domain instead of a broad output bucket.
+- `[Domains]` Renamed the recipe domain family from singular `recipe-*` to plural `recipes-*` (`recipes-references.ts`, `recipes-discovery.ts`, `recipes-usage.ts`, `recipes-context.ts`) to match the `tools-*` and `runs-*` family convention.
+- `[Tests]` Extended installed-package contract coverage to assert stale renamed lib domains are absent from `dist/lib`, keeping packaged JS output aligned with the current domain names.
 
 ## 0.33.0: Signal-First Compatibility Pruning
 

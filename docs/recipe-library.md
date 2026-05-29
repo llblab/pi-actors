@@ -125,7 +125,7 @@ The repeatable smoke surface is the normal validation suite:
 npm test
 ```
 
-The scenario coverage is intentionally local-first and bounded: shared room coordination and roster snapshots (`actor-rooms` / `tools` tests), direct branch delivery and claim/handle transitions (`tools` and coordinator tests), inspector navigation (`actor-inspector-tui` tests), recipe context injection (`actor-recipe-context` / async-run tests), recipe persistence suggestions (`observability` tests), and opt-in retirement candidate/execution smoke (`observability` / async-run tests). These scenarios exercise public `spawn` / `message` / `inspect` behavior or the packaged script surfaces rather than relying on manual swarm demos.
+The scenario coverage is intentionally local-first and bounded: shared room coordination and roster snapshots (`rooms` / `tools` tests), direct branch delivery and claim/handle transitions (`tools` and coordinator tests), inspector navigation (`inspector` tests), recipe context injection (`recipes-context` / async-runs tests), recipe persistence suggestions (`observability` tests), and opt-in retirement candidate/execution smoke (`observability` / async-runs tests). These scenarios exercise public `spawn` / `message` / `inspect` behavior or the packaged script surfaces rather than relying on manual swarm demos.
 
 ## Music Player
 

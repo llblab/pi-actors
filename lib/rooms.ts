@@ -1,14 +1,14 @@
 /**
- * Actor room persistence helpers.
- * Zones: room timelines, room rosters, cross-branch discovery state
- * Owns small file-backed room state; routing policy stays in tools/runtime adapters.
+ * Actor room persistence.
+ * Zones: room timelines, rosters, branch inboxes, cross-branch discovery state
+ * Owns file-backed room and branch-mailbox state; routing policy stays in tools/runtime adapters.
  */
 
 import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import * as path from "node:path";
 
-import type { ActorMessage } from "./actor-messages.ts";
+import type { ActorMessage } from "./messages.ts";
 import * as Limits from "./limits.ts";
 import { notifyRuntimeWake } from "./runtime-notifier.ts";
 import {

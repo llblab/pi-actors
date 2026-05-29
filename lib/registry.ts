@@ -7,13 +7,13 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import * as Config from "./config.ts";
-import * as Identity from "./identity.ts";
-import * as Output from "./output.ts";
 import * as CommandTemplates from "./command-templates.ts";
+import * as Config from "./config.ts";
+import * as ExecutionOutput from "./execution-output.ts";
 import { writeJsonAtomic } from "./file-state.ts";
+import * as Identity from "./identity.ts";
 import * as Paths from "./paths.ts";
-import * as RecipeReferences from "./recipe-references.ts";
+import * as RecipesReferences from "./recipes-references.ts";
 import * as Schema from "./schema.ts";
 
 export interface RegisterToolInput {
@@ -71,7 +71,7 @@ function listTools<TContext>(
   return {
     content: [
       textContent(
-        Output.formatToolText(
+        ExecutionOutput.formatToolText(
           names.length > 0
             ? `Registered tools:\n${names.map((name) => `- ${name}`).join("\n")}`
             : "No registered tools.",
@@ -122,7 +122,9 @@ function deleteTool<TContext>(
   if (!tools.has(name)) {
     return {
       content: [
-        textContent(Output.formatToolText(`Tool "${name}" not found.`)),
+        textContent(
+          ExecutionOutput.formatToolText(`Tool "${name}" not found.`),
+        ),
       ],
       details: { tool: name },
     };
@@ -137,7 +139,7 @@ function deleteTool<TContext>(
   return {
     content: [
       textContent(
-        Output.formatToolText(
+        ExecutionOutput.formatToolText(
           `Deleted tool "${name}". Reload to remove it from the complete registry.`,
         ),
       ),
@@ -157,7 +159,7 @@ function getInputTemplate(
     });
     if (steps.length === 0)
       throw new Error(
-        Output.formatToolText("Tool template sequence is empty."),
+        ExecutionOutput.formatToolText("Tool template sequence is empty."),
       );
     return value;
   }
@@ -168,7 +170,9 @@ function getInputTemplate(
     return value as CommandTemplates.CommandTemplateConfig;
   }
   throw new Error(
-    Output.formatToolText("Tool template must be a string, object, or sequence."),
+    ExecutionOutput.formatToolText(
+      "Tool template must be a string, object, or sequence.",
+    ),
   );
 }
 
@@ -182,26 +186,30 @@ function buildConfig(
       ? undefined
       : Schema.parseToolArgDeclarations(input.args);
   if (explicitArgs?.error)
-    throw new Error(Output.formatToolText(explicitArgs.error));
+    throw new Error(ExecutionOutput.formatToolText(explicitArgs.error));
   const description = (input.description ?? existing?.description ?? "").trim();
   if (!description) {
     throw new Error(
-      Output.formatToolText("Tool description is required unless deleting."),
+      ExecutionOutput.formatToolText(
+        "Tool description is required unless deleting.",
+      ),
     );
   }
   const template = getInputTemplate(input.template);
   if (template === null) {
     throw new Error(
-      Output.formatToolText("Tool template cannot be null here."),
+      ExecutionOutput.formatToolText("Tool template cannot be null here."),
     );
   }
   const finalTemplate =
     template === undefined || template === "" ? existing?.template : template;
   if (!finalTemplate) {
-    throw new Error(Output.formatToolText("Tool template is required."));
+    throw new Error(
+      ExecutionOutput.formatToolText("Tool template is required."),
+    );
   }
   const inputRecipe = typeof input.async === "boolean" ? name : undefined;
-  const recipe: RecipeReferences.TemplateRecipeConfig | undefined = inputRecipe
+  const recipe: RecipesReferences.TemplateRecipeConfig | undefined = inputRecipe
     ? {
         name: inputRecipe,
         ...(typeof input.async === "boolean" ? { async: input.async } : {}),
@@ -222,7 +230,7 @@ function buildConfig(
     : existing?.storedArgs;
   const storedDefaults =
     Object.keys(defaults).length > 0 ? defaults : undefined;
-  const recipeTemplate = RecipeReferences.getRecipeTemplate(finalTemplate);
+  const recipeTemplate = RecipesReferences.getRecipeTemplate(finalTemplate);
   const argTemplate = recipeTemplate ?? finalTemplate;
   const argTemplateConfig: CommandTemplates.CommandTemplateConfig =
     typeof argTemplate === "object" && !Array.isArray(argTemplate)
@@ -248,10 +256,10 @@ function buildConfig(
     template: finalTemplate,
     ...(recipe ? { recipe } : {}),
     args:
-      RecipeReferences.isRecipeTool(finalTemplate, recipe) &&
+      RecipesReferences.isRecipeTool(finalTemplate, recipe) &&
       storedArgs !== undefined
         ? Schema.getExplicitToolArgNames(storedArgs)
-        : RecipeReferences.isRecipeReference(finalTemplate) && !recipeTemplate
+        : RecipesReferences.isRecipeReference(finalTemplate) && !recipeTemplate
           ? Schema.getExplicitToolArgNames(storedArgs)
           : Schema.getToolArgNames(argTemplateConfig),
     defaults,
@@ -269,9 +277,12 @@ export async function executeRegisterTool<TContext>(
   const input = params as RegisterToolInput;
   if (!input.name) return listTools(deps);
   const name = Identity.normalizeToolName(input.name);
-  if (!name) throw new Error(Output.formatToolText("Invalid tool name."));
+  if (!name)
+    throw new Error(ExecutionOutput.formatToolText("Invalid tool name."));
   if (deps.reservedToolNames.has(name)) {
-    throw new Error(Output.formatToolText(`Reserved tool name: ${name}`));
+    throw new Error(
+      ExecutionOutput.formatToolText(`Reserved tool name: ${name}`),
+    );
   }
   const templateProvided = Object.hasOwn(input, "template");
   const template = getInputTemplate(input.template);
@@ -280,17 +291,19 @@ export async function executeRegisterTool<TContext>(
   const tools = deps.getTools();
   const existing = tools.get(name);
   const conflict = deps.getExternalToolConflict(name);
-  if (conflict) throw new Error(Output.formatToolText(conflict));
+  if (conflict) throw new Error(ExecutionOutput.formatToolText(conflict));
   if (existing && !input.update) {
     throw new Error(
-      Output.formatToolText(
+      ExecutionOutput.formatToolText(
         `Tool "${name}" already registered. Use update=true to overwrite.`,
       ),
     );
   }
   if (template === undefined && !existing) {
     throw new Error(
-      Output.formatToolText("Tool template is required for new registrations."),
+      ExecutionOutput.formatToolText(
+        "Tool template is required for new registrations.",
+      ),
     );
   }
   const cfg = buildConfig(name, input, existing);
@@ -299,7 +312,7 @@ export async function executeRegisterTool<TContext>(
     recipePath = persistToolRecipe(deps, cfg);
   } catch (error) {
     throw new Error(
-      Output.formatToolText(
+      ExecutionOutput.formatToolText(
         `Failed to persist tool recipe: ${error instanceof Error ? error.message : String(error)}`,
       ),
     );
@@ -320,7 +333,7 @@ export async function executeRegisterTool<TContext>(
   return {
     content: [
       textContent(
-        Output.formatToolText(
+        ExecutionOutput.formatToolText(
           `${existing ? "Updated" : "Registered"} tool "${name}" (args: ${Schema.formatToolArgs(cfg.args)}).${warningText}`,
         ),
       ),

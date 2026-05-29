@@ -14,10 +14,10 @@ import {
   renderInspectorRosterLine,
   renderInspectorRosterPanel,
   renderInspectorWidget,
-} from "../lib/actor-inspector-tui.ts";
+} from "../lib/inspector.ts";
 
 test("Actor inspector TUI reads room and direct previews", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-tui-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-"));
   try {
     const stateDir = join(root, "demo");
     await mkdir(join(stateDir, "rooms", "main"), { recursive: true });

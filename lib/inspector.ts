@@ -1,6 +1,7 @@
 /**
- * Actor inspector TUI previews.
- * Zones: terminal actor inspection, room/direct message previews, no-dependency UI formatting
+ * Inspector preview rendering.
+ * Zones: terminal run inspection, room/direct message previews, no-dependency UI formatting
+ * Owns read-only previews and TUI-ready summaries; actor routing stays outside.
  */
 
 import * as fs from "node:fs";
@@ -8,7 +9,7 @@ import * as path from "node:path";
 
 import { visibleWidth } from "@earendil-works/pi-tui";
 
-import type { ActorMessage } from "./actor-messages.ts";
+import type { ActorMessage } from "./messages.ts";
 import * as Limits from "./limits.ts";
 import * as Paths from "./paths.ts";
 import {

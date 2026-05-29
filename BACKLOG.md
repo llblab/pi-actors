@@ -187,5 +187,5 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 ```text
 Next milestone: M-15 Worker Stale-Claim Dogfood.
 Then: M-17 Message Delivery Outcome Contract → M-18 Draft Recipe Promotion UX.
-Small cleanup lane: M-23 Tool Boundary Type Tightening → M-24 Registry Path Naming Cleanup.
+Small cleanup lane: continue opportunistic domain polish only when a real ownership boundary appears.
 ```

@@ -1,12 +1,13 @@
 /**
- * Actor recipe context prompt helpers.
+ * Recipe context prompt assembly.
  * Zones: async runner prompt context, recipe provenance, LLM child launches
+ * Owns compact actor recipe context records appended to child-agent prompts.
  */
 
 import { basename } from "node:path";
 
 import type { CommandTemplateActorRecipeContext } from "./command-templates.ts";
-import type { TemplateRecipeContextRecord } from "./recipe-references.ts";
+import type { TemplateRecipeContextRecord } from "./recipes-references.ts";
 
 export interface MarkedRecipeContextRecord extends TemplateRecipeContextRecord {
   you_are_here?: true;

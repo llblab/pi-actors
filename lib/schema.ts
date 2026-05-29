@@ -30,6 +30,61 @@ export interface ToolArgSpec {
   error?: string;
 }
 
+export type JsonSchema = Record<string, unknown>;
+
+export function stringSchema(description: string): JsonSchema {
+  return { description, type: "string" };
+}
+
+export function typedArgSchema(
+  description: string,
+  type: ToolArgType | undefined,
+): JsonSchema {
+  if (!type) return stringSchema(description);
+  switch (type.kind) {
+    case "int":
+      return { description, type: "integer" };
+    case "number":
+      return { description, type: "number" };
+    case "bool":
+      return { description, type: "boolean" };
+    case "array":
+      return { description, items: {}, type: "array" };
+    case "enum":
+      return { description, enum: type.values, type: "string" };
+    case "path":
+    case "string":
+      return stringSchema(description);
+  }
+}
+
+export function booleanSchema(description: string): JsonSchema {
+  return { description, type: "boolean" };
+}
+
+export function nullSchema(description: string): JsonSchema {
+  return { description, type: "null" };
+}
+
+export function arraySchema(description: string): JsonSchema {
+  return { description, items: {}, type: "array" };
+}
+
+export function unionSchema(anyOf: JsonSchema[]): JsonSchema {
+  return { anyOf };
+}
+
+export function objectSchema(
+  properties: Record<string, JsonSchema>,
+  required: string[] = [],
+): JsonSchema {
+  return { additionalProperties: false, properties, required, type: "object" };
+}
+
+export function looseObjectSchema(description: string): JsonSchema {
+  return { additionalProperties: true, description, type: "object" };
+}
+
 function mergeUnique(items: string[]): string[] {
   return [...new Set(items.filter(Boolean))];
 }

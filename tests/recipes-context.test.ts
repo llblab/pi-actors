@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { appendRecipeContextToPiArgs, formatRecipeContextJsonl } from "../lib/actor-recipe-context.ts";
+import { appendRecipeContextToPiArgs, formatRecipeContextJsonl } from "../lib/recipes-context.ts";
 
 const records = [
   {

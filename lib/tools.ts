@@ -27,6 +27,34 @@ export type RegisterToolInput = Registry.RegisterToolInput;
 export type RegisterToolRuntimeDeps<TContext> =
   Registry.RegisterToolRuntimeDeps<TContext>;
 
+export interface CoreActorToolDefinitionDeps<TContext extends AsyncRunToolContext> {
+  configPath: string;
+  getActiveTools: () => string[];
+  getRuntimeTool: (name: string) => unknown;
+  registryRuntime: Pick<
+    RegisterToolRuntimeDeps<TContext>,
+    | "getExternalToolConflict"
+    | "getTools"
+    | "notify"
+    | "registerRuntimeTool"
+  >;
+  setActiveTools: (toolNames: string[]) => void;
+}
+
+export const RESERVED_TOOL_NAMES = new Set([
+  "read",
+  "write",
+  "edit",
+  "bash",
+  "find",
+  "grep",
+  "ls",
+  "register_tool",
+  "message",
+  "spawn",
+  "inspect",
+]);
+
 type JsonSchema = Record<string, unknown>;
 
 function stringSchema(description: string): JsonSchema {
@@ -183,7 +211,8 @@ function compactAsyncRunStatus(value: unknown): string {
     tokens.push(`failures=${failures}`);
   if (result.code !== undefined) tokens.push(`code=${String(result.code)}`);
   if (result.killed === true) tokens.push("killed=true");
-  if (status.candidate_recipe) tokens.push(`candidate_recipe=${String(status.candidate_recipe)}`);
+  if (status.candidate_recipe)
+    tokens.push(`candidate_recipe=${String(status.candidate_recipe)}`);
   return `\n${tokens.join(" ")}`;
 }
 
@@ -448,10 +477,17 @@ function compactSessionRuns(
   summary: Record<string, unknown> = {},
 ): string {
   const suffix = [
-    summary.other_sessions !== undefined ? `other_sessions=${String(summary.other_sessions)}` : "",
-    summary.other_runs !== undefined ? `other_runs=${String(summary.other_runs)}` : "",
-  ].filter(Boolean).join(" ");
-  if (runs.length === 0) return `\nsession=${session} runs=0${suffix ? ` ${suffix}` : ""}`;
+    summary.other_sessions !== undefined
+      ? `other_sessions=${String(summary.other_sessions)}`
+      : "",
+    summary.other_runs !== undefined
+      ? `other_runs=${String(summary.other_runs)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  if (runs.length === 0)
+    return `\nsession=${session} runs=0${suffix ? ` ${suffix}` : ""}`;
   return `\nsession=${session} runs=${runs.length}${suffix ? ` ${suffix}` : ""}\n${runs
     .map((run) => {
       const tokens = [
@@ -471,14 +507,21 @@ function getPiActorsRuntimeStatus(): Record<string, unknown> {
   const packageRoot = dirname(packagedRecipeRoot);
   const packageJsonPath = join(packageRoot, "package.json");
   const packageJson = existsSync(packageJsonPath)
-    ? JSON.parse(readFileSync(packageJsonPath, "utf8")) as Record<string, unknown>
+    ? (JSON.parse(readFileSync(packageJsonPath, "utf8")) as Record<
+        string,
+        unknown
+      >)
     : {};
   let git_commit: string | undefined;
   try {
-    git_commit = execFileSync("git", ["-C", packageRoot, "rev-parse", "--short", "HEAD"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    git_commit = execFileSync(
+      "git",
+      ["-C", packageRoot, "rev-parse", "--short", "HEAD"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    ).trim();
   } catch {
     git_commit = undefined;
   }
@@ -510,12 +553,13 @@ function compactToolActor(name: string, tool: Record<string, unknown>): string {
 
 function compactRecipeImports(summary: Record<string, unknown>): string {
   const active = Array.isArray(summary.active)
-    ? summary.active as Array<Record<string, unknown>>
+    ? (summary.active as Array<Record<string, unknown>>)
     : [];
   const lines = active.flatMap((entry) => {
     const imports = asRecord(entry.imports);
     return Object.entries(imports).map(([alias, value]) => {
-      const binding = typeof value === "string" ? { from: value } : asRecord(value);
+      const binding =
+        typeof value === "string" ? { from: value } : asRecord(value);
       return `recipe=${String(entry.id ?? "<unknown>")} alias=${alias} from=${String(binding.from ?? value)}`;
     });
   });
@@ -552,7 +596,10 @@ function compactRecipeDoctor(summary: Record<string, unknown>): string {
     );
   }
   for (const item of remediations.slice(0, 8)) {
-    const action = compactPreview(item.action, Limits.DOCTOR_ACTION_PREVIEW_CHARS);
+    const action = compactPreview(
+      item.action,
+      Limits.DOCTOR_ACTION_PREVIEW_CHARS,
+    );
     const blocked = item.blocked_candidate
       ? ` blocked=${compactPreview(item.blocked_candidate, Limits.DOCTOR_ACTION_PREVIEW_CHARS)}`
       : "";
@@ -717,7 +764,11 @@ function formatToolActorFailure(
 function shadowedRecipeLaunchDiagnostic(
   recipe: unknown,
 ): Record<string, unknown> | undefined {
-  if (typeof recipe !== "string" || recipe.includes("/") || recipe.includes("~"))
+  if (
+    typeof recipe !== "string" ||
+    recipe.includes("/") ||
+    recipe.includes("~")
+  )
     return undefined;
   const discovery = RecipeDiscovery.discoverRecipeSources([
     { root: Paths.getRecipeRoot(), defaultTool: true, mutableUsage: true },
@@ -730,7 +781,9 @@ function candidateRecipeName(run: string): string {
   return `${run.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "spawn"}.json`;
 }
 
-function candidateRecipeDefaults(values: Record<string, unknown>): Record<string, unknown> | undefined {
+function candidateRecipeDefaults(
+  values: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   const ignored = new Set([
     "actor_address",
     "communication_file",
@@ -753,7 +806,11 @@ function writeSpawnCandidateRecipe(
     process.env.PI_ACTORS_ENABLE_SPAWN_CANDIDATES_IN_TEST !== "1"
   )
     return undefined;
-  if (input.template === undefined || input.file !== undefined || input.recipe !== undefined)
+  if (
+    input.template === undefined ||
+    input.file !== undefined ||
+    input.recipe !== undefined
+  )
     return undefined;
   const root = Paths.getRecipeCandidateRoot();
   mkdirSync(root, { recursive: true });
@@ -772,7 +829,8 @@ function writeSpawnCandidateRecipe(
 
 function enhanceSpawnRecipeError(error: unknown, recipe: unknown): Error {
   const diagnostic = shadowedRecipeLaunchDiagnostic(recipe);
-  if (!diagnostic) return error instanceof Error ? error : new Error(String(error));
+  if (!diagnostic)
+    return error instanceof Error ? error : new Error(String(error));
   const original = error instanceof Error ? error.message : String(error);
   return Object.assign(
     new Error(
@@ -832,12 +890,17 @@ async function routeBranchEnvelope(
   try {
     return await AsyncRuns.sendRunMessage(runId, JSON.stringify(branchMessage));
   } catch (error) {
-    const record = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
+    const record =
+      error && typeof error === "object"
+        ? (error as Record<string, unknown>)
+        : {};
     if (record.queued === true) {
       return {
         control_path: record.control_path,
         control_type: record.control_type,
-        delivery_error: record.delivery_error ?? (error instanceof Error ? error.message : String(error)),
+        delivery_error:
+          record.delivery_error ??
+          (error instanceof Error ? error.message : String(error)),
         inbox_id: record.inbox_id,
         queued: true,
         run: runId,
@@ -1070,7 +1133,12 @@ export function createInspectToolDefinition<TContext = unknown>(
       const target = String(input.target ?? "");
       const view = String(input.view ?? "");
       if (target === "recipes" || target === "recipe-registry") {
-        if (view !== "status" && view !== "summary" && view !== "doctor" && view !== "imports") {
+        if (
+          view !== "status" &&
+          view !== "summary" &&
+          view !== "doctor" &&
+          view !== "imports"
+        ) {
           throw new Error(
             "inspect recipes supports view=status, view=summary, view=doctor, or view=imports.",
           );
@@ -1086,7 +1154,9 @@ export function createInspectToolDefinition<TContext = unknown>(
         const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
         const summary = {
           ...RecipeDiscovery.summarizeDiscovery(discovered),
-          candidates: RecipeDiscovery.listCandidateRecipes(join(recipeRoot, "candidates")),
+          candidates: RecipeDiscovery.listCandidateRecipes(
+            join(recipeRoot, "candidates"),
+          ),
         };
         return {
           content: [
@@ -1147,9 +1217,10 @@ export function createInspectToolDefinition<TContext = unknown>(
         const runs = allRuns.filter(
           (run) => address.value === "all" || run.ownerId === address.value,
         );
-        const sessionSummary = address.value === "all"
-          ? {}
-          : summarizeOtherSessions(address.value || "", allRuns);
+        const sessionSummary =
+          address.value === "all"
+            ? {}
+            : summarizeOtherSessions(address.value || "", allRuns);
         return {
           content: [
             {
@@ -1723,6 +1794,30 @@ export function createActorMessageToolDefinition<TContext = unknown>(
       };
     },
   };
+}
+
+export function createCoreActorToolDefinitions<TContext extends AsyncRunToolContext>(
+  deps: CoreActorToolDefinitionDeps<TContext>,
+): any[] {
+  return [
+    createRegisterToolDefinition<TContext>({
+      configPath: deps.configPath,
+      getActiveTools: deps.getActiveTools,
+      getExternalToolConflict: deps.registryRuntime.getExternalToolConflict,
+      getTools: deps.registryRuntime.getTools,
+      notify: deps.registryRuntime.notify,
+      registerRuntimeTool: deps.registryRuntime.registerRuntimeTool,
+      reservedToolNames: RESERVED_TOOL_NAMES,
+      setActiveTools: deps.setActiveTools,
+    }),
+    createSpawnToolDefinition<TContext>(),
+    createActorMessageToolDefinition<TContext>({
+      getTool: (name) => deps.getRuntimeTool(name),
+    }),
+    createInspectToolDefinition<TContext>({
+      getTool: (name) => deps.getRuntimeTool(name),
+    }),
+  ];
 }
 
 export function createRuntimeToolDefinition(

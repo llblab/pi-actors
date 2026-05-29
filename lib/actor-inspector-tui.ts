@@ -11,7 +11,10 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ActorMessage } from "./actor-messages.ts";
 import * as Limits from "./limits.ts";
 import * as Paths from "./paths.ts";
-import { readJsonFileResilient, readJsonlFileResilient } from "./state-readers.ts";
+import {
+  readJsonFileResilient,
+  readJsonlFileResilient,
+} from "./state-readers.ts";
 
 export interface ActorInspectorPreview {
   body_preview?: string;
@@ -64,6 +67,223 @@ export interface ActorInspectorPreviewReadOptions {
   readKeys?: Iterable<string>;
   roomLimitPerRun?: number;
   unreadOnly?: boolean;
+}
+
+export interface ActorInspectorControllerState {
+  branch?: string;
+  channels?: ActorInspectorPreview["channel"][];
+  mention?: string;
+  readKeys: Set<string>;
+  roomLimitPerRun: number;
+  rows: number;
+  selectedSequence?: number;
+  unreadOnly: boolean;
+  visible: boolean;
+}
+
+export interface ActorInspectorCommandResult {
+  notify: string;
+  type: "info" | "warning";
+  update: boolean;
+}
+
+export const DEFAULT_ACTOR_INSPECTOR_ROWS = 12;
+
+export const ACTOR_INSPECTOR_COMMAND_DESCRIPTIONS = {
+  filter:
+    "Filter actor inspector rows: all, room, direct, broadcast, unread, branch <name>, mention <text>",
+  inspect: "Inspect actor message by visible number",
+  toggle: "Toggle actor inspector widget; optional row count",
+};
+
+export function createActorInspectorControllerState(): ActorInspectorControllerState {
+  return {
+    readKeys: new Set<string>(),
+    roomLimitPerRun: DEFAULT_ACTOR_INSPECTOR_ROWS,
+    rows: DEFAULT_ACTOR_INSPECTOR_ROWS,
+    unreadOnly: false,
+    visible: false,
+  };
+}
+
+export function getActorInspectorPreviewOptions(
+  state: ActorInspectorControllerState,
+  ownerId: string,
+): ActorInspectorPreviewReadOptions {
+  return {
+    channels: state.channels,
+    currentRunOnly: true,
+    branch: state.branch,
+    mention: state.mention,
+    ownerId,
+    readKeys: state.readKeys,
+    roomLimitPerRun: state.roomLimitPerRun,
+    unreadOnly: state.unreadOnly,
+  };
+}
+
+export function handleActorInspectorToggle(
+  state: ActorInspectorControllerState,
+  args: unknown,
+): ActorInspectorCommandResult {
+  const raw = Array.isArray(args) ? args[0] : String(args ?? "");
+  if (String(raw).trim()) {
+    const rows = Number.parseInt(String(raw), 10);
+    if (!Number.isFinite(rows) || rows <= 0) {
+      return {
+        notify: "Usage: /actors-inspector-toggle [rows] where rows > 0",
+        type: "warning",
+        update: false,
+      };
+    }
+    state.rows = rows;
+    state.roomLimitPerRun = rows;
+    state.selectedSequence = undefined;
+    state.visible = true;
+    return {
+      notify: `Actor inspector rows ${rows}`,
+      type: "info",
+      update: true,
+    };
+  }
+  if (state.selectedSequence !== undefined) {
+    state.selectedSequence = undefined;
+    state.visible = true;
+    return { notify: "Actor inspector table", type: "info", update: true };
+  }
+  if (state.visible) state.visible = false;
+  else {
+    state.rows = DEFAULT_ACTOR_INSPECTOR_ROWS;
+    state.roomLimitPerRun = DEFAULT_ACTOR_INSPECTOR_ROWS;
+    state.visible = true;
+  }
+  return {
+    notify: `Actor inspector ${state.visible ? "shown" : "hidden"}`,
+    type: "info",
+    update: true,
+  };
+}
+
+export function handleActorInspectorFilter(
+  state: ActorInspectorControllerState,
+  args: unknown,
+): ActorInspectorCommandResult {
+  const parts = Array.isArray(args)
+    ? args.map(String)
+    : String(args ?? "").split(/\s+/);
+  const mode = (parts[0] ?? "").trim().toLowerCase();
+  if (!mode || mode === "all" || mode === "clear") {
+    state.channels = undefined;
+    state.mention = undefined;
+    state.branch = undefined;
+    state.unreadOnly = false;
+  } else if (mode === "room" || mode === "direct" || mode === "broadcast") {
+    state.channels = [mode];
+    state.mention = undefined;
+  } else if (mode === "unread") {
+    state.unreadOnly = true;
+  } else if (mode === "branch" || mode === "current-branch") {
+    const branch = parts.slice(1).join(" ").trim();
+    if (!branch) {
+      return {
+        notify: `Usage: /actors-inspector-filter ${mode} <branch-name>`,
+        type: "warning",
+        update: false,
+      };
+    }
+    state.branch = branch;
+  } else if (mode === "mention") {
+    const mention = parts.slice(1).join(" ").trim();
+    if (!mention) {
+      return {
+        notify: "Usage: /actors-inspector-filter mention <text>",
+        type: "warning",
+        update: false,
+      };
+    }
+    state.channels = undefined;
+    state.mention = mention;
+  } else {
+    return {
+      notify:
+        "Usage: /actors-inspector-filter all|room|direct|broadcast|unread|branch <name>|mention <text>",
+      type: "warning",
+      update: false,
+    };
+  }
+  state.selectedSequence = undefined;
+  state.visible = true;
+  return {
+    notify: `Actor inspector filter ${mode || "all"}`,
+    type: "info",
+    update: true,
+  };
+}
+
+export function handleActorInspectorInspect(
+  state: ActorInspectorControllerState,
+  args: unknown,
+  previews: ActorInspectorPreview[],
+): ActorInspectorCommandResult {
+  const raw = Array.isArray(args) ? args[0] : String(args ?? "");
+  return selectActorInspectorSequence(
+    state,
+    Number.parseInt(String(raw), 10),
+    previews,
+  );
+}
+
+export function selectActorInspectorSequence(
+  state: ActorInspectorControllerState,
+  sequence: number,
+  previews: ActorInspectorPreview[],
+): ActorInspectorCommandResult {
+  if (!Number.isFinite(sequence) || sequence <= 0) {
+    return {
+      notify: "Usage: /actors-inspect <number>",
+      type: "warning",
+      update: false,
+    };
+  }
+  const preview = previews.find((item) => item.sequence === sequence);
+  if (preview) state.readKeys.add(inspectorPreviewReadKey(preview));
+  state.selectedSequence = sequence;
+  state.visible = true;
+  return {
+    notify: `Actor inspect item ${sequence}`,
+    type: "info",
+    update: true,
+  };
+}
+
+export function renderActorInspectorPanel(input: {
+  stateRoot: string;
+  state: ActorInspectorControllerState;
+  ownerId: string;
+  width: number;
+  style: ActorInspectorWidgetStyle;
+}): string[] {
+  const previews = readActorInspectorPreviews(
+    input.stateRoot,
+    input.state.rows,
+    getActorInspectorPreviewOptions(input.state, input.ownerId),
+  );
+  const rows =
+    (input.state.selectedSequence !== undefined
+      ? renderInspectorItemView(previews, input.width, input.style, {
+          sequence: input.state.selectedSequence,
+        })
+      : renderInspectorWidget(previews, input.width, input.style)) ?? [];
+  const run = previews[0]?.run;
+  const roster =
+    input.state.selectedSequence === undefined && run
+      ? renderInspectorRosterPanel(
+          readActorInspectorRoster(input.stateRoot, run),
+          input.width,
+          input.style,
+        )
+      : undefined;
+  return roster ? [...roster, ...rows] : rows;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

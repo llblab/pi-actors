@@ -4,7 +4,13 @@
  * Owns ambient summaries, terminal events, and run outbox delivery for detached command-template runs
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  watch,
+  type FSWatcher,
+} from "node:fs";
 import {
   basename,
   dirname,
@@ -58,6 +64,108 @@ export interface RunSummary {
   total: number;
 }
 
+export interface RunUiObservationState {
+  eventLines: Map<string, number>;
+  frame: number;
+  observed: Map<string, RunObservedStatus>;
+  outboxEventIds: Map<string, Set<string>>;
+}
+
+export interface RunUiSnapshot {
+  outboxEvents: RunOutboxEvent[];
+  status: string | undefined;
+  summary: RunSummary;
+  transitions: RunTransition[];
+}
+
+export interface RunUiNotificationSink {
+  notify(message: string, level: "info" | "warning" | "error"): void;
+  sendFollowUp(message: {
+    customType: string;
+    content: string;
+    display: true;
+    details: unknown;
+  }): void;
+}
+
+export function createRunUiObservationState(): RunUiObservationState {
+  return {
+    eventLines: new Map<string, number>(),
+    frame: 0,
+    observed: new Map<string, RunObservedStatus>(),
+    outboxEventIds: new Map<string, Set<string>>(),
+  };
+}
+
+export function readRunUiSnapshot(
+  state: RunUiObservationState,
+  ownerId: string,
+): RunUiSnapshot {
+  const summary = summarizeRuns(undefined, ownerId);
+  const status = renderRunStatus(summary, state.frame++);
+  return {
+    outboxEvents: detectRunOutboxEvents(
+      state.eventLines,
+      summary,
+      state.outboxEventIds,
+    ),
+    status,
+    summary,
+    transitions: detectRunTransitions(state.observed, summary),
+  };
+}
+
+export function pruneRunUiObservationState(
+  state: RunUiObservationState,
+  snapshot: Pick<RunUiSnapshot, "summary" | "transitions">,
+): void {
+  pruneRunObservationState(
+    state.observed,
+    state.eventLines,
+    snapshot.summary,
+    snapshot.transitions.map(
+      (transition) => transition.stateDir ?? transition.run,
+    ),
+    state.outboxEventIds,
+  );
+}
+
+export function deliverRunTransitionNotifications(
+  transitions: RunTransition[],
+  sink: RunUiNotificationSink,
+): void {
+  for (const transition of transitions) {
+    if (!shouldNotifyRunTransition(transition)) continue;
+    const text = formatRunTransitionMessage(transition);
+    sink.notify(text, getRunTransitionNotificationType(transition));
+    if (!shouldSendRunTransitionFollowUp(transition)) continue;
+    sink.sendFollowUp({
+      customType: "pi-actors-run",
+      content: text,
+      display: true,
+      details: transition,
+    });
+  }
+}
+
+export function deliverRunOutboxNotifications(
+  events: RunOutboxEvent[],
+  sink: RunUiNotificationSink,
+): void {
+  for (const event of events) {
+    if (!shouldNotifyRunOutboxEvent(event)) continue;
+    const text = formatRunOutboxMessage(event);
+    sink.notify(text, getRunOutboxNotificationType(event));
+    if (!shouldSendRunOutboxFollowUp(event)) continue;
+    sink.sendFollowUp({
+      customType: "pi-actors-run-message",
+      content: text,
+      display: true,
+      details: event,
+    });
+  }
+}
+
 export interface RunRetirementCandidate {
   activeSubagents: number;
   childRuns: number;
@@ -72,6 +180,58 @@ export interface RunRetirementExecution {
   error?: string;
   run: string;
   stateDir: string;
+}
+
+export interface RunStateWatcher {
+  close(): void;
+  refresh(): void;
+}
+
+export function createRunStateWatcher(input: {
+  stateRoot?: string;
+  onChange: () => void;
+}): RunStateWatcher {
+  const stateRoot = input.stateRoot ?? Paths.getRunStateRoot();
+  let stateRootWatcher: FSWatcher | undefined;
+  const runDirWatchers = new Map<string, FSWatcher>();
+  const close = (): void => {
+    stateRootWatcher?.close();
+    stateRootWatcher = undefined;
+    for (const watcher of runDirWatchers.values()) watcher.close();
+    runDirWatchers.clear();
+  };
+  const watchRunDir = (stateDir: string): void => {
+    if (runDirWatchers.has(stateDir) || !existsSync(stateDir)) return;
+    try {
+      const watcher = watch(stateDir, input.onChange);
+      watcher.on("error", () => {
+        watcher.close();
+        runDirWatchers.delete(stateDir);
+      });
+      runDirWatchers.set(stateDir, watcher);
+    } catch {
+      // Watching is best-effort; explicit inspect remains available.
+    }
+  };
+  function refresh(): void {
+    if (!existsSync(stateRoot)) return;
+    if (!stateRootWatcher) {
+      try {
+        stateRootWatcher = watch(stateRoot, input.onChange);
+        stateRootWatcher.on("error", () => {
+          stateRootWatcher?.close();
+          stateRootWatcher = undefined;
+        });
+      } catch {
+        // Watching is best-effort; explicit inspect remains available.
+      }
+    }
+    for (const entry of readdirSync(stateRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      watchRunDir(`${stateRoot}/${entry.name}`);
+    }
+  }
+  return { close, refresh };
 }
 
 export interface RunRetirementExecutorOptions {
@@ -612,39 +772,39 @@ function parseOutboxRecord(
   index: number,
 ): RunOutboxEvent | undefined {
   if (!run.stateDir) return undefined;
-    const event =
-      typeof raw.event === "string" && raw.event.trim()
-        ? raw.event.trim()
-        : "run.event";
-    const summary =
-      typeof raw.summary === "string" && raw.summary.trim()
-        ? raw.summary.trim()
-        : event;
-    const ts =
-      typeof raw.ts === "string" && raw.ts.trim()
-        ? raw.ts.trim()
-        : new Date(0).toISOString();
-    const id =
-      typeof raw.id === "string" && raw.id.trim()
-        ? raw.id.trim()
-        : `${run.run}:${index}`;
-    return {
-      ...(raw.body !== undefined ? { body: raw.body } : {}),
-      ...(raw.data !== undefined ? { data: raw.data } : {}),
-      delivery: normalizeOutboxDelivery(raw.delivery),
-      event,
-      id,
-      level: normalizeOutboxLevel(raw.level),
-      ...(raw.metadata &&
-      typeof raw.metadata === "object" &&
-      !Array.isArray(raw.metadata)
-        ? { metadata: raw.metadata as Record<string, unknown> }
-        : {}),
-      run: run.run,
-      stateDir: run.stateDir,
-      summary,
-      ts,
-    };
+  const event =
+    typeof raw.event === "string" && raw.event.trim()
+      ? raw.event.trim()
+      : "run.event";
+  const summary =
+    typeof raw.summary === "string" && raw.summary.trim()
+      ? raw.summary.trim()
+      : event;
+  const ts =
+    typeof raw.ts === "string" && raw.ts.trim()
+      ? raw.ts.trim()
+      : new Date(0).toISOString();
+  const id =
+    typeof raw.id === "string" && raw.id.trim()
+      ? raw.id.trim()
+      : `${run.run}:${index}`;
+  return {
+    ...(raw.body !== undefined ? { body: raw.body } : {}),
+    ...(raw.data !== undefined ? { data: raw.data } : {}),
+    delivery: normalizeOutboxDelivery(raw.delivery),
+    event,
+    id,
+    level: normalizeOutboxLevel(raw.level),
+    ...(raw.metadata &&
+    typeof raw.metadata === "object" &&
+    !Array.isArray(raw.metadata)
+      ? { metadata: raw.metadata as Record<string, unknown> }
+      : {}),
+    run: run.run,
+    stateDir: run.stateDir,
+    summary,
+    ts,
+  };
 }
 
 function readOutboxRecords(run: RunObservation): Record<string, unknown>[] {

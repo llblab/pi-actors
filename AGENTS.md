@@ -129,6 +129,8 @@ Pi host
 - Preserve JSON envelope object shape across handoffs.
 - Keep locker state generic and thin; orchestration strategy belongs in the coordinator.
 - Graceful actor retirement is opt-in through recipe/run metadata and must not infer retirement for persistent services or backlog implementers.
+- Script helpers that spawn long-lived child processes should keep those children inside the async run's owned process group unless they also provide an explicit termination bridge; `control.kill` must not leave detached playback/service descendants alive.
+- True daemon recipes are allowed, but daemon ownership belongs to the recipe/script contract: persist a pid or service handle, verify ownership before signaling, expose status/stop semantics, and bridge `control.kill` to daemon cleanup instead of relying on the generic runner to discover detached services.
 
 ## Context And Planning Hygiene
 

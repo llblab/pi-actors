@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.30.2: Music Player Kill Hotfix
+
+- `[Music Player]` Kept backend player processes inside the async run process group so `control.kill` can terminate an active music-player run without leaving detached `cvlc`/player children alive.
+- `[Docs]` Updated durable project guidance, actor skill guidance, async-run ownership docs, and recipe-library music-player notes to preserve the run-owned process-tree invariant while still allowing true daemon recipes through explicit termination bridges.
+
 ## 0.30.1: Backlog Curation Hotfix
 
 - `[Backlog]` Added curation rules clarifying that completed work belongs only in the changelog, that cohesive ~1000-line domain files are acceptable, and that file splitting should follow real ownership boundaries rather than line count alone.

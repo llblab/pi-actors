@@ -160,6 +160,15 @@ test("Unreleased changelog items avoid version literals", () => {
   }
 });
 
+test("Music player helper keeps player processes inside the run process group", () => {
+  const script = readFileSync("scripts/music-player.mjs", "utf8");
+  assert.doesNotMatch(
+    script,
+    /detached:\s*process\.platform\s*!==\s*["']win32["']/,
+    "music-player must not detach backend players from the async run process group",
+  );
+});
+
 test("Music player backend enum stays aligned across recipe docs and script", () => {
   const recipe = JSON.parse(readFileSync("recipes/music-player.json", "utf8"));
   const recipePlayers = recipe.args

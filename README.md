@@ -132,6 +132,7 @@ docs_review scope="README.md" model="current-review-model" run_id=docs_review
 Inspect only when there is a reason:
 
 ```text
+inspect target=tool:pi-actors view=triage
 inspect target=run:docs_review view=status
 inspect target=run:docs_review view=tail lines=80
 inspect target=run:docs_review view=messages
@@ -307,7 +308,7 @@ Packaged recipes should prefer mailbox/wake behavior for portable control. Recip
 
 Commands execute directly without shell evaluation where possible, but trusted executables still run with the same system permissions as Pi. Only register commands, scripts, recipes, and paths you trust.
 
-High-risk templates such as shells, interpreter eval modes, and broad filesystem mutation may surface warnings, but the runtime is not a security boundary.
+High-risk templates such as shells, interpreter eval modes, and broad filesystem mutation may surface warnings, but the runtime is not a security boundary. Recipe doctor also exposes advisory labels like `risk.shell`, `risk.eval`, `risk.destructive_fs`, `risk.network`, and `risk.external_side_effect` for operator review.
 
 Prefer:
 

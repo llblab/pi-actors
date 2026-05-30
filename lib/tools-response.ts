@@ -173,15 +173,26 @@ export function compactRecipeDoctor(summary: Record<string, unknown>): string {
   const recommendations = Array.isArray(summary.recommendations)
     ? (summary.recommendations as Array<Record<string, unknown>>)
     : [];
+  const riskSummary = Array.isArray(summary.risk_summary)
+    ? (summary.risk_summary as Array<Record<string, unknown>>)
+    : [];
   const counts = { error: 0, info: 0, warning: 0 };
   for (const detail of details) {
     const severity = String(detail.severity ?? "info");
     if (severity === "error" || severity === "warning" || severity === "info")
       counts[severity] += 1;
   }
+  const riskCount = riskSummary.reduce(
+    (total, item) => total + Number(item.count ?? 0),
+    0,
+  );
+  const topRisks = riskSummary
+    .slice(0, 4)
+    .map((item) => `${String(item.label)}:${String(item.count ?? 0)}`)
+    .join(",");
   const topAction = asRecord(summary.top_action);
   const lines = [
-    `recipes doctor errors=${counts.error} warnings=${counts.warning} info=${counts.info} actions=${remediations.length} recommendations=${recommendations.length}`,
+    `recipes doctor errors=${counts.error} warnings=${counts.warning} info=${counts.info} actions=${remediations.length} recommendations=${recommendations.length} risks=${riskCount}${topRisks ? ` top_risks=${topRisks}` : ""}`,
   ];
   if (Object.keys(topAction).length > 0) {
     const action = compactPreview(
@@ -200,8 +211,11 @@ export function compactRecipeDoctor(summary: Record<string, unknown>): string {
     const blocked = item.blocked_fallback
       ? ` blocked=${compactPreview(item.blocked_fallback, Limits.DOCTOR_ACTION_PREVIEW_CHARS)}`
       : "";
+    const labels = Array.isArray(item.risk_labels)
+      ? ` labels=${(item.risk_labels as unknown[]).map(String).slice(0, 4).join(",")}`
+      : "";
     lines.push(
-      `${String(item.severity ?? "info")} kind=${String(item.kind ?? "inspect")} id=${String(item.id ?? "root")}${blocked} action=${action ?? "inspect"}`,
+      `${String(item.severity ?? "info")} kind=${String(item.kind ?? "inspect")} id=${String(item.id ?? "root")}${blocked}${labels} action=${action ?? "inspect"}`,
     );
   }
   const nextActions = Array.isArray(summary.next_actions)

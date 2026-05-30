@@ -71,3 +71,69 @@ test("validate-recipe validates recipe directories with --all", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("validate-recipe qa accepts packaged-style async recipes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-qa-"));
+  try {
+    await mkdir(join(root, "recipes"));
+    await writeFile(
+      join(root, "recipes", "worker.json"),
+      JSON.stringify({
+        description: "Worker",
+        async: true,
+        mailbox: { accepts: ["task.assign", "control.kill"], emits: ["run.done"] },
+        artifacts: { report: "{state_dir}/report.md" },
+        template: "{repo}/scripts/validate-recipe.mjs {target}",
+      }),
+    );
+    const { stdout } = await execFileAsync(process.execPath, [
+      ...nodeArgs,
+      join(root, "recipes"),
+      "--all",
+      "--qa",
+    ]);
+    const report = JSON.parse(stdout);
+    assert.equal(report.ok, true);
+    assert.equal(report.results[0].qa.ok, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validate-recipe qa fails exact packaged recipe diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-qa-"));
+  try {
+    await mkdir(join(root, "recipes"));
+    await writeFile(
+      join(root, "recipes", "bad-worker.json"),
+      JSON.stringify({
+        async: true,
+        mailbox: { accepts: ["control.stop"], emits: ["done"] },
+        artifacts: { report: "/home/user/report.md" },
+        template: "node scripts/missing.mjs",
+      }),
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        ...nodeArgs,
+        join(root, "recipes"),
+        "--all",
+        "--qa",
+      ]),
+      (error: unknown) => {
+        const stdout = (error as { stdout?: string }).stdout ?? "";
+        const report = JSON.parse(stdout);
+        const diagnostics = report.results[0].qa.diagnostics.join("\n");
+        const warnings = report.results[0].qa.warnings.join("\n");
+        assert.match(warnings, /description: missing or empty/);
+        assert.match(diagnostics, /mailbox.accepts: async recipes must include control.kill/);
+        assert.match(diagnostics, /mailbox.emits\[0\]: message type must use channel.action form/);
+        assert.match(diagnostics, /artifacts.report: must not use a machine-local absolute path/);
+        assert.match(diagnostics, /helper scripts must be referenced through \{repo\}\/scripts/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

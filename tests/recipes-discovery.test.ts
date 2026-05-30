@@ -51,6 +51,10 @@ test("Recipe discovery surfaces risky recipe diagnostics", async () => {
     assert.match(diagnostics, /group-writable/);
     assert.match(diagnostics, /invokes bash/);
     assert.match(result.active.get("shell-risk")?.diagnostics.join("\n") ?? "", /bash/);
+    assert.deepEqual(result.active.get("shell-risk")?.riskLabels, [
+      "risk.shell",
+      "risk.eval",
+    ]);
   } finally {
     await chmod(root, 0o700).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
@@ -347,6 +351,10 @@ test("Recipe discovery summary exposes prioritized doctor remediations", async (
     await writeRecipe(high, "shell-risk", {
       template: "bash -c 'echo risky'",
     });
+    await writeRecipe(high, "async-worker", {
+      async: true,
+      template: "sleep 1",
+    });
 
     const summary = summarizeDiscovery(
       discoverRecipeSources([{ root: high, defaultTool: true }, { root: low }]),
@@ -356,6 +364,22 @@ test("Recipe discovery summary exposes prioritized doctor remediations", async (
     assert.deepEqual(
       remediations.map((item) => item.kind),
       ["blocking_invalid", "blocking_disabled", "risky_shell_boundary", "shadowed", "shadowed"],
+    );
+    assert.deepEqual(
+      (remediations.find((item) => item.id === "shell-risk")?.risk_labels as string[]),
+      ["risk.shell", "risk.eval"],
+    );
+    assert.equal(
+      (summary.active as Array<{ id: string; risk_labels?: string[] }>).find(
+        (entry) => entry.id === "async-worker",
+      )?.risk_labels?.includes("risk.long_running"),
+      true,
+    );
+    assert.equal(
+      (summary.risk_summary as Array<{ label: string; count: number }>).some(
+        (entry) => entry.label === "risk.long_running" && entry.count === 1,
+      ),
+      true,
     );
     assert.deepEqual(summary.top_action, remediations[0]);
     assert.equal(remediations[0].id, "broken");

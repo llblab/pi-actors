@@ -2,15 +2,23 @@
 
 ## Unreleased
 
+## 0.36.0: Recipe Diagnostics And Runtime Triage
+
+- `[Recipe Doctor]` Added deterministic advisory risk labels for discovered recipes, including shell, eval, filesystem mutation, network, external side effect, long-running, platform-specific, and secret-touching signals in verbose recipe inspection plus compact doctor risk counts.
+- `[Runtime]` Added `inspect target=tool:pi-actors view=triage` as a compact read-only operator attention surface covering runtime mode, active and other-session runs, invalid or blocking recipes, exposed tool recipes with non-lifecycle risk labels, drafts, stale claims, failed runs, attention messages, and next inspect actions.
+- `[Recipes]` Added packaged recipe QA through `validate-recipe.mjs --qa` and `npm run recipes:qa`, with exact diagnostics for async mailbox contracts, termination vocabulary, artifact paths, platform scope, installed-package-safe helper paths, and missing helper scripts.
+- `[Runtime]` Hardened wake/watch chaos behavior with deterministic coverage for watcher restarts, partial wake records before file catch-up, corrupt wake JSONL with later valid records, missing wake records with durable inbox work, and killed runs with stale progress state.
+- `[Docs]` Documented recipe-doctor risk labels, runtime triage, packaged recipe QA, and import-first ready-recipe registration as operator review aids and source-of-truth preservation, not sandbox, repair, or security-boundary claims.
+
 ## 0.35.0: Draft Recipe Promotion UX
 
-- `[Recipes]` Completed M-18 Draft Recipe Promotion UX: `inspect target=recipes view=summary verbose=true` now exposes draft timestamps, fingerprints, validation state, source run when known, and template previews, while `register_tool name=<tool> draft=<path>` promotes a validated draft into active recipe memory without deleting the draft and rejects collisions unless `update=true` is explicit.
+- `[Recipes]` Added draft recipe promotion UX: `inspect target=recipes view=summary verbose=true` now exposes draft timestamps, fingerprints, validation state, source run when known, and template previews, while `register_tool name=<tool> draft=<path>` promotes a validated draft into active recipe memory without deleting the draft and rejects collisions unless `update=true` is explicit.
 
 ## 0.34.1: Message Delivery Outcome Hotfix
 
 - `[Dogfood]` Added a deterministic actor-worker stale-claim smoke covering an intentionally claimed branch inbox record; the worker now reports stale claim counts in both `worker-status.json` and its awaiting-assignment room event without adding auto-recovery or scheduler policy.
-- `[Messages]` Completed the M-17 message delivery outcome contract by normalizing public message results with `delivered`, `persisted`, `queued`, `forwarded`, `consumer`, and `reason` fields across run, branch, room, coordinator, session, and tool destinations; room multicast now also exposes per-recipient branch delivery outcomes.
-- `[Backlog]` Closed M-15 Worker Stale-Claim Dogfood and M-17 Message Delivery Outcome Contract after adding delivery-result coverage for run, branch, room, coordinator, session, tool, and ownership-denied paths.
+- `[Messages]` Normalized public message results with `delivered`, `persisted`, `queued`, `forwarded`, `consumer`, and `reason` fields across run, branch, room, coordinator, session, and tool destinations; room multicast now also exposes per-recipient branch delivery outcomes.
+- `[Backlog]` Closed the worker stale-claim dogfood and message delivery outcome work after adding delivery-result coverage for run, branch, room, coordinator, session, tool, and ownership-denied paths.
 
 ## 0.34.0: Actor Kernel Domain Compression
 

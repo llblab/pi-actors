@@ -24,14 +24,15 @@ Inspect the loaded pi-actors runtime and discovered registry with:
 
 ```text
 inspect target=tool:pi-actors view=status
+inspect target=tool:pi-actors view=triage
 inspect target=recipes view=status
 inspect target=recipes view=doctor
 inspect target=recipes view=summary verbose=true
 ```
 
-`tool:pi-actors` is a reserved runtime-status actor: it reports the loaded package version, package root, source/dist mode, entrypoint path, recipe roots, and git commit when available. Use it after reloads to confirm which extension code is actually live.
+`tool:pi-actors` is a reserved runtime-status actor. `view=status` reports the loaded package version, package root, source/dist mode, entrypoint path, recipe roots, and git commit when available. Use it after reloads to confirm which extension code is actually live. `view=triage` adds a compact attention surface for active runs, other-session runs, invalid or blocking recipes, exposed tool recipes with non-lifecycle risk labels, drafts, stale claims, failed runs, attention messages, and next inspect actions without repairing anything. Packaged components and recipes whose only label is `risk.long_running` stay in recipe doctor/summary evidence rather than triage attention.
 
-The recipe summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled. The doctor view keeps the same registry evidence but promotes an advisory action surface: compact output includes the highest-priority `top` remediation plus ordered actions for invalid/blocking, disabled, risky shell-boundary, and shadowed recipes. Verbose inspection keeps the structured `remediations`, `top_action`, diagnostic details, and blocked lower-priority fallback paths when a broken or disabled higher-priority recipe masks a fallback.
+The recipe summary reports active, shadowed, invalid, disabled, and diagnostic entries so operators can answer why a tool is present, hidden, broken, or disabled. The doctor view keeps the same registry evidence but promotes an advisory action surface: compact output includes the highest-priority `top` remediation, risk-label counts, and ordered actions for invalid/blocking, disabled, risky shell-boundary, and shadowed recipes. Verbose inspection keeps per-recipe `risk_labels`, the structured `risk_summary`, `remediations`, `top_action`, diagnostic details, and blocked lower-priority fallback paths when a broken or disabled higher-priority recipe masks a fallback. Risk labels are deterministic review aids, not execution blockers or sandbox claims.
 
 Routine shadowing is quiet. If a bare `spawn` recipe launch already fails because an invalid or `disabled: true` user recipe blocks a lower-priority fallback, the launch error adds compact tokens such as `reason=shadowed_invalid` or `reason=shadowed_disabled`, `active_path`, `blocked_fallback`, and `hint=inspect_recipes_doctor`.
 
@@ -62,18 +63,22 @@ Use `update=true` to overwrite an existing tool. Omit `template` and co-located 
 ]
 ```
 
-For reusable actor workflows, register a small tool whose `template` points to an existing actor recipe instead of embedding the launch graph in the tool itself:
+For reusable actor workflows, expose an existing recipe by writing a small wrapper recipe in `~/.pi/agent/recipes` that imports the ready recipe and calls it by alias. This keeps the imported recipe as the source of truth for its script path, defaults, mailbox, artifacts, and future fixes:
 
-```text
-register_tool name=docs_review \
-  description="Start an async docs review actor" \
-  template="docs_review" \
-  args="scope:path,model:string"
+```json
+{
+  "description": "Run the ABCd context validator through its skill recipe.",
+  "imports": {
+    "validate_context": "{agent}/skills/abcd-context/recipes/validate-context.json"
+  },
+  "args": ["path:path=."],
+  "template": { "name": "validate_context" }
+}
 ```
 
-This writes or updates `~/.pi/agent/recipes/docs_review.json` with a recipe-reference template. Its location in the user recipe root makes it a tool. If the referenced recipe contains `async: true`, calling the tool starts a detached actor run and returns metadata immediately. If `async` is omitted or false, the same recipe runs foreground and returns normal tool output.
+Use the same pattern for packaged pi-actors components, reviewed ad hoc recipes, project-local recipe files, and especially skill recipes that wrap skill scripts. Do not register a local tool that calls `~/.pi/agent/skills/<skill>/scripts/*` directly when the skill already ships a recipe. The wrapper's location in the user recipe root makes it a tool; the import preserves the ready recipe's maintained interface.
 
-When co-location is clearer than a separate file, `register_tool` writes the recipe fields directly into the user recipe file:
+When no ready recipe exists and co-location is clearer than a separate file, `register_tool` writes the recipe fields directly into the user recipe file:
 
 ```json
 {

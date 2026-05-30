@@ -248,6 +248,181 @@ function compactPiActorsRuntimeStatus(status: Record<string, unknown>): string {
   return `\npi-actors version=${String(status.version)} mode=${String(status.mode)} path=${String(status.package_root)} entrypoint=${String(status.entrypoint)}${status.git_commit ? ` git=${String(status.git_commit)}` : ""}`;
 }
 
+function isStaleClaim(message: AsyncRuns.RunInboxMessage, now: number): boolean {
+  if (message.status !== "claimed") return false;
+  const claimedAt = Date.parse(String(message.claimed_at ?? ""));
+  return Number.isFinite(claimedAt) && now - claimedAt > 5 * 60 * 1000;
+}
+
+function getRunTriageSignals(
+  runs: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  const now = Date.now();
+  const staleClaims: Array<Record<string, unknown>> = [];
+  const attentionMessages: Array<Record<string, unknown>> = [];
+  for (const run of runs) {
+    const stateDir = String(run.state_dir ?? "");
+    const runId = String(run.run ?? "");
+    if (!stateDir) continue;
+    try {
+      for (const message of AsyncRuns.readRunInboxMessages(stateDir, 200)) {
+        if (!isStaleClaim(message, now)) continue;
+        staleClaims.push({
+          run: runId,
+          id: message.id,
+          claimed_at: message.claimed_at,
+          claimed_by: message.claimed_by,
+          type: message.type,
+        });
+      }
+    } catch {}
+    try {
+      for (const event of AsyncRuns.readRunEvents(stateDir, 80)) {
+        if (event.metadata?.requires_response !== true) continue;
+        attentionMessages.push({
+          run: runId,
+          id: event.id,
+          summary: event.summary,
+          type: event.type ?? event.event,
+        });
+      }
+    } catch {}
+  }
+  return { attention_messages: attentionMessages, stale_claims: staleClaims };
+}
+
+function isTriageHighRiskRecipe(recipe: Record<string, unknown>): boolean {
+  if (recipe.tool !== true) return false;
+  const labels = Array.isArray(recipe.risk_labels)
+    ? recipe.risk_labels.map((label) => String(label))
+    : [];
+  return labels.some((label) => label !== "risk.long_running");
+}
+
+function getPiActorsTriage(
+  ctx: unknown,
+  deps: InspectToolDeps,
+): Record<string, unknown> {
+  const runtime = getPiActorsRuntimeStatus();
+  const currentSession = ToolsAccess.getContextSessionId(ctx);
+  const allRuns = AsyncRuns.listRuns().map((run) =>
+    AsyncRuns.getRunStatus(String(run.state_dir)),
+  );
+  const visibleRuns = currentSession
+    ? allRuns.filter(
+        (run) => !run.ownerId || run.ownerId === currentSession,
+      )
+    : allRuns;
+  const activeRuns = visibleRuns.filter((run) => run.status === "running");
+  const failedRuns = visibleRuns.filter((run) => run.status === "failed");
+  const otherRuns = currentSession
+    ? allRuns.filter((run) => run.ownerId && run.ownerId !== currentSession)
+    : [];
+  const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
+  const discovered = RecipesDiscovery.discoverRecipeSources([
+    { root: recipeRoot, defaultTool: true, mutableUsage: true },
+    { root: deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot() },
+  ]);
+  const recipeSummary: Record<string, unknown> = {
+    ...RecipesDiscovery.summarizeDiscovery(discovered),
+    drafts: RecipesDiscovery.listDraftRecipes(join(recipeRoot, "drafts")),
+  };
+  const activeRecipes = Array.isArray(recipeSummary.active)
+    ? (recipeSummary.active as Array<Record<string, unknown>>)
+    : [];
+  const highRiskRecipes = activeRecipes.filter(isTriageHighRiskRecipe);
+  const signals = getRunTriageSignals(visibleRuns);
+  const attentionMessages = signals.attention_messages as Array<
+    Record<string, unknown>
+  >;
+  const staleClaims = signals.stale_claims as Array<Record<string, unknown>>;
+  const invalidRecipes = Array.isArray(recipeSummary.invalid)
+    ? (recipeSummary.invalid as Array<Record<string, unknown>>)
+    : [];
+  const remediations = Array.isArray(recipeSummary.remediations)
+    ? (recipeSummary.remediations as Array<Record<string, unknown>>)
+    : [];
+  const drafts = Array.isArray(recipeSummary.drafts)
+    ? (recipeSummary.drafts as Array<Record<string, unknown>>)
+    : [];
+  const nextActions = [
+    invalidRecipes.length || remediations.length
+      ? "inspect target=recipes view=doctor"
+      : "",
+    drafts.length ? "inspect target=recipes view=summary verbose=true" : "",
+    failedRuns[0]?.run
+      ? `inspect target=run:${String(failedRuns[0].run)} view=tail lines=80`
+      : "",
+    attentionMessages[0]?.run
+      ? `inspect target=run:${String(attentionMessages[0].run)} view=messages`
+      : "",
+    activeRuns.length
+      ? "inspect target=session:all view=runs status=active"
+      : "",
+  ].filter(Boolean);
+  return {
+    runtime,
+    current_session: currentSession ?? null,
+    active_runs: activeRuns.map((run) => ({
+      run: run.run,
+      ownerId: run.ownerId,
+      recipe: run.recipe,
+      status: run.status,
+    })),
+    other_session_runs: otherRuns.length,
+    invalid_recipes: invalidRecipes,
+    blocking_recipes: remediations.filter((item) =>
+      String(item.kind ?? "").startsWith("blocking_"),
+    ),
+    high_risk_recipes: highRiskRecipes.map((recipe) => ({
+      id: recipe.id,
+      path: recipe.path,
+      risk_labels: recipe.risk_labels,
+    })),
+    draft_recipes: drafts,
+    stale_claims: staleClaims,
+    recent_failed_runs: failedRuns.slice(0, 5).map((run) => ({
+      run: run.run,
+      recipe: run.recipe,
+      status: run.status,
+    })),
+    attention_messages: attentionMessages.slice(-10),
+    next_actions: [...new Set(nextActions)].slice(0, 5),
+  };
+}
+
+function compactPiActorsTriage(summary: Record<string, unknown>): string {
+  const runtime = asRecord(summary.runtime);
+  const activeRuns = Array.isArray(summary.active_runs)
+    ? summary.active_runs.length
+    : 0;
+  const invalidRecipes = Array.isArray(summary.invalid_recipes)
+    ? summary.invalid_recipes.length
+    : 0;
+  const blockingRecipes = Array.isArray(summary.blocking_recipes)
+    ? summary.blocking_recipes.length
+    : 0;
+  const highRiskRecipes = Array.isArray(summary.high_risk_recipes)
+    ? summary.high_risk_recipes.length
+    : 0;
+  const drafts = Array.isArray(summary.draft_recipes)
+    ? summary.draft_recipes.length
+    : 0;
+  const staleClaims = Array.isArray(summary.stale_claims)
+    ? summary.stale_claims.length
+    : 0;
+  const failedRuns = Array.isArray(summary.recent_failed_runs)
+    ? summary.recent_failed_runs.length
+    : 0;
+  const attention = Array.isArray(summary.attention_messages)
+    ? summary.attention_messages.length
+    : 0;
+  const nextActions = Array.isArray(summary.next_actions)
+    ? (summary.next_actions as string[])
+    : [];
+  return `\ntriage version=${String(runtime.version ?? "unknown")} mode=${String(runtime.mode ?? "unknown")} active_runs=${activeRuns} other_runs=${String(summary.other_session_runs ?? 0)} invalid_recipes=${invalidRecipes} blocking_recipes=${blockingRecipes} high_risk_recipes=${highRiskRecipes} drafts=${drafts} stale_claims=${staleClaims} failed_runs=${failedRuns} attention=${attention}${ToolsResponse.compactNextActions(nextActions)}`;
+}
+
 function compactToolActor(name: string, tool: Record<string, unknown>): string {
   const parameters = asRecord(tool.parameters);
   const required = Array.isArray(parameters.required)
@@ -414,10 +589,15 @@ export function createInspectToolDefinition<TContext = unknown>(
       }
       if (address.kind === "tool" && address.value) {
         if (address.value === "pi-actors") {
-          if (view !== "status") {
-            throw new Error("inspect tool:pi-actors supports view=status.");
+          if (view !== "status" && view !== "triage") {
+            throw new Error(
+              "inspect tool:pi-actors supports view=status or view=triage.",
+            );
           }
-          const details = getPiActorsRuntimeStatus();
+          const details =
+            view === "triage"
+              ? getPiActorsTriage(ctx, deps)
+              : getPiActorsRuntimeStatus();
           return {
             content: [
               {
@@ -425,7 +605,9 @@ export function createInspectToolDefinition<TContext = unknown>(
                 text: maybeJsonText(
                   details,
                   input.verbose === true,
-                  compactPiActorsRuntimeStatus(details),
+                  view === "triage"
+                    ? compactPiActorsTriage(details)
+                    : compactPiActorsRuntimeStatus(details),
                 ),
               },
             ],

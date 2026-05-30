@@ -115,6 +115,8 @@ Utility recipes cover local operator workflows that do not need subagents:
 - `recipes/utility-skill-summary.json`: Use `scripts/recipe-utils.mjs` to summarize packaged skill frontmatter, body shape, formatter-safe scalar lines, and package-version alignment.
 - `recipes/utility-validate-recipe.json`: Use `scripts/validate-recipe.mjs` to validate one template recipe file, or all packaged recipes in a directory with `all: true`.
 
+Packaged QA is available through the `recipes:qa` npm script. It reports description warnings and fails exact diagnostics for async mailbox contracts, termination vocabulary, artifact paths, platform scope, helper script paths, and missing helper scripts.
+
 These recipes are intentionally small. Register them only for trusted local commands and prefer narrow scopes. Discovery diagnostics flag obvious trust-boundary shapes such as shell/eval/destructive commands; those warnings are operator review aids, not a sandbox. The helper-backed utilities share `scripts/recipe-utils.mjs` so repeated parsing/listing logic stays out of recipe strings.
 
 ## Actor OS Smoke Matrix

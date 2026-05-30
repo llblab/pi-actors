@@ -794,6 +794,68 @@ test("Runtime notifier periodic fallback observes missed fs watch events", async
   }
 });
 
+test("Runtime notifier replay survives watcher restarts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-restart-"));
+  const stateDir = join(root, "notified-restart");
+  const observed: unknown[] = [];
+  try {
+    notifyRuntimeWake(stateDir, {
+      actor: "run:notified-restart",
+      reason: "mailbox.update",
+    });
+    const notifier = createFileRuntimeNotifier(stateDir, {
+      pollIntervalMs: 25,
+      replay: true,
+      watch: false,
+    });
+    const subscription = notifier.subscribe("run:notified-restart", (event) => {
+      observed.push(event);
+    });
+    try {
+      await waitForWakeCount(observed, 1);
+      assert.equal((observed[0] as { reason: string }).reason, "mailbox.update");
+    } finally {
+      subscription.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime notifier buffers partial wake records until file catch-up", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-partial-"));
+  const stateDir = join(root, "notified-partial");
+  const observed: unknown[] = [];
+  try {
+    const notifier = createFileRuntimeNotifier(stateDir, {
+      pollIntervalMs: 25,
+      watch: false,
+    });
+    const subscription = notifier.subscribe("run:notified-partial", (event) => {
+      observed.push(event);
+    });
+    try {
+      const line = JSON.stringify({
+        actor: "run:notified-partial",
+        id: "wake-1",
+        reason: "mailbox.update",
+        state_dir: stateDir,
+        ts: new Date().toISOString(),
+      });
+      await writeFile(runtimeWakeFile(stateDir), line.slice(0, 24));
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      assert.equal(observed.length, 0);
+      await appendFile(runtimeWakeFile(stateDir), `${line.slice(24)}\n`);
+      await waitForWakeCount(observed, 1);
+      assert.equal((observed[0] as { id: string }).id, "wake-1");
+    } finally {
+      subscription.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test(
   "Async runs can send line messages to a run control FIFO",
   { skip: process.platform === "win32" },
@@ -1093,6 +1155,58 @@ test("Async run messages persist mailbox wake before endpoint delivery failure",
   }
 });
 
+test("Runtime wake reader skips corrupt records and preserves later wakes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-corrupt-"));
+  const stateDir = join(root, "notified-corrupt");
+  try {
+    const valid = {
+      actor: "run:notified-corrupt",
+      id: "wake-after-corrupt",
+      reason: "mailbox.update",
+      state_dir: stateDir,
+      ts: new Date().toISOString(),
+    };
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(runtimeWakeFile(stateDir), `{bad json\n${JSON.stringify(valid)}\n`);
+    assert.deepEqual(readRuntimeWakeEvents(stateDir), [valid]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run inbox processing does not require wake records", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-missing-wake-"));
+  const stateDir = join(root, "missing-wake");
+  try {
+    startRun(
+      {
+        run_id: "missing-wake",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    await writeFile(
+      join(stateDir, "inbox.jsonl"),
+      `${JSON.stringify({ body: "durable work", id: "manual-1", status: "queued", type: "task.assign" })}\n`,
+    );
+    assert.deepEqual(readRuntimeWakeEvents(stateDir), []);
+    const processed = await processRunInboxMessages(
+      stateDir,
+      (message) => {
+        assert.equal(message.body, "durable work");
+      },
+      { owner: "test-worker" },
+    );
+    assert.deepEqual(processed, { claimed: 1, failed: 0, handled: 1 });
+    assert.equal(readRunInboxMessages(stateDir)[0].status, "handled");
+  } finally {
+    killRun(stateDir);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async run inbox messages can be claimed and handled", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-inbox-process-"));
   const stateDir = join(root, "inbox-process");
@@ -1300,6 +1414,32 @@ test("Async run cancel signals the running command process group", async () => {
         // Already stopped by process-group cancellation.
       }
     }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async run status keeps killed runs diagnosable with stale progress", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-killed-stale-progress-"));
+  const stateDir = join(root, "stale-progress");
+  try {
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(
+      join(stateDir, "run.json"),
+      `${JSON.stringify({ created_at: new Date().toISOString(), pid: 0, run: "stale-progress", state_dir: stateDir })}\n`,
+    );
+    await writeFile(
+      join(stateDir, "events.jsonl"),
+      `${JSON.stringify({ event: "run.kill", signal: "SIGKILL", ts: new Date().toISOString() })}\n`,
+    );
+    await writeFile(
+      join(stateDir, "progress.json"),
+      `${JSON.stringify({ activeSubagents: 2, phase: "running" })}\n`,
+    );
+    const status = getRunStatus(stateDir);
+    assert.equal(status.status, "killed");
+    assert.deepEqual(status.progress, { activeSubagents: 2, phase: "running" });
+    assert.match(tailRun(stateDir), /run\.kill/);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

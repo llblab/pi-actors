@@ -147,6 +147,7 @@ export function createFileRuntimeNotifier(
       mkdirSync(dirname(file), { recursive: true });
       let position =
         options.replay || !existsSync(file) ? 0 : statSync(file).size;
+      let pending = "";
       let closed = false;
       const reconcile = (reason: RuntimeReconcileReason): void => {
         if (closed) return;
@@ -160,10 +161,15 @@ export function createFileRuntimeNotifier(
       const drain = (): void => {
         if (closed || !existsSync(file)) return;
         const buffer = readFileSync(file);
-        if (position > buffer.length) position = 0;
-        const chunk = buffer.subarray(position).toString("utf8");
+        if (position > buffer.length) {
+          position = 0;
+          pending = "";
+        }
+        const chunk = pending + buffer.subarray(position).toString("utf8");
         position = buffer.length;
-        for (const line of chunk.split("\n")) {
+        const lines = chunk.split("\n");
+        pending = chunk.endsWith("\n") ? "" : (lines.pop() ?? "");
+        for (const line of lines) {
           if (!line.trim()) continue;
           const event = parseRuntimeWakeEventLine(line);
           if (event && event.actor === actor) {

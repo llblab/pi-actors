@@ -51,73 +51,9 @@ No open hotfix items.
 
 ## Minor Backlog
 
+No open minor items.
+
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
-
-### M-19 Recipe Doctor Risk Labels v2
-
-- Priority: Medium.
-- Status: Planned.
-- Goal: Evolve recipe doctor into a compact capability-risk membrane without pretending to sandbox trusted local execution.
-- Why now: Recipe doctor already has remediation UX; the next useful slice is deterministic advisory risk classification for local capabilities.
-- Direction:
-  - Add advisory labels such as `risk.shell`, `risk.eval`, `risk.broad_fs_write`, `risk.destructive_fs`, `risk.network`, `risk.external_side_effect`, `risk.long_running`, `risk.platform_specific`, and `risk.secret_touching`.
-  - Keep labels advisory and deterministic; do not block execution unless existing validation already blocks it.
-  - Expose compact risk summaries in `inspect target=recipes view=doctor` and verbose per-recipe labels.
-  - Keep launch-time warnings quiet except for already-failing or clearly dangerous cases.
-  - Preserve honest wording: trusted local execution, not isolation.
-- Acceptance:
-  - Risk labels are deterministic and tested.
-  - Existing risky shell-boundary diagnostics remain intact.
-  - Doctor output stays compact by default.
-  - README/docs do not introduce sandbox or security-boundary claims.
-
-### M-20 Runtime Triage Surface
-
-- Priority: Medium.
-- Status: Planned.
-- Goal: Add one compact operator triage view that answers what needs attention right now without performing repairs.
-- Why now: Runtime status, recipe doctor, drafts, stale claims, session mismatches, failed runs, and other-session counts are currently separate bounded surfaces.
-- Direction:
-  - Add `inspect target=tool:pi-actors view=triage` or an equivalent existing inspect surface.
-  - Summarize runtime version/mode, active runs, other-session runs, invalid or blocking recipes, high-risk recipes, draft recipes, stale worker claims, recent failed runs, attention messages, and suggested next inspect actions.
-  - Keep every warning tied to a next inspect/action hint.
-  - Do not auto-repair, auto-prune, relax ownership, or hide detailed source-of-truth views.
-- Acceptance:
-  - Triage output is compact enough for agent context.
-  - Healthy and degraded states are covered by tests.
-  - Detailed inspect/doctor/status views remain source of truth.
-
-### M-21 Packaged Recipe QA Matrix
-
-- Priority: Medium.
-- Status: Planned.
-- Goal: Prevent packaged recipes from drifting into inconsistent mailbox, artifact, platform, or package-root behavior.
-- Why now: Packaged recipes are standard-library components; they should be boringly consistent before operators copy or register them as durable local capabilities.
-- Direction:
-  - Add an internal QA check over `recipes/*.json` for descriptions, async mailbox contracts, termination vocabulary, artifact declarations, platform notes, installed-package-safe helper paths, and compiled shim coverage.
-  - Keep `control.kill` as generic runtime termination and allow `control.stop` / `control.cancel` only as actor-domain vocabulary.
-  - Fail with exact recipe/path/key diagnostics.
-  - Avoid a broad recipe-library rewrite beyond violations discovered by the check.
-- Acceptance:
-  - QA runs under an existing validation command or a clearly named subcheck used by `npm run validate`.
-  - Tests/fixtures cover at least one positive and one negative case.
-  - Packaged recipes remain optional components, not policy workflows.
-
-### M-22 Wake and Watcher Chaos Fixtures
-
-- Priority: Medium.
-- Status: Planned.
-- Goal: Harden the invariant that durable files are canonical and wake notifications are advisory acceleration.
-- Why now: Wake, watcher, line-counter, and JSONL resilience are central to operator trust as actor counts grow.
-- Direction:
-  - Add deterministic fixtures for watcher restart, line-counter reset, duplicate terminal events, missing wake with present inbox record, wake before file catch-up, corrupt JSONL with later valid records, and killed run with stale progress phase.
-  - Preserve event-driven observability without reintroducing polling-first coordination examples.
-  - Keep tests fast and local.
-- Acceptance:
-  - Duplicate follow-ups do not reappear.
-  - Missing wake does not lose durable messages.
-  - Corrupt records degrade inspect but do not kill it.
-  - Killed/stale progress states remain diagnosable.
 
 ## Explicitly Deferred
 
@@ -127,7 +63,7 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 - Run restart/reattach policy: risky for isolation; defer until corruption recovery and protocol fixtures are stronger.
 - Cross-session force kill or attach/adopt/reparent: useful later, but ownership policy should not change until observability makes current boundaries clear.
 - Actor address helper CLI: keep diagnostics improving opportunistically inside existing parser/tests.
-- Golden flow docs and flow conformance runner: useful after M-14, M-15, M-17, and M-18 make the diagnostic and promotion surfaces stable.
+- Golden flow docs and flow conformance runner: useful after the diagnostic and promotion surfaces are stable.
 - Documentation refactor: defer until the canonical mailbox loop and worker recipe exist; avoid rewriting docs twice.
 - Host-level tool unregistration: blocked on host API support.
 - Branch-local checkpoint semantics: wait for real collaborative branch-runner experiments.
@@ -135,8 +71,4 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 
 ## Suggested Milestone Order
 
-```text
-Next milestone: M-19 Recipe Doctor Risk Labels v2.
-Then: M-20 Runtime Recipe Triage.
-Small cleanup lane: continue opportunistic domain polish only when a real ownership boundary appears.
-```
+No current milestone. Reassess runtime evidence before adding the next reliability slice.

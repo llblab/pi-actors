@@ -113,9 +113,11 @@ Pi host
 - `~/.pi/agent/recipes/*.json` is executable muscle memory: recipes there become persistent tools by location.
 - Preserve filename identity, atomic writes, explicit operator-gated changes, and local transportability.
 - Packaged/ad hoc recipes outside the agent root are components, not user tools.
+- Register existing recipes by importing them from the user-root wrapper and using a `{ "name": "alias" }` template node; do not duplicate a ready recipe's script command, defaults, mailbox, or artifact contract in the wrapper.
+- Skill-owned scripts must be exposed through skill-owned recipes first. If a local tool needs that capability, import the skill recipe via `{agent}/skills/<skill>/recipes/<recipe>.json` instead of calling `{agent}/skills/<skill>/scripts/*` directly.
 - Tool definitions use `template`, not `script`, and built-in/core tool names must not be shadowed.
 - Packaged recipe growth is demand-driven: prefer reusable components over speculative scenario catalogs.
-- Recipe templates may point directly at executable helper scripts; keep script executable bits and avoid unnecessary `node` prefixes.
+- Recipe templates may point directly at executable helper scripts when the recipe owns that script boundary; keep script executable bits and avoid unnecessary `node` prefixes.
 
 ## Command And Recipe Layers
 

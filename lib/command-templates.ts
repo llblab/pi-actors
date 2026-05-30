@@ -67,6 +67,29 @@ export interface CommandTemplateExecResult {
   killed: boolean;
 }
 
+export type CommandTemplateRiskLabel =
+  | "risk.shell"
+  | "risk.eval"
+  | "risk.broad_fs_write"
+  | "risk.destructive_fs"
+  | "risk.network"
+  | "risk.external_side_effect"
+  | "risk.long_running"
+  | "risk.platform_specific"
+  | "risk.secret_touching";
+
+const COMMAND_TEMPLATE_RISK_LABEL_ORDER: CommandTemplateRiskLabel[] = [
+  "risk.shell",
+  "risk.eval",
+  "risk.destructive_fs",
+  "risk.broad_fs_write",
+  "risk.external_side_effect",
+  "risk.secret_touching",
+  "risk.network",
+  "risk.long_running",
+  "risk.platform_specific",
+];
+
 export type CommandTemplateExecCommand = (
   command: string,
   args: string[],
@@ -179,6 +202,97 @@ function hasRiskyPathArg(args: string[]): boolean {
       arg.startsWith("~/") ||
       arg.startsWith("/"),
   );
+}
+
+function sortRiskLabels(
+  labels: Iterable<CommandTemplateRiskLabel>,
+): CommandTemplateRiskLabel[] {
+  const unique = new Set(labels);
+  return COMMAND_TEMPLATE_RISK_LABEL_ORDER.filter((label) => unique.has(label));
+}
+
+function hasAnyArg(args: string[], values: string[]): boolean {
+  return args.some((arg) => values.includes(arg.toLowerCase()));
+}
+
+function hasSecretTouchingText(parts: string[]): boolean {
+  return parts.some((part) =>
+    /(^|[{}._\-\s/])(?:secret|token|password|passwd|credential|api[_-]?key|private[_-]?key|\.env|ssh[_-]?key)(?:[{}._\-\s/]|$)/i.test(
+      part,
+    ),
+  );
+}
+
+function getLeafCommandTemplateRiskLabels(
+  config: CommandTemplateLeafConfig,
+): CommandTemplateRiskLabel[] {
+  const parts = splitCommandTemplate(config.template);
+  const command = getExecutableName(parts[0]);
+  const args = parts.slice(1);
+  const labels = new Set<CommandTemplateRiskLabel>();
+  if (["bash", "sh", "zsh", "fish"].includes(command)) {
+    labels.add("risk.shell");
+    if (hasAnyFlag(args, ["-c"])) labels.add("risk.eval");
+  }
+  if (
+    ["node", "deno", "bun"].includes(command) &&
+    hasAnyFlag(args, ["-e", "--eval"])
+  ) {
+    labels.add("risk.eval");
+  }
+  if (
+    ["python", "python3", "perl", "ruby"].includes(command) &&
+    hasAnyFlag(args, ["-c", "-e"])
+  ) {
+    labels.add("risk.eval");
+  }
+  if (
+    command === "rm" &&
+    (args.some((arg) => /^-[^-]*r/.test(arg) || /^-[^-]*f/.test(arg)) ||
+      hasRiskyPathArg(args))
+  ) {
+    labels.add("risk.destructive_fs");
+  }
+  if (["mv", "cp", "rsync"].includes(command) && hasRiskyPathArg(args)) {
+    labels.add("risk.broad_fs_write");
+  }
+  if (
+    ["curl", "wget", "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp"].includes(
+      command,
+    ) ||
+    (command === "git" &&
+      hasAnyArg(args, ["clone", "fetch", "pull", "push", "ls-remote"])) ||
+    ["npm", "pnpm", "yarn", "pip", "cargo"].includes(command)
+  ) {
+    labels.add("risk.network");
+  }
+  if (
+    ["gh", "glab", "hub", "kubectl", "terraform"].includes(command) ||
+    (command === "git" && hasAnyArg(args, ["push"])) ||
+    (["npm", "pnpm", "yarn"].includes(command) &&
+      hasAnyArg(args, ["publish", "login", "logout", "deprecate"]))
+  ) {
+    labels.add("risk.external_side_effect");
+  }
+  if (
+    command === "sleep" ||
+    command === "watch" ||
+    (command === "tail" && hasAnyFlag(args, ["-f"])) ||
+    hasAnyArg(args, ["--watch", "--serve", "serve"])
+  ) {
+    labels.add("risk.long_running");
+  }
+  if (
+    ["systemctl", "launchctl", "osascript", "open", "xdg-open", "powershell", "pwsh", "cmd.exe", "apt", "apt-get", "dnf", "yum", "brew", "pacman", "apk", "xclip", "wl-copy"].includes(
+      command,
+    )
+  ) {
+    labels.add("risk.platform_specific");
+  }
+  if (["pass", "gpg", "ssh-add"].includes(command) || hasSecretTouchingText(parts)) {
+    labels.add("risk.secret_touching");
+  }
+  return sortRiskLabels(labels);
 }
 
 function getLeafCommandTemplateWarnings(
@@ -345,6 +459,16 @@ export function getCommandTemplateWarnings(
       ),
     ),
   ];
+}
+
+export function getCommandTemplateRiskLabels(
+  config: CommandTemplateConfig,
+): CommandTemplateRiskLabel[] {
+  return sortRiskLabels(
+    expandCommandTemplateConfigs(config).flatMap((leaf) =>
+      getLeafCommandTemplateRiskLabels(leaf),
+    ),
+  );
 }
 
 function parseCommandTemplateArgToken(value: string): {

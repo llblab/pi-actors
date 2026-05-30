@@ -292,6 +292,8 @@ An import binding may be either a string recipe path/name or an object with:
 
 A template node of `{ "name": "alias" }` is replaced with the imported recipe's command-template graph. Imported recipe defaults are merged with import `defaults`, import `values`, node `defaults`, and node `values`; later layers win. This lets a parent recipe embed a reusable recipe in a sequence or `parallel: true` branch without inventing a workflow language.
 
+Use imports as the default adapter for exposing ready recipes as local tools. A user-root recipe such as `~/.pi/agent/recipes/repo_context_check.json` should import the maintained source recipe and call `{ "name": "alias" }`, not duplicate the source recipe's script command. Skill scripts are the strongest version of this rule: when a skill provides `recipes/<name>.json` for its `scripts/*` entrypoint, local tools must import the skill recipe via `{agent}/skills/<skill>/recipes/<name>.json` instead of invoking the script path directly.
+
 Async composition stays explicit: importing a recipe reuses its command-template-shaped definition. It does not start a nested async run. Put `async: true` on the parent recipe when the combined imported graph should run detached as one run with one state dir. Ephemeral coordinator recipes may declare `retire_when: "children_terminal"` as an opt-in lifecycle hint for future graceful retirement handling; persistent services and implementer loops should omit it. For agent-callable fanout, prefer public inputs such as `prompts:array` plus `repeat: "{prompts.length}"`, then select each branch value with `{prompts[index]}` instead of baking concrete prompts or file names into the reusable recipe.
 
 ```json

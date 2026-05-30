@@ -324,6 +324,7 @@ test("Inspect tool reads recipe registry summaries", async () => {
     );
     assert.match(doctor.content[0].text, /recipes doctor errors=\d+/);
     assert.match(doctor.content[0].text, /actions=\d+/);
+    assert.match(doctor.content[0].text, /risks=\d+/);
     assert.match(doctor.content[0].text, /top severity=/);
     assert.match(doctor.content[0].text, /action=/);
     assert.match(doctor.content[0].text, /next=/);
@@ -1029,6 +1030,96 @@ test("Inspect tool reads pi-actors runtime status", async () => {
   assert.match(result.content[0].text, /mode=(source|dist)/);
   assert.equal(result.details.package_name, "@llblab/pi-actors");
   assert.equal(typeof result.details.entrypoint, "string");
+});
+
+test("Inspect tool reads healthy pi-actors triage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-triage-healthy-"));
+  try {
+    const userRecipes = join(root, "recipes");
+    const packagedRecipes = join(root, "packaged");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(join(userRecipes, "drafts"), { recursive: true }),
+        fs.mkdir(packagedRecipes, { recursive: true }),
+      ]),
+    );
+    const definition = createInspectToolDefinition({
+      packagedRecipeRoot: packagedRecipes,
+      recipeRoot: userRecipes,
+    });
+    const result = await definition.execute(
+      "call-inspect-runtime-triage-healthy",
+      { target: "tool:pi-actors", view: "triage" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /triage version=/);
+    assert.match(result.content[0].text, /invalid_recipes=0/);
+    assert.match(result.content[0].text, /drafts=0/);
+    assert.deepEqual(result.details.invalid_recipes, []);
+    assert.deepEqual(result.details.draft_recipes, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Inspect tool reports degraded pi-actors triage signals", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-triage-degraded-"));
+  try {
+    const userRecipes = join(root, "recipes");
+    const packagedRecipes = join(root, "packaged");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(join(userRecipes, "drafts"), { recursive: true }),
+        fs.mkdir(packagedRecipes, { recursive: true }),
+      ]),
+    );
+    await writeFile(join(userRecipes, "broken.json"), JSON.stringify({}));
+    await writeFile(
+      join(userRecipes, "shell-risk.json"),
+      JSON.stringify({ template: "bash -c 'echo risky'" }),
+    );
+    await writeFile(
+      join(userRecipes, "async-only.json"),
+      JSON.stringify({ async: true, template: "echo background" }),
+    );
+    await writeFile(
+      join(packagedRecipes, "packaged-shell.json"),
+      JSON.stringify({ template: "bash -c 'echo packaged'" }),
+    );
+    await writeFile(
+      join(userRecipes, "drafts", "draft.json"),
+      JSON.stringify({ template: "echo draft" }),
+    );
+    const definition = createInspectToolDefinition({
+      packagedRecipeRoot: packagedRecipes,
+      recipeRoot: userRecipes,
+    });
+    const result = await definition.execute(
+      "call-inspect-runtime-triage-degraded",
+      { target: "tool:pi-actors", view: "triage" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /invalid_recipes=1/);
+    assert.match(result.content[0].text, /high_risk_recipes=1/);
+    assert.match(result.content[0].text, /drafts=1/);
+    assert.deepEqual(
+      (result.details.high_risk_recipes as Array<Record<string, unknown>>).map(
+        (entry) => entry.id,
+      ),
+      ["shell-risk"],
+    );
+    assert.ok(
+      (result.details.next_actions as string[]).includes(
+        "inspect target=recipes view=doctor",
+      ),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Inspect tool reads tool actor contracts", async () => {

@@ -27,6 +27,7 @@ export interface DiscoveredRecipe {
   tool: boolean;
   mutableUsage: boolean;
   diagnostics: string[];
+  riskLabels: CommandTemplates.CommandTemplateRiskLabel[];
   shadows: string[];
 }
 
@@ -110,6 +111,14 @@ function listRecipeFiles(root: string): string[] {
     );
 }
 
+function getRecipeCommandTemplateConfig(
+  config: TemplateRecipeConfig,
+): CommandTemplates.CommandTemplateConfig {
+  return (typeof config.template === "object" && config.template !== null
+    ? config.template
+    : config) as CommandTemplates.CommandTemplateConfig;
+}
+
 function getRecipeConfigDiagnostics(
   file: string,
   config: TemplateRecipeConfig | undefined,
@@ -118,13 +127,34 @@ function getRecipeConfigDiagnostics(
     const reason = RecipesReferences.diagnoseRawRecipeConfigFailure(file);
     return [`Invalid recipe: ${file}${reason ? `: ${reason}` : ""}`];
   }
-  const commandTemplateConfig =
-    typeof config.template === "object" && config.template !== null
-      ? config.template
-      : config;
   return CommandTemplates.getCommandTemplateWarnings(
-    commandTemplateConfig as CommandTemplates.CommandTemplateConfig,
+    getRecipeCommandTemplateConfig(config),
   ).map((warning) => `Recipe ${file}: ${warning}`);
+}
+
+function getRecipeRiskLabels(
+  config: TemplateRecipeConfig | undefined,
+): CommandTemplates.CommandTemplateRiskLabel[] {
+  if (!config) return [];
+  const labels = new Set(
+    CommandTemplates.getCommandTemplateRiskLabels(
+      getRecipeCommandTemplateConfig(config),
+    ),
+  );
+  if (config.async === true) labels.add("risk.long_running");
+  return [
+    "risk.shell",
+    "risk.eval",
+    "risk.destructive_fs",
+    "risk.broad_fs_write",
+    "risk.external_side_effect",
+    "risk.secret_touching",
+    "risk.network",
+    "risk.long_running",
+    "risk.platform_specific",
+  ].filter((label): label is CommandTemplates.CommandTemplateRiskLabel =>
+    labels.has(label as CommandTemplates.CommandTemplateRiskLabel),
+  );
 }
 
 function readDiscoveredRecipe(
@@ -152,6 +182,7 @@ function readDiscoveredRecipe(
       tool: defaultTool && !disabled && !invalid,
       mutableUsage,
       diagnostics: getRecipeConfigDiagnostics(file, config),
+      riskLabels: getRecipeRiskLabels(config),
       shadows: [],
     };
   } catch (error) {
@@ -169,6 +200,7 @@ function readDiscoveredRecipe(
       diagnostics: [
         `Failed to load recipe ${file}: ${error instanceof Error ? error.message : String(error)}`,
       ],
+      riskLabels: [],
       shadows: [],
     };
   }
@@ -392,7 +424,7 @@ function diagnosticSeverity(message: string): "info" | "warning" | "error" {
     return "error";
   }
   if (
-    /world-writable|group-writable|invokes bash|eval|destructive|unsafe/i.test(
+    /world-writable|group-writable|invokes bash|eval|destructive|broad filesystem|unsafe/i.test(
       message,
     )
   ) {
@@ -435,6 +467,7 @@ function diagnosticDetails(
     seen.add(key);
     details.push({
       ...(entry ? { id: entry.id, path: entry.path } : {}),
+      ...(entry?.riskLabels.length ? { risk_labels: entry.riskLabels } : {}),
       action: diagnosticSuggestedAction(message),
       message,
       severity: diagnosticSeverity(message),
@@ -496,6 +529,7 @@ function remediationForEntry(
       kind: "risky_shell_boundary",
       severity: "warning",
       path: entry.path,
+      ...(entry.riskLabels.length ? { risk_labels: entry.riskLabels } : {}),
       reason: riskyDiagnostics[0],
       action:
         "audit trusted command boundary; keep only if the recipe is local and intentional",
@@ -541,6 +575,31 @@ function discoveryRemediations(
         remediationRank(a) - remediationRank(b) ||
         String(a.id).localeCompare(String(b.id)) ||
         String(a.path).localeCompare(String(b.path)),
+    );
+}
+
+function summarizeRiskLabels(
+  entries: DiscoveredRecipe[],
+): Array<Record<string, unknown>> {
+  const counts = new Map<string, { count: number; ids: Set<string> }>();
+  for (const entry of entries) {
+    for (const label of entry.riskLabels) {
+      const current = counts.get(label) ?? { count: 0, ids: new Set<string>() };
+      current.count += 1;
+      current.ids.add(entry.id);
+      counts.set(label, current);
+    }
+  }
+  return [...counts.entries()]
+    .map(([label, value]) => ({
+      label,
+      count: value.count,
+      recipes: [...value.ids].sort(),
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.count) - Number(a.count) ||
+        String(a.label).localeCompare(String(b.label)),
     );
 }
 
@@ -598,6 +657,7 @@ export function listDraftRecipes(root: string): Array<Record<string, unknown>> {
       /spawn run ([^\s]+)/,
     )?.[1];
     const preview = templatePreview(config?.template);
+    const riskLabels = getRecipeRiskLabels(resolved);
     return {
       id,
       path,
@@ -607,6 +667,7 @@ export function listDraftRecipes(root: string): Array<Record<string, unknown>> {
       modified_at: stat.mtime.toISOString(),
       valid: Boolean(resolved),
       diagnostics,
+      ...(riskLabels.length ? { risk_labels: riskLabels } : {}),
       ...(config?.description ? { description: config.description } : {}),
       ...(sourceRun ? { source_run: sourceRun } : {}),
       ...(config?.async !== undefined ? { async: config.async } : {}),
@@ -639,6 +700,7 @@ export function summarizeDiscovery(
         disabled: entry.disabled,
         invalid: entry.invalid,
         shadows: entry.shadows,
+        ...(entry.riskLabels.length ? { risk_labels: entry.riskLabels } : {}),
         ...(entry.config?.imports ? { imports: entry.config.imports } : {}),
         ...(recipeUsage(entry.config)
           ? { usage: recipeUsage(entry.config) }
@@ -665,6 +727,7 @@ export function summarizeDiscovery(
       .filter((entry) => entry.disabled)
       .map((entry) => ({ id: entry.id, path: entry.path }))
       .sort((a, b) => a.id.localeCompare(b.id)),
+    risk_summary: summarizeRiskLabels(result.entries),
     recommendations,
     remediations,
     top_action: remediations[0],

@@ -106,7 +106,6 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     configPath: Paths.EXTENSION_RUNTIME_PATHS.configPath,
     exec: CommandTemplates.execCommandTemplate,
     getActiveTools: () => pi.getActiveTools(),
-    getAllTools: () => pi.getAllTools(),
     registerTool: (definition) => {
       actorToolDefinitions.set(definition.name, definition);
       pi.registerTool(definition);

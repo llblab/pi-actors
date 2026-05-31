@@ -1,7 +1,7 @@
 /**
  * Tool registry runtime coordinator
  * Zones: runtime coordination, registry loading, pi tools
- * Owns persisted tool loading, conflict detection, runtime registration, and warning notification
+ * Owns persisted tool loading, reserved-name guards, runtime registration, and warning notification
  */
 
 import { existsSync, watch, type FSWatcher } from "node:fs";
@@ -19,17 +19,12 @@ export interface RuntimeContext {
   };
 }
 
-export interface ToolInfoLike {
-  name: string;
-}
-
 export interface ToolRegistryRuntimeDeps {
   configPath: string;
   exec: RegisteredToolExec;
   packagedRecipeRoot?: string;
   recipeRoot?: string;
   getActiveTools?: () => string[];
-  getAllTools: () => ToolInfoLike[];
   registerTool: (
     definition: ReturnType<typeof ToolsLocal.createRuntimeToolDefinition>,
   ) => void;
@@ -38,7 +33,7 @@ export interface ToolRegistryRuntimeDeps {
 }
 
 export interface ToolRegistryRuntime {
-  getExternalToolConflict(name: string): string | undefined;
+  getToolNameBlocker(name: string): string | undefined;
   getTools(): Map<string, Config.RegisteredTool>;
   loadTools(ctx: RuntimeContext): void;
   notify(
@@ -67,11 +62,9 @@ export function createAutoToolsRuntime(
   ) {
     if (ctx.hasUI) ctx.ui.notify(message, type);
   }
-  function getExternalToolConflict(name: string): string | undefined {
-    if (runtimeTools.has(name)) return undefined;
-    const existing = deps.getAllTools().find((tool) => tool.name === name);
-    return existing
-      ? `Tool "${name}" is already registered outside pi-actors.`
+  function getToolNameBlocker(name: string): string | undefined {
+    return deps.reservedToolNames.has(name)
+      ? `Reserved tool name: ${name}`
       : undefined;
   }
   function getToolFingerprint(cfg: Config.RegisteredTool): string {
@@ -105,6 +98,7 @@ export function createAutoToolsRuntime(
     runtimeToolFingerprints.set(cfg.name, fingerprint);
   }
   function isStartupActionableRegistryWarning(warning: string): boolean {
+    if (warning.includes(" shadows ")) return false;
     if (
       warning.includes("invokes bash;") &&
       warning.includes("trusted executable content")
@@ -166,9 +160,9 @@ export function createAutoToolsRuntime(
     }
     deactivateMissingRuntimeTools(new Set(tools.keys()));
     for (const cfg of tools.values()) {
-      const conflict = getExternalToolConflict(cfg.name);
-      if (conflict) {
-        warnings.push(conflict);
+      const blocker = getToolNameBlocker(cfg.name);
+      if (blocker) {
+        warnings.push(blocker);
         continue;
       }
       registerRuntimeTool(cfg);
@@ -179,7 +173,7 @@ export function createAutoToolsRuntime(
     }
   }
   return {
-    getExternalToolConflict,
+    getToolNameBlocker,
     getTools: () => tools,
     loadTools,
     notify,

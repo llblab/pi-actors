@@ -50,7 +50,7 @@ export interface RegisterToolResult {
 export interface RegisterToolRuntimeDeps<TContext> {
   configPath: string;
   recipeRoot?: string;
-  getExternalToolConflict: (name: string) => string | undefined;
+  getToolNameBlocker: (name: string) => string | undefined;
   getTools: () => Map<string, Config.RegisteredTool>;
   getActiveTools: () => string[];
   notify: (
@@ -132,8 +132,8 @@ function promoteDraftRecipe<TContext>(
   const targetPath = getToolRecipePath(deps, name);
   const tools = deps.getTools();
   const existing = tools.get(name);
-  const conflict = deps.getExternalToolConflict(name);
-  if (conflict) throw new Error(ExecutionOutput.formatToolText(conflict));
+  const blocker = deps.getToolNameBlocker(name);
+  if (blocker) throw new Error(ExecutionOutput.formatToolText(blocker));
   if ((existing || existsSync(targetPath)) && !input.update) {
     throw new Error(
       ExecutionOutput.formatToolText(
@@ -383,8 +383,8 @@ export async function executeRegisterTool<TContext>(
     return deleteTool(name, ctx, deps);
   const tools = deps.getTools();
   const existing = tools.get(name);
-  const conflict = deps.getExternalToolConflict(name);
-  if (conflict) throw new Error(ExecutionOutput.formatToolText(conflict));
+  const blocker = deps.getToolNameBlocker(name);
+  if (blocker) throw new Error(ExecutionOutput.formatToolText(blocker));
   if (existing && !input.update) {
     throw new Error(
       ExecutionOutput.formatToolText(

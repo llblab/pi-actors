@@ -7,11 +7,16 @@ import assert from "node:assert/strict";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { getPackagedRecipeRoot } from "../lib/paths.ts";
-import { buildRecipeContextRecords, getRecipeIdFromPath, readResolvedRecipeConfig, resolveRecipePath } from "../lib/recipes-references.ts";
+import {
+  buildRecipeContextRecords,
+  getRecipeIdFromPath,
+  readResolvedRecipeConfig,
+  resolveRecipePath,
+} from "../lib/recipes-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -87,8 +92,20 @@ test("Template recipe context records preserve raw composition identity", async 
         role: record.role,
       })),
       [
-        { alias: undefined, depth: 0, import_path: [], name: "parent", role: "entry" },
-        { alias: "child_alias", depth: 1, import_path: ["child_alias"], name: "child", role: "import" },
+        {
+          alias: undefined,
+          depth: 0,
+          import_path: [],
+          name: "parent",
+          role: "entry",
+        },
+        {
+          alias: "child_alias",
+          depth: 1,
+          import_path: ["child_alias"],
+          name: "child",
+          role: "import",
+        },
       ],
     );
     assert.deepEqual(records[1].recipe, {
@@ -116,8 +133,19 @@ test("Recipe paths expand repo and agent placeholders", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const recipeRoot = join(root, "recipes");
-    assert.equal(resolveRecipePath("{repo}/recipes/base.json", recipeRoot), join(root, "recipes", "base.json"));
-    assert.equal(resolveRecipePath("{agent}/recipes/base.json", recipeRoot), join(process.env.PI_CODING_AGENT_DIR ?? join(process.env.HOME!, ".pi", "agent"), "recipes", "base.json"));
+    assert.equal(
+      resolveRecipePath("{repo}/recipes/base.json", recipeRoot),
+      join(root, "recipes", "base.json"),
+    );
+    assert.equal(
+      resolveRecipePath("{agent}/recipes/base.json", recipeRoot),
+      join(
+        process.env.PI_CODING_AGENT_DIR ??
+          join(process.env.HOME!, ".pi", "agent"),
+        "recipes",
+        "base.json",
+      ),
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -131,27 +159,121 @@ test("Template recipe imports resolve bare names by recipe-root priority", async
     const userRoot = join(agentDir, "recipes");
     const adHocRoot = join(root, "adhoc");
     process.env.PI_CODING_AGENT_DIR = agentDir;
-    await import("node:fs/promises").then((fs) => Promise.all([
-      fs.mkdir(userRoot, { recursive: true }),
-      fs.mkdir(adHocRoot, { recursive: true }),
-    ]));
-    await writeFile(join(userRoot, "shared.json"), JSON.stringify({ template: "echo user" }));
-    await writeFile(join(adHocRoot, "shared.json"), JSON.stringify({ template: "echo adhoc" }));
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(userRoot, { recursive: true }),
+        fs.mkdir(adHocRoot, { recursive: true }),
+      ]),
+    );
+    await writeFile(
+      join(userRoot, "shared.json"),
+      JSON.stringify({ template: "echo user" }),
+    );
+    await writeFile(
+      join(adHocRoot, "shared.json"),
+      JSON.stringify({ template: "echo adhoc" }),
+    );
     await writeFile(
       join(adHocRoot, "parent.json"),
-      JSON.stringify({ imports: { shared: "shared" }, template: { name: "shared" } }),
+      JSON.stringify({
+        imports: { shared: "shared" },
+        template: { name: "shared" },
+      }),
     );
     await writeFile(
       join(adHocRoot, "stdlib-parent.json"),
-      JSON.stringify({ imports: { utility: "utility-package-summary" }, template: { name: "utility" } }),
+      JSON.stringify({
+        imports: { utility: "utility-package-summary" },
+        template: { name: "utility" },
+      }),
     );
 
     const config = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
     assert.deepEqual(config.template, { template: "echo user" });
     await rm(join(userRoot, "shared.json"), { force: true });
-    const fallbackConfig = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
+    const fallbackConfig = readResolvedRecipeConfig(
+      join(adHocRoot, "parent.json"),
+    )!;
     assert.deepEqual(fallbackConfig.template, { template: "echo adhoc" });
-    const stdlibConfig = readResolvedRecipeConfig(join(adHocRoot, "stdlib-parent.json"))!;
+    const stdlibConfig = readResolvedRecipeConfig(
+      join(adHocRoot, "stdlib-parent.json"),
+    )!;
+    assert.match(JSON.stringify(stdlibConfig.template), /recipe-utils\.mjs/);
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template recipe direct delegation resolves by recipe priority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  try {
+    const agentDir = join(root, "agent");
+    const userRoot = join(agentDir, "recipes");
+    const adHocRoot = join(root, "adhoc");
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(userRoot, { recursive: true }),
+        fs.mkdir(adHocRoot, { recursive: true }),
+      ]),
+    );
+    await writeFile(
+      join(userRoot, "shared.json"),
+      JSON.stringify({
+        async: true,
+        args: ["message:string"],
+        defaults: { message: "user" },
+        mailbox: { accepts: ["player.stop"] },
+        retire_when: "children_terminal",
+        template: "echo {message}",
+      }),
+    );
+    await writeFile(
+      join(adHocRoot, "shared.json"),
+      JSON.stringify({
+        defaults: { message: "adhoc" },
+        template: "echo {message}",
+      }),
+    );
+    await writeFile(
+      join(adHocRoot, "parent.json"),
+      JSON.stringify({
+        defaults: { message: "parent" },
+        template: "shared",
+      }),
+    );
+    await writeFile(
+      join(adHocRoot, "stdlib-parent.json"),
+      JSON.stringify({
+        template: "utility-package-summary",
+      }),
+    );
+
+    const config = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
+    assert.equal(config.async, true);
+    assert.deepEqual(config.args, ["message:string"]);
+    assert.deepEqual(config.defaults, { message: "parent" });
+    assert.deepEqual(config.mailbox, { accepts: ["player.stop"] });
+    assert.equal(config.retire_when, "children_terminal");
+    assert.deepEqual(config.template, {
+      args: ["message:string"],
+      defaults: { message: "parent" },
+      template: "echo {message}",
+    });
+    await rm(join(userRoot, "shared.json"), { force: true });
+    const fallbackConfig = readResolvedRecipeConfig(
+      join(adHocRoot, "parent.json"),
+    )!;
+    assert.deepEqual(fallbackConfig.template, {
+      defaults: { message: "parent" },
+      template: "echo {message}",
+    });
+    const stdlibConfig = readResolvedRecipeConfig(
+      join(adHocRoot, "stdlib-parent.json"),
+    )!;
     assert.match(JSON.stringify(stdlibConfig.template), /recipe-utils\.mjs/);
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -166,7 +288,9 @@ test("Template recipe imports expand repo placeholders", async () => {
     const recipeRoot = join(root, "recipes");
     const child = join(recipeRoot, "child.json");
     const parent = join(recipeRoot, "parent.json");
-    await import("node:fs/promises").then((fs) => fs.mkdir(recipeRoot, { recursive: true }));
+    await import("node:fs/promises").then((fs) =>
+      fs.mkdir(recipeRoot, { recursive: true }),
+    );
     await writeFile(child, JSON.stringify({ template: "echo {word}" }));
     await writeFile(
       parent,
@@ -176,7 +300,10 @@ test("Template recipe imports expand repo placeholders", async () => {
       }),
     );
     const config = readResolvedRecipeConfig(parent)!;
-    assert.deepEqual(config.template, { defaults: { word: "ok" }, template: "echo {word}" });
+    assert.deepEqual(config.template, {
+      defaults: { word: "ok" },
+      template: "echo {word}",
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -376,15 +503,26 @@ test("Template recipes preserve mailbox declarations", async () => {
     const recipe = join(root, "mailbox.json");
     await writeFile(
       base,
-      JSON.stringify({ defaults: { message_type: "checkpoint.ready" }, template: "echo base" }),
+      JSON.stringify({
+        defaults: { message_type: "checkpoint.ready" },
+        template: "echo base",
+      }),
     );
     await writeFile(
       recipe,
       JSON.stringify({
         imports: { base: "base.json" },
         mailbox: {
-          accepts: ["control.approve", { type: "control.revise", requires_response: true }, 7],
-          emits: ["{base.defaults.message_type}", { type: "run.done", level: "info" }, false],
+          accepts: [
+            "control.approve",
+            { type: "control.revise", requires_response: true },
+            7,
+          ],
+          emits: [
+            "{base.defaults.message_type}",
+            { type: "run.done", level: "info" },
+            false,
+          ],
         },
         template: "echo mailbox",
       }),
@@ -392,7 +530,10 @@ test("Template recipes preserve mailbox declarations", async () => {
 
     const config = readResolvedRecipeConfig(recipe)!;
     assert.deepEqual(config.mailbox, {
-      accepts: ["control.approve", { type: "control.revise", requires_response: true }],
+      accepts: [
+        "control.approve",
+        { type: "control.revise", requires_response: true },
+      ],
       emits: ["checkpoint.ready", { type: "run.done", level: "info" }],
     });
   } finally {
@@ -416,11 +557,23 @@ test("Packaged library recipes parse and resolve imports", async () => {
 
 test("Packaged async-run operations recipes expose actor run args", () => {
   const recipeDir = join(__dirname, "..", "recipes");
-  for (const file of ["utility-run-ops-snapshot.json", "pipeline-async-run-ops.json"]) {
+  for (const file of [
+    "utility-run-ops-snapshot.json",
+    "pipeline-async-run-ops.json",
+  ]) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
-    assert.ok(config?.args?.includes("run_id:string"), `${file} should expose run_id:string`);
-    assert.ok(!config?.args?.some((arg) => arg.startsWith("message_file")), `${file} should not expose message_file`);
-    assert.ok(!config?.args?.some((arg) => arg.startsWith("event_file")), `${file} should not expose event_file`);
+    assert.ok(
+      config?.args?.includes("run_id:string"),
+      `${file} should expose run_id:string`,
+    );
+    assert.ok(
+      !config?.args?.some((arg) => arg.startsWith("message_file")),
+      `${file} should not expose message_file`,
+    );
+    assert.ok(
+      !config?.args?.some((arg) => arg.startsWith("event_file")),
+      `${file} should not expose event_file`,
+    );
   }
 });
 
@@ -428,9 +581,18 @@ test("Packaged actor message recipes expose envelope-aligned type args", () => {
   const recipeDir = join(__dirname, "..", "recipes");
   for (const file of ["subagent-message.json", "utility-actor-message.json"]) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
-    assert.ok(config?.args?.includes("type:string"), `${file} should expose type:string`);
-    assert.ok(!config?.args?.some((arg) => arg.startsWith("event_type")), `${file} should not expose event_type`);
-    assert.ok(!config?.args?.some((arg) => arg.startsWith("event_policy")), `${file} should not expose event_policy`);
+    assert.ok(
+      config?.args?.includes("type:string"),
+      `${file} should expose type:string`,
+    );
+    assert.ok(
+      !config?.args?.some((arg) => arg.startsWith("event_type")),
+      `${file} should not expose event_type`,
+    );
+    assert.ok(
+      !config?.args?.some((arg) => arg.startsWith("event_policy")),
+      `${file} should not expose event_policy`,
+    );
   }
 });
 
@@ -454,7 +616,8 @@ test("Packaged recipes do not ship concrete model-version defaults", async () =>
     file.endsWith(".json"),
   );
   const modelLikeKey = /(^|_)models?$/;
-  const concreteModelValue = /\b(openai|gpt|claude|deepseek|gemini|mistral|codex)\b/i;
+  const concreteModelValue =
+    /\b(openai|gpt|claude|deepseek|gemini|mistral|codex)\b/i;
 
   for (const file of files) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
@@ -473,18 +636,28 @@ test("Packaged recipes do not ship concrete model-version defaults", async () =>
 });
 
 test("Packaged actor worker recipe stays mailbox-only and cross-platform", () => {
-  const config = readResolvedRecipeConfig(join(getPackagedRecipeRoot(), "actor-worker.json"))!;
+  const config = readResolvedRecipeConfig(
+    join(getPackagedRecipeRoot(), "actor-worker.json"),
+  )!;
   assert.deepEqual(config.mailbox?.accepts, ["task.assign", "control.kill"]);
   const template = JSON.stringify(config.template);
   assert.match(template, /actor-worker\.mjs/);
   assert.match(template, /--stale-claim-ms/);
   assert.match(template, /--write-artifacts/);
-  assert.deepEqual(Object.keys(config.artifacts ?? {}).sort(), ["journal", "results", "status"]);
+  assert.deepEqual(Object.keys(config.artifacts ?? {}).sort(), [
+    "journal",
+    "results",
+    "status",
+  ]);
   assert.doesNotMatch(template, /control\.fifo|mkfifo|named-pipe/);
 });
 
 test("Packaged async recipes declare stop and cancel only for actor-domain handlers", async () => {
-  const allowed = new Set(["coordinator-locker.json", "locker.json", "music-player.json"]);
+  const allowed = new Set([
+    "coordinator-locker.json",
+    "locker.json",
+    "music-player.json",
+  ]);
   const recipeDir = join(__dirname, "..", "recipes");
   const asyncFiles = (await readdir(recipeDir)).filter((file) => {
     if (!file.endsWith(".json")) return false;
@@ -493,8 +666,10 @@ test("Packaged async recipes declare stop and cancel only for actor-domain handl
   });
 
   for (const file of asyncFiles) {
-    const accepts = readResolvedRecipeConfig(join(recipeDir, file))?.mailbox?.accepts ?? [];
-    const hasDomainStop = accepts.includes("control.stop") || accepts.includes("control.cancel");
+    const accepts =
+      readResolvedRecipeConfig(join(recipeDir, file))?.mailbox?.accepts ?? [];
+    const hasDomainStop =
+      accepts.includes("control.stop") || accepts.includes("control.cancel");
     assert.equal(
       hasDomainStop,
       allowed.has(file),

@@ -19,7 +19,11 @@ const exec = async (): Promise<CommandTemplateExecResult> => ({
   stdout: "ok",
 });
 
-async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
+async function writeRecipe(
+  root: string,
+  name: string,
+  body: Record<string, unknown>,
+) {
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
 }
 
@@ -43,7 +47,6 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
       exec,
-      getAllTools: () => [],
       packagedRecipeRoot,
       recipeRoot,
       registerTool: () => assert.fail("invalid recipe should not register"),
@@ -82,7 +85,6 @@ test("Runtime suppresses routine bash wrapper startup warnings", async () => {
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
       exec,
-      getAllTools: () => [],
       packagedRecipeRoot,
       recipeRoot,
       registerTool: () => {},
@@ -96,6 +98,90 @@ test("Runtime suppresses routine bash wrapper startup warnings", async () => {
 
     assert.equal(runtime.getTools().has("bash-wrapper"), true);
     assert.equal(notifications.join("\n"), "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime treats same-id recipe shadowing as a normal override", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-registry-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const packagedRecipeRoot = join(root, "packaged");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(recipeRoot, { recursive: true }),
+        fs.mkdir(packagedRecipeRoot, { recursive: true }),
+      ]),
+    );
+    await writeRecipe(packagedRecipeRoot, "music_player", {
+      description: "Packaged player",
+      template: "echo packaged",
+    });
+    await writeRecipe(recipeRoot, "music_player", {
+      description: "User player",
+      template: "echo user",
+    });
+
+    const notifications: string[] = [];
+    const registered: string[] = [];
+    const runtime = createAutoToolsRuntime({
+      configPath: join(root, "tool-registry.json"),
+      exec,
+      packagedRecipeRoot,
+      recipeRoot,
+      registerTool: (definition) => registered.push(definition.name),
+      reservedToolNames: new Set(),
+    });
+
+    runtime.loadTools({
+      hasUI: true,
+      ui: { notify: (message) => notifications.push(message) },
+    });
+
+    assert.deepEqual(registered, ["music_player"]);
+    assert.equal(
+      runtime.getTools().get("music_player")?.description,
+      "User player",
+    );
+    assert.equal(notifications.join("\n"), "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime keeps reserved tool names protected during recipe loading", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-registry-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const packagedRecipeRoot = join(root, "packaged");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(recipeRoot, { recursive: true }),
+        fs.mkdir(packagedRecipeRoot, { recursive: true }),
+      ]),
+    );
+    await writeRecipe(recipeRoot, "read", {
+      description: "Unsafe core override",
+      template: "echo nope",
+    });
+
+    const notifications: string[] = [];
+    const runtime = createAutoToolsRuntime({
+      configPath: join(root, "tool-registry.json"),
+      exec,
+      packagedRecipeRoot,
+      recipeRoot,
+      registerTool: () => assert.fail("reserved recipe should not register"),
+      reservedToolNames: new Set(["read"]),
+    });
+
+    runtime.loadTools({
+      hasUI: true,
+      ui: { notify: (message) => notifications.push(message) },
+    });
+
+    assert.match(notifications.join("\n"), /Reserved tool name: read/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -136,7 +222,6 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       configPath: join(root, "tool-registry.json"),
       exec,
       getActiveTools: () => activeTools,
-      getAllTools: () => [],
       packagedRecipeRoot,
       recipeRoot,
       registerTool: (definition) => {
@@ -155,8 +240,14 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       "recipe-only",
       "user-tool",
     ]);
-    assert.equal(runtime.getTools().get("user-tool")?.sourcePath, join(recipeRoot, "user-tool.json"));
-    assert.equal(runtime.getTools().get("recipe-only")?.sourcePath, join(recipeRoot, "recipe-only.json"));
+    assert.equal(
+      runtime.getTools().get("user-tool")?.sourcePath,
+      join(recipeRoot, "user-tool.json"),
+    );
+    assert.equal(
+      runtime.getTools().get("recipe-only")?.sourcePath,
+      join(recipeRoot, "recipe-only.json"),
+    );
     assert.equal(runtime.getTools().get("stdlib-tool"), undefined);
     assert.deepEqual(registered.sort(), ["recipe-only", "user-tool"]);
 
@@ -169,7 +260,11 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       template: "echo updated {scope}",
     });
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
-    assert.deepEqual(registered.sort(), ["recipe-only", "user-tool", "user-tool"]);
+    assert.deepEqual(registered.sort(), [
+      "recipe-only",
+      "user-tool",
+      "user-tool",
+    ]);
 
     await writeRecipe(packagedRecipeRoot, "fallback", {
       description: "Packaged fallback",
@@ -181,7 +276,10 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       repeat: 0,
     });
     const warnings: string[] = [];
-    runtime.loadTools({ hasUI: true, ui: { notify: (message) => warnings.push(message) } });
+    runtime.loadTools({
+      hasUI: true,
+      ui: { notify: (message) => warnings.push(message) },
+    });
     assert.equal(runtime.getTools().has("fallback"), false);
     assert.match(warnings.join("\n"), /blocks lower-priority recipes/);
 
@@ -190,7 +288,10 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       template: "echo recovered {topic}",
     });
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
-    assert.equal(runtime.getTools().get("fallback")?.description, "Recovered user winner");
+    assert.equal(
+      runtime.getTools().get("fallback")?.description,
+      "Recovered user winner",
+    );
     assert.deepEqual(runtime.getTools().get("fallback")?.args, ["topic"]);
 
     await unlink(join(recipeRoot, "user-tool.json"));

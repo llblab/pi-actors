@@ -135,25 +135,53 @@ function recipeNameFiles(value: string): string[] {
   return [`${trimmed}.json`, `${trimmed}.md`];
 }
 
-function resolveRecipeImportPath(
+function recipeCandidatePaths(
   value: string,
   currentRecipeRoot: string,
-): string {
+): string[] {
   if (!isBareRecipeName(value))
-    return resolveRecipePath(value, currentRecipeRoot);
+    return [resolveRecipePath(value, currentRecipeRoot)];
   const roots = [
     Paths.getRecipeRoot(),
     currentRecipeRoot,
     Paths.getPackagedRecipeRoot(),
   ];
-  const candidates = [
+  return [
     ...new Set(
       roots.flatMap((root) =>
         recipeNameFiles(value).map((file) => resolve(root, file)),
       ),
     ),
   ];
+}
+
+function resolveRecipeImportPath(
+  value: string,
+  currentRecipeRoot: string,
+): string {
+  const candidates = recipeCandidatePaths(value, currentRecipeRoot);
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+export function resolveRecipeReferencePath(
+  value: unknown,
+  currentRecipeRoot = Paths.getRecipeRoot(),
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || hasWhitespace(trimmed)) return undefined;
+  for (const path of recipeCandidatePaths(trimmed, currentRecipeRoot)) {
+    if (!existsSync(path)) continue;
+    try {
+      const raw = readRawRecipeConfig(path);
+      if (raw && typeof raw === "object" && Object.hasOwn(raw, "template"))
+        return path;
+      return path;
+    } catch {
+      return path;
+    }
+  }
+  return undefined;
 }
 
 export function getRecipePath(
@@ -165,18 +193,7 @@ export function getRecipePath(
   if (!trimmed || hasWhitespace(trimmed)) return undefined;
   if (trimmed.endsWith(".json") || trimmed.endsWith(".md"))
     return resolveRecipePath(trimmed, recipeRoot);
-  const jsonPath = resolveRecipePath(trimmed, recipeRoot);
-  const mdPath = resolveRecipePath(`${trimmed}.md`, recipeRoot);
-  const path = existsSync(jsonPath) ? jsonPath : mdPath;
-  if (!existsSync(path)) return undefined;
-  try {
-    const raw = readRawRecipeConfig(path);
-    return raw && typeof raw === "object" && Object.hasOwn(raw, "template")
-      ? path
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  return resolveRecipeReferencePath(trimmed, recipeRoot);
 }
 
 function isImportNode(value: unknown): boolean {
@@ -483,7 +500,7 @@ export function getRecipeIdFromPath(file: string): string {
 }
 
 function readRecipeConfig(value: unknown): TemplateRecipeConfig | undefined {
-  const path = getRecipePath(value);
+  const path = resolveRecipeReferencePath(value);
   return path ? readResolvedRecipeConfig(path) : undefined;
 }
 
@@ -647,6 +664,7 @@ function applyDefaultsToTemplate(
 ): CommandTemplateValue {
   const cleanOverrides = { ...overrides };
   delete cleanOverrides.name;
+  delete cleanOverrides.template;
   delete cleanOverrides.values;
   if (typeof template === "object" && !Array.isArray(template)) {
     return {
@@ -684,6 +702,119 @@ function withActorRecipeContext(
     return { ...value, actorRecipeContext: context };
   }
   return { actorRecipeContext: context, template: value };
+}
+
+function loadDelegatedRecipe(
+  value: unknown,
+  currentRecipeFile: string,
+  stack: string[],
+  options: ReadResolvedRecipeConfigOptions,
+): TemplateRecipeConfig | undefined {
+  const path = resolveRecipeReferencePath(value, dirname(currentRecipeFile));
+  if (!path) return undefined;
+  const config = readResolvedRecipeConfig(
+    path,
+    [...stack, currentRecipeFile],
+    options,
+  );
+  if (!config) throw new Error(`Template recipe must define template: ${path}`);
+  if (config.disabled === true)
+    throw new Error(`Template recipe is disabled: ${path}`);
+  return config;
+}
+
+function applyDelegatedRecipeToNode(
+  delegated: TemplateRecipeConfig,
+  overrides: Record<string, unknown> = {},
+): CommandTemplateValue {
+  return applyDefaultsToTemplate(
+    delegated.template,
+    delegated.values,
+    overrides,
+  );
+}
+
+function expandRecipeDelegations(
+  value: CommandTemplateValue,
+  currentRecipeFile: string,
+  stack: string[],
+  options: ReadResolvedRecipeConfigOptions = {},
+): CommandTemplateValue {
+  if (typeof value === "string") {
+    const delegated = loadDelegatedRecipe(
+      value,
+      currentRecipeFile,
+      stack,
+      options,
+    );
+    return delegated ? applyDelegatedRecipeToNode(delegated) : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(
+      (item) =>
+        expandRecipeDelegations(
+          item as CommandTemplateValue,
+          currentRecipeFile,
+          stack,
+          options,
+        ) as CommandTemplateConfig,
+    );
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.template === "string") {
+    const delegated = loadDelegatedRecipe(
+      record.template,
+      currentRecipeFile,
+      stack,
+      options,
+    );
+    if (delegated) return applyDelegatedRecipeToNode(delegated, record);
+  }
+  if (Array.isArray(record.template)) {
+    return {
+      ...record,
+      template: record.template.map(
+        (item) =>
+          expandRecipeDelegations(
+            item as CommandTemplateValue,
+            currentRecipeFile,
+            stack,
+            options,
+          ) as CommandTemplateConfig,
+      ),
+    } as CommandTemplates.CommandTemplateObjectConfig;
+  }
+  if (record.template && typeof record.template === "object") {
+    return {
+      ...record,
+      template: expandRecipeDelegations(
+        record.template as CommandTemplateValue,
+        currentRecipeFile,
+        stack,
+        options,
+      ),
+    } as CommandTemplates.CommandTemplateObjectConfig;
+  }
+  return value;
+}
+
+function getDirectDelegatedRecipe(
+  value: CommandTemplateValue,
+  currentRecipeFile: string,
+  stack: string[],
+  options: ReadResolvedRecipeConfigOptions = {},
+): TemplateRecipeConfig | undefined {
+  if (typeof value === "string")
+    return loadDelegatedRecipe(value, currentRecipeFile, stack, options);
+  if (!Array.isArray(value) && typeof value.template === "string") {
+    return loadDelegatedRecipe(
+      value.template,
+      currentRecipeFile,
+      stack,
+      options,
+    );
+  }
+  return undefined;
 }
 
 function expandImportNodes(
@@ -807,7 +938,22 @@ export function readResolvedRecipeConfig(
   >;
   const template = getRecipeCommandTemplate(substituted);
   if (!template) return undefined;
-  const expandedTemplate = expandImportNodes(template, imports, options);
+  const expandedImportsTemplate = expandImportNodes(template, imports, options);
+  const delegated = getDirectDelegatedRecipe(
+    expandedImportsTemplate,
+    path,
+    stack,
+    options,
+  );
+  const expandedTemplate = delegated
+    ? applyDelegatedRecipeToNode(
+        delegated,
+        typeof expandedImportsTemplate === "object" &&
+          !Array.isArray(expandedImportsTemplate)
+          ? (expandedImportsTemplate as Record<string, unknown>)
+          : {},
+      )
+    : expandRecipeDelegations(expandedImportsTemplate, path, stack, options);
   const recipeName = getRecipeIdFromPath(path);
   const templateWithContext = options.includeActorRecipeContext
     ? withActorRecipeContext(expandedTemplate, {
@@ -817,33 +963,53 @@ export function readResolvedRecipeConfig(
         role: stack.length > 0 ? "import" : "entry",
       })
     : expandedTemplate;
+  const mergedDefaults = mergeDefaults(
+    delegated?.defaults,
+    isRecord(substituted.defaults) ? substituted.defaults : undefined,
+  );
+  const artifactSource = isRecord(substituted.artifacts)
+    ? substituted.artifacts
+    : delegated?.artifacts;
+  const mailboxSource = isRecord(substituted.mailbox)
+    ? substituted.mailbox
+    : delegated?.mailbox;
   return {
     name: recipeName,
     ...(typeof substituted.description === "string" &&
     substituted.description.trim()
       ? { description: substituted.description.trim() }
-      : {}),
+      : typeof delegated?.description === "string"
+        ? { description: delegated.description }
+        : {}),
     ...(typeof substituted.disabled === "boolean"
       ? { disabled: substituted.disabled }
-      : {}),
+      : typeof delegated?.disabled === "boolean"
+        ? { disabled: delegated.disabled }
+        : {}),
     ...(substituted.async === true
       ? { async: true }
       : substituted.async === false
         ? { async: false }
-        : {}),
+        : delegated?.async === true
+          ? { async: true }
+          : delegated?.async === false
+            ? { async: false }
+            : {}),
     ...(typeof substituted.state_dir === "string"
       ? { state_dir: substituted.state_dir }
-      : {}),
+      : typeof delegated?.state_dir === "string"
+        ? { state_dir: delegated.state_dir }
+        : {}),
     ...(Object.keys(imports).length > 0
       ? { imports: getRecipeImports(raw) }
       : {}),
     template: templateWithContext,
     ...(Array.isArray(substituted.args)
       ? { args: substituted.args as string[] }
-      : {}),
-    ...(isRecord(substituted.defaults)
-      ? { defaults: substituted.defaults }
-      : {}),
+      : Array.isArray(delegated?.args)
+        ? { args: delegated.args }
+        : {}),
+    ...(mergedDefaults ? { defaults: mergedDefaults } : {}),
     ...(typeof substituted.parallel === "boolean"
       ? { parallel: substituted.parallel }
       : {}),
@@ -865,31 +1031,31 @@ export function readResolvedRecipeConfig(
     ...(typeof substituted.output === "string"
       ? { output: substituted.output }
       : {}),
-    ...(isRecord(substituted.artifacts)
+    ...(isRecord(artifactSource)
       ? {
           artifacts: Object.fromEntries(
-            Object.entries(substituted.artifacts).filter(
+            Object.entries(artifactSource).filter(
               (entry): entry is [string, string] =>
                 typeof entry[1] === "string",
             ),
           ),
         }
       : {}),
-    ...(isRecord(substituted.mailbox)
+    ...(isRecord(mailboxSource)
       ? {
           mailbox: {
-            ...(Array.isArray(substituted.mailbox.accepts)
+            ...(Array.isArray(mailboxSource.accepts)
               ? {
-                  accepts: substituted.mailbox.accepts.filter(
+                  accepts: mailboxSource.accepts.filter(
                     (value): value is TemplateRecipeMailboxEntry =>
                       typeof value === "string" ||
                       (isRecord(value) && typeof value.type === "string"),
                   ),
                 }
               : {}),
-            ...(Array.isArray(substituted.mailbox.emits)
+            ...(Array.isArray(mailboxSource.emits)
               ? {
-                  emits: substituted.mailbox.emits.filter(
+                  emits: mailboxSource.emits.filter(
                     (value): value is TemplateRecipeMailboxEntry =>
                       typeof value === "string" ||
                       (isRecord(value) && typeof value.type === "string"),
@@ -899,7 +1065,8 @@ export function readResolvedRecipeConfig(
           },
         }
       : {}),
-    ...(substituted.retire_when === "children_terminal"
+    ...(substituted.retire_when === "children_terminal" ||
+    delegated?.retire_when === "children_terminal"
       ? { retire_when: "children_terminal" as const }
       : {}),
     ...(typeof substituted.retry === "number" ||

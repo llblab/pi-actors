@@ -12,6 +12,7 @@ import {
   expandCommandTemplateConfigs,
   getCommandTemplateRiskLabels,
   getCommandTemplateWarnings,
+  resolveInheritedDefaultReferences,
   splitCommandTemplate,
 } from "../lib/command-templates.ts";
 
@@ -76,6 +77,16 @@ test("Command template child defaults can reference inherited defaults", () => {
   });
   assert.equal(steps[0].defaults?.model, "parent-model");
   assert.equal(steps[1].defaults?.model, "reviewer-model");
+});
+
+test("Command template child defaults can reference runtime values", () => {
+  const resolved = resolveInheritedDefaultReferences(
+    { lenses: "{lenses}", lens: "{lenses[index]}" },
+    { lenses: ["parent"], index: 0 },
+    { lenses: ["runtime"], index: 0 },
+  );
+  assert.deepEqual(resolved?.lenses, ["runtime"]);
+  assert.equal(resolved?.lens, "runtime");
 });
 
 test("Template composition expansion preserves retry and failure on step objects", () => {
@@ -180,7 +191,10 @@ test("Command templates detect high-risk trusted executable shapes", () => {
   assert.match(warnings[1], /eval/);
   assert.match(warnings[2], /code-eval/);
   assert.match(warnings[3], /removes filesystem paths/);
-  assert.equal(warnings.every((warning) => /Mitigation:/.test(warning)), true);
+  assert.equal(
+    warnings.every((warning) => /Mitigation:/.test(warning)),
+    true,
+  );
   assert.deepEqual(getCommandTemplateRiskLabels(config), [
     "risk.shell",
     "risk.eval",

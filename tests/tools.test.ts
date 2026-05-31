@@ -33,7 +33,7 @@ function createRegistryDeps() {
   return {
     configPath: "/tmp/tool-registry.json",
     getActiveTools: () => [],
-    getExternalToolConflict: () => undefined,
+    getToolNameBlocker: () => undefined,
     getTools: () => new Map<string, RegisteredTool>(),
     notify: () => undefined,
     registerRuntimeTool: () => undefined,

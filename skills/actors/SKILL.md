@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.36.0
+  version: 0.37.0
 ---
 
 # Actors (pi-actors)
@@ -194,13 +194,14 @@ Rules:
 2. `async: true` makes spawned work a detached actor run.
 3. Public knobs belong in `args`/`defaults`; hidden launch mechanics stay inside `template`.
 4. Use `imports` to compose recipes; imported recipes are definitions, not nested async runs.
-5. When exposing an already-authored recipe as a user tool, make a small wrapper recipe in `~/.pi/agent/recipes` that imports the source recipe and uses a `{ "name": "alias" }` node. Do not copy the ready recipe's script command, defaults, mailbox, or artifacts into a second template.
-6. Declare `mailbox` for actors that accept or emit meaningful messages.
-7. Declare `artifacts` for durable outputs the coordinator should inspect.
-8. File-backed recipe identity comes from the filename basename; legacy top-level `name` fields are ignored by loaders.
-9. File-backed async recipes pass child `pi -p` actors a bounded JSONL recipe context bundle by default: raw entry/import recipe records, derived `name`, import path/alias, and `"you_are_here": true` on the launching recipe node. Set `"actor_context": false` or `"off"` to suppress it for minimal prompts.
-10. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
-11. Do not ship concrete model-version defaults in packaged recipes; expose `model`, `models`, and stage-specific model args so the caller must choose current policy at launch.
+5. Direct recipe delegation is the thin-wrapper case: when a `template` value is just a ready recipe name/path, the intended behavior is to delegate to that recipe rather than execute the recipe file as a program. Use this for simple handoffs and wrapper tools; use `imports` + `{ "name": "alias" }` when you need rich composition, multiple nodes, or import-specific values/defaults.
+6. When exposing an already-authored recipe as a user tool before direct delegation is available or when composition is needed, make a small wrapper recipe in `~/.pi/agent/recipes` that imports the source recipe and uses a `{ "name": "alias" }` node. Do not copy the ready recipe's script command, defaults, mailbox, or artifacts into a second template.
+7. Declare `mailbox` for actors that accept or emit meaningful messages.
+8. Declare `artifacts` for durable outputs the coordinator should inspect.
+9. File-backed recipe identity comes from the filename basename; legacy top-level `name` fields are ignored by loaders.
+10. File-backed async recipes pass child `pi -p` actors a bounded JSONL recipe context bundle by default: raw entry/import recipe records, derived `name`, import path/alias, and `"you_are_here": true` on the launching recipe node. Set `"actor_context": false` or `"off"` to suppress it for minimal prompts.
+11. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
+12. Do not ship concrete model-version defaults in packaged recipes; expose `model`, `models`, and stage-specific model args so the caller must choose current policy at launch.
 
 Priority for same-id recipes:
 
@@ -209,7 +210,7 @@ Priority for same-id recipes:
 3. Explicit ad hoc user recipe file outside `~/.pi/agent/recipes`.
 4. User recipe in `~/.pi/agent/recipes/*.json` or `*.md`: highest-priority operator tool surface.
 
-Only matching filename ids compete. Higher priority shadows lower priority; within one priority layer, same-id JSON shadows Markdown. An invalid or `disabled: true` higher-priority recipe blocks fallback so the agent does not silently run standard-library behavior when a user override is broken or intentionally disabled.
+Only matching filename ids compete. Higher priority shadows lower priority; within one priority layer, same-id JSON shadows Markdown. Same-id overrides are normal composition/delegation behavior, not startup-warning material. An invalid or `disabled: true` higher-priority recipe blocks fallback so the agent does not silently run standard-library behavior when a user override is broken or intentionally disabled.
 
 Muscle-memory lens: pi-actors has two durable executable-memory layers.
 
@@ -230,7 +231,21 @@ Cleanup rule: periodically inspect `~/.pi/agent/recipes` as the live muscle-memo
 
 Use it when a command/template/recipe should become durable agent muscle memory. Prefer typed args or placeholder-derived args; use `update=true` for replacement and `template=null` or `template=""` for deletion. `register_tool` should create/update/delete simple recipe files in the user recipe root; direct recipe-file editing is the right path when the wrapper needs `imports` or other top-level recipe metadata not exposed by the interactive mutation API.
 
-Ready-recipe registration pattern:
+Ready-recipe registration patterns:
+
+Thin delegation target shape:
+
+```json
+{
+  "description": "Run a ready recipe through a local tool name.",
+  "args": ["source:path", "volume:int=70"],
+  "template": "/path/to/ready-recipe.json"
+}
+```
+
+Delegation is for one-to-one handoff: expose or call a maintained recipe directly, preserving that recipe as the source of truth. If the runtime does not yet support direct recipe references in `template`, or if you need composition, use the import-node wrapper below.
+
+Composition/import wrapper:
 
 ```json
 {
@@ -243,16 +258,16 @@ Ready-recipe registration pattern:
 }
 ```
 
-Use this pattern whenever a reusable recipe already exists: packaged pi-actors components, project-local recipes, ad hoc reviewed recipe files, and especially skill-owned recipes that wrap skill scripts. The wrapper owns only the public tool name, description, optional narrowed args/defaults, and local usage metadata. The imported recipe remains the source of truth for the script path, default values, mailbox contract, artifacts, and future fixes.
+Use delegation or this import pattern whenever a reusable recipe already exists: packaged pi-actors components, project-local recipes, ad hoc reviewed recipe files, and especially skill-owned recipes that wrap skill scripts. The wrapper owns only the public tool name, description, optional narrowed args/defaults, and local usage metadata. The delegated/imported recipe remains the source of truth for the script path, default values, mailbox contract, artifacts, and future fixes.
 
 Tool-registration lenses are open-ended prompts for deciding what deserves durable tool status:
 
 1. **Reliability lens**: register wrappers for operations where agents commonly omit checks, run steps out of order, pass ambiguous inputs, or recover poorly from partial failure.
 2. **Safety lens**: prefer read-only diagnostics, dry-runs, preflights, confirmations, or bounded adapters around high-impact operations before registering direct action tools.
 3. **Context-affordance lens**: register tools whose mere presence in the injected capability list should steer agents toward the right operational habit.
-4. **Existing-recipe lens**: scan already-authored recipes before inventing a new tool. Packaged recipes, ad hoc project recipes, and recipes co-located under skill directories are the first candidates to import from a user-root wrapper when they match a recurring local workflow.
-5. **Skill-recipe lens**: when a skill ships a recipe for its script, local tools must import that recipe instead of calling the skill script directly. This preserves the skill's maintained interface and keeps future script/default changes centralized.
-6. **Composition lens**: register small semantic entrypoints over reusable recipe components instead of baking one large scenario-specific shell command into a tool.
+4. **Existing-recipe lens**: scan already-authored recipes before inventing a new tool. Packaged recipes, ad hoc project recipes, and recipes co-located under skill directories are the first candidates to delegate to or import from a user-root wrapper when they match a recurring local workflow.
+5. **Skill-recipe lens**: when a skill ships a recipe for its script, local tools must delegate to or import that recipe instead of calling the skill script directly. This preserves the skill's maintained interface and keeps future script/default changes centralized.
+6. **Composition lens**: register small semantic entrypoints over reusable recipe components instead of baking one large scenario-specific shell command into a tool; prefer direct delegation for one recipe, imports for composed graphs.
 7. **Portability lens**: keep recipe files transportable; make tool exposure a consequence of placement in `~/.pi/agent/recipes`, not recipe-owned markers or machine-local assumptions.
 
 Default bias: register diagnostic/preflight tools before action tools, and promote existing recipes before writing new orchestration. A good persistent tool shrinks the chance of a subtle operational mistake, not just the number of keystrokes.
@@ -260,7 +275,7 @@ Default bias: register diagnostic/preflight tools before action tools, and promo
 Tool templates may be:
 
 - A foreground command template.
-- A file-backed recipe name/path.
+- A file-backed recipe name/path for thin delegation.
 - A complete recipe body, optionally `async: true`.
 
 The user recipe root is the default tool set by location. It accepts canonical JSON recipes and literate Markdown recipes with frontmatter plus fenced `template`/`json recipe` blocks; same-id JSON shadows Markdown in the same priority layer. Packaged recipes are lower-priority standard-library components and are not tools unless copied or registered into the agent recipe root. Ideal runtime behavior is reactive: create/edit/delete recipe files, validate them, then connect valid tools or surface diagnostics without requiring agents to hand-maintain a separate registry.

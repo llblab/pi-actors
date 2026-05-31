@@ -134,18 +134,33 @@ export function resolveInheritedDefaultReferences(
   inheritedDefaults: Record<string, unknown> | undefined,
   runtimeValues: Record<string, unknown> = {},
 ): Record<string, unknown> | undefined {
-  if (!ownDefaults || !inheritedDefaults) return ownDefaults;
+  if (!ownDefaults) return ownDefaults;
   const resolved = { ...ownDefaults };
+  const values = { ...(inheritedDefaults ?? {}), ...runtimeValues };
   for (const [key, value] of Object.entries(ownDefaults)) {
     if (typeof value !== "string") continue;
     const exact = /^\{([A-Za-z_][A-Za-z0-9_-]*)\}$/.exec(value);
-    if (
-      !exact ||
-      Object.hasOwn(runtimeValues, exact[1]) ||
-      !Object.hasOwn(inheritedDefaults, exact[1])
-    )
+    if (exact && Object.hasOwn(values, exact[1])) {
+      resolved[key] = values[exact[1]];
       continue;
-    resolved[key] = inheritedDefaults[exact[1]];
+    }
+    const indexed = value.match(
+      /^\{([A-Za-z_][A-Za-z0-9_-]*)\[([A-Za-z_][A-Za-z0-9_-]*|\d+)\]\}$/,
+    );
+    if (!indexed) continue;
+    const source = values[indexed[1]];
+    const indexValue = /^\d+$/.test(indexed[2])
+      ? indexed[2]
+      : values[indexed[2]];
+    const index = Number(indexValue);
+    if (
+      Array.isArray(source) &&
+      Number.isInteger(index) &&
+      index >= 0 &&
+      index < source.length
+    ) {
+      resolved[key] = source[index] ?? "";
+    }
   }
   return resolved;
 }

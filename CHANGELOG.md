@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.37.0: Direct Recipe Delegation And Quiet Overrides
+
+- `[Recipes]` Added direct recipe delegation from `template` strings so thin wrappers can point at ready recipe names/paths while preserving priority resolution, inherited metadata, and import-based composition for richer graphs.
+- `[Command Templates]` Fixed inherited/default placeholder resolution for arrays and repeat-indexed values, unblocking lens-swarm recipes that pass `lenses` through wrapper defaults into `{lenses.length}` and `{lenses[index]}`.
+- `[Registry]` Stopped treating same-name recipe/tool registration as a startup warning: higher-priority user recipes now quietly override lower-priority recipe/tool definitions as normal composition behavior, while reserved core tool names remain protected.
+
 ## 0.36.0: Recipe Diagnostics And Runtime Triage
 
 - `[Recipe Doctor]` Added deterministic advisory risk labels for discovered recipes, including shell, eval, filesystem mutation, network, external side effect, long-running, platform-specific, and secret-touching signals in verbose recipe inspection plus compact doctor risk counts.

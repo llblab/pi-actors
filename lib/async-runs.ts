@@ -67,11 +67,7 @@ import {
   deliverRunMessage,
   type SendRunMessageOptions,
 } from "./runs-messages.ts";
-import {
-  buildRunStatus,
-  tailFile,
-  tailLines,
-} from "./runs-status.ts";
+import { buildRunStatus, tailFile, tailLines } from "./runs-status.ts";
 import { readJsonFileResilient } from "./state-readers.ts";
 
 const RUNNER_IDENTITY_GRACE_MS = 5000;
@@ -213,8 +209,9 @@ function assertNoActiveRunState(stateDir: string): void {
 
 function resolveRecipeFile(file: string): string {
   return (
-    RecipesReferences.getRecipePath(file, DEFAULT_RECIPE_ROOT) ??
-    RecipesReferences.resolveRecipePath(file, DEFAULT_RECIPE_ROOT)
+    RecipesReferences.resolveRecipeReferencePath(file, Paths.getRecipeRoot()) ??
+    RecipesReferences.getRecipePath(file, Paths.getRecipeRoot()) ??
+    RecipesReferences.resolveRecipePath(file, Paths.getRecipeRoot())
   );
 }
 

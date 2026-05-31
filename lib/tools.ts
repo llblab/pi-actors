@@ -27,7 +27,7 @@ export interface CoreActorToolDefinitionDeps<
   getRuntimeTool: (name: string) => unknown;
   registryRuntime: Pick<
     RegisterToolRuntimeDeps<TContext>,
-    "getExternalToolConflict" | "getTools" | "notify" | "registerRuntimeTool"
+    "getToolNameBlocker" | "getTools" | "notify" | "registerRuntimeTool"
   >;
   setActiveTools: (toolNames: string[]) => void;
 }
@@ -53,7 +53,7 @@ export function createCoreActorToolDefinitions<
     ToolsRegister.createRegisterToolDefinition<TContext>({
       configPath: deps.configPath,
       getActiveTools: deps.getActiveTools,
-      getExternalToolConflict: deps.registryRuntime.getExternalToolConflict,
+      getToolNameBlocker: deps.registryRuntime.getToolNameBlocker,
       getTools: deps.registryRuntime.getTools,
       notify: deps.registryRuntime.notify,
       registerRuntimeTool: deps.registryRuntime.registerRuntimeTool,

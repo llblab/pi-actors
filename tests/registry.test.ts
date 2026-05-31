@@ -24,7 +24,7 @@ async function createHarness() {
     deps: {
       configPath: join(dir, "tool-registry.json"),
       getActiveTools: () => activeTools,
-      getExternalToolConflict: () => undefined,
+      getToolNameBlocker: () => undefined,
       getTools: () => tools,
       notify: (_ctx: unknown, message: string) => notifications.push(message),
       registerRuntimeTool: (cfg: RegisteredTool) =>

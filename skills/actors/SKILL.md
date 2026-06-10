@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.37.0
+  version: 0.37.1
 ---
 
 # Actors (pi-actors)
@@ -283,6 +283,8 @@ The user recipe root is the default tool set by location. It accepts canonical J
 ## Top Recipes
 
 Use packaged recipes by name with `spawn file=<name>` for async actors, or register/call them as tools when repeated use deserves a stable shortcut.
+
+Packaged review recipes are directly spawnable. Use `spawn file="pipeline-review-readiness" values={...}` for readiness review or `spawn file="subagent-review" values={...}` for one reviewer; pass model/thinking/tool policy through values, then inspect the run. Do not recreate their script commands, call packaged scripts directly, or create wrapper recipes just to launch the maintained recipe.
 
 - [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json): room-visible swarm coordination with roles, rounds, optional locker, artifact synthesis, and `subagent_ttl_ms` for hard participant budgets.
 - [`pipeline-repo-health`](../../recipes/pipeline-repo-health.json): git/doc/validation evidence → normalized repository health report.

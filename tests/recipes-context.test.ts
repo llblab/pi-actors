@@ -57,4 +57,48 @@ test("Actor recipe context is appended only to pi print prompts", () => {
     appendRecipeContextToPiArgs("echo", ["-p", "Do work"], records),
     ["-p", "Do work"],
   );
+  assert.deepEqual(
+    appendRecipeContextToPiArgs("pi", ["--model", "m", "Do work"], records),
+    ["--model", "m", "Do work"],
+  );
+});
+
+test("Actor recipe context skips print-mode options before appending to the prompt", () => {
+  const args = appendRecipeContextToPiArgs(
+    "pi",
+    [
+      "-p",
+      "--model",
+      "m",
+      "--thinking",
+      "off",
+      "--no-tools",
+      "Review",
+      "scope",
+    ],
+    records,
+    { alias: "child" },
+  );
+  assert.deepEqual(args.slice(0, 7), [
+    "-p",
+    "--model",
+    "m",
+    "--thinking",
+    "off",
+    "--no-tools",
+    "Review",
+  ]);
+  assert.equal(args[7].startsWith("scope\n\nActor recipe context bundle"), true);
+});
+
+test("Actor recipe context ignores pi file args when finding the print prompt", () => {
+  const args = appendRecipeContextToPiArgs(
+    "pi",
+    ["-p", "@screen.png", "Describe", "image"],
+    records,
+    { alias: "child" },
+  );
+  assert.equal(args[1], "@screen.png");
+  assert.equal(args[2], "Describe");
+  assert.equal(args[3].startsWith("image\n\nActor recipe context bundle"), true);
 });

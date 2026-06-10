@@ -13,7 +13,8 @@
     "rubric": "Judge evidence preservation, severity calibration, consensus purity, internal consistency, and merge bias.",
     "evidence": "Use the provided raw outputs or artifact paths; mark any missing evidence.",
     "output_format": "Markdown sections: Verdict, Issues, Evidence Preservation, Bias Risks, Required Fixes.",
-    "thinking": "medium",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
     "tools": ""
   },
   "mailbox": {

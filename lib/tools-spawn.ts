@@ -9,13 +9,14 @@ import { join } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Messages from "./messages.ts";
+import * as ModelContext from "./model-context.ts";
 import * as Paths from "./paths.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
 import * as Rooms from "./rooms.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsResponse from "./tools-response.ts";
 
-export interface SpawnToolContext {
+export interface SpawnToolContext extends ModelContext.CurrentModelContext {
   cwd: string;
   sessionManager?: { getSessionId?: () => string };
 }
@@ -196,7 +197,10 @@ export function createSpawnToolDefinition<
                     input.template as AsyncRuns.AsyncRunStartParams["template"],
                 }
               : {}),
-            values: asRecord(input.values),
+            values: ModelContext.withCurrentModelValues(
+              asRecord(input.values),
+              ctx,
+            ),
             ...(input.artifacts &&
             typeof input.artifacts === "object" &&
             !Array.isArray(input.artifacts)

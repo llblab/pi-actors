@@ -10,6 +10,10 @@
     "model:string",
     "thinking:string",
     "tools:string",
+    "subagent_ttl_ms:int",
+    "reviewer_concurrency:string",
+    "min_successful_reviewers:int",
+    "merge_policy:string",
     "claim:string",
     "evidence_policy:string",
     "risk_policy:string",
@@ -21,12 +25,17 @@
       "architecture",
       "operator UX"
     ],
-    "thinking": "off",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
     "tools": "",
+    "subagent_ttl_ms": 600000,
+    "reviewer_concurrency": "",
+    "min_successful_reviewers": 1,
+    "merge_policy": "Preserve partial reviewer reports, branch status, and degraded confidence markers. If reviewer evidence is below threshold, do not invent consensus.",
     "claim": "The reviewed scope has clear, evidence-based findings, risks, and recommended next actions.",
     "evidence_policy": "Cite inspected files, command outputs, or explicit uncertainty for every material claim.",
     "risk_policy": "Preserve minority high-impact risks and ideas; separate confirmed issues from hypotheses.",
-    "output_format": "Markdown sections: Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
+    "output_format": "Markdown sections: Status (complete/degraded/insufficient_data), Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
   },
   "mailbox": {
     "accepts": [
@@ -55,6 +64,10 @@
         "judge_model": "{model}",
         "thinking": "{thinking}",
         "tools": "{tools}",
+        "subagent_ttl_ms": "{subagent_ttl_ms}",
+        "reviewer_concurrency": "{reviewer_concurrency}",
+        "min_successful_reviewers": "{min_successful_reviewers}",
+        "merge_policy": "{merge_policy}",
         "evidence_policy": "{evidence_policy}",
         "risk_policy": "{risk_policy}",
         "output_format": "{output_format}"

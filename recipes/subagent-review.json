@@ -17,7 +17,8 @@
     "evidence_policy": "Cite inspected files, command output, or explicit uncertainty for every material claim.",
     "risk_policy": "Preserve minority high-impact risks and separate confirmed issues from hypotheses.",
     "output_format": "Markdown sections: Findings, Evidence, Risks, Next Actions.",
-    "thinking": "off",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
     "tools": ""
   },
   "mailbox": {

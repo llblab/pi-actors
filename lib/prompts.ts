@@ -22,7 +22,7 @@ export const REGISTER_TOOL_GUIDELINES = [
 export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Local-first actor memory: persist trusted local capabilities instead of rebuilding shell recipes.
 - Layers: task -> command template -> recipe/tool -> spawn -> run:<id>; tool:<name> wraps registered capabilities.
-- Command templates stay sync: string leaf, array sequence, object node; flags include args/defaults, parallel, when, timeout, delay, retry, failure, recover, repeat, output.
+- Command templates stay sync: string leaf, array sequence, object node; flags include args/defaults, parallel, concurrency, min_successful, when, timeout, delay, retry, failure, recover, repeat, output.
 - Placeholders support typed/default args plus {value??fallback} and {flag?yes:no}.
 - ~/.pi/agent/recipes/*.json is actor muscle memory: every recipe there is auto-registered as an agent tool across sessions; register_tool writes there.
 - Recipes own template directly and may declare metadata/defaults/imports/mailbox/artifacts; files >1 MiB or import depth >32 fail closed.
@@ -31,7 +31,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Use spawn/message/inspect for actor-level start/send/observe; short foreground checks can stay ordinary tools/templates; avoid runtime/FIFO/outbox vocabulary in public guidance.
 - Run state lives under ~/.pi/agent/tmp/pi-actors/runs; inspect status/tail/messages/mailbox/files/artifacts intentionally and avoid busy-polling.
 - Maintain ~/.pi/agent/recipes like MEMORY.md for capabilities: keep useful tools, curate stale ones, and fix/remove/disable invalid recipes flagged by registry warnings; packaged/ad hoc recipes are lower-priority components; offer to save successful recurring patterns only after confirmation.
-- Prefer maintained packaged recipes/pipelines with spawn file=<recipe> before ad hoc scripts/wrappers; long fanout = parent async recipe wrapping template(parallel:true) and imports.
+- Prefer maintained packaged recipes/pipelines with spawn file=<recipe> before ad hoc scripts/wrappers; review swarms inherit current model/thinking, preflight before fanout, and expose quorum/concurrency/TTL knobs unless explicit args are passed.
 - For any non-trivial actor use or pi-actors change, read the bundled actors skill first; for deeper guidance, inspect installed extension sources/docs/recipes because README/docs are not automatically in context.`;
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {

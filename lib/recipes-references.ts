@@ -52,6 +52,8 @@ export interface TemplateRecipeDefinition {
   args?: string[];
   defaults?: Record<string, unknown>;
   parallel?: boolean;
+  concurrency?: number | string;
+  min_successful?: number | string;
   label?: string;
   when?: boolean | string;
   timeout?: number | string;
@@ -255,6 +257,8 @@ function getRecipeCommandTemplate(
     "args",
     "defaults",
     "parallel",
+    "concurrency",
+    "min_successful",
     "label",
     "when",
     "timeout",
@@ -1012,6 +1016,14 @@ export function readResolvedRecipeConfig(
     ...(mergedDefaults ? { defaults: mergedDefaults } : {}),
     ...(typeof substituted.parallel === "boolean"
       ? { parallel: substituted.parallel }
+      : {}),
+    ...(typeof substituted.concurrency === "number" ||
+    typeof substituted.concurrency === "string"
+      ? { concurrency: substituted.concurrency }
+      : {}),
+    ...(typeof substituted.min_successful === "number" ||
+    typeof substituted.min_successful === "string"
+      ? { min_successful: substituted.min_successful }
       : {}),
     ...(typeof substituted.label === "string"
       ? { label: substituted.label }

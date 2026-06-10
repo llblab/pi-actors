@@ -11,7 +11,8 @@
   "defaults": {
     "format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
     "preservation_policy": "Do not change meaning, severity, evidence, or uncertainty while normalizing.",
-    "thinking": "off",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
     "tools": ""
   },
   "mailbox": {

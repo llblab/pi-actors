@@ -5,11 +5,15 @@
 
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { executeRegisteredTool } from "../lib/execution.ts";
 import type { RegisteredTool } from "../lib/config.ts";
+import { readResolvedRecipeConfig } from "../lib/recipes-references.ts";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const tool: RegisteredTool = {
   name: "transcribe",
@@ -415,6 +419,32 @@ test("Registered tool execution runs nested parallel template nodes", async () =
   });
 });
 
+test("Registered tool execution caps parallel branch concurrency", async () => {
+  let active = 0;
+  let maxActive = 0;
+  await executeRegisteredTool(
+    {
+      ...tool,
+      template: {
+        parallel: true,
+        concurrency: 2,
+        repeat: 5,
+        template: "./branch {index}",
+      },
+    },
+    {},
+    async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active -= 1;
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.equal(maxActive, 2);
+});
+
 test("Registered tool execution reports degraded soft quorum without aborting", async () => {
   const result = await executeRegisteredTool(
     {
@@ -459,6 +489,241 @@ test("Registered tool execution reports degraded soft quorum without aborting", 
     failed: 1,
     usable: true,
   });
+});
+
+test("Registered tool execution fails branch fanout when every branch is unusable", async () => {
+  await assert.rejects(
+    () =>
+      executeRegisteredTool(
+        {
+          ...tool,
+          template: [
+            {
+              failure: "branch",
+              parallel: true,
+              template: [
+                { label: "empty", template: "./empty {file}" },
+                { label: "bad", template: "./bad {file}" },
+              ],
+            },
+          ],
+        },
+        { file: "/tmp/a.ogg" },
+        async (command) => {
+          if (command.endsWith("bad"))
+            return { stdout: "", stderr: "boom", code: 1, killed: false };
+          return { stdout: "", stderr: "", code: 0, killed: false };
+        },
+        "/work",
+      ),
+    (error: unknown) => {
+      assert(error instanceof Error);
+      assert.match(error.message, /all parallel branches failed or produced empty output/);
+      const details = (error as Error & { details?: any }).details;
+      assert.equal(details?.failureReason, "all_branches_unusable");
+      assert.deepEqual(details?.softQuorum, {
+        coverage: 0.5,
+        degraded: true,
+        done: 1,
+        expected: 2,
+        failed: 1,
+        usable: false,
+      });
+      const empty = details?.branches?.find((branch: any) => branch.label === "empty");
+      const bad = details?.branches?.find((branch: any) => branch.label === "bad");
+      assert.equal(empty?.failureReason, "empty_output");
+      assert.equal(empty?.stdoutBytes, 0);
+      assert.equal(empty?.stderrBytes, 0);
+      assert.equal(bad?.failureReason, "nonzero_exit");
+      assert.equal(bad?.stderrBytes, Buffer.byteLength("boom"));
+      return true;
+    },
+  );
+});
+
+function createReviewCoordinatorTool(): RegisteredTool {
+  const recipe = readResolvedRecipeConfig(
+    join(__dirname, "..", "recipes", "subagent-review-coordinator.json"),
+  )!;
+  return {
+    name: "review_coordinator_test",
+    description: "Review coordinator fixture",
+    args: recipe.args ?? [],
+    defaults: recipe.defaults as Record<string, string>,
+    template: recipe.template,
+  };
+}
+
+const reviewCoordinatorValues = {
+  claim: "The scope is ready.",
+  evidence_policy: "Cite evidence.",
+  judge_model: "fake-judge",
+  lenses: ["correctness", "security"],
+  merge_policy: "Preserve degraded evidence.",
+  merger_model: "fake-merger",
+  min_successful_reviewers: 1,
+  output_format: "Markdown.",
+  reviewer_concurrency: "",
+  subagent_ttl_ms: 600000,
+  reviewer_model: "fake-reviewer",
+  risk_policy: "Preserve risks.",
+  scope: "repo",
+  thinking: "medium",
+  tools: "",
+  verifier_model: "fake-verifier",
+};
+
+function getPromptText(args: readonly string[]): string {
+  return args.join(" ");
+}
+
+test("Review coordinator preflight fails before reviewer fanout", async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    () =>
+      executeRegisteredTool(
+        createReviewCoordinatorTool(),
+        reviewCoordinatorValues,
+        async (_command, args) => {
+          const prompt = getPromptText(args);
+          calls.push(prompt);
+          if (prompt.includes("Preflight check for stage reviewer")) {
+            return {
+              stdout: "",
+              stderr: "404 model not found",
+              code: 7,
+              killed: false,
+            };
+          }
+          return { stdout: "ACTOR_PREFLIGHT_OK", stderr: "", code: 0, killed: false };
+        },
+        "/work",
+      ),
+    (error: unknown) => {
+      assert(error instanceof Error);
+      assert.match(error.message, /404 model not found/);
+      return true;
+    },
+  );
+  assert.equal(
+    calls.some((prompt) => prompt.includes("Review repo through this lens")),
+    false,
+  );
+  assert.deepEqual(
+    calls.map((prompt) => prompt.match(/Preflight check for stage ([^\s.]+)/)?.[1]).sort(),
+    ["judge", "merger", "reviewer", "verifier"],
+  );
+});
+
+async function runReviewCoordinatorWithReviewerOutcomes(
+  reviewerOutcomes: boolean[],
+  minSuccessful = 1,
+): Promise<{ calls: string[]; resultText?: string; rejected?: unknown }> {
+  const calls: string[] = [];
+  let reviewerIndex = 0;
+  try {
+    const result = await executeRegisteredTool(
+      createReviewCoordinatorTool(),
+      {
+        ...reviewCoordinatorValues,
+        lenses: reviewerOutcomes.map((_ok, index) => `lens-${index + 1}`),
+        min_successful_reviewers: minSuccessful,
+      },
+      async (_command, args, options) => {
+        const prompt = getPromptText(args);
+        calls.push(prompt);
+        if (prompt.includes("Preflight check for stage")) {
+          return { stdout: "ACTOR_PREFLIGHT_OK", stderr: "", code: 0, killed: false };
+        }
+        if (prompt.includes("Review repo through this lens")) {
+          const ok = reviewerOutcomes[reviewerIndex] ?? false;
+          reviewerIndex += 1;
+          return ok
+            ? { stdout: `reviewer ${reviewerIndex} evidence`, stderr: "", code: 0, killed: false }
+            : { stdout: "", stderr: `reviewer ${reviewerIndex} unavailable`, code: 2, killed: false };
+        }
+        return {
+          stdout: `stage output\n${options?.stdin ?? ""}`,
+          stderr: "",
+          code: 0,
+          killed: false,
+        };
+      },
+      "/work",
+    );
+    return { calls, resultText: result.content[0]?.text };
+  } catch (error) {
+    return { calls, rejected: error };
+  }
+}
+
+test("Review coordinator fails with insufficient reviewer evidence before verifier and merger", async () => {
+  const result = await runReviewCoordinatorWithReviewerOutcomes([false, false], 1);
+  assert(result.rejected instanceof Error);
+  assert.match(result.rejected.message, /parallel branch quorum not met/);
+  assert.equal(
+    result.calls.some((prompt) => prompt.includes("Verify this claim")),
+    false,
+  );
+  assert.equal(
+    result.calls.some((prompt) => prompt.includes("Merge these subagent outputs")),
+    false,
+  );
+  assert.equal(
+    (result.rejected as Error & { details?: any }).details?.failureReason,
+    "parallel_quorum_not_met",
+  );
+});
+
+test("Review coordinator preserves degraded reviewer evidence above threshold", async () => {
+  const result = await runReviewCoordinatorWithReviewerOutcomes([true, false], 1);
+  assert.equal(result.rejected, undefined);
+  assert.match(result.resultText ?? "", /parallel_status: degraded/);
+  assert.equal(
+    result.calls.some((prompt) => prompt.includes("Verify this claim")),
+    true,
+  );
+  assert.equal(
+    result.calls.some((prompt) => prompt.includes("Normalize this subagent output")),
+    true,
+  );
+});
+
+test("Review coordinator marks complete reviewer evidence when quorum succeeds", async () => {
+  const result = await runReviewCoordinatorWithReviewerOutcomes([true, true], 2);
+  assert.equal(result.rejected, undefined);
+  assert.match(result.resultText ?? "", /parallel_status: complete/);
+});
+
+test("Review coordinator starts reviewer fanout only after preflight passes", async () => {
+  const preflightStages = new Set<string>();
+  let firstReviewerCall = -1;
+  let callCount = 0;
+  await executeRegisteredTool(
+    createReviewCoordinatorTool(),
+    reviewCoordinatorValues,
+    async (_command, args) => {
+      callCount += 1;
+      const prompt = getPromptText(args);
+      const stage = prompt.match(/Preflight check for stage ([^\s.]+)/)?.[1];
+      if (stage) {
+        preflightStages.add(stage);
+        return { stdout: "ACTOR_PREFLIGHT_OK", stderr: "", code: 0, killed: false };
+      }
+      if (prompt.includes("Review repo through this lens")) {
+        if (firstReviewerCall === -1) firstReviewerCall = callCount;
+        assert.deepEqual([...preflightStages].sort(), [
+          "judge",
+          "merger",
+          "reviewer",
+          "verifier",
+        ]);
+      }
+      return { stdout: `ok ${callCount}`, stderr: "", code: 0, killed: false };
+    },
+    "/work",
+  );
+  assert.ok(firstReviewerCall > 4, `first reviewer call ${firstReviewerCall}`);
 });
 
 test("Registered tool execution throws formatted command failures", async () => {

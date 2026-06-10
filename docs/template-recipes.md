@@ -208,7 +208,7 @@ Top-level command-template flags may sit beside recipe metadata such as `async`:
 }
 ```
 
-Valid command-template flags include `args`, `defaults`, `parallel`, `when`, `label`, `timeout`, `delay`, `output`, `retry`, `failure`, `recover`, and `repeat`.
+Valid command-template flags include `args`, `defaults`, `parallel`, `concurrency`, `min_successful`, `when`, `label`, `timeout`, `delay`, `output`, `retry`, `failure`, `recover`, and `repeat`.
 
 Timeout is disabled by default. Set a positive `timeout` when a recipe should fail closed after a bounded runtime; omit it, or set `0`, for intentionally open-ended runs that will be stopped by async cancellation, such as background audio playback.
 
@@ -260,7 +260,7 @@ If a tool recipe contains `async: true`, calling the tool starts a detached acto
 
 ## Values And Public Args
 
-Recipe placeholders come from runtime values, recipe `defaults`, inline placeholder defaults, and registered-tool defaults.
+Recipe placeholders come from runtime values, recipe `defaults`, inline placeholder defaults, and registered-tool defaults. Pi tool launches also inject `{current_model}` and `{current_thinking}` when the active session exposes a selected model and thinking level; recipes that require those placeholders fail before fanout when the current value is unavailable unless the caller supplies an explicit override such as `model` or `thinking`. Async runs persist `model_policy` provenance in run status, progress, and terminal results so operators can tell whether model/thinking values were inherited, explicit, mixed, or unresolved.
 
 Recipe tools derive public arguments from the referenced or co-located command template when the recipe is available locally. Explicit `args` is still available when the public tool surface should be narrower than the recipe internals.
 

@@ -4,6 +4,7 @@
  * Owns compact actor recipe context records appended to child-agent prompts.
  */
 
+import { writeFileSync } from "node:fs";
 import { basename } from "node:path";
 
 import type { CommandTemplateActorRecipeContext } from "./command-templates.ts";
@@ -62,7 +63,7 @@ function isPiFileArgument(arg: string): boolean {
   return arg.startsWith("@") && arg.length > 1;
 }
 
-function findPrintPromptIndex(args: string[]): number | undefined {
+export function findPiPrintPromptIndex(args: string[]): number | undefined {
   let printMode = false;
   let positionalOnly = false;
   let promptIndex: number | undefined;
@@ -153,11 +154,37 @@ export function appendRecipeContextToPiArgs(
   context?: CommandTemplateActorRecipeContext,
 ): string[] {
   if (!records || records.length === 0 || !isPiCommand(command)) return args;
-  const promptIndex = findPrintPromptIndex(args);
+  const promptIndex = findPiPrintPromptIndex(args);
   if (promptIndex === undefined) return args;
   const block = buildRecipeContextPromptBlock(records, context);
   if (!block) return args;
   const next = [...args];
   next[promptIndex] = `${next[promptIndex]}\n\n${block}`;
   return next;
+}
+
+export interface MaterializedPiPrintPromptArgs {
+  args: string[];
+  promptBytes?: number;
+  promptFile?: string;
+}
+
+export function materializePiPrintPromptArg(
+  command: string,
+  args: string[],
+  promptFile: string | (() => string),
+): MaterializedPiPrintPromptArgs {
+  if (!isPiCommand(command)) return { args };
+  const promptIndex = findPiPrintPromptIndex(args);
+  if (promptIndex === undefined) return { args };
+  const prompt = args[promptIndex];
+  const path = typeof promptFile === "function" ? promptFile() : promptFile;
+  writeFileSync(path, prompt, "utf8");
+  const next = [...args];
+  next[promptIndex] = `@${path}`;
+  return {
+    args: next,
+    promptBytes: Buffer.byteLength(prompt),
+    promptFile: path,
+  };
 }

@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.37.1
+  version: 0.38.0
 ---
 
 # Actors (pi-actors)
@@ -199,9 +199,9 @@ Rules:
 7. Declare `mailbox` for actors that accept or emit meaningful messages.
 8. Declare `artifacts` for durable outputs the coordinator should inspect.
 9. File-backed recipe identity comes from the filename basename; legacy top-level `name` fields are ignored by loaders.
-10. File-backed async recipes pass child `pi -p` actors a bounded JSONL recipe context bundle by default: raw entry/import recipe records, derived `name`, import path/alias, and `"you_are_here": true` on the launching recipe node. Set `"actor_context": false` or `"off"` to suppress it for minimal prompts.
+10. File-backed async recipes pass child `pi -p` actors a bounded JSONL recipe context bundle by default: raw entry/import recipe records, derived `name`, import path/alias, and `"you_are_here": true` on the launching recipe node. The runner materializes child prompts under `prompts/command-NNN.md` and invokes Pi with `@file` args so large prompts and recipe context stay inspectable and argv-safe. Set `"actor_context": false` or `"off"` to suppress recipe context for minimal prompts.
 11. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
-12. Do not ship concrete model-version defaults in packaged recipes; expose `model`, `models`, and stage-specific model args so the caller must choose current policy at launch.
+12. Do not ship concrete model-version defaults in packaged recipes. For review-oriented subagent/lens recipes, default model/thinking args through `{current_model}` and `{current_thinking}` so they inherit the selected Pi session policy; keep `model`, `models`, `thinking`, and stage-specific model args explicit so callers can override policy at launch.
 
 Priority for same-id recipes:
 
@@ -284,7 +284,7 @@ The user recipe root is the default tool set by location. It accepts canonical J
 
 Use packaged recipes by name with `spawn file=<name>` for async actors, or register/call them as tools when repeated use deserves a stable shortcut.
 
-Packaged review recipes are directly spawnable. Use `spawn file="pipeline-review-readiness" values={...}` for readiness review or `spawn file="subagent-review" values={...}` for one reviewer; pass model/thinking/tool policy through values, then inspect the run. Do not recreate their script commands, call packaged scripts directly, or create wrapper recipes just to launch the maintained recipe.
+Packaged review recipes are directly spawnable. Use `spawn file="pipeline-review-readiness" values={...}` for readiness review or `spawn file="subagent-review" values={...}` for one reviewer; pass model/thinking/tool policy through values, then inspect the run. Review coordinators preflight stage models before fanout; `ACTOR_PREFLIGHT_FAILED` diagnostics identify the failed stage, selected policy, provider error class, prompt file, and override args. Quorum-aware review fanout exposes `subagent_ttl_ms`, `reviewer_concurrency`, `min_successful_reviewers`, and `merge_policy`; partial reviewer evidence is preserved and marked `complete`, `degraded`, or `insufficient_data`. Run status/progress exposes `model_policy` so inherited vs explicit model/thinking choices remain visible. Do not recreate their script commands, call packaged scripts directly, or create wrapper recipes just to launch the maintained recipe.
 
 - [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json): room-visible swarm coordination with roles, rounds, optional locker, artifact synthesis, and `subagent_ttl_ms` for hard participant budgets.
 - [`pipeline-repo-health`](../../recipes/pipeline-repo-health.json): git/doc/validation evidence → normalized repository health report.

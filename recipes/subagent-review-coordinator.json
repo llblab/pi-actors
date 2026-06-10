@@ -1,6 +1,7 @@
 {
   "async": true,
   "imports": {
+    "preflight": "subagent-preflight.json",
     "reviewer": "subagent-review.json",
     "verifier": "subagent-verify.json",
     "merger": "subagent-merge.json",
@@ -17,6 +18,10 @@
     "judge_model:string",
     "thinking:string",
     "tools:string",
+    "subagent_ttl_ms:int",
+    "reviewer_concurrency:string",
+    "min_successful_reviewers:int",
+    "merge_policy:string",
     "evidence_policy:string",
     "risk_policy:string",
     "output_format:string"
@@ -28,11 +33,19 @@
       "operator UX"
     ],
     "claim": "The reviewed scope is ready for the next implementation or release step.",
-    "thinking": "off",
+    "thinking": "{current_thinking}",
     "tools": "",
+    "subagent_ttl_ms": 600000,
+    "reviewer_concurrency": "",
+    "min_successful_reviewers": 1,
+    "merge_policy": "Preserve partial reviewer reports, branch status, and degraded confidence markers. If reviewer evidence is below threshold, do not invent consensus.",
     "evidence_policy": "Cite inspected files, command output, or explicit uncertainty for every material claim.",
     "risk_policy": "Preserve minority high-impact risks and separate confirmed issues from hypotheses.",
-    "output_format": "Markdown sections: Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
+    "output_format": "Markdown sections: Status (complete/degraded/insufficient_data), Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions.",
+    "reviewer_model": "{current_model}",
+    "verifier_model": "{current_model}",
+    "merger_model": "{current_model}",
+    "judge_model": "{current_model}"
   },
   "mailbox": {
     "accepts": [
@@ -51,10 +64,63 @@
   "template": [
     {
       "parallel": true,
+      "failure": "root",
+      "template": [
+        {
+          "label": "preflight:reviewer",
+          "name": "preflight",
+          "timeout": "{subagent_ttl_ms}",
+          "values": {
+            "stage": "reviewer",
+            "model": "{reviewer_model}",
+            "thinking": "{thinking}",
+            "tools": "{tools}"
+          }
+        },
+        {
+          "label": "preflight:verifier",
+          "name": "preflight",
+          "timeout": "{subagent_ttl_ms}",
+          "values": {
+            "stage": "verifier",
+            "model": "{verifier_model}",
+            "thinking": "{thinking}",
+            "tools": "{tools}"
+          }
+        },
+        {
+          "label": "preflight:merger",
+          "name": "preflight",
+          "timeout": "{subagent_ttl_ms}",
+          "values": {
+            "stage": "merger",
+            "model": "{merger_model}",
+            "thinking": "{thinking}",
+            "tools": "{tools}"
+          }
+        },
+        {
+          "label": "preflight:judge",
+          "name": "preflight",
+          "timeout": "{subagent_ttl_ms}",
+          "values": {
+            "stage": "judge",
+            "model": "{judge_model}",
+            "thinking": "{thinking}",
+            "tools": "{tools}"
+          }
+        }
+      ]
+    },
+    {
+      "parallel": true,
       "repeat": "{lenses.length}",
+      "concurrency": "{reviewer_concurrency}",
+      "min_successful": "{min_successful_reviewers}",
       "failure": "branch",
       "template": {
         "name": "reviewer",
+        "timeout": "{subagent_ttl_ms}",
         "values": {
           "scope": "{scope}",
           "lens": "{lenses[index]}",
@@ -68,9 +134,10 @@
     },
     {
       "name": "verifier",
+      "timeout": "{subagent_ttl_ms}",
       "values": {
         "claim": "{claim}",
-        "evidence": "Use previous reviewer outputs from stdin and named scope: {scope}.",
+        "evidence": "Use previous reviewer outputs from stdin and named scope: {scope}. Respect the parallel_status header and verify only against usable reviewer evidence.",
         "model": "{verifier_model}",
         "thinking": "{thinking}",
         "tools": "{tools}",
@@ -79,32 +146,37 @@
     },
     {
       "name": "merger",
+      "timeout": "{subagent_ttl_ms}",
       "values": {
         "inputs": "Use previous reviewer and verifier outputs from stdin.",
         "mode": "consensus-first",
+        "merge_policy": "{merge_policy}",
         "model": "{merger_model}",
-        "thinking": "medium",
+        "thinking": "{thinking}",
         "tools": "{tools}",
         "risk_policy": "{risk_policy}"
       }
     },
     {
       "name": "judge",
+      "timeout": "{subagent_ttl_ms}",
       "values": {
         "report": "Use merged output from stdin.",
-        "evidence": "Use previous reviewer, verifier, and merger outputs from stdin.",
+        "evidence": "Use previous reviewer, verifier, and merger outputs from stdin. Preserve complete/degraded/insufficient_data status.",
         "model": "{judge_model}",
-        "thinking": "medium",
+        "thinking": "{thinking}",
         "tools": "{tools}"
       }
     },
     {
       "name": "normalizer",
+      "timeout": "{subagent_ttl_ms}",
       "values": {
         "input": "Use merged and judged output from stdin.",
         "format": "{output_format}",
+        "preservation_policy": "Preserve branch status and explicitly mark Status as complete, degraded, or insufficient_data.",
         "model": "{merger_model}",
-        "thinking": "off",
+        "thinking": "{thinking}",
         "tools": "{tools}"
       }
     }

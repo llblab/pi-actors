@@ -22,6 +22,12 @@ import type {
   CommandTemplateValue,
 } from "./command-templates.ts";
 import { writeJsonAtomic } from "./file-state.ts";
+import {
+  CURRENT_MODEL_VALUE_KEY,
+  CURRENT_THINKING_VALUE_KEY,
+  describeCurrentPolicyProvenance,
+  type CurrentPolicyProvenance,
+} from "./model-context.ts";
 import * as Paths from "./paths.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
@@ -93,6 +99,8 @@ export interface AsyncRunStartParams {
   args?: string[];
   defaults?: Record<string, unknown>;
   parallel?: boolean;
+  concurrency?: number | string;
+  min_successful?: number | string;
   label?: string;
   when?: boolean | string;
   timeout?: number | string;
@@ -106,6 +114,7 @@ export interface AsyncRunStartParams {
   recover?: CommandTemplateValue;
   repeat?: number;
   values?: Record<string, unknown>;
+  policy_values?: Record<string, unknown>;
   actor_context?: boolean | string;
   cwd?: string;
 }
@@ -136,6 +145,7 @@ export interface AsyncRunMeta {
   artifacts?: Record<string, RunArtifactDeclaration>;
   control?: AsyncRunControlEndpoint;
   mailbox?: RecipesReferences.TemplateRecipeMailbox;
+  model_policy?: CurrentPolicyProvenance;
   recipe_context_records?: RecipesReferences.TemplateRecipeContextRecord[];
   retire_when?: "children_terminal";
 }
@@ -180,6 +190,8 @@ function resolveRunTemplate(params: AsyncRunStartParams): {
     "args",
     "defaults",
     "parallel",
+    "concurrency",
+    "min_successful",
     "label",
     "when",
     "timeout",
@@ -270,6 +282,130 @@ function readJson(path: string): Record<string, unknown> | undefined {
   ).value;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFalsyValue(value: unknown): boolean {
+  if (value === undefined || value === null || value === false) return true;
+  const normalized = String(value).trim().toLowerCase();
+  return (
+    normalized === "" ||
+    normalized === "0" ||
+    normalized === "false" ||
+    normalized === "no"
+  );
+}
+
+function stringReferencesPlaceholder(
+  value: string,
+  placeholder: string,
+): boolean {
+  return new RegExp(`\\{\\s*${placeholder}\\s*\\}`).test(value);
+}
+
+function collectUnresolvedCurrentPlaceholderReferences(
+  value: unknown,
+  values: Record<string, unknown>,
+  placeholder: string,
+  valueKey: string,
+  path = "template",
+  refs: string[] = [],
+): string[] {
+  if (typeof value === "string") {
+    if (
+      stringReferencesPlaceholder(value, placeholder) &&
+      isFalsyValue(values[valueKey])
+    ) {
+      refs.push(path);
+    }
+    return refs;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectUnresolvedCurrentPlaceholderReferences(
+        item,
+        values,
+        placeholder,
+        valueKey,
+        `${path}[${index}]`,
+        refs,
+      ),
+    );
+    return refs;
+  }
+  if (!isRecord(value)) return refs;
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "defaults" && isRecord(child)) {
+      for (const [defaultKey, defaultValue] of Object.entries(child)) {
+        if (
+          typeof defaultValue === "string" &&
+          stringReferencesPlaceholder(defaultValue, placeholder) &&
+          isFalsyValue(values[defaultKey]) &&
+          isFalsyValue(values[valueKey])
+        ) {
+          refs.push(`${path}.defaults.${defaultKey}`);
+        }
+      }
+      continue;
+    }
+    collectUnresolvedCurrentPlaceholderReferences(
+      child,
+      values,
+      placeholder,
+      valueKey,
+      `${path}.${key}`,
+      refs,
+    );
+  }
+  return refs;
+}
+
+function assertCurrentPlaceholderReferencesResolved(
+  template: CommandTemplateValue,
+  defaults: Record<string, unknown> | undefined,
+  values: Record<string, unknown>,
+  modelPolicy: CurrentPolicyProvenance,
+): void {
+  const checks = [
+    {
+      label: "model",
+      placeholder: "current_model",
+      valueKey: CURRENT_MODEL_VALUE_KEY,
+    },
+    {
+      label: "thinking level",
+      placeholder: "current_thinking",
+      valueKey: CURRENT_THINKING_VALUE_KEY,
+    },
+  ];
+  for (const check of checks) {
+    const refs = collectUnresolvedCurrentPlaceholderReferences(
+      template,
+      values,
+      check.placeholder,
+      check.valueKey,
+    );
+    if (defaults) {
+      collectUnresolvedCurrentPlaceholderReferences(
+        { defaults },
+        values,
+        check.placeholder,
+        check.valueKey,
+        "recipe",
+        refs,
+      );
+    }
+    if (refs.length === 0) continue;
+    throw Object.assign(
+      new Error(
+        `Template recipe requires the current Pi ${check.label} for inheritance, but no current ${check.label} was available. Pass explicit values or launch from a Pi session with a selected ${check.label}. unresolved=${refs.slice(0, 4).join(",")}`,
+      ),
+      { model_policy: modelPolicy },
+    );
+  }
+}
+
 function acquireStateStartLock(stateDir: string): () => void {
   return RunsStart.acquireStateStartLock(stateDir);
 }
@@ -286,6 +422,25 @@ export function startRun(
   const resolved = resolveRunTemplate(startParams);
   const run = safeRunId(startParams.run_id);
   const stateDir = resolveStateDir(startParams, run);
+  const values = {
+    ...(startParams.values || {}),
+    actor_address: `run:${run}`,
+    communication_file: join(stateDir, "communication.json"),
+    default_room: `room:${run}`,
+    run_id: run,
+    state_dir: stateDir,
+  };
+  const modelPolicy = describeCurrentPolicyProvenance({
+    defaults: startParams.defaults,
+    template: resolved.template,
+    values: startParams.policy_values ?? startParams.values ?? {},
+  });
+  assertCurrentPlaceholderReferencesResolved(
+    resolved.template,
+    startParams.defaults,
+    values,
+    modelPolicy,
+  );
   assertNoActiveRunState(stateDir);
   mkdirSync(stateDir, { recursive: true });
   const releaseStartLock = acquireStateStartLock(stateDir);
@@ -315,14 +470,6 @@ export function startRun(
     const outFd = openSync(stdout, "a");
     const errFd = openSync(stderr, "a");
     const argv = asyncRunnerArgv(stateDir);
-    const values = {
-      ...(startParams.values || {}),
-      actor_address: `run:${run}`,
-      communication_file: join(stateDir, "communication.json"),
-      default_room: `room:${run}`,
-      run_id: run,
-      state_dir: stateDir,
-    };
     const outputValues = {
       ...(startParams.defaults || {}),
       ...values,
@@ -345,6 +492,7 @@ export function startRun(
       ...(startParams.tool ? { tool: startParams.tool } : {}),
       template: resolved.template,
       values,
+      model_policy: modelPolicy,
       ...(artifacts ? { artifacts } : {}),
       ...(startParams.control ? { control: startParams.control } : {}),
       ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
@@ -368,6 +516,7 @@ export function startRun(
     writeJsonAtomic(join(stateDir, "progress.json"), {
       completed: 0,
       failures: [],
+      model_policy: modelPolicy,
       phase: "starting",
       updatedAt: new Date().toISOString(),
     });

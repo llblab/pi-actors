@@ -42,6 +42,7 @@ export interface RunObservation {
   ownerId?: string;
   artifacts?: Record<string, string>;
   launchSource?: AsyncRuns.AsyncRunLaunchSource;
+  modelPolicy?: Record<string, unknown>;
   recipeFile?: string;
   terminalHandled?: boolean;
   retireWhen?: string;
@@ -247,6 +248,7 @@ export interface RunTransition {
   stateDir?: string;
   artifacts?: Record<string, string>;
   launchSource?: AsyncRuns.AsyncRunLaunchSource;
+  modelPolicy?: Record<string, unknown>;
   recipeFile?: string;
   terminalHandled?: boolean;
   to: RunObservedStatus;
@@ -351,6 +353,11 @@ function observeRun(stateDir: string): RunObservation | undefined {
         : {}),
       ...(status.launch_source === "spawn" || status.launch_source === "tool"
         ? { launchSource: status.launch_source }
+        : {}),
+      ...(status.model_policy &&
+      typeof status.model_policy === "object" &&
+      !Array.isArray(status.model_policy)
+        ? { modelPolicy: status.model_policy as Record<string, unknown> }
         : {}),
       ...(typeof status.recipe_file === "string"
         ? { recipeFile: status.recipe_file }
@@ -747,6 +754,7 @@ export function detectRunTransitions(
         ...(run.stateDir ? { stateDir: run.stateDir } : {}),
         ...(run.artifacts ? { artifacts: run.artifacts } : {}),
         ...(run.launchSource ? { launchSource: run.launchSource } : {}),
+        ...(run.modelPolicy ? { modelPolicy: run.modelPolicy } : {}),
         ...(run.recipeFile ? { recipeFile: run.recipeFile } : {}),
         ...(run.terminalHandled ? { terminalHandled: true } : {}),
         to: run.status,
@@ -1021,6 +1029,26 @@ function formatRecipePersistenceSuggestion(transition: RunTransition): string {
   return `\nAgent note: this actor was spawned directly and completed successfully. If this pattern fits this machine's recurring workflow, ask the operator whether to save it as a durable recipe/tool under ~/.pi/agent/recipes with register_tool. Do not auto-save without confirmation.`;
 }
 
+function formatTransitionPolicy(transition: RunTransition): string {
+  if (!transition.modelPolicy) return "";
+  const axis = (key: "model" | "thinking", label: string): string | undefined => {
+    const value = transition.modelPolicy?.[key];
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    const source = typeof record.source === "string" ? record.source : "unused";
+    if (source === "unused") return undefined;
+    const renderedValue =
+      typeof record.value === "string" && record.value.trim()
+        ? ` (${record.value.trim()})`
+        : "";
+    return `${label}: ${source}${renderedValue}`;
+  };
+  const lines = [axis("model", "Model"), axis("thinking", "Thinking")].filter(
+    (line): line is string => Boolean(line),
+  );
+  return lines.length ? `\nPolicy:\n- ${lines.join("\n- ")}` : "";
+}
+
 function formatTransitionNextActions(transition: RunTransition): string {
   const actions = [
     `inspect target=run:${transition.run} view=status`,
@@ -1036,16 +1064,17 @@ export function formatRunTransitionMessage(transition: RunTransition): string {
   const artifacts = formatNamedArtifacts(transition.artifacts);
   const runFiles = formatRunFileList(getRunArtifacts(transition));
   const persistenceSuggestion = formatRecipePersistenceSuggestion(transition);
+  const policy = formatTransitionPolicy(transition);
   const nextActions = formatTransitionNextActions(transition);
   if (transition.to === "done")
-    return `Run ${transition.run} completed successfully.${artifacts}${runFiles}${nextActions}${persistenceSuggestion}`;
+    return `Run ${transition.run} completed successfully.${policy}${artifacts}${runFiles}${nextActions}${persistenceSuggestion}`;
   if (transition.to === "failed")
-    return `Run ${transition.run} failed.${artifacts}${runFiles}${nextActions}`;
+    return `Run ${transition.run} failed.${policy}${artifacts}${runFiles}${nextActions}`;
   if (transition.to === "cancelled")
-    return `Run ${transition.run} was cancelled.${nextActions}`;
+    return `Run ${transition.run} was cancelled.${policy}${nextActions}`;
   if (transition.to === "killed")
-    return `Run ${transition.run} was force-killed.${nextActions}`;
+    return `Run ${transition.run} was force-killed.${policy}${nextActions}`;
   if (transition.to === "exited")
-    return `Run ${transition.run} exited before writing a result.${nextActions}`;
-  return `Run ${transition.run} finished with status ${transition.to}.${nextActions}`;
+    return `Run ${transition.run} exited before writing a result.${policy}${nextActions}`;
+  return `Run ${transition.run} finished with status ${transition.to}.${policy}${nextActions}`;
 }

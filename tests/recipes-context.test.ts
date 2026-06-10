@@ -4,9 +4,12 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { appendRecipeContextToPiArgs, formatRecipeContextJsonl } from "../lib/recipes-context.ts";
+import { appendRecipeContextToPiArgs, formatRecipeContextJsonl, materializePiPrintPromptArg } from "../lib/recipes-context.ts";
 
 const records = [
   {
@@ -101,4 +104,27 @@ test("Actor recipe context ignores pi file args when finding the print prompt", 
   assert.equal(args[1], "@screen.png");
   assert.equal(args[2], "Describe");
   assert.equal(args[3].startsWith("image\n\nActor recipe context bundle"), true);
+});
+
+test("Pi print prompts can be materialized into prompt files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-prompt-file-"));
+  try {
+    const promptFile = join(root, "prompt.md");
+    const prompt = "# Review\nQuoted \"text\", paths /tmp/a, and `code`.";
+    const result = materializePiPrintPromptArg(
+      "pi",
+      ["-p", "@screen.png", "Describe", prompt],
+      promptFile,
+    );
+    assert.deepEqual(result.args, ["-p", "@screen.png", "Describe", `@${promptFile}`]);
+    assert.equal(result.promptFile, promptFile);
+    assert.equal(result.promptBytes, Buffer.byteLength(prompt));
+    assert.equal(await readFile(promptFile, "utf8"), prompt);
+    assert.deepEqual(
+      materializePiPrintPromptArg("echo", ["-p", "text"], join(root, "unused.md")),
+      { args: ["-p", "text"] },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

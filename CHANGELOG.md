@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.38.0: Review Swarm Pipeline Hardening
+
+- `[Recipes]` Added current model/thinking inheritance for packaged review/lens-swarm recipes through `{current_model}` and `{current_thinking}`, so normal subagent review swarms use the selected Pi session policy by default while explicit args still override it.
+- `[Runtime]` Injected the current Pi model and thinking level into spawn/runtime tool recipe values and fail fast before async fanout when a current placeholder cannot be resolved.
+- `[Runtime]` Persisted `model_policy` provenance in async run status, progress, terminal results, compact status text, and terminal follow-ups so operators can distinguish inherited, explicit, mixed, and unresolved model/thinking policy.
+- `[Runtime]` Materialized child `pi -p` prompts into run-local `prompts/command-NNN.md` files and invoked Pi with `@file` arguments, preserving long quoted prompts and recipe context without fragile inline argv transport.
+- `[Runtime]` Expanded parallel branch diagnostics with stdout/stderr byte counts, tail previews, failure reasons, prompt-file paths, soft-quorum usability, and failed-run result/progress details; branch-failure fanouts now fail when every branch fails or emits empty output.
+- `[Recipes]` Added `subagent-preflight` and wired the review coordinator to run stage model/thinking/tool smoke checks before reviewer fanout, so unavailable providers fail before expensive reviewer branches launch.
+- `[Recipes]` Made review pipelines quorum-aware with `subagent_ttl_ms`, `reviewer_concurrency`, `min_successful_reviewers`, and `merge_policy` knobs; partial reviewer evidence is preserved, verifier/merger stages run only after the evidence threshold is met, and normalized reports must mark `complete`, `degraded`, or `insufficient_data`.
+- `[Diagnostics]` Preflight command failures now emit `ACTOR_PREFLIGHT_FAILED` diagnostics with stage, selected model/thinking, provider error class, prompt file, and suggested override args; fake-`pi` coverage proves reviewer fanout starts only after preflight passes.
+- `[Tests]` Added a deterministic packaged review-readiness dogfood fixture to `npm run conformance`, using a fake local `pi` executable to verify preflight, degraded reviewer fanout, prompt-file artifacts, branch failure capture, merge gating, and terminal status without external model APIs.
+- `[Guidance]` Updated README, actor/swarm skills, recipe docs, async-run docs, and onboarding copy to steer review swarms away from `models.json` rediscovery and toward maintained recipes with current model/thinking inheritance, policy provenance, prompt-file transport, preflight, quorum controls, and inspectable branch diagnostics.
+- `[Backlog]` Captured the remaining `pi-telegram` review-swarm dogfood lessons as concrete `pi-actors` hardening work: review-pipeline preflight/quorum resilience, model-provenance visibility, and a deterministic review-swarm fixture.
+
 ## 0.37.1: Subagent Recipe Prompt Injection Hotfix
 
 - `[Recipes]` Fixed actor recipe context injection for child `pi -p` launches with options after the print flag, so packaged subagent recipes such as `subagent-review` and `pipeline-review-readiness` append context to the actual prompt instead of corrupting `--model` or other option values.

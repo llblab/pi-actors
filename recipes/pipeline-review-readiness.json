@@ -11,7 +11,12 @@
     "verifier_model:string",
     "merger_model:string",
     "judge_model:string",
-    "tools:string"
+    "thinking:string",
+    "tools:string",
+    "subagent_ttl_ms:int",
+    "reviewer_concurrency:string",
+    "min_successful_reviewers:int",
+    "merge_policy:string"
   ],
   "defaults": {
     "lenses": [
@@ -21,7 +26,16 @@
       "operator UX"
     ],
     "release_gate": "The scope is safe to ship or hand to the next release step.",
-    "tools": ""
+    "reviewer_model": "{current_model}",
+    "verifier_model": "{current_model}",
+    "merger_model": "{current_model}",
+    "judge_model": "{current_model}",
+    "thinking": "{current_thinking}",
+    "tools": "",
+    "subagent_ttl_ms": 600000,
+    "reviewer_concurrency": "",
+    "min_successful_reviewers": 1,
+    "merge_policy": "Preserve partial reviewer reports, branch status, and degraded confidence markers. If reviewer evidence is below threshold, do not invent consensus."
   },
   "mailbox": {
     "accepts": [
@@ -45,8 +59,13 @@
       "verifier_model": "{verifier_model}",
       "merger_model": "{merger_model}",
       "judge_model": "{judge_model}",
+      "thinking": "{thinking}",
       "tools": "{tools}",
-      "output_format": "Markdown sections: Ship Verdict, Blocking Findings, Nonblocking Risks, Evidence, Required Follow-up."
+      "subagent_ttl_ms": "{subagent_ttl_ms}",
+      "reviewer_concurrency": "{reviewer_concurrency}",
+      "min_successful_reviewers": "{min_successful_reviewers}",
+      "merge_policy": "{merge_policy}",
+      "output_format": "Markdown sections: Status (complete/degraded/insufficient_data), Ship Verdict, Blocking Findings, Nonblocking Risks, Evidence, Required Follow-up."
     }
   }
 }

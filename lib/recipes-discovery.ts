@@ -10,6 +10,7 @@ import { join } from "node:path";
 
 import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
+import * as ModelContext from "./model-context.ts";
 import type { TemplateRecipeConfig } from "./recipes-references.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as Schema from "./schema.ts";
@@ -701,6 +702,20 @@ export function summarizeDiscovery(
         invalid: entry.invalid,
         shadows: entry.shadows,
         ...(entry.riskLabels.length ? { risk_labels: entry.riskLabels } : {}),
+        ...(entry.config &&
+        ModelContext.describeRecipeCurrentPolicy({
+          args: entry.config.args,
+          defaults: entry.config.defaults,
+          template: entry.config.template,
+        })
+          ? {
+              current_policy: ModelContext.describeRecipeCurrentPolicy({
+                args: entry.config.args,
+                defaults: entry.config.defaults,
+                template: entry.config.template,
+              }),
+            }
+          : {}),
         ...(entry.config?.imports ? { imports: entry.config.imports } : {}),
         ...(recipeUsage(entry.config)
           ? { usage: recipeUsage(entry.config) }

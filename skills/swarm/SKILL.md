@@ -2,7 +2,7 @@
 name: swarm
 description: Subagent orchestration with scoped locks and quorum consensus. Use for multi-model review, parallel scoped work, delegated audit, and coordinated subagent execution.
 metadata:
-  version: 0.37.1
+  version: 0.38.0
 ---
 
 # Swarm
@@ -162,7 +162,7 @@ Use [`references/development-swarm.md`](./references/development-swarm.md) for c
 
 Purpose: turn one result into many risk lenses and a decision-grade verdict.
 
-Use lens swarm for broad coverage, quorum for confidence on one critical judgement, or both for high-stakes releases. The final report should separate consensus findings, minority findings, merger findings, risks, and recommended next actions.
+Use lens swarm for broad coverage, quorum for confidence on one critical judgement, or both for high-stakes releases. In adapters that expose current session model/thinking policy, default ordinary same-policy review swarms to that current policy and require explicit args only when intentionally varying models or thinking levels. Run a cheap model/tool preflight before launching expensive reviewer fanout; if it fails, use the `ACTOR_PREFLIGHT_FAILED` stage/model/error-class/prompt-file diagnostic to choose explicit override args instead of rerunning blindly. For packaged review swarms, tune `min_successful_reviewers`, `reviewer_concurrency`, `subagent_ttl_ms`, and `merge_policy` instead of manual reruns; preserve partial reports and label the outcome `complete`, `degraded`, or `insufficient_data`. The final report should separate consensus findings, minority findings, merger findings, risks, and recommended next actions.
 
 A review swarm synthesis must not fabricate claims. Every final finding should trace to a reviewer note, checked artifact, command output, source, or explicit merger rationale. Devil's Advocate critical findings must be preserved or explicitly disproved with evidence.
 

@@ -7,6 +7,7 @@
 import * as Rooms from "./rooms.ts";
 import * as AsyncRuns from "./async-runs.ts";
 import * as CommandTemplates from "./command-templates.ts";
+import * as ModelContext from "./model-context.ts";
 import type { RegisteredTool } from "./config.ts";
 import * as Execution from "./execution.ts";
 import * as Prompts from "./prompts.ts";
@@ -17,7 +18,7 @@ import * as ToolsResponse from "./tools-response.ts";
 
 type JsonSchema = Schema.JsonSchema;
 
-export interface RuntimeToolContext {
+export interface RuntimeToolContext extends ModelContext.CurrentModelContext {
   cwd: string;
   sessionManager?: { getSessionId?: () => string };
 }
@@ -178,8 +179,15 @@ export function createRuntimeToolDefinition(
               ownerId: getRunOwnerId(ctx),
               run_id: runId,
               tool: cfg.name,
+              policy_values: ModelContext.withCurrentModelValues(
+                { ...(cfg.recipe?.values ?? {}), ...values },
+                ctx,
+              ),
               values: Schema.normalizeRuntimeValues(
-                { ...(cfg.recipe?.values ?? {}), ...cfg.defaults, ...values },
+                ModelContext.withCurrentModelValues(
+                  { ...(cfg.recipe?.values ?? {}), ...cfg.defaults, ...values },
+                  ctx,
+                ),
                 cfg.argTypes,
               ),
             },
@@ -198,11 +206,14 @@ export function createRuntimeToolDefinition(
           };
         }
         if (isRecipe && recipeTemplate) {
-          const paramsWithDefaults = {
-            ...(cfg.recipe?.values ?? {}),
-            ...cfg.defaults,
-            ...(params as Record<string, unknown>),
-          };
+          const paramsWithDefaults = ModelContext.withCurrentModelValues(
+            {
+              ...(cfg.recipe?.values ?? {}),
+              ...cfg.defaults,
+              ...(params as Record<string, unknown>),
+            },
+            ctx,
+          );
           return await Execution.executeRegisteredTool(
             { ...cfg, template: recipeTemplate },
             Schema.normalizeRuntimeValues(paramsWithDefaults, cfg.argTypes),
@@ -214,7 +225,10 @@ export function createRuntimeToolDefinition(
         return await Execution.executeRegisteredTool(
           cfg,
           Schema.normalizeRuntimeValues(
-            params as Record<string, unknown>,
+            ModelContext.withCurrentModelValues(
+              params as Record<string, unknown>,
+              ctx,
+            ),
             cfg.argTypes,
           ),
           exec,

@@ -276,6 +276,15 @@ test("Inspect tool reads recipe registry summaries", async () => {
       join(userRecipes, "user-tool.json"),
       JSON.stringify({ description: "User", imports: { base: "base.json" }, template: "echo user" }),
     );
+    await writeFile(
+      join(userRecipes, "policy.json"),
+      JSON.stringify({
+        args: ["model:string", "thinking:string"],
+        defaults: { model: "{current_model}", thinking: "{current_thinking}" },
+        description: "Policy",
+        template: "echo {model} {thinking}",
+      }),
+    );
     await writeFile(join(userRecipes, "broken.json"), JSON.stringify({}));
     await writeFile(
       join(packagedRecipes, "stdlib.json"),
@@ -298,13 +307,21 @@ test("Inspect tool reads recipe registry summaries", async () => {
       undefined,
     );
 
-    assert.match(result.content[0].text, /recipes active=4/);
+    assert.match(result.content[0].text, /recipes active=5/);
     assert.match(result.content[0].text, /drafts=1/);
     assert.match(result.content[0].text, /invalid=1/);
+    assert.match(result.content[0].text, /current_policy=1/);
     assert.match(result.content[0].text, /next=.*inspect_target=recipes_view=doctor/);
     assert.match(result.content[0].text, /next=.*spawn_file=.*recipes\/drafts\/draft\.json/);
-    assert.equal((result.details.active as unknown[]).length, 4);
+    assert.equal((result.details.active as unknown[]).length, 5);
     assert.equal((result.details.drafts as unknown[]).length, 1);
+    const policy = (result.details.active as Array<Record<string, unknown>>).find(
+      (entry) => entry.id === "policy",
+    )!;
+    assert.deepEqual(policy.current_policy, {
+      model: { inherited_defaults: ["model"], public_args: ["model"] },
+      thinking: { inherited_defaults: ["thinking"], public_args: ["thinking"] },
+    });
     const draft = (result.details.drafts as Array<Record<string, unknown>>)[0];
     assert.equal(draft.valid, true);
     assert.equal(typeof draft.sha256, "string");
@@ -1550,6 +1567,146 @@ test("Spawn tool enriches shadowed recipe launch failures", async () => {
   }
 });
 
+test("Spawn tool injects current model and thinking into inherited recipe defaults", async () => {
+  const definition = createSpawnToolDefinition();
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-current-policy-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  let stateDir = "";
+  try {
+    const recipesDir = join(root, "recipes");
+    await mkdir(recipesDir, { recursive: true });
+    await writeFile(
+      join(recipesDir, "current-review.json"),
+      `${JSON.stringify({
+        async: true,
+        args: ["model:string", "thinking:string"],
+        defaults: { model: "{current_model}", thinking: "{current_thinking}" },
+        mailbox: { accepts: ["control.kill"], emits: ["command.done", "run.done", "run.failed"] },
+        template: `${process.execPath} -e "console.log(process.argv[1], process.argv[2])" {model} {thinking}`,
+      }, null, 2)}\n`,
+    );
+    process.env.PI_CODING_AGENT_DIR = root;
+    const runId = `current-policy-${process.pid}-${Date.now()}`;
+    const result = await definition.execute(
+      "call-spawn-current-policy",
+      { as: `run:${runId}`, recipe: "current-review" },
+      undefined,
+      undefined,
+      {
+        cwd: process.cwd(),
+        getThinkingLevel: () => "high",
+        model: { provider: "test-provider", id: "test-model" },
+      },
+    );
+    stateDir = String(result.details.state_dir);
+    assert.equal(result.details.values.current_model, "test-provider/test-model");
+    assert.equal(result.details.values.current_thinking, "high");
+    assert.equal(result.details.model_policy.model.source, "inherited");
+    assert.equal(result.details.model_policy.thinking.source, "inherited");
+    assert.match(result.content[0].text, /model=inherited:test-provider\/test-model/);
+    assert.match(result.content[0].text, /thinking=inherited:high/);
+    await waitForFile(join(stateDir, "result.json"));
+    const inspect = createInspectToolDefinition();
+    const status = await inspect.execute(
+      "call-inspect-current-policy",
+      { target: `run:${runId}`, view: "status" },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+    assert.equal(status.details.model_policy.model.source, "inherited");
+    assert.equal(status.details.progress.model_policy.thinking.source, "inherited");
+    assert.match(status.content[0].text, /model=inherited:test-provider\/test-model/);
+    const stdout = await readFile(join(stateDir, "stdout.log"), "utf8");
+    assert.match(stdout, /test-provider\/test-model/);
+    assert.match(stdout, /high/);
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Spawn tool rejects current policy defaults before fanout when unavailable", async () => {
+  const definition = createSpawnToolDefinition();
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-missing-current-policy-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  try {
+    const recipesDir = join(root, "recipes");
+    await mkdir(recipesDir, { recursive: true });
+    await writeFile(
+      join(recipesDir, "current-review.json"),
+      `${JSON.stringify({
+        async: true,
+        args: ["model:string", "thinking:string"],
+        defaults: { model: "{current_model}", thinking: "{current_thinking}" },
+        mailbox: { accepts: ["control.kill"], emits: ["command.done", "run.done", "run.failed"] },
+        template: `${process.execPath} -e "console.log(process.argv[1], process.argv[2])" {model} {thinking}`,
+      }, null, 2)}\n`,
+    );
+    process.env.PI_CODING_AGENT_DIR = root;
+    await assert.rejects(
+      () =>
+        definition.execute(
+          "call-spawn-missing-current-model",
+          { as: `run:missing-current-model-${process.pid}-${Date.now()}`, recipe: "current-review" },
+          undefined,
+          undefined,
+          { cwd: process.cwd() },
+        ),
+      (error: unknown) => {
+        assert(error instanceof Error);
+        assert.match(error.message, /requires the current Pi model/);
+        assert.equal((error as any).model_policy.model.source, "unresolved");
+        assert.deepEqual((error as any).model_policy.model.unresolved_keys, ["model"]);
+        return true;
+      },
+    );
+    await assert.rejects(
+      () =>
+        definition.execute(
+          "call-spawn-missing-current-thinking",
+          { as: `run:missing-current-thinking-${process.pid}-${Date.now()}`, recipe: "current-review" },
+          undefined,
+          undefined,
+          {
+            cwd: process.cwd(),
+            model: { provider: "test-provider", id: "test-model" },
+          },
+        ),
+      (error: unknown) => {
+        assert(error instanceof Error);
+        assert.match(error.message, /requires the current Pi thinking level/);
+        assert.equal((error as any).model_policy.model.source, "inherited");
+        assert.equal((error as any).model_policy.thinking.source, "unresolved");
+        assert.deepEqual((error as any).model_policy.thinking.unresolved_keys, ["thinking"]);
+        return true;
+      },
+    );
+    const explicit = await definition.execute(
+      "call-spawn-explicit-model",
+      {
+        as: `run:explicit-model-${process.pid}-${Date.now()}`,
+        recipe: "current-review",
+        values: { model: "explicit/provider-model", thinking: "off" },
+      },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+    assert.equal(explicit.details.model_policy.model.source, "explicit");
+    assert.equal(explicit.details.model_policy.thinking.source, "explicit");
+    assert.match(explicit.content[0].text, /model=explicit:explicit\/provider-model/);
+    await waitForFile(join(String(explicit.details.state_dir), "result.json"));
+    await rm(String(explicit.details.state_dir), { recursive: true, force: true });
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Spawn tool starts run actors with artifact metadata", async () => {
   const definition = createSpawnToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-"));
@@ -2095,6 +2252,48 @@ test("Runtime tool definition exposes run id override for async co-located recip
   assert.equal(properties.scope.type, "string");
   assert.equal(properties.run_id.type, "string");
   assert.match(definition.promptSnippet, /Start async template recipe: review/);
+});
+
+test("Runtime async tools report inherited current policy", async () => {
+  const definition = createRuntimeToolDefinition(
+    {
+      args: ["model", "thinking"],
+      defaults: { model: "{current_model}", thinking: "{current_thinking}" },
+      description: "Start policy run",
+      recipe: {
+        async: true,
+        args: ["model:string", "thinking:string"],
+        defaults: { model: "{current_model}", thinking: "{current_thinking}" },
+        name: "policy",
+        template: `${process.execPath} -e "console.log(process.argv[1], process.argv[2])" {model} {thinking}`,
+      },
+      name: "policy_run",
+      template: "policy",
+    },
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+  );
+  const runId = `runtime-policy-${process.pid}-${Date.now()}`;
+  let stateDir = "";
+  try {
+    const result = await definition.execute(
+      "call-runtime-current-policy",
+      { run_id: runId },
+      undefined,
+      undefined,
+      {
+        cwd: process.cwd(),
+        getThinkingLevel: () => "medium",
+        model: { provider: "test-provider", id: "test-model" },
+      },
+    );
+    stateDir = String(result.details.state_dir);
+    assert.equal(result.details.model_policy.model.source, "inherited");
+    assert.equal(result.details.model_policy.thinking.source, "inherited");
+    assert.match(result.content[0].text, /model=inherited:test-provider\/test-model/);
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("Runtime tool definition exposes typed arg schemas", () => {

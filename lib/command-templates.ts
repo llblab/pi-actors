@@ -22,6 +22,8 @@ export interface CommandTemplateObjectConfig {
   actorRecipeContext?: CommandTemplateActorRecipeContext;
   label?: string;
   parallel?: boolean;
+  concurrency?: number | string;
+  min_successful?: number | string;
   when?: boolean | string;
   template?: CommandTemplateValue;
   args?: string[];

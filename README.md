@@ -111,22 +111,23 @@ cat > ~/.pi/agent/recipes/docs_review.json <<'JSON'
 {
   "description": "Start an async docs review actor",
   "async": true,
-  "args": ["scope:path", "model:string"],
+  "args": ["scope:path", "model:string", "thinking:string"],
+  "defaults": { "model": "{current_model}", "thinking": "{current_thinking}" },
   "mailbox": {
     "accepts": ["control.kill", "control.continue"],
     "emits": ["review.completed", "run.failed"]
   },
-  "template": "pi -p --model {model} --no-tools \"Review {scope} for unclear actor-runtime onboarding. Return concise findings.\""
+  "template": "pi -p --model {model} --thinking {thinking} --no-tools \"Review {scope} for unclear actor-runtime onboarding. Return concise findings.\""
 }
 JSON
 ```
 
-Because it lives under `~/.pi/agent/recipes/`, the file becomes a persistent agent tool by location. The filename is the tool id.
+Because it lives under `~/.pi/agent/recipes/`, the file becomes a persistent agent tool by location. The filename is the tool id. `{current_model}` and `{current_thinking}` inherit the selected Pi session model/thinking level; pass `model=...` or `thinking=...` only when a run should intentionally diverge. Run status/progress and terminal follow-ups include `model_policy` provenance so inherited, explicit, and unresolved policy choices stay inspectable.
 
 Start it:
 
 ```text
-docs_review scope="README.md" model="current-review-model" run_id=docs_review
+docs_review scope="README.md" run_id=docs_review
 ```
 
 Inspect only when there is a reason:
@@ -258,7 +259,7 @@ Templates support:
 - Retries, recovery, failure policy, delays, and guarded execution;
 - Async run values such as `{run_id}`, `{state_dir}`, `{actor_address}`, `{default_room}`, and `{communication_file}`.
 
-The template owns execution shape. The recipe owns saved metadata, defaults, imports, mailbox, and artifacts. JSON is the canonical precise recipe format; Markdown recipes use frontmatter plus fenced `template`/`json recipe` blocks for literate authoring and compile into the same model. The run actor owns detached lifecycle, state, messages, cancellation, and inspection. File-backed async recipes also provide child `pi -p` actors with a bounded JSONL recipe context bundle by default, including raw entry/import recipe records and a `"you_are_here": true` marker for the recipe node that launched the child. Set `"actor_context": false` or `"off"` in a recipe to suppress that context for minimal prompts.
+The template owns execution shape. The recipe owns saved metadata, defaults, imports, mailbox, and artifacts. JSON is the canonical precise recipe format; Markdown recipes use frontmatter plus fenced `template`/`json recipe` blocks for literate authoring and compile into the same model. The run actor owns detached lifecycle, state, messages, cancellation, and inspection. File-backed async recipes also provide child `pi -p` actors with a bounded JSONL recipe context bundle by default, including raw entry/import recipe records and a `"you_are_here": true` marker for the recipe node that launched the child; the runner materializes child prompts under `prompts/` and invokes Pi with `@file` arguments. Set `"actor_context": false` or `"off"` in a recipe to suppress that context for minimal prompts.
 
 ## Recipe Library
 

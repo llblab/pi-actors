@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 const conformanceSuites = [
   "tests/protocol-examples.test.ts",
   "tests/recipes-discovery.test.ts",
+  "tests/review-swarm-dogfood.test.ts",
   "tests/registry.test.ts",
   "tests/runtime.test.ts",
   "tests/async-runs.test.ts",

@@ -87,10 +87,11 @@ Use ordinary files under the extension temp directory so status tools stay simpl
 
 - `run.json`: pid, optional source metadata (`launch_source`, `tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, mailbox metadata, created time, and state dir.
 - `communication.json`: compact actor communication snapshot with self/root/parent, default-room, member, and contact hints for room-aware scripts and agents.
-- `progress.json`: phase, active command count, completed count, failures, and updated time.
+- `progress.json`: phase, active command count, completed count, failures, updated time, and optional `model_policy` provenance for inherited/explicit model and thinking values.
 - `events.jsonl`: append-only implementation lifecycle log.
 - `outbox.jsonl`: implementation storage for actor-message envelopes used by `inspect view=messages`, coordinator notifications, or follow-up context. Coordinator follow-ups preserve bounded `body` previews plus message metadata for decision points.
 - `stdout.log` and `stderr.log`: detached process output.
+- `prompts/command-NNN.md`: state-owned prompt files materialized for child `pi -p` commands so long prompts and appended recipe context travel as `@file` arguments instead of fragile inline argv text.
 - `result.json`: final code, killed flag, output selector, and optional full-output path.
 
 For pi-actors, actor run state defaults to:
@@ -109,6 +110,7 @@ State files use this shape:
 ~/.pi/agent/tmp/pi-actors/runs/<run>/outbox.jsonl
 ~/.pi/agent/tmp/pi-actors/runs/<run>/stdout.log
 ~/.pi/agent/tmp/pi-actors/runs/<run>/stderr.log
+~/.pi/agent/tmp/pi-actors/runs/<run>/prompts/command-001.md
 ~/.pi/agent/tmp/pi-actors/runs/<run>/result.json
 ```
 

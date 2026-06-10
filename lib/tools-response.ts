@@ -40,6 +40,25 @@ function formatFailureCount(value: unknown): number | undefined {
   return Array.isArray(value) ? value.length : undefined;
 }
 
+function compactPolicyAxis(label: string, value: unknown): string | undefined {
+  const axis = asRecord(value);
+  const source = typeof axis.source === "string" ? axis.source : undefined;
+  if (!source || source === "unused") return undefined;
+  const renderedValue =
+    typeof axis.value === "string" && axis.value.trim()
+      ? `:${axis.value.trim()}`
+      : "";
+  return `${label}=${source}${renderedValue}`;
+}
+
+function compactModelPolicy(value: unknown): string[] {
+  const policy = asRecord(value);
+  return [
+    compactPolicyAxis("model", policy.model),
+    compactPolicyAxis("thinking", policy.thinking),
+  ].filter((token): token is string => Boolean(token));
+}
+
 export function actorRunNextActions(run: unknown): string[] {
   const id = String(run ?? "").trim();
   if (!id) return [];
@@ -56,6 +75,7 @@ export function compactAsyncRunStatus(value: unknown): string {
   const result = asRecord(status.result);
   const run = String(status.run ?? "<unknown>");
   const tokens = [`run=${run}`, `status=${String(status.status ?? "unknown")}`];
+  tokens.push(...compactModelPolicy(status.model_policy ?? progress.model_policy));
   if (status.tool) tokens.push(`tool=${String(status.tool)}`);
   if (status.recipe) tokens.push(`recipe=${String(status.recipe)}`);
   if (status.retire_when)
@@ -272,10 +292,15 @@ export function compactRecipeRegistry(
   const recommendations = Array.isArray(summary.recommendations)
     ? summary.recommendations.length
     : 0;
+  const currentPolicy = Array.isArray(summary.active)
+    ? (summary.active as Array<Record<string, unknown>>).filter(
+        (entry) => entry.current_policy,
+      ).length
+    : 0;
   const nextActions = Array.isArray(summary.next_actions)
     ? (summary.next_actions as string[])
     : [];
-  return `\nrecipes active=${active} drafts=${drafts} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} recommendations=${recommendations} diagnostics=${diagnostics}${compactNextActions(nextActions)}`;
+  return `\nrecipes active=${active} drafts=${drafts} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} current_policy=${currentPolicy} recommendations=${recommendations} diagnostics=${diagnostics}${compactNextActions(nextActions)}`;
 }
 
 export const DEFAULT_INSPECT_LINES = Limits.DEFAULT_INSPECT_LINES;

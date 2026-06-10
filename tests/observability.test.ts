@@ -270,6 +270,21 @@ test("Run observability detects terminal transitions", () => {
   assert.equal(previous.get("review"), "done");
 });
 
+test("Run observability includes model policy in terminal follow-ups", () => {
+  const message = formatRunTransitionMessage({
+    from: "running",
+    modelPolicy: {
+      model: { source: "inherited", value: "provider/model" },
+      thinking: { source: "explicit", value: "high" },
+    },
+    run: "review",
+    to: "done",
+  });
+  assert.match(message, /Policy:/);
+  assert.match(message, /Model: inherited \(provider\/model\)/);
+  assert.match(message, /Thinking: explicit \(high\)/);
+});
+
 test("Run observability keys transitions by state directory", () => {
   const previous = new Map([
     ["/tmp/parent/review", "running" as const],

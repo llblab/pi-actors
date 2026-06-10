@@ -1,0 +1,29 @@
+{
+  "async": true,
+  "args": [
+    "stage:string",
+    "model:string",
+    "thinking:string",
+    "tools:string",
+    "output_format:string"
+  ],
+  "defaults": {
+    "stage": "subagent",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
+    "tools": "",
+    "output_format": "Reply exactly: ACTOR_PREFLIGHT_OK"
+  },
+  "mailbox": {
+    "accepts": [
+      "control.kill"
+    ],
+    "emits": [
+      "preflight.completed",
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Preflight check for stage {stage}. Confirm this model, thinking level, and tool policy can start before expensive fanout. Do not inspect files. {output_format}"
+}

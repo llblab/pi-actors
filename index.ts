@@ -102,13 +102,34 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
       activeRunContext && scheduleRunEventUpdate(activeRunContext),
   });
   const actorToolDefinitions = new Map<string, Tools.ActorToolDefinition>();
+  const withCurrentThinkingContext = <T extends Tools.ActorToolDefinition>(
+    definition: T,
+  ): T => {
+    if (typeof definition.execute !== "function") return definition;
+    const execute = definition.execute as (...args: unknown[]) => unknown;
+    return {
+      ...definition,
+      execute: (...args: unknown[]) => {
+        const nextArgs = [...args];
+        const ctx = nextArgs[4];
+        if (ctx && typeof ctx === "object") {
+          nextArgs[4] = {
+            ...(ctx as Record<string, unknown>),
+            getThinkingLevel: () => pi.getThinkingLevel(),
+          };
+        }
+        return execute(...nextArgs);
+      },
+    } as T;
+  };
   const runtime = Runtime.createAutoToolsRuntime({
     configPath: Paths.EXTENSION_RUNTIME_PATHS.configPath,
     exec: CommandTemplates.execCommandTemplate,
     getActiveTools: () => pi.getActiveTools(),
     registerTool: (definition) => {
-      actorToolDefinitions.set(definition.name, definition);
-      pi.registerTool(definition);
+      const wrapped = withCurrentThinkingContext(definition);
+      actorToolDefinitions.set(wrapped.name, wrapped);
+      pi.registerTool(wrapped);
     },
     reservedToolNames: Tools.RESERVED_TOOL_NAMES,
     setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
@@ -186,6 +207,6 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
       getRuntimeTool: (name) => actorToolDefinitions.get(name),
       registryRuntime: runtime,
       setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
-    }),
+    }).map(withCurrentThinkingContext),
   );
 }

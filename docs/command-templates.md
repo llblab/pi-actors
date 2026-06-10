@@ -50,6 +50,8 @@ Common object fields:
 
 - `label`: Optional human label for diagnostics and parallel branch reports.
 - `parallel`: Optional boolean for array templates. Default is `false` for sequence; `true` runs children concurrently.
+- `concurrency`: Optional positive integer cap for a `parallel: true` node. Omit it to launch all children at once.
+- `min_successful`: Optional non-negative integer evidence threshold for a `parallel: true` node. Usable branches are successful branches with non-empty stdout; joins include a `parallel_status` header when this is set.
 - `when`: Optional node guard. A false guard skips the node; strings may be `flag`, `!flag`, or `{flag?yes:no}` style expressions.
 - `args`: Optional placeholder declarations. Untyped names remain valid; compact typed forms such as `file:path`, `request_timeout:int`, `speed:number`, `dry_run:bool`, `prompts:array`, and `mode:enum(check,fix)` are valid when the host supports typed tool schemas. Defaults belong in `defaults` or inline placeholder defaults; hosts may normalize interactive shorthand such as `request_timeout:int=60000` before persistence.
 - `defaults`: Placeholder default values by name.
@@ -187,6 +189,7 @@ Composition rules:
 - Skipped nodes preserve current stdin/stdout flow and do not execute commands
 - Each parallel child receives the same stdin, and child stdout values are joined in stable array order before flowing to the next sequence leaf
 - Parallel branch joins include branch label and status, and tool details include branch metadata plus coverage summary
+- `min_successful` adds a join header with `complete`, `degraded`, or `insufficient_data`; with `failure: "branch"` or `"root"`, an unmet threshold fails at that scope
 - Each leaf still applies its own inline defaults
 
 ```json
@@ -398,7 +401,7 @@ string           → leaf command
 string[]         → sequential composition
 { template }     → leaf command object
 { parallel, template } → sequence or parallel subtree
-{ parallel, when, args, defaults, delay, retry, failure, recover, output, template } → full node
+{ parallel, concurrency, min_successful, when, args, defaults, delay, retry, failure, recover, output, template } → full node
 ```
 
 Start with a string. Add composition when needed. Add `parallel: true` when independent work can run concurrently. Add `when` when a node is conditional. Add delay when launch pacing matters. Add retry when flaky. Add `failure` when propagation scope matters. Add `recover` when a retried node needs cleanup before another attempt. Same contract, growing capability, no dead weight.

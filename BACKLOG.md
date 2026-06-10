@@ -71,4 +71,4 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 
 ## Suggested Milestone Order
 
-No current milestone. Reassess runtime evidence before adding the next reliability slice.
+1. Re-curate after the next real packaged review-swarm dogfood run.

@@ -29,6 +29,7 @@ Core subagent recipes:
 - `recipes/subagent-prompt.json`: Start one prompt-driven subagent.
 - `recipes/subagent-tools.json`: Start a subagent with an explicit tool allowlist.
 - `recipes/subagents-prompts.json`: Run prompt fanout with one imported subagent component.
+- `recipes/subagent-preflight.json`: Tiny model/thinking/tool-policy smoke check before expensive fanout; failures surface `ACTOR_PREFLIGHT_FAILED` with stage, selected policy, provider error class, prompt file, and override args.
 - `recipes/subagent-review.json`: Evidence-grounded review lens.
 - `recipes/subagent-critic.json`: Assumption and failure-mode critique.
 - `recipes/subagent-plan.json`: Bounded plan slices and validation gates.
@@ -46,7 +47,7 @@ Core subagent recipes:
 - `recipes/subagent-followup.json`: Same-context or degraded continuation.
 - `recipes/subagent-judge.json`: Post-merge/report quality judge.
 
-Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Packaged recipes intentionally do not ship concrete model-version defaults: callers must pass current model policy at launch, which keeps reusable recipe components from aging around old provider aliases. The generic prompt launchers, including `subagent-tools` and `subagents-prompts`, expose the same core model/thinking/tool/output knobs so callers do not need separate recipe families for policy tuning. Interactive async atoms also declare mailbox metadata for their basic control, completion, and domain-result message surface. Higher-level recipes pass these knobs through instead of hard-coding local policy.
+Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Packaged recipes intentionally do not ship concrete model-version defaults: review-oriented subagent and lens-swarm recipes default model/thinking args through `{current_model}` and `{current_thinking}` so they inherit the selected Pi session policy, and callers can still pass explicit values when a run should diverge. Recipe inspection marks these inherited policy defaults as `current_policy`, and run status/progress records whether launch policy was inherited, explicit, mixed, or unresolved. Generic prompt launchers, including `subagent-tools` and `subagents-prompts`, expose the same core model/thinking/tool/output knobs so callers do not need separate recipe families for policy tuning. Interactive async atoms also declare mailbox metadata for their basic control, completion, and domain-result message surface. Higher-level recipes pass these knobs through instead of hard-coding local policy.
 
 For one-off packaged subagent reviews, launch the recipe directly with `spawn file="subagent-review" values={...}` or `spawn file="pipeline-review-readiness" values={...}`. Do not copy the underlying `pi -p` command or wrap the recipe unless you are creating a durable operator tool with a narrower interface.
 
@@ -73,7 +74,7 @@ inspect target=run:docs_review view=tail
 Pipeline recipes demonstrate second-order composition:
 
 - `recipes/coordinator-locker.json`: Long-lived coordinator cell with queue, acquire/renew/release lease locks, journal, actor messages for worker coordination, and platform-adapted control metadata.
-- `recipes/subagent-review-coordinator.json`: Lens reviewers → verifier → merger → judge → normalizer.
+- `recipes/subagent-review-coordinator.json`: Model/tool preflight with compact provider diagnostics → quorum-aware lens reviewers → verifier → merger → judge → normalizer. Review pipelines expose `subagent_ttl_ms`, `reviewer_concurrency`, `min_successful_reviewers`, and `merge_policy` knobs; reviewer joins preserve partial evidence and mark `complete`, `degraded`, or `insufficient_data`. `npm run conformance` includes a fake-`pi` review-readiness dogfood fixture for this packaged path.
 - `recipes/pipeline-release-readiness.json`: Task-first release cell: changelog section → package summary → packaged skill summary → validation → release review → artifact report.
 - `recipes/pipeline-release-summary.json`: Evidence-only release summary cell: changelog section → package summary → packaged skill summary → validation → release summary / risks / PR body draft artifact. It does not commit, open a PR, merge, tag, publish, or perform external release side effects.
 - `recipes/pipeline-repo-health.json`: Task-first repository-health cell: git status/log → docs index → validation → normalized artifact report.

@@ -32,10 +32,13 @@ export interface ToolExecResult {
 export interface BranchReport {
   code: number;
   command: string;
+  failureReason?: string;
   killed: boolean;
   label: string;
   status: "done" | "failed" | "timeout";
   stderr?: string;
+  stderrBytes: number;
+  stdout?: string;
   stdoutBytes: number;
 }
 
@@ -62,6 +65,7 @@ export interface RegisteredToolExecutionResult {
       killed: boolean;
     }>;
     softQuorum?: SoftQuorumReport;
+    failureReason?: string;
     template: CommandTemplates.CommandTemplateValue;
     templateWarnings?: string[];
     tool: string;
@@ -123,6 +127,20 @@ function formatCommandDetail(commands: string[]): string {
   return commands.length === 1 ? commands[0] : commands.join(" && ");
 }
 
+function getExecutionFailureReason(
+  branches: BranchReport[],
+  softQuorum: SoftQuorumReport | undefined,
+  stderr: string,
+): string {
+  if (/parallel branch quorum not met/.test(stderr)) {
+    return "parallel_quorum_not_met";
+  }
+  if (branches.length > 0 && softQuorum?.usable === false) {
+    return "all_branches_unusable";
+  }
+  return "command_failed";
+}
+
 function mergeDefaults(
   inherited: Record<string, unknown> | undefined,
   own: Record<string, unknown> | undefined,
@@ -145,20 +163,38 @@ function getBranchStatus(result: ToolExecResult): BranchReport["status"] {
   return result.killed ? "timeout" : "failed";
 }
 
+function getBranchFailureReason(
+  result: ToolExecResult,
+): string | undefined {
+  if (result.code === 0) {
+    return result.stdout.trim() ? undefined : "empty_output";
+  }
+  if (result.killed) return "timeout_or_killed";
+  return result.stderr.trim() ? "nonzero_exit" : "nonzero_exit_empty_stderr";
+}
+
 function createBranchReport(
   label: string,
   command: string,
   result: ToolExecResult,
 ): BranchReport {
+  const failureReason = getBranchFailureReason(result);
   return {
     code: result.code,
     command,
+    ...(failureReason ? { failureReason } : {}),
     killed: result.killed,
     label,
     status: getBranchStatus(result),
-    ...(result.stderr ? { stderr: result.stderr.slice(0, 1000) } : {}),
+    ...(result.stderr ? { stderr: result.stderr.slice(-1000) } : {}),
+    stderrBytes: Buffer.byteLength(result.stderr),
+    ...(result.stdout ? { stdout: result.stdout.slice(-1000) } : {}),
     stdoutBytes: Buffer.byteLength(result.stdout),
   };
+}
+
+function isUsableBranch(branch: BranchReport): boolean {
+  return branch.status === "done" && branch.stdoutBytes > 0;
 }
 
 function createSoftQuorum(
@@ -173,8 +209,12 @@ function createSoftQuorum(
     done,
     expected: branches.length,
     failed,
-    usable: done > 0,
+    usable: branches.some(isUsableBranch),
   };
+}
+
+function countUsableBranches(branches: BranchReport[]): number {
+  return branches.filter(isUsableBranch).length;
 }
 
 function getMaxParallelBranches(): number {
@@ -227,6 +267,34 @@ function normalizeRetry(
   if (resolved === undefined) return 1;
   if (!Number.isInteger(resolved) || resolved < 1)
     throw new Error("Command template retry must be a positive integer.");
+  return resolved;
+}
+
+function normalizeConcurrency(
+  value: number | string | undefined,
+  values: Record<string, unknown>,
+  branchCount: number,
+): number {
+  const resolved = resolveNumericControlField(value, values, "concurrency");
+  if (resolved === undefined) return branchCount;
+  if (!Number.isInteger(resolved) || resolved < 1)
+    throw new Error("Command template concurrency must be a positive integer.");
+  return Math.min(resolved, branchCount);
+}
+
+function normalizeMinSuccessful(
+  value: number | string | undefined,
+  values: Record<string, unknown>,
+  branchCount: number,
+): number | undefined {
+  const resolved = resolveNumericControlField(value, values, "min_successful");
+  if (resolved === undefined) return undefined;
+  if (!Number.isInteger(resolved) || resolved < 0)
+    throw new Error("Command template min_successful must be a non-negative integer.");
+  if (resolved > branchCount)
+    throw new Error(
+      `Command template min_successful ${resolved} exceeds branch count ${branchCount}.`,
+    );
   return resolved;
 }
 
@@ -309,11 +377,34 @@ async function applyDelay(
   await sleep(resolved, signal);
 }
 
+function getParallelStatus(
+  branches: BranchReport[],
+  minSuccessful: number | undefined,
+): "complete" | "degraded" | "insufficient_data" {
+  const usable = countUsableBranches(branches);
+  if (minSuccessful !== undefined && usable < minSuccessful) {
+    return "insufficient_data";
+  }
+  return branches.every(isUsableBranch) ? "complete" : "degraded";
+}
+
+function formatParallelStatusHeader(
+  branches: BranchReport[],
+  minSuccessful: number | undefined,
+): string | undefined {
+  if (minSuccessful === undefined) return undefined;
+  return `--- parallel_status: ${getParallelStatus(
+    branches,
+    minSuccessful,
+  )} usable: ${countUsableBranches(branches)} expected: ${branches.length} minimum: ${minSuccessful} ---`;
+}
+
 function joinParallelStdout(
   branches: BranchReport[],
   results: ToolExecResult[],
+  minSuccessful?: number,
 ): string {
-  return results
+  const body = results
     .map((result, index) => {
       const branch = branches[index];
       const header = `--- branch: ${branch.label} status: ${branch.status} ---`;
@@ -322,6 +413,30 @@ function joinParallelStdout(
       return `${header}\nexit: ${branch.code}${stderr}`;
     })
     .join("\n");
+  return [formatParallelStatusHeader(branches, minSuccessful), body]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function mapConcurrent<T, TResult>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<TResult>,
+): Promise<TResult[]> {
+  const results = new Array<TResult>(items.length);
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!, index);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  );
+  return results;
 }
 
 async function executeRetriableTemplateConfig(
@@ -466,7 +581,17 @@ async function executeTemplateConfig(
       };
     });
     return executeTemplateConfig(
-      { parallel: normalized.parallel === true, template: repeatedSteps },
+      {
+        parallel: normalized.parallel === true,
+        ...(normalized.concurrency !== undefined
+          ? { concurrency: normalized.concurrency }
+          : {}),
+        ...(normalized.min_successful !== undefined
+          ? { min_successful: normalized.min_successful }
+          : {}),
+        ...(normalized.failure !== undefined ? { failure: normalized.failure } : {}),
+        template: repeatedSteps,
+      },
       context,
       params,
       exec,
@@ -552,19 +677,27 @@ async function executeTemplateConfig(
     throw new Error(formatToolText("Tool template produced no command steps."));
   if (normalized.parallel === true) {
     assertParallelBranchLimit(steps.length);
-    const branchResults = await Promise.all(
-      steps.map((step) =>
-        executeTemplateConfig(
-          step,
-          context,
-          params,
-          exec,
-          cwd,
-          signal,
-          stdin,
-          false,
-          actorRecipeContext,
-        ),
+    const concurrency = normalizeConcurrency(
+      normalized.concurrency,
+      controlValues,
+      steps.length,
+    );
+    const minSuccessful = normalizeMinSuccessful(
+      normalized.min_successful,
+      controlValues,
+      steps.length,
+    );
+    const branchResults = await mapConcurrent(steps, concurrency, (step) =>
+      executeTemplateConfig(
+        step,
+        context,
+        params,
+        exec,
+        cwd,
+        signal,
+        stdin,
+        false,
+        actorRecipeContext,
       ),
     );
     const commands = branchResults.flatMap((item) => item.commands);
@@ -576,6 +709,12 @@ async function executeTemplateConfig(
         item.result,
       ),
     );
+    const usableBranches = countUsableBranches(branches);
+    const quorumUnmet =
+      minSuccessful !== undefined && usableBranches < minSuccessful;
+    const quorumFailureMessage = quorumUnmet
+      ? `parallel branch quorum not met: usable ${usableBranches}/${branches.length}, minimum ${minSuccessful}`
+      : "";
     const nodeFailure = getFailureScope(normalized);
     const rootFailure = branchResults.find((item, index) => {
       if (item.result.code === 0) return false;
@@ -603,6 +742,9 @@ async function executeTemplateConfig(
     const firstFailedBranch = branchResults.find(
       (item) => item.result.code !== 0,
     );
+    const allBranchesUnusable = branches.every(
+      (branch) => !isUsableBranch(branch),
+    );
     const successful = branchResults.map((item) => {
       if (item.result.code === 0) return item.result;
       addResultFailure(failures, item);
@@ -615,9 +757,31 @@ async function executeTemplateConfig(
         .map((item) => item.stderr)
         .filter(Boolean)
         .join("\n"),
-      stdout: joinParallelStdout(branches, successful),
+      stdout: joinParallelStdout(branches, successful, minSuccessful),
     };
-    if (firstFailedBranch && nodeFailure === "branch") {
+    if (quorumUnmet && nodeFailure === "root") {
+      return {
+        commands,
+        branches: [
+          ...branchResults.flatMap((item) => item.branches),
+          ...branches,
+        ],
+        criticalFailure: true,
+        failureScope: "root",
+        failures,
+        result: {
+          ...result,
+          code: firstFailedBranch?.result.code || 1,
+          stderr: [result.stderr, quorumFailureMessage]
+            .filter(Boolean)
+            .join("\n"),
+        },
+      };
+    }
+    const branchFailureTriggered = minSuccessful === undefined
+      ? firstFailedBranch || allBranchesUnusable
+      : quorumUnmet;
+    if (branchFailureTriggered && nodeFailure === "branch") {
       return {
         commands,
         branches: [
@@ -626,7 +790,19 @@ async function executeTemplateConfig(
         ],
         failureScope: "branch",
         failures,
-        result: { ...result, code: firstFailedBranch.result.code || 1 },
+        result: {
+          ...result,
+          code: firstFailedBranch?.result.code || 1,
+          stderr: [
+            result.stderr,
+            allBranchesUnusable
+              ? "all parallel branches failed or produced empty output"
+              : "",
+            quorumFailureMessage,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        },
       };
     }
     return {
@@ -735,6 +911,7 @@ export async function executeRegisteredTool(
   );
   const command = formatCommandDetail(executed.commands);
   const result = executed.result;
+  const softQuorum = createSoftQuorum(executed.branches);
   if (result.code !== 0) {
     const formatted = formatFailureOutput(
       cfg.name,
@@ -743,7 +920,26 @@ export async function executeRegisteredTool(
       result.stdout,
       result.stderr,
     );
-    throw new Error(formatted.text);
+    throw Object.assign(new Error(formatted.text), {
+      details: {
+        branches: executed.branches,
+        code: result.code,
+        command,
+        killed: result.killed,
+        ...(executed.failures.length > 0
+          ? { nonCriticalFailures: executed.failures }
+          : {}),
+        ...(softQuorum ? { softQuorum } : {}),
+        failureReason: getExecutionFailureReason(
+          executed.branches,
+          softQuorum,
+          result.stderr,
+        ),
+        template: cfg.template!,
+        tool: cfg.name,
+        truncated: formatted.truncated,
+      },
+    });
   }
   const formatted = formatOutput(cfg.name, "stdout", result.stdout);
   const templateWarnings = CommandTemplates.getCommandTemplateWarnings(
@@ -760,9 +956,7 @@ export async function executeRegisteredTool(
       ...(executed.failures.length > 0
         ? { nonCriticalFailures: executed.failures }
         : {}),
-      ...(createSoftQuorum(executed.branches)
-        ? { softQuorum: createSoftQuorum(executed.branches) }
-        : {}),
+      ...(softQuorum ? { softQuorum } : {}),
       template: cfg.template!,
       ...(templateWarnings.length > 0 ? { templateWarnings } : {}),
       tool: cfg.name,

@@ -623,16 +623,85 @@ test("Packaged recipes do not ship concrete model-version defaults", async () =>
     const config = readResolvedRecipeConfig(join(recipeDir, file));
     const defaults = config?.defaults ?? {};
     for (const [key, value] of Object.entries(defaults)) {
-      assert.ok(
-        !modelLikeKey.test(key),
-        `${file} should expose ${key} as a required caller-provided arg, not a packaged default`,
-      );
+      if (modelLikeKey.test(key)) {
+        assert.equal(
+          value,
+          "{current_model}",
+          `${file} may default ${key} only through current-model inheritance`,
+        );
+      }
       assert.ok(
         !concreteModelValue.test(JSON.stringify(value)),
         `${file} should not ship concrete model provider/version defaults in ${key}`,
       );
     }
   }
+});
+
+test("Packaged review recipes inherit current model and thinking by default", () => {
+  const recipeDir = join(__dirname, "..", "recipes");
+  const expectedModelDefaults: Record<string, string[]> = {
+    "lens-swarm.json": ["model"],
+    "pipeline-review-readiness.json": [
+      "reviewer_model",
+      "verifier_model",
+      "merger_model",
+      "judge_model",
+    ],
+    "pipeline-release-readiness.json": [
+      "reviewer_model",
+      "verifier_model",
+      "merger_model",
+      "judge_model",
+    ],
+    "subagent-review-coordinator.json": [
+      "reviewer_model",
+      "verifier_model",
+      "merger_model",
+      "judge_model",
+    ],
+    "subagent-preflight.json": ["model"],
+    "subagent-review.json": ["model"],
+    "subagent-verify.json": ["model"],
+    "subagent-merge.json": ["model"],
+    "subagent-judge.json": ["model"],
+    "subagent-normalize.json": ["model"],
+  };
+  const expectedThinkingDefaults = [
+    "lens-swarm.json",
+    "pipeline-review-readiness.json",
+    "pipeline-release-readiness.json",
+    "subagent-review-coordinator.json",
+    "subagent-preflight.json",
+    "subagent-review.json",
+    "subagent-verify.json",
+    "subagent-merge.json",
+    "subagent-judge.json",
+    "subagent-normalize.json",
+  ];
+  for (const [file, keys] of Object.entries(expectedModelDefaults)) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    for (const key of keys) {
+      assert.equal(config?.defaults?.[key], "{current_model}", `${file}:${key}`);
+    }
+  }
+  for (const file of expectedThinkingDefaults) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    assert.equal(config?.defaults?.thinking, "{current_thinking}", `${file}:thinking`);
+  }
+});
+
+test("Packaged review coordinator preflights stage models before reviewer fanout", () => {
+  const config = readResolvedRecipeConfig(
+    join(__dirname, "..", "recipes", "subagent-review-coordinator.json"),
+  )!;
+  const steps = (config.template as { template?: unknown }).template;
+  assert.ok(Array.isArray(steps));
+  const first = steps[0] as Record<string, unknown>;
+  assert.equal(first.parallel, true);
+  assert.equal(first.failure, "root");
+  assert.match(JSON.stringify(first), /ACTOR_PREFLIGHT_OK|Preflight check/);
+  assert.match(JSON.stringify(steps[1]), /repeat.*lenses|reviewer/);
 });
 
 test("Packaged actor worker recipe stays mailbox-only and cross-platform", () => {

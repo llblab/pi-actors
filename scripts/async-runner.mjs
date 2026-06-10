@@ -8,7 +8,7 @@
  * chasing a one-off lib entrypoint domain.
  */
 
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -25,8 +25,10 @@ async function importRuntimeModule(name) {
   );
 }
 
-const { appendRecipeContextToPiArgs } =
+const { appendRecipeContextToPiArgs, materializePiPrintPromptArg } =
   await importRuntimeModule("recipes-context");
+const { buildReviewPreflightDiagnostic, formatReviewPreflightDiagnostic } =
+  await importRuntimeModule("preflight-diagnostics");
 const { execCommandTemplate } = await importRuntimeModule("command-templates");
 const { executeRegisteredTool } = await importRuntimeModule("execution");
 const { writeJsonAtomic } = await importRuntimeModule("file-state");
@@ -75,6 +77,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
 
   function progress(phase, extra = {}) {
     writeJsonAtomic(progressPath, {
+      ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
       phase,
       updatedAt: new Date().toISOString(),
       ...extra,
@@ -83,6 +86,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
 
   let activeSubagents = 0;
   let completedSubagents = 0;
+  let promptCounter = 0;
   const subagentFailures = [];
 
   function getCommandDoneDelivery(result) {
@@ -97,18 +101,65 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     });
   }
 
+  function promptFilePath() {
+    promptCounter += 1;
+    const dir = join(stateDir, "prompts");
+    mkdirSync(dir, { recursive: true });
+    return join(dir, `command-${String(promptCounter).padStart(3, "0")}.md`);
+  }
+
+  function readPromptText(promptFile) {
+    if (!promptFile) return undefined;
+    try {
+      return readFileSync(promptFile, "utf8");
+    } catch {
+      return undefined;
+    }
+  }
+
   async function observedExec(command, args, options) {
-    const commandDetail = formatCommandDetail(command, args);
-    const execArgs = appendRecipeContextToPiArgs(
+    const contextArgs = appendRecipeContextToPiArgs(
       command,
       args,
       meta.recipe_context_records,
       options?.actorRecipeContext,
     );
+    const materialized = materializePiPrintPromptArg(
+      command,
+      contextArgs,
+      promptFilePath,
+    );
+    const execArgs = materialized.args;
+    const commandDetail = formatCommandDetail(command, execArgs);
     activeSubagents += 1;
-    event("command.start", { activeSubagents, command: commandDetail });
+    event("command.start", {
+      activeSubagents,
+      command: commandDetail,
+      ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
+      ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
+    });
     progressRunning();
-    const result = await execCommandTemplate(command, execArgs, options);
+    let result = await execCommandTemplate(command, execArgs, options);
+    const preflightDiagnostic = result.code !== 0
+      ? buildReviewPreflightDiagnostic({
+          args: execArgs,
+          code: result.code,
+          killed: result.killed,
+          ...(materialized.promptFile ? { promptFile: materialized.promptFile } : {}),
+          promptText: readPromptText(materialized.promptFile),
+          stderr: result.stderr,
+          stdout: result.stdout,
+        })
+      : undefined;
+    if (preflightDiagnostic) {
+      result = {
+        ...result,
+        stderr: [
+          result.stderr,
+          formatReviewPreflightDiagnostic(preflightDiagnostic),
+        ].filter(Boolean).join("\n"),
+      };
+    }
     activeSubagents = Math.max(0, activeSubagents - 1);
     completedSubagents += 1;
     if (result.code !== 0) {
@@ -116,6 +167,8 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
         code: result.code,
         command: commandDetail,
         killed: result.killed,
+        ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
+        ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
       });
     }
     event("command.done", {
@@ -123,6 +176,9 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       code: result.code,
       command: commandDetail,
       killed: result.killed,
+      ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
+      ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
+      ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
     });
     outbox(
       "command.done",
@@ -134,6 +190,9 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
         code: result.code,
         command: commandDetail,
         killed: result.killed,
+        ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
+        ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
+        ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
       },
       getCommandDoneDelivery(result),
       result.code === 0 ? "info" : "error",
@@ -163,6 +222,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       code: result.details.code,
       command: result.details.command,
       killed: result.details.killed,
+      ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
       truncated: result.details.truncated,
       completedAt: new Date().toISOString(),
     });
@@ -173,15 +233,29 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     event("run.done", { code: result.details.code });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const details = error && typeof error === "object" ? error.details : undefined;
     appendFileSync(stderrPath, `${message}\n`);
     writeJsonAtomic(resultPath, {
-      code: 1,
+      code: typeof details?.code === "number" ? details.code : 1,
       error: message,
-      killed: false,
+      killed: Boolean(details?.killed),
+      ...(Array.isArray(details?.branches) ? { branches: details.branches } : {}),
+      ...(details?.failureReason ? { failure_reason: details.failureReason } : {}),
+      ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
+      ...(details?.softQuorum ? { soft_quorum: details.softQuorum } : {}),
       completedAt: new Date().toISOString(),
     });
-    progress("failed", { completed: 0, failures: [{ message }] });
-    event("run.failed", { error: message });
+    progress("failed", {
+      completed: 0,
+      failures: Array.isArray(details?.branches) && details.branches.length > 0
+        ? details.branches
+        : [{ message }],
+      ...(details?.failureReason ? { failureReason: details.failureReason } : {}),
+    });
+    event("run.failed", {
+      error: message,
+      ...(details?.failureReason ? { failure_reason: details.failureReason } : {}),
+    });
     throw error;
   }
 }

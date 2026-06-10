@@ -356,7 +356,7 @@ test("Async runs expose failed terminal status", async () => {
       process.cwd(),
     );
     const result = await waitForResult(stateDir);
-    assert.equal(result.code, 1);
+    assert.equal(result.code, 7);
     assert.equal(getRunStatus(stateDir).status, "failed");
     assert.equal((listRuns(root)[0] || {}).status, "failed");
     assert.equal(listRuns(root, "running").length, 0);

@@ -14,7 +14,8 @@
     "acceptance": "Separate proven, disproven, unknown, and missing evidence.",
     "evidence_policy": "Do not infer beyond provided evidence or inspected artifacts.",
     "output_format": "Markdown sections: Verdict, Evidence, Gaps, Confidence.",
-    "thinking": "off",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
     "tools": ""
   },
   "mailbox": {

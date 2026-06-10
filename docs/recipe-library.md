@@ -48,6 +48,8 @@ Core subagent recipes:
 
 Most atoms expose policy knobs such as `model`, `thinking`, `tools`, `output_format`, `evidence_policy`, `risk_policy`, source policy, continuity policy, handoff format, or model pools. Packaged recipes intentionally do not ship concrete model-version defaults: callers must pass current model policy at launch, which keeps reusable recipe components from aging around old provider aliases. The generic prompt launchers, including `subagent-tools` and `subagents-prompts`, expose the same core model/thinking/tool/output knobs so callers do not need separate recipe families for policy tuning. Interactive async atoms also declare mailbox metadata for their basic control, completion, and domain-result message surface. Higher-level recipes pass these knobs through instead of hard-coding local policy.
 
+For one-off packaged subagent reviews, launch the recipe directly with `spawn file="subagent-review" values={...}` or `spawn file="pipeline-review-readiness" values={...}`. Do not copy the underlying `pi -p` command or wrap the recipe unless you are creating a durable operator tool with a narrower interface.
+
 For build-oriented swarms, prefer a consensus-first shape over parallel writers: proposer roles coordinate in a room with message/inspect tools, a named implementer owns the first artifact write, a QA reviewer inspects the result, and a finalizer applies review-grounded fixes before `run.done`. This pattern keeps creative/lens diversity while preserving one coherent artifact and gives recipes concrete artifact assertions instead of treating room discussion as success.
 
 Register one atom:

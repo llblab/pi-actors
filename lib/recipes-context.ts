@@ -22,14 +22,68 @@ function isPiCommand(command: string): boolean {
   return commandName(command) === "pi";
 }
 
+const PI_PRINT_FLAGS = new Set(["-p", "--print"]);
+const PI_VALUE_OPTIONS = new Set([
+  "--api-key",
+  "--append-system-prompt",
+  "--exclude-tools",
+  "--extension",
+  "--fork",
+  "--mode",
+  "--model",
+  "--models",
+  "--name",
+  "--prompt-template",
+  "--provider",
+  "--session",
+  "--session-dir",
+  "--skill",
+  "--system-prompt",
+  "--theme",
+  "--thinking",
+  "--tools",
+]);
+const PI_SHORT_VALUE_OPTIONS = new Set(["-e", "-n", "-t", "-xt"]);
+
+function isPiPrintFlag(arg: string): boolean {
+  return PI_PRINT_FLAGS.has(arg);
+}
+
+function isPiOption(arg: string): boolean {
+  return arg.startsWith("-") && arg !== "-";
+}
+
+function piOptionConsumesNextArg(arg: string): boolean {
+  if (arg.includes("=")) return false;
+  return PI_VALUE_OPTIONS.has(arg) || PI_SHORT_VALUE_OPTIONS.has(arg);
+}
+
+function isPiFileArgument(arg: string): boolean {
+  return arg.startsWith("@") && arg.length > 1;
+}
+
 function findPrintPromptIndex(args: string[]): number | undefined {
+  let printMode = false;
+  let positionalOnly = false;
+  let promptIndex: number | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if ((arg === "-p" || arg === "--print") && index + 1 < args.length) {
-      return index + 1;
+    if (!positionalOnly && arg === "--") {
+      positionalOnly = true;
+      continue;
     }
+    if (!positionalOnly && isPiPrintFlag(arg)) {
+      printMode = true;
+      continue;
+    }
+    if (!positionalOnly && isPiOption(arg)) {
+      if (piOptionConsumesNextArg(arg)) index += 1;
+      continue;
+    }
+    if (!printMode || isPiFileArgument(arg)) continue;
+    promptIndex = index;
   }
-  return undefined;
+  return promptIndex;
 }
 
 function matchesActorContext(

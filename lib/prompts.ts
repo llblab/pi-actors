@@ -31,7 +31,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Use spawn/message/inspect for actor-level start/send/observe; short foreground checks can stay ordinary tools/templates; avoid runtime/FIFO/outbox vocabulary in public guidance.
 - Run state lives under ~/.pi/agent/tmp/pi-actors/runs; inspect status/tail/messages/mailbox/files/artifacts intentionally and avoid busy-polling.
 - Maintain ~/.pi/agent/recipes like MEMORY.md for capabilities: keep useful tools, curate stale ones, and fix/remove/disable invalid recipes flagged by registry warnings; packaged/ad hoc recipes are lower-priority components; offer to save successful recurring patterns only after confirmation.
-- Long fanout = parent async recipe wrapping template(parallel:true) and imports; packaged fanout recipes bubble branch completion messages; grow recurring multi-agent workflows as packaged recipes/pipelines, not ad hoc external scripts.
+- Prefer maintained packaged recipes/pipelines with spawn file=<recipe> before ad hoc scripts/wrappers; long fanout = parent async recipe wrapping template(parallel:true) and imports.
 - For any non-trivial actor use or pi-actors change, read the bundled actors skill first; for deeper guidance, inspect installed extension sources/docs/recipes because README/docs are not automatically in context.`;
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {

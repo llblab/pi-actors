@@ -59,6 +59,10 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /Prefer maintained packaged recipes\/pipelines/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
     /avoid runtime\/FIFO\/outbox vocabulary/,
   );
 });

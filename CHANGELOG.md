@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.37.1: Subagent Recipe Prompt Injection Hotfix
+
+- `[Recipes]` Fixed actor recipe context injection for child `pi -p` launches with options after the print flag, so packaged subagent recipes such as `subagent-review` and `pipeline-review-readiness` append context to the actual prompt instead of corrupting `--model` or other option values.
+- `[Guidance]` Tightened onboarding, actor-skill, and recipe-library guidance so agents prefer maintained packaged review recipes via `spawn file=<recipe>` before rebuilding script commands or creating unnecessary wrappers.
+
 ## 0.37.0: Direct Recipe Delegation And Quiet Overrides
 
 - `[Recipes]` Added direct recipe delegation from `template` strings so thin wrappers can point at ready recipe names/paths while preserving priority resolution, inherited metadata, and import-based composition for richer graphs.

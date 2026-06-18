@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.38.1: Windows Recipe ACL Hotfix
+
+- `[Registry]` Replaced POSIX mode-bit recipe-root writability checks on Windows with ACL-aware diagnostics, avoiding false `world-writable` and `group-writable` startup warnings from Node's NTFS mode emulation while still flagging broad Windows write grants.
+- `[Tests]` Added portable coverage for broad Windows ACL parsing and skipped the POSIX chmod diagnostic regression on Windows.
+
 ## 0.38.0: Review Swarm Pipeline Hardening
 
 - `[Recipes]` Added current model/thinking inheritance for packaged review/lens-swarm recipes through `{current_model}` and `{current_thinking}`, so normal subagent review swarms use the selected Pi session policy by default while explicit args still override it.

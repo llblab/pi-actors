@@ -11,7 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { getPackagedRecipeRoot } from "../lib/paths.ts";
-import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, listDraftRecipes, summarizeDiscovery } from "../lib/recipes-discovery.ts";
+import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, hasBroadWindowsWriteAcl, listDraftRecipes, summarizeDiscovery } from "../lib/recipes-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
@@ -37,7 +37,7 @@ test("Recipe discovery exposes tool recipes by location and filename identity", 
   }
 });
 
-test("Recipe discovery surfaces risky recipe diagnostics", async () => {
+test("Recipe discovery surfaces risky recipe diagnostics", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-"));
   try {
     await chmod(root, 0o777);
@@ -59,6 +59,24 @@ test("Recipe discovery surfaces risky recipe diagnostics", async () => {
     await chmod(root, 0o700).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Windows ACL parser flags broad write access without POSIX mode bits", () => {
+  assert.equal(
+    hasBroadWindowsWriteAcl(String.raw`C:\Users\owner\.pi\agent\recipes BUILTIN\\Users:(I)(RX)
+                                          Everyone:(I)(RX)
+                                          OWNER RIGHTS:(OI)(CI)(F)`),
+    false,
+  );
+  assert.equal(
+    hasBroadWindowsWriteAcl(String.raw`C:\Users\owner\.pi\agent\recipes S-1-5-32-545:(OI)(CI)(M)
+                                          S-1-1-0:(RX)`),
+    true,
+  );
+  assert.equal(
+    hasBroadWindowsWriteAcl(String.raw`C:\Users\owner\.pi\agent\recipes Authenticated Users:(OI)(CI)(WD)`),
+    true,
+  );
 });
 
 test("Recipe discovery flags packaged validation wrapper as trusted shell boundary", () => {

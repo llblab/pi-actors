@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.38.0
+  version: 0.38.1
 ---
 
 # Actors (pi-actors)

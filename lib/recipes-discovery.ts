@@ -4,6 +4,7 @@
  * Owns filename identity discovery across prioritized recipe roots
  */
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -234,6 +235,61 @@ function filesForSource(source: RecipesDiscoverySource): Array<{
     : [];
 }
 
+const WINDOWS_BROAD_WRITE_PRINCIPALS = [
+  "Everyone",
+  "BUILTIN\\Users",
+  "Authenticated Users",
+  "S-1-1-0",
+  "S-1-5-11",
+  "S-1-5-32-545",
+];
+
+const WINDOWS_WRITE_ACL_PATTERN = /\((?:[^)]*,)?(?:F|M|W|WD|AD|DC|GA|GW)(?:,[^)]*)?\)/i;
+
+export function hasBroadWindowsWriteAcl(icaclsOutput: string): boolean {
+  return icaclsOutput
+    .split(/\r?\n/)
+    .some((line) =>
+      WINDOWS_BROAD_WRITE_PRINCIPALS.some((principal) =>
+        line.includes(principal),
+      ) && WINDOWS_WRITE_ACL_PATTERN.test(line),
+    );
+}
+
+function getWindowsRecipeRootDiagnostics(root: string): string[] {
+  try {
+    const output = execFileSync("icacls", [root], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5000,
+    });
+    if (!hasBroadWindowsWriteAcl(output)) return [];
+    return [
+      `Recipe root grants write access to broad Windows principals; review ACLs: ${root}`,
+    ];
+  } catch (error) {
+    return [
+      `Failed to inspect Windows ACL for recipe root ${root}: ${error instanceof Error ? error.message : String(error)}`,
+    ];
+  }
+}
+
+function getPosixRecipeRootDiagnostics(root: string): string[] {
+  const diagnostics: string[] = [];
+  const stat = statSync(root);
+  if ((stat.mode & 0o002) !== 0) {
+    diagnostics.push(
+      `Recipe root is world-writable; review permissions: ${root}`,
+    );
+  }
+  if ((stat.mode & 0o020) !== 0) {
+    diagnostics.push(
+      `Recipe root is group-writable; review ownership and permissions: ${root}`,
+    );
+  }
+  return diagnostics;
+}
+
 function getRecipeRootDiagnostics(sources: RecipesDiscoverySource[]): string[] {
   const diagnostics: string[] = [];
   const roots = new Set(
@@ -244,17 +300,11 @@ function getRecipeRootDiagnostics(sources: RecipesDiscoverySource[]): string[] {
   for (const root of roots) {
     try {
       if (!existsSync(root)) continue;
-      const stat = statSync(root);
-      if ((stat.mode & 0o002) !== 0) {
-        diagnostics.push(
-          `Recipe root is world-writable; review permissions: ${root}`,
-        );
-      }
-      if ((stat.mode & 0o020) !== 0) {
-        diagnostics.push(
-          `Recipe root is group-writable; review ownership and permissions: ${root}`,
-        );
-      }
+      diagnostics.push(
+        ...(process.platform === "win32"
+          ? getWindowsRecipeRootDiagnostics(root)
+          : getPosixRecipeRootDiagnostics(root)),
+      );
     } catch (error) {
       diagnostics.push(
         `Failed to inspect recipe root ${root}: ${error instanceof Error ? error.message : String(error)}`,

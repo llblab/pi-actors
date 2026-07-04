@@ -61,7 +61,7 @@ Pi host
 - `/skills/actors/SKILL.md`: Dense practical reference for operating pi-actors itself.
 - `/skills/swarm/SKILL.md`: Bundled methodology skill for multi-agent standards, strategies, and portable examples.
 - `/tests/*.test.ts`: Focused regression tests for pure domains.
-- `/README.md`: Human-facing install, usage, and runtime semantics.
+- `/README.md`: Human-facing install, usage, and runtime semantics. Keep it as a product/onboarding entrypoint rather than an implementation dump: identity → why it exists → core verbs → install → first run → address/message model → feature showcase → golden path → recipe memory → platform/safety/docs. Preserve both layers: strong local-actor-kernel positioning plus compact practical capability catalog.
 - `/BACKLOG.md`: Canonical open work; only completable future work.
 - `/CHANGELOG.md`: Completed delivery history.
 - `/docs/README.md`: Documentation index.

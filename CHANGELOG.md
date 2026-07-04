@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.39.0: Actor Kernel Welcome Refresh
+
+- `[Docs]` Reworked the root README as a product/onboarding entrypoint for the local actor kernel, with clearer positioning, first-run path, feature showcase, recipe-memory model, address/message examples, and practical surface-selection guidance. Impact: new operators can understand when to use `spawn`, `message`, `inspect`, recipes, rooms, and artifacts without reading deep implementation docs first.
+- `[Context]` Added a durable README standard to `AGENTS.md` so future edits preserve the RhythmE/product entrypoint shape while keeping the practical capability catalogue visible.
+- `[Release]` Bumped package metadata to `0.39.0` for the onboarding refresh minor release.
+
 ## 0.38.1: Windows Recipe ACL Hotfix
 
 - `[Registry]` Replaced POSIX mode-bit recipe-root writability checks on Windows with ACL-aware diagnostics, avoiding false `world-writable` and `group-writable` startup warnings from Node's NTFS mode emulation while still flagging broad Windows write grants.

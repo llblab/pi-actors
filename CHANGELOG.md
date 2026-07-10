@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `[CI Stability]` Wait for the detached runner process to exit before removing the large-review-evidence fixture directory, and wait for the terminal evidence manifest instead of racing its final write. Impact: Linux CI cleanup no longer intermittently fails with `ENOTEMPTY` after the assertions pass.
+
 ## 0.40.0: Durable Review and Runtime Hardening
 
 - `[Runtime]` Collapsed every natural-language positional fragment in child `pi -p` launches into one inspectable prompt file while preserving Pi options and intentional `@file` attachments, so review stages receive one authoritative user turn and preflight diagnostics resolve the concrete stage.

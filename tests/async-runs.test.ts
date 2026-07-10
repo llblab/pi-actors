@@ -392,8 +392,9 @@ test("Async review evidence accepts a large marker from complete capture", async
       process.cwd(),
     );
     const result = await waitForResult(stateDir);
-    const evidence = JSON.parse(
-      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+    const evidence = await waitForJsonStatus(
+      join(stateDir, "review-evidence.json"),
+      "done",
     );
     assert.equal(result.code, 0);
     assert.equal(evidence.status, "done");
@@ -401,6 +402,11 @@ test("Async review evidence accepts a large marker from complete capture", async
     assert.equal(evidence.commands[0].stdout_truncated, true);
     assert.equal(evidence.commands[0].stdout_bytes, 1_100_020);
   } finally {
+    try {
+      await waitForRunProcessExit(stateDir);
+    } catch {
+      // Best-effort synchronization before recursive cleanup.
+    }
     await rm(root, { recursive: true, force: true });
   }
 });

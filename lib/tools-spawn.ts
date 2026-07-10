@@ -143,9 +143,6 @@ export function createSpawnToolDefinition<
         recipe: Schema.stringSchema(
           "Alias for file; template recipe JSON file/name to spawn.",
         ),
-        state_dir: Schema.stringSchema(
-          "Optional explicit run state directory.",
-        ),
         template: Schema.unionSchema([
           Schema.stringSchema("Inline command template string"),
           Schema.arraySchema(
@@ -172,6 +169,11 @@ export function createSpawnToolDefinition<
       ctx: TContext,
     ) {
       const input = asRecord(params);
+      if (input.state_dir !== undefined) {
+        throw new Error(
+          "spawn.state_dir is not supported; run state is runtime-owned so run:<id> remains addressable and retention-safe.",
+        );
+      }
       const runId = runIdFromActorAddress(
         typeof input.as === "string" ? input.as : undefined,
       );
@@ -189,8 +191,6 @@ export function createSpawnToolDefinition<
             launch_source: "spawn",
             ownerId: getRunOwnerId(ctx),
             run_id: runId,
-            state_dir:
-              typeof input.state_dir === "string" ? input.state_dir : undefined,
             ...(input.template !== undefined
               ? {
                   template:

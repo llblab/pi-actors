@@ -9,7 +9,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 function run(command, args) {
@@ -21,6 +27,13 @@ rmSync("dist", { recursive: true, force: true });
 mkdirSync("dist", { recursive: true });
 
 run("tsc", ["-p", "tsconfig.build.json"]);
+
+mkdirSync(join("dist", "pi-actors"), { recursive: true });
+writeFileSync(
+  join("dist", "pi-actors", "index.js"),
+  'export { default } from "../index.js";\n',
+  "utf8",
+);
 
 for (const dir of ["scripts", "recipes", "fixtures", "skills"]) {
   cpSync(dir, join("dist", dir), { recursive: true });

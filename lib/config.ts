@@ -47,7 +47,6 @@ export function serializeTools(
       entry.defaults = cfg.storedDefaults;
     if (cfg.recipe?.name) entry.name = cfg.recipe.name;
     if (cfg.recipe?.async !== undefined) entry.async = cfg.recipe.async;
-    if (cfg.recipe?.state_dir) entry.state_dir = cfg.recipe.state_dir;
     if (cfg.recipe?.values) entry.values = cfg.recipe.values;
     if (cfg.template) entry.template = cfg.template;
     result[name] = entry;
@@ -145,9 +144,6 @@ export function normalizeStoredTool(
     ? {
         name: recipeName,
         ...(typeof record.async === "boolean" ? { async: record.async } : {}),
-        ...(typeof record.state_dir === "string" && record.state_dir.trim()
-          ? { state_dir: record.state_dir.trim() }
-          : {}),
         template,
         ...(record.values &&
         typeof record.values === "object" &&

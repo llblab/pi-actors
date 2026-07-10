@@ -9,9 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-async function readJson(path: string): Promise<Record<string, unknown>> {
-  return JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
-}
+import { readRecipeUsage } from "../lib/recipes-usage.ts";
 
 test("Async run start increments user recipe launch counter", async () => {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-actors-async-usage-"));
@@ -45,12 +43,11 @@ test("Async run start increments user recipe launch counter", async () => {
     const meta = startRun({ file: "counted", run_id: "counted-run" }, process.cwd());
     await waitForResult(meta.state_dir);
 
-    const updated = await readJson(recipe);
-    assert.equal((updated.usage as Record<string, unknown>).calls, 1);
-    assert.equal(
-      typeof (updated.usage as Record<string, unknown>).last_called,
-      "string",
-    );
+    const usage = readRecipeUsage(recipe)!;
+    assert.equal(usage.calls, 1);
+    assert.equal(typeof usage.last_called, "string");
+    const unchanged = JSON.parse(await readFile(recipe, "utf8"));
+    assert.equal(unchanged.usage, undefined);
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

@@ -29,5 +29,6 @@
       "run.failed"
     ]
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Verify this claim against the provided evidence. Claim: {claim}. Evidence or artifact paths: {evidence}. Acceptance: {acceptance}. Evidence policy: {evidence_policy}. Output format: {output_format}"
+  "accept_output": "review_evidence",
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Verify this claim against the provided evidence. Claim: {claim}. Evidence or artifact paths: {evidence}. Acceptance: {acceptance}. Evidence policy: {evidence_policy}. Begin the response with ACTOR_REVIEW_RESULT on its own line. Output format: {output_format}"
 }

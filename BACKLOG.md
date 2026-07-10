@@ -37,9 +37,9 @@ Non-goals:
 - Arbitrary subrooms.
 - Heavy broker abstraction.
 
-## Hotfix Backlog
+## Open Work
 
-No open hotfix items.
+No active implementation or release-preparation work remains. The `0.40.0` release candidate is validated locally; commit, tag, merge, publish, and release actions remain operator-gated rather than backlog work.
 
 ## Backlog Curation Rules
 
@@ -48,10 +48,6 @@ No open hotfix items.
 - Consider splitting only when a file crosses roughly 2000 lines, mixes real ownership zones, or hides a clearer domain boundary.
 - Prefer semantic compression before file splitting: fewer public nouns, consistent outcomes, compact diagnostics, and domain-owned constants/helpers.
 - Preserve signal/noise balance: feedback should be state-backed, compact, and action-shaped; do not add advisory prose just because a surface exists.
-
-## Minor Backlog
-
-No open minor items.
 
 The backlog is intentionally pruned to the 20% of work most likely to deliver 80% of value for `pi-actors` as a local actor kernel. Bias toward consolidation, smaller public surface area, and reliability over new feature breadth.
 
@@ -64,11 +60,6 @@ These are valid ideas but not current focus. Reintroduce only with concrete evid
 - Cross-session force kill or attach/adopt/reparent: useful later, but ownership policy should not change until observability makes current boundaries clear.
 - Actor address helper CLI: keep diagnostics improving opportunistically inside existing parser/tests.
 - Golden flow docs and flow conformance runner: useful after the diagnostic and promotion surfaces are stable.
-- Documentation refactor: defer until the canonical mailbox loop and worker recipe exist; avoid rewriting docs twice.
 - Host-level tool unregistration: blocked on host API support.
 - Branch-local checkpoint semantics: wait for real collaborative branch-runner experiments.
 - Actor recipe feedback loop: keep advisory and operator-gated after real runs produce evidence.
-
-## Suggested Milestone Order
-
-1. Re-curate after the next real packaged review-swarm dogfood run.

@@ -10,11 +10,12 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
@@ -50,11 +51,12 @@ import {
   parseRunOutboxEventLine,
   type RunOutboxEvent,
 } from "./runs-outbox.ts";
+import { claimRunStateDirectory } from "./runs-ownership.ts";
 import { archiveTerminalRun, pruneTerminalRun } from "./runs-retention.ts";
 import {
-  isAlive,
-  isWithinRunnerIdentityGrace,
-  pidMatchesRun,
+  captureRunProcessIdentity,
+  verifyRunProcessIdentity,
+  type RunProcessIdentity,
 } from "./runs-process.ts";
 import * as RunsStart from "./runs-start.ts";
 import * as RunsIndex from "./runs-index.ts";
@@ -105,6 +107,7 @@ export interface AsyncRunStartParams {
   when?: boolean | string;
   timeout?: number | string;
   delay?: number | string;
+  accept_output?: "review_evidence";
   output?: string;
   artifacts?: Record<string, RunArtifactDeclaration>;
   mailbox?: RecipesReferences.TemplateRecipeMailbox;
@@ -146,6 +149,7 @@ export interface AsyncRunMeta {
   control?: AsyncRunControlEndpoint;
   mailbox?: RecipesReferences.TemplateRecipeMailbox;
   model_policy?: CurrentPolicyProvenance;
+  process_identity?: RunProcessIdentity;
   recipe_context_records?: RecipesReferences.TemplateRecipeContextRecord[];
   retire_when?: "children_terminal";
 }
@@ -196,6 +200,7 @@ function resolveRunTemplate(params: AsyncRunStartParams): {
     "when",
     "timeout",
     "delay",
+    "accept_output",
     "output",
     "retry",
     "failure",
@@ -445,6 +450,7 @@ export function startRun(
   mkdirSync(stateDir, { recursive: true });
   const releaseStartLock = acquireStateStartLock(stateDir);
   try {
+    claimRunStateDirectory(stateDir, run);
     assertNoActiveRunState(stateDir);
     prepareStateDirForStart(stateDir);
     const stdout = join(stateDir, "stdout.log");
@@ -512,6 +518,13 @@ export function startRun(
     closeSync(outFd);
     closeSync(errFd);
     meta.pid = child.pid ?? 0;
+    const processIdentity = captureRunProcessIdentity(
+      meta.pid,
+      cwd,
+      stateDir,
+      RUNNER_PATH,
+    );
+    if (processIdentity) meta.process_identity = processIdentity;
     writeJsonAtomic(join(stateDir, "run.json"), meta);
     writeJsonAtomic(join(stateDir, "progress.json"), {
       completed: 0,
@@ -704,15 +717,23 @@ export async function sendRunMessage(
   const status = getRunStatus(runOrDir);
   const stateDir = String(status.state_dir);
   const run = String(status.run ?? runOrDir);
-  if (status.status !== "running")
-    throw new Error(`Run is not running: ${run}`);
   const pid = Number(status.pid || 0);
-  if (!pid || !isAlive(pid)) throw new Error(`Run pid is not alive: ${run}`);
-  if (
-    !pidMatchesRun(pid, String(status.cwd), stateDir, RUNNER_PATH) &&
-    !isWithinRunnerIdentityGrace(status, RUNNER_IDENTITY_GRACE_MS)
-  )
-    throw new Error(`Run pid owner mismatch: ${run}`);
+  const identity = verifyRunProcessIdentity(
+    pid,
+    status.process_identity as RunProcessIdentity | undefined,
+  );
+  if (status.status !== "running") {
+    if (
+      identity.status === "owner_mismatch" ||
+      identity.status === "unsupported_proof"
+    ) {
+      throw new Error(`Run process identity ${identity.status}: ${run}`);
+    }
+    throw new Error(`Run is not running: ${run}`);
+  }
+  if (!identity.valid) {
+    throw new Error(`Run process identity ${identity.status}: ${run}`);
+  }
   return deliverRunMessage(status, run, stateDir, message, options);
 }
 
@@ -734,6 +755,66 @@ function markTerminalProgress(
   );
 }
 
+function finalizeInterruptedReviewEvidence(
+  stateDir: string,
+  phase: "cancelled" | "killed",
+  signal: NodeJS.Signals,
+): void {
+  const evidencePath = join(stateDir, "review-evidence.json");
+  const manifest = readJson(evidencePath);
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return;
+  const record = manifest as Record<string, unknown>;
+  if (!Array.isArray(record.commands)) return;
+  const completedAt = new Date().toISOString();
+  const effectiveExitCode = signal === "SIGKILL" ? 137 : 143;
+  const commands = record.commands.map((command) => {
+    if (!command || typeof command !== "object" || Array.isArray(command)) {
+      return command;
+    }
+    const entry = command as Record<string, unknown>;
+    if (entry.status !== "running" || typeof entry.id !== "string") return entry;
+    const captureDir = join(stateDir, "captures", entry.id);
+    const attempts = existsSync(captureDir)
+      ? readdirSync(captureDir)
+          .filter((name) => /^attempt-\d+$/.test(name))
+          .sort()
+          .map((name, index) => {
+            const attemptDir = join(captureDir, name);
+            const stdoutFile = join(attemptDir, "stdout.log");
+            const stderrFile = join(attemptDir, "stderr.log");
+            return {
+              attempt: index + 1,
+              stdout: {
+                path: relative(stateDir, stdoutFile),
+                bytes: existsSync(stdoutFile) ? statSync(stdoutFile).size : 0,
+              },
+              stderr: {
+                path: relative(stateDir, stderrFile),
+                bytes: existsSync(stderrFile) ? statSync(stderrFile).size : 0,
+              },
+            };
+          })
+      : [];
+    return {
+      ...entry,
+      status: phase,
+      completed_at: completedAt,
+      attempts,
+      effective_exit_code: effectiveExitCode,
+      killed: true,
+      ...(entry.semantic_acceptance === "pending"
+        ? { semantic_acceptance: "interrupted" }
+        : {}),
+    };
+  });
+  writeJsonAtomic(evidencePath, {
+    ...record,
+    status: phase,
+    commands,
+    updated_at: completedAt,
+  });
+}
+
 function stopRun(
   runOrDir: string,
   signal: NodeJS.Signals,
@@ -742,12 +823,34 @@ function stopRun(
   const status = getRunStatus(runOrDir);
   const pid = Number(status.pid || 0);
   const stateDir = String(status.state_dir);
-  if (status.status !== "running")
+  if (status.status !== "running" && status.status !== "exited") {
     return { stopped: false, reason: "not running", status };
-  if (!pid || !isAlive(pid))
-    return { stopped: false, reason: "pid not alive", status };
-  if (!pidMatchesRun(pid, String(status.cwd), stateDir, RUNNER_PATH)) {
-    return { stopped: false, reason: "pid owner mismatch", status };
+  }
+  const identity = verifyRunProcessIdentity(
+    pid,
+    status.process_identity as RunProcessIdentity | undefined,
+  );
+  if (status.status === "exited") {
+    if (
+      identity.status === "owner_mismatch" ||
+      identity.status === "unsupported_proof"
+    ) {
+      return {
+        stopped: false,
+        reason: identity.status.replaceAll("_", " "),
+        process_identity_status: identity.status,
+        status,
+      };
+    }
+    return { stopped: false, reason: "not running", status };
+  }
+  if (!identity.valid) {
+    return {
+      stopped: false,
+      reason: identity.status.replaceAll("_", " "),
+      process_identity_status: identity.status,
+      status,
+    };
   }
   const signalResult = signalOwnedRunProcess(pid, signal);
   writeFileSync(
@@ -756,9 +859,25 @@ function stopRun(
     { flag: "a" },
   );
   markTerminalHandled(stateDir, { event, signal });
-  if (event === "run.kill") markTerminalProgress(stateDir, "killed");
-  if (event === "run.cancel") markTerminalProgress(stateDir, "cancelled");
+  if (event === "run.kill") {
+    finalizeInterruptedReviewEvidence(stateDir, "killed", signal);
+    markTerminalProgress(stateDir, "killed");
+  }
+  if (event === "run.cancel") {
+    finalizeInterruptedReviewEvidence(stateDir, "cancelled", signal);
+    markTerminalProgress(stateDir, "cancelled");
+  }
   return { stopped: true, pid, signal, ...signalResult, state_dir: stateDir };
+}
+
+export function markRunTerminalNotificationHandled(
+  stateDir: string,
+  status: string,
+): void {
+  markTerminalHandled(stateDir, {
+    event: "run.notification",
+    status,
+  });
 }
 
 export function cancelRun(runOrDir: string): Record<string, unknown> {

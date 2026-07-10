@@ -4,13 +4,17 @@
  */
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
 import { executeRegisterTool } from "../lib/registry.ts";
+
+const execFileAsync = promisify(execFile);
 
 async function createHarness() {
   const dir = await mkdtemp(join(tmpdir(), "pi-actors-registry-"));
@@ -67,6 +71,95 @@ test("Registry mutations register template-backed tools", async () => {
     assert.match(result.content[0].text, /Registered tool "transcribe"/);
   } finally {
     await harness.cleanup();
+  }
+});
+
+test("Concurrent same-name registry mutations have one collision winner", async () => {
+  const harness = await createHarness();
+  try {
+    const attempts = await Promise.allSettled([
+      executeRegisterTool(
+        { description: "First", name: "shared", template: "echo first" },
+        {},
+        harness.deps,
+      ),
+      executeRegisterTool(
+        { description: "Second", name: "shared", template: "echo second" },
+        {},
+        harness.deps,
+      ),
+    ]);
+    assert.deepEqual(
+      attempts.map((attempt) => attempt.status),
+      ["fulfilled", "rejected"],
+    );
+    assert.match(
+      String(attempts[1].status === "rejected" ? attempts[1].reason : ""),
+      /already registered/,
+    );
+    const stored = JSON.parse(
+      await readFile(join(dirname(harness.deps.configPath), "recipes", "shared.json"), "utf8"),
+    );
+    assert.equal(stored.template, "echo first");
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("Sibling processes cannot silently overwrite the same registration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-registry-process-"));
+  const registryUrl = new URL("../lib/registry.ts", import.meta.url).href;
+  const childSource = (description: string, template: string) => `
+    import { join } from "node:path";
+    const { executeRegisterTool } = await import(${JSON.stringify(registryUrl)});
+    const root = ${JSON.stringify(root)};
+    const tools = new Map();
+    const deps = {
+      configPath: join(root, "registry.json"),
+      recipeRoot: root,
+      getActiveTools: () => [],
+      getToolNameBlocker: () => undefined,
+      getTools: () => tools,
+      notify: () => {},
+      registerRuntimeTool: () => {},
+      reservedToolNames: new Set(),
+      setActiveTools: () => {},
+    };
+    try {
+      await executeRegisterTool(${JSON.stringify({ name: "shared", description, template })}, {}, deps);
+      console.log("registered");
+    } catch (error) {
+      console.log("rejected:" + (error instanceof Error ? error.message : String(error)));
+    }
+  `;
+  try {
+    const attempts = await Promise.all([
+      execFileAsync(process.execPath, [
+        "--experimental-strip-types",
+        "--input-type=module",
+        "-e",
+        childSource("First", "echo first"),
+      ]),
+      execFileAsync(process.execPath, [
+        "--experimental-strip-types",
+        "--input-type=module",
+        "-e",
+        childSource("Second", "echo second"),
+      ]),
+    ]);
+    const outputs = attempts.map((attempt) => attempt.stdout.trim()).sort();
+    assert.equal(outputs.filter((output) => output === "registered").length, 1);
+    assert.equal(
+      outputs.filter((output) => /rejected:[\s\S]*already registered/.test(output)).length,
+      1,
+      JSON.stringify(outputs),
+    );
+    const stored = JSON.parse(
+      await readFile(join(root, "shared.json"), "utf8"),
+    );
+    assert.equal(["echo first", "echo second"].includes(stored.template), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -138,7 +231,6 @@ test("Registry mutations register co-located template recipes", async () => {
         async: true,
         description: "Start review run",
         name: "review_run",
-        state_dir: "~/.pi/agent/tmp/pi-actors/runs/review-docs",
         template: "review {scope}",
         values: { prompt: "Review risks." },
       },
@@ -148,17 +240,13 @@ test("Registry mutations register co-located template recipes", async () => {
     assert.deepEqual(harness.tools.get("review_run")?.recipe, {
       async: true,
       name: "review_run",
-      state_dir: "~/.pi/agent/tmp/pi-actors/runs/review-docs",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     });
     assert.deepEqual(harness.tools.get("review_run")?.args, ["scope"]);
     assert.equal(result.details.async, true);
     assert.equal(result.details.recipeName, "review_run");
-    assert.equal(
-      result.details.state_dir,
-      "~/.pi/agent/tmp/pi-actors/runs/review-docs",
-    );
+    assert.equal("state_dir" in result.details, false);
   } finally {
     await harness.cleanup();
   }

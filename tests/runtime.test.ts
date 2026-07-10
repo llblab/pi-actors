@@ -4,13 +4,16 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import type { CommandTemplateExecResult } from "../lib/command-templates.ts";
-import { createAutoToolsRuntime } from "../lib/runtime.ts";
+import {
+  createAutoToolsRuntime,
+  createRecipeToolReloadWatcher,
+} from "../lib/runtime.ts";
 
 const exec = async (): Promise<CommandTemplateExecResult> => ({
   code: 0,
@@ -300,5 +303,58 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
     assert.deepEqual(activeTools.sort(), ["fallback", "read", "recipe-only"]);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipe watcher rearms when the recipe root appears", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-actors-runtime-watch-root-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  let loads = 0;
+  const notifications: string[] = [];
+  const watcher = createRecipeToolReloadWatcher({
+    loadTools() {
+      loads += 1;
+    },
+  });
+  const ctx = {
+    hasUI: true,
+    ui: { notify: (message: string) => notifications.push(message) },
+  };
+  async function waitForLoad(previous: number): Promise<void> {
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (loads > previous) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`recipe watcher did not reload after ${previous}`);
+  }
+  try {
+    watcher.watch(ctx);
+    const recipeRoot = join(agentDir, "recipes");
+    await mkdir(recipeRoot);
+    await writeRecipe(recipeRoot, "first", {
+      description: "First",
+      template: "echo first",
+    });
+    await waitForLoad(0);
+    assert.match(notifications.join("\n"), /Recipe tools refreshed/);
+
+    let previousLoads = loads;
+    await rm(recipeRoot, { recursive: true, force: true });
+    await waitForLoad(previousLoads);
+    previousLoads = loads;
+    await mkdir(recipeRoot);
+    await writeRecipe(recipeRoot, "second", {
+      description: "Second",
+      template: "echo second",
+    });
+    await waitForLoad(previousLoads);
+    watcher.close();
+    watcher.close();
+  } finally {
+    watcher.close();
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(agentDir, { recursive: true, force: true });
   }
 });

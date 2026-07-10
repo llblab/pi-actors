@@ -329,7 +329,99 @@ test("Command template execution writes stdin without invoking a shell", async (
     stderr: "",
     code: 0,
     killed: false,
+    stdoutBytes: 5,
+    stderrBytes: 0,
   });
+});
+
+test("Command template capture directories retain every retry stream", async () => {
+  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-command-evidence-"));
+  const counter = join(root, "counter.txt");
+  await writeFile(counter, "0");
+  try {
+    const script = `
+      const fs = require("fs");
+      const path = ${JSON.stringify(counter)};
+      const attempt = Number(fs.readFileSync(path, "utf8")) + 1;
+      fs.writeFileSync(path, String(attempt));
+      process.stdout.write("out-" + attempt);
+      process.stderr.write("err-" + attempt);
+      if (attempt === 1) process.exit(1);
+    `;
+    const result = await execCommandTemplate(process.execPath, ["-e", script], {
+      captureDir: root,
+      retry: 2,
+    });
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "out-2");
+    assert.equal(result.stderr, "err-2");
+    assert.equal(
+      await readFile(join(root, "attempt-001", "stdout.log"), "utf8"),
+      "out-1",
+    );
+    assert.equal(
+      await readFile(join(root, "attempt-001", "stderr.log"), "utf8"),
+      "err-1",
+    );
+    assert.equal(
+      await readFile(join(root, "attempt-002", "stdout.log"), "utf8"),
+      "out-2",
+    );
+    assert.equal(
+      await readFile(join(root, "attempt-002", "stderr.log"), "utf8"),
+      "err-2",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Command template execution bounds tails and spills complete streams", async () => {
+  const result = await execCommandTemplate(
+    process.execPath,
+    [
+      "-e",
+      "process.stdout.write('A'.repeat(4096)); process.stderr.write('B'.repeat(3072))",
+    ],
+    { captureLimitBytes: 256 },
+  );
+  assert.equal(Buffer.byteLength(result.stdout), 256);
+  assert.equal(Buffer.byteLength(result.stderr), 256);
+  assert.equal(result.stdoutBytes, 4096);
+  assert.equal(result.stderrBytes, 3072);
+  assert.equal(result.stdoutTruncated, true);
+  assert.equal(result.stderrTruncated, true);
+  assert.equal(typeof result.stdoutFile, "string");
+  assert.equal(typeof result.stderrFile, "string");
+  const { readFile, rm } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  assert.equal((await readFile(result.stdoutFile!, "utf8")).length, 4096);
+  assert.equal((await readFile(result.stderrFile!, "utf8")).length, 3072);
+  await rm(dirname(result.stdoutFile!), { recursive: true, force: true });
+});
+
+test("Command template capture preserves UTF-8 across chunks and bounded tails", async () => {
+  const result = await execCommandTemplate(
+    process.execPath,
+    [
+      "-e",
+      `const bytes = Buffer.from("🙂🙂");
+       process.stdout.write(bytes.subarray(0, 2));
+       setTimeout(() => process.stdout.write(bytes.subarray(2)), 20);`,
+    ],
+    { captureLimitBytes: 5 },
+  );
+  assert.equal(result.stdout, "🙂");
+  assert.equal(result.stdout.includes("�"), false);
+  assert.equal(result.stdoutBytes, 8);
+  assert.equal(result.stdoutTruncated, true);
+  const { readFile, rm } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  assert.equal(await readFile(result.stdoutFile!, "utf8"), "🙂🙂");
+  await rm(dirname(result.stdoutFile!), { recursive: true, force: true });
 });
 
 test("Command template timeout escalates when SIGTERM is ignored", async () => {
@@ -363,6 +455,33 @@ test("Command template retry succeeds on second attempt", async () => {
   assert.equal(result.code, 0);
   assert.equal(readFileSync(counterFile, "utf8").trim(), "2");
   unlinkSync(counterFile);
+});
+
+test("Command template retries keep high-volume captures bounded", async () => {
+  const counterFile = `/tmp/ct-capture-retry-${process.pid}.txt`;
+  const { writeFileSync, unlinkSync } = await import("node:fs");
+  const { dirname } = await import("node:path");
+  const { readFile, rm } = await import("node:fs/promises");
+  writeFileSync(counterFile, "0");
+  const script = `
+    const fs = require("fs");
+    const p = "${counterFile}";
+    const n = Number(fs.readFileSync(p, "utf8")) + 1;
+    fs.writeFileSync(p, String(n));
+    process.stdout.write(String(n).repeat(4096));
+    if (n < 2) process.exit(1);
+  `;
+  const result = await execCommandTemplate(process.execPath, ["-e", script], {
+    captureLimitBytes: 128,
+    retry: 2,
+  });
+  assert.equal(result.code, 0);
+  assert.equal(Buffer.byteLength(result.stdout), 128);
+  assert.equal(result.stdoutBytes, 4096);
+  assert.equal(result.stdoutTruncated, true);
+  assert.equal((await readFile(result.stdoutFile!, "utf8")).length, 4096);
+  unlinkSync(counterFile);
+  await rm(dirname(result.stdoutFile!), { recursive: true, force: true });
 });
 
 test("Command template retry exhausts attempts and surfaces last failure", async () => {

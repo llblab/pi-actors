@@ -6,8 +6,9 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
-import { writeJsonAtomic } from "./file-state.ts";
+import { withFileMutationLock, writeJsonAtomic } from "./file-state.ts";
 
 interface RecipesUsageRecord {
   calls?: number;
@@ -47,6 +48,19 @@ function getRecipeFingerprint(raw: Record<string, unknown>): string {
 
 export type RecipeLaunchKind = "direct" | "spawn" | "tool";
 
+export function getRecipeUsagePath(path: string): string {
+  return join(dirname(path), ".usage", `${basename(path)}.json`);
+}
+
+export function readRecipeUsage(path: string): Record<string, unknown> | undefined {
+  try {
+    const value = JSON.parse(readFileSync(getRecipeUsagePath(path), "utf8"));
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function launchCounterKey(
   kind: RecipeLaunchKind,
 ): "direct_calls" | "spawn_calls" | "tool_calls" {
@@ -59,19 +73,21 @@ export function recordRecipeLaunch(
   kind: RecipeLaunchKind = "direct",
 ): boolean {
   if (!existsSync(path)) return false;
-  try {
-    const raw = JSON.parse(readFileSync(path, "utf8"));
-    if (!isRecord(raw)) return false;
-    const usage: RecipesUsageRecord = isRecord(raw.usage) ? raw.usage : {};
-    const fingerprint = getRecipeFingerprint(raw);
-    const changed =
-      typeof usage.fingerprint === "string" &&
-      usage.fingerprint !== fingerprint;
-    const nowIso = now.toISOString();
-    const counterKey = launchCounterKey(kind);
-    writeJsonAtomic(path, {
-      ...raw,
-      usage: {
+  const usagePath = getRecipeUsagePath(path);
+  return withFileMutationLock(usagePath, () => {
+    try {
+      const raw = JSON.parse(readFileSync(path, "utf8"));
+      if (!isRecord(raw)) return false;
+      const storedUsage = readRecipeUsage(path);
+      const usage: RecipesUsageRecord =
+        storedUsage ?? (isRecord(raw.usage) ? raw.usage : {});
+      const fingerprint = getRecipeFingerprint(raw);
+      const changed =
+        typeof usage.fingerprint === "string" &&
+        usage.fingerprint !== fingerprint;
+      const nowIso = now.toISOString();
+      const counterKey = launchCounterKey(kind);
+      writeJsonAtomic(usagePath, {
         ...usage,
         calls: (changed ? 0 : normalizeCalls(usage.calls)) + 1,
         [counterKey]: (changed ? 0 : normalizeCalls(usage[counterKey])) + 1,
@@ -84,10 +100,10 @@ export function recordRecipeLaunch(
               reset_reason: "recipe content fingerprint changed",
             }
           : {}),
-      },
-    });
-    return true;
-  } catch {
-    return false;
-  }
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }

@@ -19,7 +19,7 @@ async: true     = run through detached lifecycle
 
 A recipe wraps one command-template tree. The wrapped `template` keeps the normal command-template semantics: argv splitting, placeholders, defaults, typed args, sequence, `parallel: true`, `when`, delay, retry, failure propagation, recover cleanup, and output selection.
 
-Layer boundary: `imports`, `{ "name": "alias" }` imported-recipe nodes, `{alias.defaults.key}` references, fallback expressions, and recipe-local ternaries are recipe-loading features. They resolve before the command-template graph runs and do not extend the portable Command Template Standard. Typed imports are recipe definitions: they expose the imported recipe's command-template-shaped metadata (`template`, `args`, `defaults`, flags, and `values`), while async-run launch fields such as `async`, `state_dir`, and `retire_when` remain lifecycle configuration for starting a run, not part of the imported execution graph.
+Layer boundary: `imports`, `{ "name": "alias" }` imported-recipe nodes, `{alias.defaults.key}` references, fallback expressions, and recipe-local ternaries are recipe-loading features. They resolve before the command-template graph runs and do not extend the portable Command Template Standard. Typed imports are recipe definitions: they expose the imported recipe's command-template-shaped metadata (`template`, `args`, `defaults`, flags, and `values`), while async-run launch fields such as `async` and `retire_when` remain lifecycle configuration for starting a run, not part of the imported execution graph. Run state directories are runtime-owned and are not recipe or `register_tool` configuration; `{state_dir}` remains an injected run-local value for commands and artifact paths.
 
 Packaged recipes are the pi-actors recipe standard library: declarative actor config components that can be imported, launched, inspected, overridden, or composed by user recipes. Treat them as stable building blocks rather than user-local policy.
 
@@ -109,18 +109,16 @@ Higher-priority files shadow lower-priority files with the same basename. Within
 
 ## Usage Metadata
 
-User-owned recipes may accumulate extension-maintained usage metadata:
+User-owned recipe launches may accumulate extension-maintained usage metadata in `.usage/<recipe-filename>.json` sidecars:
 
 ```json
 {
-  "usage": {
-    "calls": 12,
-    "last_called": "2026-05-22T10:30:00.000Z"
-  }
+  "calls": 12,
+  "last_called": "2026-05-22T10:30:00.000Z"
 }
 ```
 
-The extension increments `usage.calls` and updates `usage.last_called` when it starts that concrete recipe, either through a recipe-backed tool call or a direct async recipe-file run. It also stores a content `usage.fingerprint`; if the authored recipe content changes, the next launch resets `usage.calls` before counting the new launch and records `usage.reset_at`. Agents should treat these fields as cleanup evidence, not as authored recipe contract. Packaged standard-library recipes are not mutated for usage metadata.
+The extension increments `calls` and updates `last_called` when it starts that concrete recipe, either through a recipe-backed tool call or a direct async recipe-file run. The sidecar also stores a content `fingerprint`; if authored recipe content changes, the next launch resets `calls` before counting the new launch and records `reset_at`. Keeping telemetry outside the recipe prevents usage writes from replacing concurrent operator edits; discovery merges sidecar usage into inspection. Agents should treat these fields as cleanup evidence, not as authored recipe contract. Packaged standard-library recipes do not receive usage metadata.
 
 There is intentionally no failure counter in the recipe contract. A failed launch can reflect caller misuse, missing runtime values, or an environmental problem rather than recipe uselessness. Cleanup decisions should be explicit operator work: keep as a tool, move out of the agent recipe root to retain recipe-only memory, merge, delete, or archive.
 

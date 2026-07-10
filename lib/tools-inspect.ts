@@ -139,6 +139,31 @@ function compactArtifactPath(value: unknown): string {
   return String(record.path ?? "<missing>");
 }
 
+function readBoundedReviewEvidence(
+  status: Record<string, unknown>,
+  limit: number,
+): Record<string, unknown> | undefined {
+  const evidenceFile = status.evidenceFile;
+  if (typeof evidenceFile !== "string" || !existsSync(evidenceFile))
+    return undefined;
+  try {
+    const manifest = asRecord(JSON.parse(readFileSync(evidenceFile, "utf8")));
+    const commands = Array.isArray(manifest.commands) ? manifest.commands : [];
+    const bounded = commands.slice(-Math.max(1, limit));
+    return {
+      ...manifest,
+      commands: bounded,
+      commands_total: commands.length,
+      ...(bounded.length < commands.length ? { commands_truncated: true } : {}),
+    };
+  } catch {
+    return {
+      status: "invalid",
+      error: "review evidence manifest is unreadable",
+    };
+  }
+}
+
 function compactActorFiles(status: Record<string, unknown>): string {
   const run = String(status.run ?? "<unknown>");
   const artifacts = asRecord(status.artifacts);
@@ -147,6 +172,7 @@ function compactActorFiles(status: Record<string, unknown>): string {
     status.stderrLog,
     status.eventsFile,
     status.outboxFile,
+    status.evidenceFile,
     status.state_dir
       ? `${String(status.state_dir)}/communication.json`
       : undefined,
@@ -305,9 +331,15 @@ function getPiActorsTriage(
 ): Record<string, unknown> {
   const runtime = getPiActorsRuntimeStatus();
   const currentSession = ToolsAccess.getContextSessionId(ctx);
-  const allRuns = AsyncRuns.listRuns().map((run) =>
-    AsyncRuns.getRunStatus(String(run.state_dir)),
-  );
+  const listRuns = deps.listRuns ?? AsyncRuns.listRuns;
+  const getRunStatus = deps.getRunStatus ?? AsyncRuns.getRunStatus;
+  const allRuns = listRuns().flatMap((run) => {
+    try {
+      return [getRunStatus(String(run.state_dir))];
+    } catch {
+      return [];
+    }
+  });
   const visibleRuns = currentSession
     ? allRuns.filter(
         (run) => !run.ownerId || run.ownerId === currentSession,
@@ -433,7 +465,9 @@ function compactToolActor(name: string, tool: Record<string, unknown>): string {
 }
 
 export interface InspectToolDeps<TContext = unknown> {
+  getRunStatus?: (runOrDir: string) => Record<string, any>;
   getTool?: (name: string) => any | undefined;
+  listRuns?: () => Array<Record<string, any>>;
   packagedRecipeRoot?: string;
   recipeRoot?: string;
 }
@@ -832,16 +866,24 @@ export function createInspectToolDefinition<TContext = unknown>(
               | Record<string, AsyncRuns.RunArtifactDeclaration>
               | undefined,
           );
+          const reviewEvidence = readBoundedReviewEvidence(
+            status,
+            Number(input.lines || Limits.DEFAULT_INSPECT_LINES),
+          );
           const details = artifactManifest
             ? {
                 ...status,
+                ...(reviewEvidence ? { review_evidence: reviewEvidence } : {}),
                 artifact_manifest: artifactManifest,
                 next_actions: ToolsResponse.artifactNextActions(
                   status.run ?? runId,
                   asRecord(status.artifacts),
                 ),
               }
-            : status;
+            : {
+                ...status,
+                ...(reviewEvidence ? { review_evidence: reviewEvidence } : {}),
+              };
           return {
             content: [
               {

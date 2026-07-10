@@ -174,7 +174,7 @@
       "values": {
         "input": "Use merged and judged output from stdin.",
         "format": "{output_format}",
-        "preservation_policy": "Preserve branch status and explicitly mark Status as complete, degraded, or insufficient_data.",
+        "preservation_policy": "Preserve branch status and explicitly mark Status as complete, degraded, or insufficient_data. Include stable ACTOR_EVIDENCE_REF values from stdin in the Evidence section for every reviewer, verifier, merger, and judge source used. Do not claim complete when any required evidence reference is absent or inconsistent.",
         "model": "{merger_model}",
         "thinking": "{thinking}",
         "tools": "{tools}"

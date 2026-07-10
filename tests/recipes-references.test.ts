@@ -691,6 +691,21 @@ test("Packaged review recipes inherit current model and thinking by default", ()
   }
 });
 
+test("Packaged review stages require marked semantic evidence", () => {
+  const recipeDir = join(__dirname, "..", "recipes");
+  for (const file of [
+    "subagent-review.json",
+    "subagent-verify.json",
+    "subagent-merge.json",
+    "subagent-judge.json",
+    "subagent-normalize.json",
+  ]) {
+    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    assert.match(JSON.stringify(config?.template), /"accept_output":"review_evidence"/);
+    assert.match(JSON.stringify(config?.template), /ACTOR_REVIEW_RESULT/);
+  }
+});
+
 test("Packaged review coordinator preflights stage models before reviewer fanout", () => {
   const config = readResolvedRecipeConfig(
     join(__dirname, "..", "recipes", "subagent-review-coordinator.json"),

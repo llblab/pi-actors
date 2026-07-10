@@ -102,20 +102,25 @@ Pi host
 ## Runtime Contract
 
 - Register trusted command templates with placeholder-derived args, progressive typed arg declarations, inline/default/`??`/ternary fallback, and split-first command argv construction.
+- Serialize extension-authored recipe mutations with the canonical-path file lock across the complete check/read/write/runtime-update window; keep usage telemetry in locked `.usage/<recipe-filename>.json` sidecars so metadata cannot overwrite authored recipes, and do not replace keyed locking with a broad registry lock.
 - Keep command templates synchronous and portable; `async: true` is the detached run switch.
 - Preserve node controls: `when`, positive `timeout`, `delay`, bounded `retry`, `failure`, and `recover` cleanup.
+- Persist every async command's complete byte-exact stdout/stderr under command- and retry-specific run-state paths while keeping returned tails bounded and pipeline stdin complete.
 - Keep async run state under `~/.pi/agent/tmp/pi-actors/runs` with injected `{run_id}` and `{state_dir}` values.
-- Preserve event-driven observability: terminal follow-ups, coordinator-bound outbox messages, branch-aware triangles, process-tree expansion, and bounded body previews.
-- Do not restore busy-polling examples, duplicate terminal follow-ups, or duplicate follow-ups for handled `cancel`, `kill`, or control-stop actions.
+- Preserve event-driven observability: durable retrying terminal steering notifications, coordinator-bound outbox messages, branch-aware triangles, process-tree expansion, and bounded body previews. Terminal delivery is at-least-once across the unavoidable send/handled-marker crash window.
+- When a deferred actor result gates the next step, wait for its terminal steering notification. Do not schedule continuation loops, repeatedly inspect, or mutate its reviewed scope while it runs; inspect early only on operator request, meaningful actor event, or diagnosis of an overdue/stuck run.
+- Do not restore busy-polling examples, duplicate terminal notifications, or duplicate notifications for handled `cancel`, `kill`, or control-stop actions.
 
 ## Recipes And Registry
 
 - `~/.pi/agent/recipes/*.json` is executable muscle memory: recipes there become persistent tools by location.
 - Preserve filename identity, atomic writes, explicit operator-gated changes, and local transportability.
+- Recipe live reload must watch the parent when the user recipe root is absent, switch to the root watcher when it appears, and rearm after deletion/rename without polling or duplicate watcher ownership.
 - Packaged/ad hoc recipes outside the agent root are components, not user tools.
 - Register existing recipes by importing them from the user-root wrapper and using a `{ "name": "alias" }` template node; do not duplicate a ready recipe's script command, defaults, mailbox, or artifact contract in the wrapper.
 - Skill-owned scripts must be exposed through skill-owned recipes first. If a local tool needs that capability, import the skill recipe via `{agent}/skills/<skill>/recipes/<recipe>.json` instead of calling `{agent}/skills/<skill>/scripts/*` directly.
 - Tool definitions use `template`, not `script`, and built-in/core tool names must not be shadowed.
+- Host registrations may remain visible because Pi cannot unregister dynamic definitions, but extension-local `message` and `inspect` lookup must consult the current runtime recipe registry before returning or executing a cached definition.
 - Packaged recipe growth is demand-driven: prefer reusable components over speculative scenario catalogs.
 - Recipe templates may point directly at executable helper scripts when the recipe owns that script boundary; keep script executable bits and avoid unnecessary `node` prefixes.
 
@@ -131,12 +136,14 @@ Pi host
 
 ## State, IO, And Safety
 
-- Tool stdout and temp state must stay bounded and local.
+- Tool stdout and temp state must stay bounded and local; preserve complete high-volume streams in spill files with byte/truncation metadata, and never feed a truncated capture tail into pipeline stdin.
 - Feedback hints must be evidence-backed, bounded, and action-shaped; prefer `next_actions` pointing to existing verbs over prose, and avoid hints when no concrete next step is justified.
 - Keep tail truncation, full-output temp files, failure formatting, and centralized limits intact.
 - Published docs must not include machine-local absolute paths.
 - Any view scanning run directories must apply coordinator/session ownership filters before exposing summaries or previews.
 - Direct branch messages are active inbox queues; guard branch-local append/status rewrites with the branch inbox lock and keep claim/handled/failed transitions tested.
+- Run-state launch and destructive retention require the runtime ownership marker bound to the canonical directory and run id; reject non-run directories, missing/mismatched markers, and symlink aliases rather than trusting `run.json`.
+- Runner lifecycle and destructive process controls require the persisted cross-platform process identity proof (start time, command, and cwd where available); dead, mismatched, or unsupported proofs stay distinct and fail closed rather than degrading to pid liveness.
 - Room/branch provenance checks should validate that accepted `from` addresses belong to the addressed run.
 
 ## Coordination And Lifecycle

@@ -14,6 +14,7 @@ import type { RegisteredTool } from "./config.ts";
 import * as ModelContext from "./model-context.ts";
 import type { TemplateRecipeConfig } from "./recipes-references.ts";
 import * as RecipesReferences from "./recipes-references.ts";
+import * as RecipesUsage from "./recipes-usage.ts";
 import * as Schema from "./schema.ts";
 
 export interface DiscoveredRecipe {
@@ -374,9 +375,13 @@ export function discoverRecipes(roots: string[]): RecipesDiscoveryResult {
 }
 
 function recipeUsage(
-  config: TemplateRecipeConfig | undefined,
+  entry: DiscoveredRecipe,
 ): Record<string, unknown> | undefined {
-  const usage = (config as { usage?: unknown } | undefined)?.usage;
+  const stored = entry.mutableUsage
+    ? RecipesUsage.readRecipeUsage(entry.path)
+    : undefined;
+  if (stored) return stored;
+  const usage = (entry.config as { usage?: unknown } | undefined)?.usage;
   return usage && typeof usage === "object" && !Array.isArray(usage)
     ? (usage as Record<string, unknown>)
     : undefined;
@@ -409,7 +414,7 @@ function cleanupRecommendation(
       actions: ["keep disabled", "delete", "archive"],
     };
   }
-  const usage = recipeUsage(entry.config);
+  const usage = recipeUsage(entry);
   const calls = Number(usage?.calls ?? 0);
   if (entry.mutableUsage && entry.tool && calls === 0) {
     return {
@@ -767,8 +772,8 @@ export function summarizeDiscovery(
             }
           : {}),
         ...(entry.config?.imports ? { imports: entry.config.imports } : {}),
-        ...(recipeUsage(entry.config)
-          ? { usage: recipeUsage(entry.config) }
+        ...(recipeUsage(entry)
+          ? { usage: recipeUsage(entry) }
           : {}),
       }))
       .sort((a, b) => a.id.localeCompare(b.id)),

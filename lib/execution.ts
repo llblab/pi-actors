@@ -4,6 +4,8 @@
  * Owns command-template invocation execution and pi tool-result payload formatting
  */
 
+import { readFile } from "node:fs/promises";
+
 import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
 import {
@@ -15,11 +17,18 @@ import * as Schema from "./schema.ts";
 
 export interface ToolExecOptions {
   actorRecipeContext?: CommandTemplates.CommandTemplateActorRecipeContext;
+  evidenceContext?: {
+    acceptOutput?: "review_evidence";
+    label?: string;
+    repeatIndex?: string;
+  };
   cwd?: string;
   signal?: AbortSignal;
   stdin?: string;
   timeout?: number;
   retry?: number;
+  captureDir?: string;
+  captureLimitBytes?: number;
 }
 
 export interface ToolExecResult {
@@ -27,6 +36,15 @@ export interface ToolExecResult {
   stderr: string;
   code: number;
   killed: boolean;
+  stdoutBytes?: number;
+  stderrBytes?: number;
+  stdoutFile?: string;
+  stderrFile?: string;
+  evidenceRef?: string;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+  /** Complete internal stdout for downstream pipeline stdin; never returned to model-facing output. */
+  pipelineStdout?: string;
 }
 
 export interface BranchReport {
@@ -38,8 +56,14 @@ export interface BranchReport {
   status: "done" | "failed" | "timeout";
   stderr?: string;
   stderrBytes: number;
+  stderrCapturedBytes: number;
+  stderrFile?: string;
+  stderrTruncated?: boolean;
   stdout?: string;
   stdoutBytes: number;
+  stdoutCapturedBytes: number;
+  stdoutFile?: string;
+  stdoutTruncated?: boolean;
 }
 
 export interface SoftQuorumReport {
@@ -59,6 +83,14 @@ export interface RegisteredToolExecutionResult {
     command: string;
     fullOutputPath?: string;
     killed: boolean;
+    stderrBytes?: number;
+    stderrCapturedBytes?: number;
+    stderrFile?: string;
+    stderrTruncated?: boolean;
+    stdoutBytes?: number;
+    stdoutCapturedBytes?: number;
+    stdoutFile?: string;
+    stdoutTruncated?: boolean;
     nonCriticalFailures?: Array<{
       code: number;
       command: string;
@@ -163,6 +195,66 @@ function getBranchStatus(result: ToolExecResult): BranchReport["status"] {
   return result.killed ? "timeout" : "failed";
 }
 
+const REVIEW_RESULT_MARKER = "ACTOR_REVIEW_RESULT";
+
+export async function applyOutputAcceptancePolicy(
+  result: ToolExecResult,
+  output: string | undefined,
+): Promise<ToolExecResult> {
+  if (result.code !== 0 || output !== "review_evidence") return result;
+  let semanticStdout = result.pipelineStdout ?? result.stdout;
+  if (result.pipelineStdout === undefined && result.stdoutTruncated) {
+    if (!result.stdoutFile) semanticStdout = "";
+    else {
+      try {
+        semanticStdout = await readFile(result.stdoutFile, "utf8");
+      } catch {
+        semanticStdout = "";
+      }
+    }
+  }
+  const firstNonWhitespaceLine = semanticStdout
+    .split(/\r?\n/)
+    .find((line) => line.trim().length > 0);
+  if (firstNonWhitespaceLine?.trim() === REVIEW_RESULT_MARKER) return result;
+  return {
+    ...result,
+    code: 65,
+    stderr: [
+      result.stderr,
+      `review evidence rejected: missing ${REVIEW_RESULT_MARKER} marker`,
+    ].filter(Boolean).join("\n"),
+  };
+}
+
+async function resolvePipelineStdout(
+  result: ToolExecResult,
+): Promise<string | undefined> {
+  let stdout = result.pipelineStdout ?? result.stdout;
+  if (result.pipelineStdout === undefined && result.stdoutTruncated) {
+    if (!result.stdoutFile) return undefined;
+    try {
+      stdout = await readFile(result.stdoutFile, "utf8");
+    } catch {
+      return undefined;
+    }
+  }
+  return result.evidenceRef
+    ? `${stdout}\nACTOR_EVIDENCE_REF: ${result.evidenceRef}`
+    : stdout;
+}
+
+function rejectIncompletePipelineOutput(result: ToolExecResult): ToolExecResult {
+  return {
+    ...result,
+    code: 74,
+    stderr: [
+      result.stderr,
+      `incomplete pipeline stdin: complete stdout unavailable${result.stdoutFile ? `; capture path unreadable: ${result.stdoutFile}` : ""}`,
+    ].filter(Boolean).join("\n"),
+  };
+}
+
 function getBranchFailureReason(
   result: ToolExecResult,
 ): string | undefined {
@@ -187,14 +279,24 @@ function createBranchReport(
     label,
     status: getBranchStatus(result),
     ...(result.stderr ? { stderr: result.stderr.slice(-1000) } : {}),
-    stderrBytes: Buffer.byteLength(result.stderr),
+    stderrBytes: result.stderrBytes ?? Buffer.byteLength(result.stderr),
+    stderrCapturedBytes: Buffer.byteLength(result.stderr),
+    ...(result.stderrFile ? { stderrFile: result.stderrFile } : {}),
+    ...(result.stderrTruncated ? { stderrTruncated: true } : {}),
     ...(result.stdout ? { stdout: result.stdout.slice(-1000) } : {}),
-    stdoutBytes: Buffer.byteLength(result.stdout),
+    stdoutBytes: result.stdoutBytes ?? Buffer.byteLength(result.stdout),
+    stdoutCapturedBytes: Buffer.byteLength(result.stdout),
+    ...(result.stdoutFile ? { stdoutFile: result.stdoutFile } : {}),
+    ...(result.stdoutTruncated ? { stdoutTruncated: true } : {}),
   };
 }
 
 function isUsableBranch(branch: BranchReport): boolean {
-  return branch.status === "done" && branch.stdoutBytes > 0;
+  return (
+    branch.status === "done" &&
+    branch.stdoutBytes > 0 &&
+    branch.stdoutTruncated !== true
+  );
 }
 
 function createSoftQuorum(
@@ -399,6 +501,12 @@ function formatParallelStatusHeader(
   )} usable: ${countUsableBranches(branches)} expected: ${branches.length} minimum: ${minSuccessful} ---`;
 }
 
+function stdoutWithEvidenceReference(result: ToolExecResult): string {
+  return result.evidenceRef
+    ? `${result.stdout}\nACTOR_EVIDENCE_REF: ${result.evidenceRef}`
+    : result.stdout;
+}
+
 function joinParallelStdout(
   branches: BranchReport[],
   results: ToolExecResult[],
@@ -407,10 +515,15 @@ function joinParallelStdout(
   const body = results
     .map((result, index) => {
       const branch = branches[index];
-      const header = `--- branch: ${branch.label} status: ${branch.status} ---`;
-      if (branch.status === "done") return `${header}\n${result.stdout}`;
+      const evidence = result.evidenceRef
+        ? ` evidence_ref: ${result.evidenceRef}`
+        : "";
+      const header = `--- branch: ${branch.label} status: ${branch.status}${evidence} ---`;
+      if (branch.status === "done")
+        return `${header}\n${stdoutWithEvidenceReference(result)}`;
+      const stdout = result.stdout ? `\nrejected_stdout: ${result.stdout}` : "";
       const stderr = branch.stderr ? `\nstderr: ${branch.stderr}` : "";
-      return `${header}\nexit: ${branch.code}${stderr}`;
+      return `${header}\nexit: ${branch.code}${stdout}${stderr}`;
     })
     .join("\n");
   return [formatParallelStatusHeader(branches, minSuccessful), body]
@@ -643,8 +756,18 @@ async function executeTemplateConfig(
       cwd,
       { emptyMessage: "Tool template produced an empty command." },
     );
-    const result = await exec(invocation.command, invocation.args, {
+    const evidenceContext = {
+      ...(normalized.accept_output
+        ? { acceptOutput: normalized.accept_output }
+        : {}),
+      ...(normalized.label ? { label: normalized.label } : {}),
+      ...(typeof controlValues.index === "string"
+        ? { repeatIndex: controlValues.index }
+        : {}),
+    };
+    const rawResult = await exec(invocation.command, invocation.args, {
       ...(actorRecipeContext ? { actorRecipeContext } : {}),
+      ...(Object.keys(evidenceContext).length > 0 ? { evidenceContext } : {}),
       cwd,
       signal,
       stdin,
@@ -665,6 +788,10 @@ async function executeTemplateConfig(
         ? { retry: normalizeRetry(normalized.retry, controlValues) }
         : {}),
     });
+    const result = await applyOutputAcceptancePolicy(
+      rawResult,
+      normalized.accept_output,
+    );
     return {
       branches: [],
       commands: [formatInvocationDetail(invocation)],
@@ -700,6 +827,14 @@ async function executeTemplateConfig(
         actorRecipeContext,
       ),
     );
+    const branchPipelineStdouts = await Promise.all(
+      branchResults.map((item) => resolvePipelineStdout(item.result)),
+    );
+    for (const [index, item] of branchResults.entries()) {
+      if (item.result.stdoutTruncated && branchPipelineStdouts[index] === undefined) {
+        item.result = rejectIncompletePipelineOutput(item.result);
+      }
+    }
     const commands = branchResults.flatMap((item) => item.commands);
     const failures = branchResults.flatMap((item) => item.failures);
     const branches = branchResults.map((item, index) =>
@@ -748,9 +883,14 @@ async function executeTemplateConfig(
     const successful = branchResults.map((item) => {
       if (item.result.code === 0) return item.result;
       addResultFailure(failures, item);
-      return { ...item.result, code: 0, stdout: "" };
+      return { ...item.result, code: 0 };
     });
-    const result = {
+    const completeSuccessful = successful.map((item, index) => ({
+      ...item,
+      stdout: branchPipelineStdouts[index] ?? item.stdout,
+      evidenceRef: undefined,
+    }));
+    const result: ToolExecResult = {
       code: 0,
       killed: successful.some((item) => item.killed),
       stderr: successful
@@ -758,6 +898,18 @@ async function executeTemplateConfig(
         .filter(Boolean)
         .join("\n"),
       stdout: joinParallelStdout(branches, successful, minSuccessful),
+      pipelineStdout: joinParallelStdout(
+        branches,
+        completeSuccessful,
+        minSuccessful,
+      ),
+      stdoutBytes: successful.reduce(
+        (total, item) => total + (item.stdoutBytes ?? Buffer.byteLength(item.stdout)),
+        0,
+      ),
+      ...(successful.some((item) => item.stdoutTruncated)
+        ? { stdoutTruncated: true }
+        : {}),
     };
     if (quorumUnmet && nodeFailure === "root") {
       return {
@@ -821,7 +973,7 @@ async function executeTemplateConfig(
     [];
   let nextStdin = stdin;
   let result: ToolExecResult | undefined;
-  for (const step of steps) {
+  for (const [stepIndex, step] of steps.entries()) {
     const executed = await executeTemplateConfig(
       step,
       context,
@@ -836,7 +988,24 @@ async function executeTemplateConfig(
     branches.push(...executed.branches);
     commands.push(...executed.commands);
     failures.push(...executed.failures);
-    result = executed.result;
+    const pipelineStdout = await resolvePipelineStdout(executed.result);
+    const incompletePipelineInput =
+      stepIndex < steps.length - 1 && pipelineStdout === undefined;
+    result = incompletePipelineInput
+      ? rejectIncompletePipelineOutput(executed.result)
+      : executed.result;
+    executed.result = result;
+    if (incompletePipelineInput) {
+      addResultFailure(failures, executed);
+      return {
+        branches,
+        commands,
+        criticalFailure: true,
+        failureScope: "root",
+        failures,
+        result,
+      };
+    }
     if (result.code !== 0) {
       const failureScope = maxFailureScope(
         executed.failureScope,
@@ -870,7 +1039,7 @@ async function executeTemplateConfig(
       nextStdin = "";
       continue;
     }
-    nextStdin = result.stdout;
+    nextStdin = pipelineStdout;
   }
   return { branches, commands, failures, result: result! };
 }
@@ -893,6 +1062,19 @@ async function executeTemplateSteps(
     true,
     undefined,
   );
+}
+
+function getCaptureDetails(result: ToolExecResult): Record<string, unknown> {
+  return {
+    stdoutBytes: result.stdoutBytes ?? Buffer.byteLength(result.stdout),
+    stdoutCapturedBytes: Buffer.byteLength(result.stdout),
+    stderrBytes: result.stderrBytes ?? Buffer.byteLength(result.stderr),
+    stderrCapturedBytes: Buffer.byteLength(result.stderr),
+    ...(result.stdoutFile ? { stdoutFile: result.stdoutFile } : {}),
+    ...(result.stderrFile ? { stderrFile: result.stderrFile } : {}),
+    ...(result.stdoutTruncated ? { stdoutTruncated: true } : {}),
+    ...(result.stderrTruncated ? { stderrTruncated: true } : {}),
+  };
 }
 
 export async function executeRegisteredTool(
@@ -925,7 +1107,9 @@ export async function executeRegisteredTool(
         branches: executed.branches,
         code: result.code,
         command,
+        fullOutputPath: result.stdoutFile ?? formatted.fullOutputPath,
         killed: result.killed,
+        ...getCaptureDetails(result),
         ...(executed.failures.length > 0
           ? { nonCriticalFailures: executed.failures }
           : {}),
@@ -950,8 +1134,9 @@ export async function executeRegisteredTool(
     details: {
       code: result.code,
       command,
-      fullOutputPath: formatted.fullOutputPath,
+      fullOutputPath: result.stdoutFile ?? formatted.fullOutputPath,
       killed: result.killed,
+      ...getCaptureDetails(result),
       ...(executed.branches.length > 0 ? { branches: executed.branches } : {}),
       ...(executed.failures.length > 0
         ? { nonCriticalFailures: executed.failures }

@@ -11,11 +11,13 @@ import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
 import { cancelRun, startRun } from "../lib/async-runs.ts";
+import { getRunStateRoot } from "../lib/paths.ts";
 import { createActorMessageToolDefinition } from "../lib/tools-message.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
 import { createRegisterToolDefinition } from "../lib/tools-register.ts";
 import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
+import { resolveActiveRuntimeTool } from "../lib/tools.ts";
 
 async function waitForFile(path: string): Promise<void> {
   for (let i = 0; i < 40; i++) {
@@ -49,7 +51,7 @@ test("Register tool definition exposes a JSON schema with no required fields", (
   const properties = definition.parameters.properties as Record<string, any>;
   assert.equal(properties.name.type, "string");
   assert.equal(properties.async.type, "boolean");
-  assert.equal(properties.state_dir.type, "string");
+  assert.equal(properties.state_dir, undefined);
   assert.equal(properties.draft.type, "string");
   assert.equal(properties.values.type, "object");
   assert.equal(properties.update.type, "boolean");
@@ -234,13 +236,27 @@ test("Spawn tool definition exposes actor creation schema", () => {
   assert.equal(properties.as.type, "string");
   assert.equal(properties.recipe.type, "string");
   assert.equal(properties.file.type, "string");
-  assert.equal(properties.state_dir.type, "string");
+  assert.equal(properties.state_dir, undefined);
   assert.equal(Array.isArray(properties.template.anyOf), true);
   assert.equal(
     properties.template.anyOf.some((item: any) => item.type === "object"),
     true,
   );
   assert.equal(properties.values.type, "object");
+});
+
+test("Spawn tool rejects custom state directories", async () => {
+  const definition = createSpawnToolDefinition();
+  await assert.rejects(
+    definition.execute(
+      "call-custom-state-dir",
+      { state_dir: process.cwd(), template: "echo unsafe" },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    ),
+    /spawn\.state_dir is not supported.*runtime-owned.*retention-safe/,
+  );
 });
 
 test("Inspect tool definition exposes intentional observation schema", () => {
@@ -1081,6 +1097,38 @@ test("Inspect tool reads healthy pi-actors triage", async () => {
   }
 });
 
+test("Inspect triage tolerates a run disappearing after inventory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-triage-vanished-run-"));
+  try {
+    const userRecipes = join(root, "recipes");
+    const packagedRecipes = join(root, "packaged");
+    await Promise.all([
+      mkdir(join(userRecipes, "drafts"), { recursive: true }),
+      mkdir(packagedRecipes, { recursive: true }),
+    ]);
+    const definition = createInspectToolDefinition({
+      getRunStatus: () => {
+        throw new Error("Run not found");
+      },
+      listRuns: () => [{ run: "vanished", state_dir: join(root, "vanished") }],
+      packagedRecipeRoot: packagedRecipes,
+      recipeRoot: userRecipes,
+    });
+    const result = await definition.execute(
+      "call-inspect-runtime-triage-vanished",
+      { target: "tool:pi-actors", view: "triage" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(result.content[0].text, /triage version=/);
+    assert.deepEqual(result.details.active_runs, []);
+    assert.deepEqual(result.details.recent_failed_runs, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Inspect tool reports degraded pi-actors triage signals", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-triage-degraded-"));
   try {
@@ -1165,6 +1213,26 @@ test("Inspect tool reads tool actor contracts", async () => {
   assert.match(result.content[0].text, /args=text/);
   assert.match(result.content[0].text, /required=text/);
   assert.equal(result.details.description, "Echo tool");
+});
+
+test("Extension-local tool routing revokes stale host definitions", () => {
+  const active = new Map<string, unknown>([["echo", { version: 1 }]]);
+  const definitions = new Map<string, unknown>([["echo", { version: 1 }]]);
+  assert.deepEqual(
+    resolveActiveRuntimeTool("echo", active, (name) => definitions.get(name)),
+    { version: 1 },
+  );
+  active.delete("echo");
+  assert.equal(
+    resolveActiveRuntimeTool("echo", active, (name) => definitions.get(name)),
+    undefined,
+  );
+  active.set("echo", { version: 2 });
+  definitions.set("echo", { version: 2 });
+  assert.deepEqual(
+    resolveActiveRuntimeTool("echo", active, (name) => definitions.get(name)),
+    { version: 2 },
+  );
 });
 
 test("Actor message tool routes tool actors to executable tools", async () => {
@@ -1753,6 +1821,7 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
       report: { path: `${stateDir}/report.md`, kind: "markdown", media_type: "text/markdown", required: true },
     });
     await writeFile(join(stateDir, "report.md"), "# Report\n");
+    await waitForFile(join(stateDir, "result.json"));
     const inspect = createInspectToolDefinition();
     const artifacts = await inspect.execute(
       "call-inspect-artifacts",
@@ -1766,6 +1835,34 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
     assert.equal(typeof artifacts.details.artifact_manifest.report.sha256, "string");
     assert.equal(artifacts.details.artifact_manifest.missing.exists, false);
     assert.equal(artifacts.details.artifact_manifest.missing.required, true);
+    assert.equal(artifacts.details.review_evidence.commands_total, 1);
+    assert.equal(artifacts.details.review_evidence.commands.length, 1);
+    assert.match(
+      artifacts.details.review_evidence.commands[0].attempts[0].stdout.path,
+      /captures\/command-001\/attempt-001\/stdout\.log/,
+    );
+    await writeFile(
+      join(stateDir, "review-evidence.json"),
+      JSON.stringify({
+        version: 1,
+        run: runId,
+        status: "done",
+        commands: [{ id: "command-001" }, { id: "command-002" }, { id: "command-003" }],
+      }),
+    );
+    const files = await inspect.execute(
+      "call-inspect-files",
+      { target: `run:${runId}`, view: "files", verbose: true, lines: "2" },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+    assert.equal(files.details.review_evidence.commands_total, 3);
+    assert.equal(files.details.review_evidence.commands_truncated, true);
+    assert.deepEqual(
+      files.details.review_evidence.commands.map((command: { id: string }) => command.id),
+      ["command-002", "command-003"],
+    );
     assert.deepEqual(artifacts.details.next_actions, [
       `inspect target=run:${runId} view=artifacts verbose=true`,
       `inspect target=run:${runId} view=messages`,
@@ -2287,6 +2384,7 @@ test("Runtime async tools report inherited current policy", async () => {
       },
     );
     stateDir = String(result.details.state_dir);
+    assert.equal(stateDir, join(getRunStateRoot(), runId));
     assert.equal(result.details.model_policy.model.source, "inherited");
     assert.equal(result.details.model_policy.thinking.source, "inherited");
     assert.match(result.content[0].text, /model=inherited:test-provider\/test-model/);

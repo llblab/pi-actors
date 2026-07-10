@@ -7,7 +7,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { AsyncRunStatus } from "./async-runs.ts";
-import { isAlive, isWithinRunnerIdentityGrace, pidMatchesRun } from "./runs-process.ts";
+import {
+  isWithinRunnerIdentityGrace,
+  verifyRunProcessIdentity,
+  type RunProcessIdentity,
+} from "./runs-process.ts";
 import { readJsonlFileResilient } from "./state-readers.ts";
 
 export type RunJsonReader = (path: string) => Record<string, unknown> | undefined;
@@ -30,17 +34,20 @@ export function buildRunStatus(
   runOrDir: string,
   meta: Record<string, unknown>,
   readJson: RunJsonReader,
-  runnerPath: string,
+  _runnerPath: string,
   runnerIdentityGraceMs: number,
 ): Record<string, unknown> {
   const result = readJson(join(stateDir, "result.json"));
   const pid = Number(meta.pid || 0);
+  const processIdentity = verifyRunProcessIdentity(
+    pid,
+    meta.process_identity as RunProcessIdentity | undefined,
+  );
   const aliveOwnedRunner = Boolean(
     pid &&
-      isAlive(pid) &&
-      (!Array.isArray(meta.argv) ||
-        pidMatchesRun(pid, String(meta.cwd ?? ""), stateDir, runnerPath) ||
-        isWithinRunnerIdentityGrace(meta, runnerIdentityGraceMs)),
+      (processIdentity.valid ||
+        (processIdentity.status === "unsupported_proof" &&
+          isWithinRunnerIdentityGrace(meta, runnerIdentityGraceMs))),
   );
   const status: AsyncRunStatus = result
     ? Number(result.code ?? 0) === 0
@@ -53,8 +60,10 @@ export function buildRunStatus(
   return {
     ...meta,
     eventsFile: join(stateDir, "events.jsonl"),
+    evidenceFile: join(stateDir, "review-evidence.json"),
     inboxFile: join(stateDir, "inbox.jsonl"),
     outboxFile: join(stateDir, "outbox.jsonl"),
+    process_identity_status: processIdentity.status,
     progress: readJson(join(stateDir, "progress.json")) || null,
     result: result || null,
     ...(terminalHandled ? { terminal_handled: terminalHandled } : {}),

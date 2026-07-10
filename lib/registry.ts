@@ -4,13 +4,13 @@
  * Owns register/update/delete validation, persistence, runtime side effects, and result payloads
  */
 
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 import * as CommandTemplates from "./command-templates.ts";
 import * as Config from "./config.ts";
 import * as ExecutionOutput from "./execution-output.ts";
-import { writeJsonAtomic } from "./file-state.ts";
+import { withFileMutationLock, writeJsonAtomic } from "./file-state.ts";
 import * as Identity from "./identity.ts";
 import * as Paths from "./paths.ts";
 import * as RecipesReferences from "./recipes-references.ts";
@@ -20,7 +20,6 @@ export interface RegisterToolInput {
   name?: string;
   description?: string;
   async?: boolean;
-  state_dir?: string;
   template?: CommandTemplates.CommandTemplateValue | null;
   draft?: string;
   args?: string;
@@ -36,7 +35,6 @@ export interface RegisterToolResultDetails {
   draft?: string;
   promoted?: boolean;
   recipeName?: string;
-  state_dir?: string;
   template?: CommandTemplates.CommandTemplateValue;
   templateWarnings?: string[];
   tool: string;
@@ -194,7 +192,6 @@ function persistToolRecipe<TContext>(
   writeJsonAtomic(path, {
     description: cfg.description,
     ...(cfg.recipe?.async !== undefined ? { async: cfg.recipe.async } : {}),
-    ...(cfg.recipe?.state_dir ? { state_dir: cfg.recipe.state_dir } : {}),
     ...(cfg.storedArgs ? { args: cfg.storedArgs } : {}),
     ...(cfg.storedDefaults ? { defaults: cfg.storedDefaults } : {}),
     ...(cfg.recipe?.values ? { values: cfg.recipe.values } : {}),
@@ -236,6 +233,28 @@ function deleteTool<TContext>(
     ],
     details: { config: recipePath, tool: name },
   };
+}
+
+function readAuthoritativeStoredTool<TContext>(
+  deps: RegisterToolRuntimeDeps<TContext>,
+  name: string,
+): { exists: boolean; tool?: Config.RegisteredTool } {
+  const path = getToolRecipePath(deps, name);
+  if (!existsSync(path)) return { exists: false };
+  try {
+    const normalized = Config.normalizeStoredTool(
+      name,
+      JSON.parse(readFileSync(path, "utf8")),
+      deps.reservedToolNames,
+    );
+    if (!normalized.cfg) return { exists: true };
+    return {
+      exists: true,
+      tool: { ...normalized.cfg, sourcePath: path },
+    };
+  } catch {
+    return { exists: true };
+  }
 }
 
 function getInputTemplate(
@@ -303,9 +322,6 @@ function buildConfig(
     ? {
         name: inputRecipe,
         ...(typeof input.async === "boolean" ? { async: input.async } : {}),
-        ...(typeof input.state_dir === "string" && input.state_dir.trim()
-          ? { state_dir: input.state_dir.trim() }
-          : {}),
         template: finalTemplate,
         ...(input.values && typeof input.values === "object"
           ? { values: input.values }
@@ -359,11 +375,11 @@ function buildConfig(
   };
 }
 
-export async function executeRegisterTool<TContext>(
+function executeRegisterToolUnlocked<TContext>(
   params: unknown,
   ctx: TContext,
   deps: RegisterToolRuntimeDeps<TContext>,
-): Promise<RegisterToolResult> {
+): RegisterToolResult {
   const input = params as RegisterToolInput;
   if (!input.name) return listTools(deps);
   const name = Identity.normalizeToolName(input.name);
@@ -382,10 +398,11 @@ export async function executeRegisterTool<TContext>(
   if (templateProvided && (template === null || template === ""))
     return deleteTool(name, ctx, deps);
   const tools = deps.getTools();
-  const existing = tools.get(name);
+  const authoritative = readAuthoritativeStoredTool(deps, name);
+  const existing = authoritative.tool ?? tools.get(name);
   const blocker = deps.getToolNameBlocker(name);
   if (blocker) throw new Error(ExecutionOutput.formatToolText(blocker));
-  if (existing && !input.update) {
+  if ((authoritative.exists || existing) && !input.update) {
     throw new Error(
       ExecutionOutput.formatToolText(
         `Tool "${name}" already registered. Use update=true to overwrite.`,
@@ -437,10 +454,23 @@ export async function executeRegisterTool<TContext>(
       defaults: cfg.defaults,
       ...(cfg.recipe?.async !== undefined ? { async: cfg.recipe.async } : {}),
       ...(cfg.recipe?.name ? { recipeName: cfg.recipe.name } : {}),
-      ...(cfg.recipe?.state_dir ? { state_dir: cfg.recipe.state_dir } : {}),
       ...(cfg.template ? { template: cfg.template } : {}),
       ...(templateWarnings.length > 0 ? { templateWarnings } : {}),
       tool: name,
     },
   };
+}
+
+export async function executeRegisterTool<TContext>(
+  params: unknown,
+  ctx: TContext,
+  deps: RegisterToolRuntimeDeps<TContext>,
+): Promise<RegisterToolResult> {
+  const input = params as RegisterToolInput;
+  if (!input.name) return executeRegisterToolUnlocked(params, ctx, deps);
+  const name = Identity.normalizeToolName(input.name);
+  if (!name) return executeRegisterToolUnlocked(params, ctx, deps);
+  return withFileMutationLock(getToolRecipePath(deps, name), () =>
+    executeRegisterToolUnlocked(params, ctx, deps),
+  );
 }

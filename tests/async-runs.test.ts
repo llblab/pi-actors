@@ -4,7 +4,16 @@
  */
 
 import assert from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -29,6 +38,7 @@ import {
   tailRun,
 } from "../lib/async-runs.ts";
 import { executeRunRetirements, summarizeRuns } from "../lib/observability.ts";
+import { pruneTerminalRun } from "../lib/runs-retention.ts";
 import {
   createFileRuntimeNotifier,
   notifyRuntimeWake,
@@ -57,6 +67,39 @@ async function waitForFile(path: string): Promise<void> {
     }
   }
   throw new Error(`file did not appear: ${path}`);
+}
+
+async function waitForFileContent(
+  path: string,
+  pattern: RegExp,
+  minBytes = 0,
+): Promise<void> {
+  for (let i = 0; i < 40; i++) {
+    try {
+      const content = await readFile(path, "utf8");
+      if (pattern.test(content) && Buffer.byteLength(content) >= minBytes) return;
+    } catch {
+      // File is not ready yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`file content did not appear: ${path}`);
+}
+
+async function waitForJsonStatus(
+  path: string,
+  status: string,
+): Promise<Record<string, any>> {
+  for (let i = 0; i < 40; i++) {
+    try {
+      const value = JSON.parse(await readFile(path, "utf8"));
+      if (value.status === status) return value;
+    } catch {
+      // File is not ready yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`json status did not appear: ${path} -> ${status}`);
 }
 
 async function waitForWakeCount(
@@ -126,6 +169,85 @@ test("Async runs reject reuse of an active run state", async () => {
   }
 });
 
+test("Async run controls fail closed on persisted process identity mismatch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-process-identity-"));
+  const stateDir = join(root, "identity");
+  try {
+    const meta = startRun(
+      {
+        run_id: "identity",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 3000)"`,
+      },
+      process.cwd(),
+    );
+    assert.equal(typeof meta.process_identity?.start_time, "string");
+    const runPath = join(stateDir, "run.json");
+    const stored = JSON.parse(await readFile(runPath, "utf8"));
+    await writeFile(
+      runPath,
+      JSON.stringify({
+        ...stored,
+        process_identity: {
+          ...stored.process_identity,
+          start_time: `${stored.process_identity.start_time}-reused`,
+        },
+      }),
+    );
+    assert.throws(
+      () =>
+        startRun(
+          {
+            run_id: "identity",
+            state_dir: stateDir,
+            template: `${process.execPath} -e "setTimeout(() => {}, 3000)"`,
+          },
+          process.cwd(),
+        ),
+      /identity does not match the live pid/,
+    );
+    assert.doesNotThrow(() => process.kill(meta.pid, 0));
+    const status = getRunStatus(stateDir);
+    assert.equal(status.process_identity_status, "owner_mismatch");
+    const cancelled = cancelRun(stateDir);
+    assert.equal(cancelled.cancelled, false);
+    assert.equal(cancelled.process_identity_status, "owner_mismatch");
+    assert.doesNotThrow(() => process.kill(meta.pid, 0));
+    await writeFile(runPath, JSON.stringify(stored));
+    killRun(stateDir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  "Async runs capture process identity from a symlinked launch cwd",
+  { skip: process.platform !== "linux" },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-symlink-cwd-"));
+    const realCwd = join(root, "real-cwd");
+    const aliasCwd = join(root, "alias-cwd");
+    const stateDir = join(root, "state");
+    try {
+      await mkdir(realCwd);
+      await symlink(realCwd, aliasCwd, "dir");
+      const meta = startRun(
+        {
+          run_id: "symlink-cwd",
+          state_dir: stateDir,
+          template: `${process.execPath} -e "setTimeout(() => {}, 3000)"`,
+        },
+        aliasCwd,
+      );
+      assert.equal(meta.process_identity?.cwd, await realpath(realCwd));
+      assert.equal(getRunStatus(stateDir).process_identity_status, "valid");
+      killRun(stateDir);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test("Async runs reject state dirs with an in-progress start lock", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-start-lock-"));
   const stateDir = join(root, "locked");
@@ -175,6 +297,180 @@ test("Async runs write state files and finish", async () => {
     assert.match(
       await readFile(join(stateDir, "stdout.log"), "utf8"),
       /hello world/,
+    );
+    const evidence = JSON.parse(
+      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+    );
+    assert.equal(evidence.version, 1);
+    assert.equal(evidence.run, "hello");
+    assert.equal(evidence.status, "done");
+    assert.equal(evidence.commands.length, 1);
+    assert.equal(evidence.commands[0].id, "command-001");
+    assert.equal(evidence.commands[0].semantic_acceptance, "not_required");
+    assert.deepEqual(evidence.commands[0].attempts, [
+      {
+        attempt: 1,
+        stdout: {
+          path: "captures/command-001/attempt-001/stdout.log",
+          bytes: 12,
+        },
+        stderr: {
+          path: "captures/command-001/attempt-001/stderr.log",
+          bytes: 0,
+        },
+      },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async review evidence rejects marker prefixes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-review-marker-"));
+  const stateDir = join(root, "review-marker");
+  try {
+    startRun(
+      {
+        run_id: "review-marker",
+        state_dir: stateDir,
+        template: {
+          accept_output: "review_evidence",
+          template: `${process.execPath} -e "console.log('ACTOR_REVIEW_RESULT_BOGUS')"`,
+        },
+      },
+      process.cwd(),
+    );
+    const result = await waitForResult(stateDir);
+    const evidence = await waitForJsonStatus(
+      join(stateDir, "review-evidence.json"),
+      "failed",
+    );
+    assert.equal(result.code, 65);
+    assert.equal(evidence.status, "failed");
+    assert.equal(evidence.commands[0].effective_exit_code, 65);
+    assert.equal(evidence.commands[0].semantic_acceptance, "rejected");
+    const events = (await readFile(join(stateDir, "events.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const commandDone = events.find((event) => event.event === "command.done");
+    assert.equal(commandDone.code, 65);
+    const outbox = (await readFile(join(stateDir, "outbox.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const commandNotification = outbox.find(
+      (entry) => entry.event === "command.done",
+    );
+    assert.equal(commandNotification.body.code, 65);
+    assert.equal(commandNotification.delivery, "followup");
+    assert.equal(commandNotification.level, "error");
+    assert.match(commandNotification.summary, /code 65/);
+    const progress = JSON.parse(
+      await readFile(join(stateDir, "progress.json"), "utf8"),
+    );
+    assert.equal(progress.phase, "failed");
+    assert.equal(progress.failures[0].code, 65);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async review evidence accepts a large marker from complete capture", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-large-review-marker-"));
+  const stateDir = join(root, "large-review-marker");
+  try {
+    startRun(
+      {
+        run_id: "large-review-marker",
+        state_dir: stateDir,
+        template: {
+          accept_output: "review_evidence",
+          template: `${process.execPath} -e "process.stdout.write(['ACTOR_REVIEW_RESULT','X'.repeat(1100000)].join(String.fromCharCode(10)))"`,
+        },
+      },
+      process.cwd(),
+    );
+    const result = await waitForResult(stateDir);
+    const evidence = JSON.parse(
+      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+    );
+    assert.equal(result.code, 0);
+    assert.equal(evidence.status, "done");
+    assert.equal(evidence.commands[0].semantic_acceptance, "accepted");
+    assert.equal(evidence.commands[0].stdout_truncated, true);
+    assert.equal(evidence.commands[0].stdout_bytes, 1_100_020);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async review reports fail closed when complete evidence references are missing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-review-evidence-"));
+  const stateDir = join(root, "review-evidence");
+  try {
+    startRun(
+      {
+        run_id: "review-evidence",
+        state_dir: stateDir,
+        template: [
+          {
+            actorRecipeContext: { alias: "reviewer", name: "reviewer" },
+            accept_output: "review_evidence",
+            template: `${process.execPath} -e "console.log(['ACTOR_REVIEW_RESULT','review'].join(String.fromCharCode(10)))"`,
+          },
+          {
+            actorRecipeContext: { alias: "normalizer", name: "normalizer" },
+            accept_output: "review_evidence",
+            template: `${process.execPath} -e "console.log(['ACTOR_REVIEW_RESULT','## Status','complete'].join(String.fromCharCode(10)))"`,
+          },
+        ],
+      },
+      process.cwd(),
+    );
+    const result = await waitForResult(stateDir);
+    const evidence = JSON.parse(
+      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+    );
+    assert.equal(result.code, 65, JSON.stringify(evidence));
+    assert.equal(result.failure_reason, "incomplete review report evidence");
+    assert.equal(evidence.status, "failed");
+    assert.equal(evidence.report_evidence.claims_complete, true);
+    assert.equal(evidence.report_evidence.complete_allowed, false);
+    assert.deepEqual(evidence.report_evidence.missing, [
+      "review-evidence.json#command-001",
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async runs persist bounded high-volume command captures", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-capture-"));
+  const stateDir = join(root, "capture");
+  try {
+    startRun(
+      {
+        run_id: "capture",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "process.stdout.write('A'.repeat(1100000)); process.stderr.write('B'.repeat(1100000))"`,
+      },
+      process.cwd(),
+    );
+    const result = await waitForResult(stateDir);
+    assert.equal(result.code, 0);
+    const events = await readFile(join(stateDir, "events.jsonl"), "utf8");
+    assert.match(events, /"stdout_bytes":1100000/);
+    assert.match(events, /"stderr_bytes":1100000/);
+    assert.match(events, /"stdout_truncated":true/);
+    assert.match(events, /"stderr_truncated":true/);
+    assert.equal(
+      (await readFile(join(stateDir, "captures", "command-001", "attempt-001", "stdout.log"), "utf8")).length,
+      1100000,
+    );
+    assert.equal(
+      (await readFile(join(stateDir, "captures", "command-001", "attempt-001", "stderr.log"), "utf8")).length,
+      1100000,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -277,6 +573,7 @@ test("Async runs emit command completion outbox events", async () => {
         join(stateDir, "result.json"),
         join(stateDir, "events.jsonl"),
         join(stateDir, "outbox.jsonl"),
+        join(stateDir, "review-evidence.json"),
       ],
     );
   } finally {
@@ -429,7 +726,6 @@ test("Async runs can start from recipe files with overrides", async () => {
       JSON.stringify(
         {
           name: "from-file",
-          state_dir: stateDir,
           mailbox: { accepts: ["control.continue"], emits: ["run.done"] },
           retire_when: "children_terminal",
           template: `${process.execPath} -e "console.log(process.argv[1] + ' ' + process.argv[2])" {greeting} {name}`,
@@ -440,7 +736,7 @@ test("Async runs can start from recipe files with overrides", async () => {
       ),
     );
     const meta = startRun(
-      { file, run_id: "override-run", values: { name: "override" } },
+      { file, run_id: "override-run", state_dir: stateDir, values: { name: "override" } },
       process.cwd(),
     );
     assert.equal(meta.run, "override-run");
@@ -488,7 +784,6 @@ test("Async runs can start from Markdown recipe files", async () => {
       file,
       [
         "---",
-        `state_dir: ${stateDir}`,
         "defaults:",
         "  greeting: hello",
         "---",
@@ -499,7 +794,7 @@ test("Async runs can start from Markdown recipe files", async () => {
         "",
       ].join("\n"),
     );
-    const meta = startRun({ file }, process.cwd());
+    const meta = startRun({ file, state_dir: stateDir }, process.cwd());
     assert.equal(meta.recipe, "say-md");
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
@@ -523,11 +818,10 @@ test("Async runs persist recipe context bundles for file-backed recipes", async 
       parent,
       JSON.stringify({
         imports: { child_step: "child.json" },
-        state_dir: stateDir,
         template: [{ name: "child_step" }],
       }),
     );
-    const meta = startRun({ file: parent }, process.cwd());
+    const meta = startRun({ file: parent, state_dir: stateDir }, process.cwd());
     assert.equal(meta.recipe_context_records?.length, 2);
     assert.deepEqual(
       meta.recipe_context_records?.map((record) => ({
@@ -557,11 +851,10 @@ test("Async runs allow recipes to opt out of actor recipe context", async () => 
       file,
       JSON.stringify({
         actor_context: false,
-        state_dir: stateDir,
         template: `${process.execPath} -e "console.log('quiet')"`,
       }),
     );
-    const meta = startRun({ file }, process.cwd());
+    const meta = startRun({ file, state_dir: stateDir }, process.cwd());
     assert.equal(meta.recipe_context_records, undefined);
     assert.doesNotMatch(JSON.stringify(meta.template), /actorRecipeContext/);
     const result = await waitForResult(stateDir);
@@ -580,7 +873,6 @@ test("Recipe files can put command-template flags at the recipe top level", asyn
       file,
       JSON.stringify(
         {
-          state_dir: stateDir,
           parallel: true,
           template: [
             `${process.execPath} -e "console.log('left')"`,
@@ -591,7 +883,7 @@ test("Recipe files can put command-template flags at the recipe top level", asyn
         2,
       ),
     );
-    const meta = startRun({ file }, process.cwd());
+    const meta = startRun({ file, state_dir: stateDir }, process.cwd());
     assert.equal(meta.run, "parallel");
     assert.equal(typeof meta.template, "object");
     assert.equal(Array.isArray(meta.template), false);
@@ -628,7 +920,6 @@ test("Recipe imports execute under repeated parallel parent nodes", async () => 
       JSON.stringify(
         {
           name: "parent",
-          state_dir: stateDir,
           imports: {
             node: {
               from: "child.json",
@@ -647,7 +938,7 @@ test("Recipe imports execute under repeated parallel parent nodes", async () => 
         2,
       ),
     );
-    const meta = startRun({ file: parent }, process.cwd());
+    const meta = startRun({ file: parent, state_dir: stateDir }, process.cwd());
     assert.equal(meta.run, "parent");
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
@@ -1384,6 +1675,62 @@ test("Async run cancel terminates matching running runs", async () => {
   }
 });
 
+test("Async cancel and kill finalize in-flight review evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-interrupted-evidence-"));
+  try {
+    for (const mode of ["cancelled", "killed"] as const) {
+      const stateDir = join(root, mode);
+      startRun(
+        {
+          run_id: `review-${mode}`,
+          state_dir: stateDir,
+          template: {
+            accept_output: "review_evidence",
+            template: `${process.execPath} -e "process.stdout.write('partial');setInterval(()=>{},1000)"`,
+          },
+        },
+        process.cwd(),
+      );
+      let runningEvidence: any;
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        try {
+          runningEvidence = JSON.parse(
+            await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+          );
+          if (runningEvidence.commands?.[0]?.status === "running") break;
+        } catch {
+          // Runner has not initialized evidence yet.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(runningEvidence?.commands?.[0]?.status, "running");
+      const captureFile = join(
+        stateDir,
+        "captures/command-001/attempt-001/stdout.log",
+      );
+      await waitForFileContent(captureFile, /partial/, 7);
+      if (mode === "cancelled") cancelRun(stateDir);
+      else killRun(stateDir);
+      await waitForStatus(stateDir, mode);
+      const evidence = JSON.parse(
+        await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+      );
+      assert.equal(evidence.status, mode);
+      assert.equal(evidence.commands[0].status, mode);
+      assert.equal(evidence.commands[0].killed, true);
+      assert.equal(
+        evidence.commands[0].effective_exit_code,
+        mode === "killed" ? 137 : 143,
+      );
+      assert.equal(evidence.commands[0].semantic_acceptance, "interrupted");
+      assert.equal(evidence.commands[0].attempts.length, 1);
+      assert.equal(evidence.commands[0].attempts[0].stdout.bytes, 7);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async run cancel signals the running command process group", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "running-group");
@@ -1551,22 +1898,25 @@ test("Async run retirement smoke stops supervisor after nested child is terminal
   }
 });
 
-test("Async run cancel fails closed for completed runs", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
-  const stateDir = join(root, "done");
+test("Async run cancel consistently classifies completed-run races as not running", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-completed-cancel-"));
   try {
-    startRun(
-      {
-        run_id: "done",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "console.log('done')"`,
-      },
-      process.cwd(),
-    );
-    await waitForResult(stateDir);
-    const result = cancelRun(stateDir);
-    assert.equal(result.cancelled, false);
-    assert.equal(result.reason, "not running");
+    for (let iteration = 0; iteration < 30; iteration += 1) {
+      const stateDir = join(root, `done-${iteration}`);
+      startRun(
+        {
+          run_id: `done-${iteration}`,
+          state_dir: stateDir,
+          template: `${process.execPath} -e "console.log('done')"`,
+        },
+        process.cwd(),
+      );
+      await waitForResult(stateDir);
+      const result = cancelRun(stateDir);
+      assert.equal(result.cancelled, false, JSON.stringify(result));
+      assert.equal(result.reason, "not running", JSON.stringify(result));
+      assert.equal("process_identity_status" in result, false);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1617,6 +1967,7 @@ test("Async run archive and prune only allow terminal run state", async () => {
   const activeDir = join(root, "active");
   const doneDir = join(root, "done");
   const pruneDir = join(root, "prune");
+  const failedPruneDir = join(root, "failed-prune");
   try {
     startRun(
       {
@@ -1646,7 +1997,11 @@ test("Async run archive and prune only allow terminal run state", async () => {
 
     startRun(
       {
-        artifacts: { report: { path: "{state_dir}/report.txt", required: true } },
+        artifacts: {
+          first: { path: "{state_dir}/one/report.txt", required: true },
+          second: { path: "{state_dir}/two/report.txt", required: true },
+          optional: { path: "{state_dir}/missing/report.txt", required: false },
+        },
         run_id: `prune-${process.pid}-${Date.now()}`,
         state_dir: pruneDir,
         template: `${process.execPath} -e "console.log('done')"`,
@@ -1654,12 +2009,41 @@ test("Async run archive and prune only allow terminal run state", async () => {
       process.cwd(),
     );
     await waitForResult(pruneDir);
-    await writeFile(join(pruneDir, "report.txt"), "report");
+    await mkdir(join(pruneDir, "one"), { recursive: true });
+    await mkdir(join(pruneDir, "two"), { recursive: true });
+    await writeFile(join(pruneDir, "one", "report.txt"), "first");
+    await writeFile(join(pruneDir, "two", "report.txt"), "second");
     const pruned = pruneRun(pruneDir, { preserveArtifacts: true });
     assert.equal(pruned.pruned, true);
-    assert.equal(typeof (pruned.preserved_artifacts as Record<string, string>).report, "string");
-    await readFile((pruned.preserved_artifacts as Record<string, string>).report, "utf8");
+    const preserved = pruned.preserved_artifacts as Record<string, string>;
+    assert.notEqual(preserved.first, preserved.second);
+    assert.equal(await readFile(preserved.first, "utf8"), "first");
+    assert.equal(await readFile(preserved.second, "utf8"), "second");
+    assert.equal(preserved.optional, undefined);
     assert.throws(() => getRunStatus(pruneDir), /Run not found/);
+
+    startRun(
+      {
+        artifacts: { report: { path: "{state_dir}/report.txt", required: true } },
+        run_id: `failed-prune-${process.pid}-${Date.now()}`,
+        state_dir: failedPruneDir,
+        template: `${process.execPath} -e "console.log('done')"`,
+      },
+      process.cwd(),
+    );
+    await waitForResult(failedPruneDir);
+    await writeFile(join(failedPruneDir, "report.txt"), "keep");
+    assert.throws(
+      () =>
+        pruneTerminalRun(
+          getRunStatus(failedPruneDir),
+          { preserveArtifacts: true },
+          { copyArtifact: () => { throw new Error("simulated copy failure"); } },
+        ),
+      /simulated copy failure/,
+    );
+    await readFile(join(failedPruneDir, "run.json"), "utf8");
+    assert.equal(await readFile(join(failedPruneDir, "report.txt"), "utf8"), "keep");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

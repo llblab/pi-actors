@@ -30,6 +30,7 @@ Core subagent recipes:
 - `recipes/subagent-tools.json`: Start a subagent with an explicit tool allowlist.
 - `recipes/subagents-prompts.json`: Run prompt fanout with one imported subagent component.
 - `recipes/subagent-preflight.json`: Tiny model/thinking/tool-policy smoke check before expensive fanout; failures surface `ACTOR_PREFLIGHT_FAILED` with stage, selected policy, provider error class, prompt file, and override args.
+- Packaged reviewer, verifier, merger, judge, and normalizer stages use `accept_output: review_evidence` and require `ACTOR_REVIEW_RESULT` as the exact first non-whitespace output line. Marker prefixes, format acknowledgements, and input requests therefore remain rejected branch diagnostics rather than usable quorum evidence.
 - `recipes/subagent-review.json`: Evidence-grounded review lens.
 - `recipes/subagent-critic.json`: Assumption and failure-mode critique.
 - `recipes/subagent-plan.json`: Bounded plan slices and validation gates.

@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,6 +13,7 @@ import {
   countRunningSubagents,
   detectRunOutboxEvents,
   detectRunTransitions,
+  deliverRunTransitionNotifications,
   executeRunRetirements,
   findRunRetirementCandidates,
   pruneRunObservationState,
@@ -30,6 +31,7 @@ import {
   summarizeRuns,
 } from "../lib/observability.ts";
 import * as Paths from "../lib/paths.ts";
+import { readProcessIdentity } from "../lib/runs-process.ts";
 
 async function writeRun(
   root: string,
@@ -57,6 +59,9 @@ async function writeRun(
       ...(recipeFile ? { recipe_file: recipeFile } : {}),
       ...(tool ? { tool } : {}),
       pid: status === "running" ? process.pid : 999999999,
+      ...(status === "running"
+        ? { process_identity: readProcessIdentity(process.pid) }
+        : {}),
       state_dir: dir,
     }),
   );
@@ -417,6 +422,98 @@ test("Run observability detects failed terminal transitions", () => {
   assert.deepEqual(transitions, [
     { from: "running", run: "review", to: "failed" },
   ]);
+});
+
+test("Run observability replays one unhandled terminal transition after reload", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-replay-"));
+  const stateDir = join(root, "review");
+  try {
+    await mkdir(stateDir, { recursive: true });
+    const summary = {
+      cancelled: 0,
+      done: 1,
+      exited: 0,
+      failed: 0,
+      killed: 0,
+      running: 0,
+      runningSubagents: 0,
+      runs: [{ run: "review", stateDir, status: "done" as const }],
+      total: 1,
+    };
+    const transitions = detectRunTransitions(new Map(), summary);
+    assert.deepEqual(transitions, [
+      { from: "running", run: "review", stateDir, to: "done" },
+    ]);
+    const steering: unknown[] = [];
+    deliverRunTransitionNotifications(transitions, {
+      notify: () => {},
+      sendSteering: (message) => steering.push(message),
+    });
+    assert.equal(steering.length, 1);
+    const handled = JSON.parse(
+      await readFile(join(stateDir, "terminal-handled.json"), "utf8"),
+    );
+    assert.equal(handled.event, "run.notification");
+    assert.equal(handled.status, "done");
+    const replay = detectRunTransitions(new Map(), {
+      ...summary,
+      runs: [{ ...summary.runs[0], terminalHandled: true }],
+    });
+    assert.deepEqual(replay, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability retries unhandled terminal steering after delivery failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-retry-"));
+  const stateDir = join(root, "review");
+  try {
+    await mkdir(stateDir, { recursive: true });
+    const summary = {
+      cancelled: 0,
+      done: 1,
+      exited: 0,
+      failed: 0,
+      killed: 0,
+      running: 0,
+      runningSubagents: 0,
+      runs: [{ run: "review", stateDir, status: "done" as const }],
+      total: 1,
+    };
+    const observed = new Map();
+    const first = detectRunTransitions(observed, summary);
+    assert.throws(
+      () =>
+        deliverRunTransitionNotifications(first, {
+          notify: () => {},
+          sendSteering: () => {
+            throw new Error("delivery failed");
+          },
+        }),
+      /delivery failed/,
+    );
+    await assert.rejects(
+      readFile(join(stateDir, "terminal-handled.json"), "utf8"),
+      /ENOENT/,
+    );
+    const retry = detectRunTransitions(observed, summary);
+    assert.equal(retry.length, 1);
+    let delivered = 0;
+    deliverRunTransitionNotifications(retry, {
+      notify: () => {},
+      sendSteering: () => {
+        delivered += 1;
+      },
+    });
+    assert.equal(delivered, 1);
+    const handled = JSON.parse(
+      await readFile(join(stateDir, "terminal-handled.json"), "utf8"),
+    );
+    assert.equal(handled.status, "done");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Run observability reports cancelled terminal transitions clearly", () => {

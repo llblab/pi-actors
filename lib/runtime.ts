@@ -5,6 +5,7 @@
  */
 
 import { existsSync, watch, type FSWatcher } from "node:fs";
+import { basename, dirname } from "node:path";
 
 import * as Config from "./config.ts";
 import type { RegisteredToolExec } from "./execution.ts";
@@ -186,10 +187,13 @@ export function createRecipeToolReloadWatcher(
 ): RecipeToolReloadWatcher {
   let reloadTimeout: NodeJS.Timeout | undefined;
   let rootWatcher: FSWatcher | undefined;
+  let parentWatcher: FSWatcher | undefined;
   let failureNotified = false;
   const close = (): void => {
     rootWatcher?.close();
     rootWatcher = undefined;
+    parentWatcher?.close();
+    parentWatcher = undefined;
     if (reloadTimeout) clearTimeout(reloadTimeout);
     reloadTimeout = undefined;
   };
@@ -210,21 +214,69 @@ export function createRecipeToolReloadWatcher(
     }, 150);
     reloadTimeout.unref?.();
   };
+  const watchParent = (ctx: RuntimeContext, recipeRoot: string): void => {
+    if (parentWatcher || rootWatcher) return;
+    const parent = dirname(recipeRoot);
+    if (!existsSync(parent)) {
+      notifyFailure(ctx);
+      return;
+    }
+    try {
+      parentWatcher = watch(parent, (_event, changedFile) => {
+        if (
+          changedFile &&
+          String(changedFile) !== basename(recipeRoot) &&
+          !existsSync(recipeRoot)
+        ) {
+          return;
+        }
+        if (!existsSync(recipeRoot)) return;
+        parentWatcher?.close();
+        parentWatcher = undefined;
+        watchRoot(ctx, recipeRoot);
+        scheduleReload(ctx);
+      });
+      parentWatcher.on("error", () => {
+        parentWatcher?.close();
+        parentWatcher = undefined;
+        notifyFailure(ctx);
+      });
+    } catch {
+      notifyFailure(ctx);
+    }
+  };
+  const watchRoot = (ctx: RuntimeContext, recipeRoot: string): void => {
+    if (rootWatcher) return;
+    if (!existsSync(recipeRoot)) {
+      watchParent(ctx, recipeRoot);
+      return;
+    }
+    try {
+      rootWatcher = watch(recipeRoot, () => {
+        if (!existsSync(recipeRoot)) {
+          rootWatcher?.close();
+          rootWatcher = undefined;
+          scheduleReload(ctx);
+          watchParent(ctx, recipeRoot);
+          return;
+        }
+        scheduleReload(ctx);
+      });
+      rootWatcher.on("error", () => {
+        rootWatcher?.close();
+        rootWatcher = undefined;
+        if (existsSync(recipeRoot)) notifyFailure(ctx);
+        else watchParent(ctx, recipeRoot);
+      });
+    } catch {
+      notifyFailure(ctx);
+    }
+  };
   return {
     close,
     watch(ctx: RuntimeContext): void {
-      const recipeRoot = Paths.getRecipeRoot();
-      if (rootWatcher || !existsSync(recipeRoot)) return;
-      try {
-        rootWatcher = watch(recipeRoot, () => scheduleReload(ctx));
-        rootWatcher.on("error", () => {
-          rootWatcher?.close();
-          rootWatcher = undefined;
-          notifyFailure(ctx);
-        });
-      } catch {
-        notifyFailure(ctx);
-      }
+      if (rootWatcher || parentWatcher) return;
+      watchRoot(ctx, Paths.getRecipeRoot());
     },
   };
 }

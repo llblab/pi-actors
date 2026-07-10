@@ -58,6 +58,7 @@ export interface TemplateRecipeDefinition {
   when?: boolean | string;
   timeout?: number | string;
   delay?: number | string;
+  accept_output?: "review_evidence";
   output?: string;
   artifacts?: Record<string, string>;
   mailbox?: TemplateRecipeMailbox;
@@ -72,7 +73,6 @@ export interface TemplateRecipeDefinition {
 
 export interface TemplateRecipeConfig extends TemplateRecipeDefinition {
   async?: boolean;
-  state_dir?: string;
 }
 
 interface ImportedRecipe {
@@ -263,6 +263,7 @@ function getRecipeCommandTemplate(
     "when",
     "timeout",
     "delay",
+    "accept_output",
     "output",
     "retry",
     "failure",
@@ -999,11 +1000,6 @@ export function readResolvedRecipeConfig(
           : delegated?.async === false
             ? { async: false }
             : {}),
-    ...(typeof substituted.state_dir === "string"
-      ? { state_dir: substituted.state_dir }
-      : typeof delegated?.state_dir === "string"
-        ? { state_dir: delegated.state_dir }
-        : {}),
     ...(Object.keys(imports).length > 0
       ? { imports: getRecipeImports(raw) }
       : {}),
@@ -1039,6 +1035,9 @@ export function readResolvedRecipeConfig(
     ...(typeof substituted.delay === "number" ||
     typeof substituted.delay === "string"
       ? { delay: substituted.delay }
+      : {}),
+    ...(substituted.accept_output === "review_evidence"
+      ? { accept_output: substituted.accept_output }
       : {}),
     ...(typeof substituted.output === "string"
       ? { output: substituted.output }

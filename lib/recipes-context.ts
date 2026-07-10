@@ -63,10 +63,10 @@ function isPiFileArgument(arg: string): boolean {
   return arg.startsWith("@") && arg.length > 1;
 }
 
-export function findPiPrintPromptIndex(args: string[]): number | undefined {
+function findPiPrintPromptIndexes(args: string[]): number[] {
   let printMode = false;
   let positionalOnly = false;
-  let promptIndex: number | undefined;
+  const promptIndexes: number[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (!positionalOnly && arg === "--") {
@@ -82,9 +82,13 @@ export function findPiPrintPromptIndex(args: string[]): number | undefined {
       continue;
     }
     if (!printMode || isPiFileArgument(arg)) continue;
-    promptIndex = index;
+    promptIndexes.push(index);
   }
-  return promptIndex;
+  return promptIndexes;
+}
+
+export function findPiPrintPromptIndex(args: string[]): number | undefined {
+  return findPiPrintPromptIndexes(args).at(-1);
 }
 
 function matchesActorContext(
@@ -175,13 +179,17 @@ export function materializePiPrintPromptArg(
   promptFile: string | (() => string),
 ): MaterializedPiPrintPromptArgs {
   if (!isPiCommand(command)) return { args };
-  const promptIndex = findPiPrintPromptIndex(args);
-  if (promptIndex === undefined) return { args };
-  const prompt = args[promptIndex];
+  const promptIndexes = findPiPrintPromptIndexes(args);
+  if (promptIndexes.length === 0) return { args };
+  const prompt = promptIndexes.map((index) => args[index]).join(" ");
   const path = typeof promptFile === "function" ? promptFile() : promptFile;
   writeFileSync(path, prompt, "utf8");
-  const next = [...args];
-  next[promptIndex] = `@${path}`;
+  const promptIndexSet = new Set(promptIndexes);
+  const firstPromptIndex = promptIndexes[0];
+  const next = args.flatMap((arg, index) => {
+    if (index === firstPromptIndex) return [`@${path}`];
+    return promptIndexSet.has(index) ? [] : [arg];
+  });
   return {
     args: next,
     promptBytes: Buffer.byteLength(prompt),

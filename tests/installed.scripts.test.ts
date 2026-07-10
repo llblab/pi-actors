@@ -52,7 +52,7 @@ async function prepareInstalledPackage(root: string): Promise<string> {
 
 test("package metadata exposes compiled and source extension entrypoints", async () => {
   const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
-  assert.deepEqual(pkg.pi.extensions, ["./dist/index.js"]);
+  assert.deepEqual(pkg.pi.extensions, ["./dist/pi-actors/index.js"]);
   assert.deepEqual(pkg.pi.sourceExtensions, ["./index.ts"]);
   assert.deepEqual(pkg.pi.skills, ["./dist/skills"]);
   assert.deepEqual(pkg.pi.sourceSkills, ["./skills"]);
@@ -66,6 +66,10 @@ test("build output mirrors JS runtime assets under dist", async () => {
     const distEntries = await readdir(join(process.cwd(), "dist", dir));
     assert.deepEqual(distEntries.sort(), sourceEntries.sort(), `dist/${dir} should mirror ${dir}`);
   }
+  assert.equal(
+    await readFile(join(process.cwd(), "dist", "pi-actors", "index.js"), "utf8"),
+    'export { default } from "../index.js";\n',
+  );
   await access(join(process.cwd(), "dist", "scripts", "actor-worker.mjs"));
   await access(join(process.cwd(), "dist", "scripts", "async-runner.mjs"));
   await access(join(process.cwd(), "dist", "scripts", "build-dist.mjs"));

@@ -26,5 +26,6 @@
       "run.failed"
     ]
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Normalize this subagent output. Target format: {format}. Preservation policy: {preservation_policy}. Input: {input}"
+  "accept_output": "review_evidence",
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Normalize this subagent output. Begin the response with ACTOR_REVIEW_RESULT on its own line. Target format: {format}. Preservation policy: {preservation_policy}. Input: {input}"
 }

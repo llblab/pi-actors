@@ -30,5 +30,6 @@
       "run.failed"
     ]
   },
-  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Merge these subagent outputs using mode {mode}: {inputs}. Merge policy: {merge_policy}. Risk policy: {risk_policy}. Output format: {output_format}"
+  "accept_output": "review_evidence",
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Merge these subagent outputs using mode {mode}: {inputs}. Merge policy: {merge_policy}. Risk policy: {risk_policy}. Begin the response with ACTOR_REVIEW_RESULT on its own line. Output format: {output_format}"
 }

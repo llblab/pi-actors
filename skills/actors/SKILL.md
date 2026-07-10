@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.39.0
+  version: 0.40.0
 ---
 
 # Actors (pi-actors)
@@ -68,6 +68,7 @@ Rules:
 - Use inline `template` for one-off experiments; promote useful repeats to recipes.
 - When a successful actor follow-up suggests persistence, decide whether the pattern deserves durable tool memory; call `register_tool` yourself only when the evidence is strong, and ask before writing the user recipe root.
 - Use stable `as` names when you will inspect or message the actor later.
+- Public run state is runtime-owned; do not pass custom `state_dir` paths. This keeps `run:<id>` addressability and retention on one boundary.
 - `async: true` on the recipe is the detached run switch.
 
 ### `message` — send a typed envelope
@@ -90,6 +91,7 @@ Envelope fields:
 - Group posts to `room:<run>` require `from` from the same run (`run:<run>` or `branch:<run>/<branch>`).
 - Runtime termination message: `control.kill` is the only documented actor message that kills a run. `control.stop` and `control.cancel` are actor-local mailbox vocabulary only when a recipe declares and handles them. Terminal retention messages: `control.archive`, `control.prune`.
 - Long-lived child processes should remain in the run-owned process group unless the recipe implements an explicit daemon termination bridge; do not leave unowned detached services behind `control.kill`.
+- Run controls revalidate a persisted cross-platform process identity proof before delivery or signaling. Treat `dead pid`, `owner mismatch`, and `unsupported proof` as distinct fail-closed states; never bypass them with direct pid signals.
 
 Check `inspect view=mailbox` before domain-specific messages.
 
@@ -116,8 +118,8 @@ Views:
 - Advanced `contacts`: roster-derived direct-message targets without full roster metadata.
 - Advanced `previews`: TUI-ready bounded group-message previews with timestamp/from/to/type/summary/body_preview.
 - `mailbox`: declared accepts/emits contract for runs; queued direct branch inbox messages for `branch:<run>/<branch>` with `id`, status, route/type, and queue/handling timestamps.
-- `files`: run state directory file list.
-- `artifacts`: declared artifact paths/status.
+- `files`: run state file summary plus a `lines`-bounded `review-evidence.json` manifest when present, including total/truncated command counts and stage capture paths.
+- `artifacts`: declared artifact paths/status plus the same bounded owned review-evidence manifest when present.
 - `recipes` target: registry summary for active, shadowed, invalid, disabled, and diagnostic recipe entries.
 
 Actor inspector commands:
@@ -128,7 +130,7 @@ Actor inspector commands:
 
 The table is compact and optimistic by default: bounded body previews, capped noisy room rows, branch-local inbox previews, stable event ids in selected-message details, and an inline roster summary in the form `name/role` that wraps only when needed. Use `unread` for queued branch inbox work and `branch <name>` / `current-branch <name>` for one branch's room/direct/inbox traffic. Rows with `metadata.requires_response=true` show a `!` attention marker. `/actors-inspect <number>` marks that row read for the current session filter. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
 
-Let terminal notifications arrive; avoid sleep-poll loops except during diagnosis.
+Let terminal notifications arrive. When a deferred actor result gates the next step, wait for that terminal steering notification instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Busy coordinators receive it at the next safe tool boundary; idle coordinators start a normal turn. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
 
 ## Runtime Communication Rules
 
@@ -154,11 +156,13 @@ Controls:
 - `args`, `defaults`: public placeholder declarations and defaults.
 - `parallel: true`: fanout child nodes.
 - `when`: conditional execution.
+- `accept_output: review_evidence`: fail closed unless the exact first non-whitespace stdout line is `ACTOR_REVIEW_RESULT`; marker prefixes are rejected and rejected stdout remains diagnostic evidence.
 - `timeout`, `delay`, `retry`: timing and retry controls; string placeholders are allowed where supported.
 - `failure`: `continue`, `branch`, or `root` propagation.
 - `recover`: cleanup between retry attempts.
 - `repeat`: repeated node expansion.
 - `output`: output behavior selection.
+- Command stdout/stderr use bounded tails plus complete spill files; tool/run diagnostics expose byte counts, truncation, and spill paths, while pipelines fail with `incomplete pipeline stdin` rather than consuming a partial tail.
 
 Placeholders:
 
@@ -199,7 +203,7 @@ Rules:
 7. Declare `mailbox` for actors that accept or emit meaningful messages.
 8. Declare `artifacts` for durable outputs the coordinator should inspect.
 9. File-backed recipe identity comes from the filename basename; legacy top-level `name` fields are ignored by loaders.
-10. File-backed async recipes pass child `pi -p` actors a bounded JSONL recipe context bundle by default: raw entry/import recipe records, derived `name`, import path/alias, and `"you_are_here": true` on the launching recipe node. The runner materializes child prompts under `prompts/command-NNN.md` and invokes Pi with `@file` args so large prompts and recipe context stay inspectable and argv-safe. Set `"actor_context": false` or `"off"` to suppress recipe context for minimal prompts.
+10. File-backed async recipes pass child `pi -p` actors a bounded JSONL recipe context bundle by default: raw entry/import recipe records, derived `name`, import path/alias, and `"you_are_here": true` on the launching recipe node. The runner collapses all natural-language positional fragments into one prompt under `prompts/command-NNN.md`, keeps intentional `@file` attachments separate, and invokes Pi with one authoritative prompt-file arg so large prompts and recipe context stay inspectable and argv-safe. Set `"actor_context": false` or `"off"` to suppress recipe context for minimal prompts.
 11. Keep packaged recipes generic: no machine-local paths, no private companion identities, no project-specific defaults unless the recipe is explicitly project-specific.
 12. Do not ship concrete model-version defaults in packaged recipes. For review-oriented subagent/lens recipes, default model/thinking args through `{current_model}` and `{current_thinking}` so they inherit the selected Pi session policy; keep `model`, `models`, `thinking`, and stage-specific model args explicit so callers can override policy at launch.
 
@@ -219,7 +223,7 @@ Muscle-memory lens: pi-actors has two durable executable-memory layers.
 
 Agents grow active memory by calling `register_tool` or by deliberate recipe-file edits. They grow draft memory by trying ad hoc actors successfully. Treat both as executable habits: drafts are the workbench/proving ground; root recipes are promoted muscle memory.
 
-Usage lens: user recipes may carry extension-maintained launch metadata such as `usage.calls` and `usage.last_called`. The extension increments the counter when it starts that concrete recipe; agents should not hand-edit counters as part of normal recipe maintenance. Treat usage as evidence for usefulness analysis: heavily used recipes are good candidates for promotion, documentation, or stronger tests; unused recipes are cleanup candidates. Do not use failure counts as a primary usefulness signal because failures may reflect bad caller judgment rather than bad recipes. Do not delete or demote solely from counters without operator approval.
+Usage lens: user recipe launches update extension-maintained `.usage/<recipe-filename>.json` sidecars with fields such as `usage.calls` and `usage.last_called`; authored recipe files are not rewritten for telemetry. Discovery merges the sidecar into inspection. Agents should not hand-edit counters as part of normal recipe maintenance. Treat usage as evidence for usefulness analysis: heavily used recipes are good candidates for promotion, documentation, or stronger tests; unused recipes are cleanup candidates. Do not use failure counts as a primary usefulness signal because failures may reflect bad caller judgment rather than bad recipes. Do not delete or demote solely from counters without operator approval.
 
 Promotion lens: successful transient/ad hoc actor runs are evidence, not commands. Inline spawns leave draft recipes as replayable evidence, not active tools. If a draft is repeatable, parameterized, safe enough, and likely useful later, the agent may promote it by moving/copying it into `~/.pi/agent/recipes` or by calling `register_tool` with a concise name, typed args/defaults, and a reviewed template or recipe path. Do not auto-register every success; do not promote temp paths, secrets, one-off prompts, or project-private assumptions without normalization and approval.
 
@@ -284,7 +288,7 @@ The user recipe root is the default tool set by location. It accepts canonical J
 
 Use packaged recipes by name with `spawn file=<name>` for async actors, or register/call them as tools when repeated use deserves a stable shortcut.
 
-Packaged review recipes are directly spawnable. Use `spawn file="pipeline-review-readiness" values={...}` for readiness review or `spawn file="subagent-review" values={...}` for one reviewer; pass model/thinking/tool policy through values, then inspect the run. Review coordinators preflight stage models before fanout; `ACTOR_PREFLIGHT_FAILED` diagnostics identify the failed stage, selected policy, provider error class, prompt file, and override args. Quorum-aware review fanout exposes `subagent_ttl_ms`, `reviewer_concurrency`, `min_successful_reviewers`, and `merge_policy`; partial reviewer evidence is preserved and marked `complete`, `degraded`, or `insufficient_data`. Run status/progress exposes `model_policy` so inherited vs explicit model/thinking choices remain visible. Do not recreate their script commands, call packaged scripts directly, or create wrapper recipes just to launch the maintained recipe.
+Packaged review recipes are directly spawnable. Use `spawn file="pipeline-review-readiness" values={...}` for readiness review or `spawn file="subagent-review" values={...}` for one reviewer; pass model/thinking/tool policy through values, then inspect the run. Review coordinators preflight stage models before fanout; `ACTOR_PREFLIGHT_FAILED` diagnostics identify the failed stage, selected policy, provider error class, prompt file, and override args. Review stages require the `ACTOR_REVIEW_RESULT` evidence marker, so format acknowledgements and input requests fail closed before satisfying quorum or flowing downstream; rejected stdout remains in branch diagnostics. Quorum-aware review fanout exposes `subagent_ttl_ms`, `reviewer_concurrency`, `min_successful_reviewers`, and `merge_policy`; partial reviewer evidence is preserved and marked `complete`, `degraded`, or `insufficient_data`. Run status/progress exposes `model_policy` so inherited vs explicit model/thinking choices remain visible. Do not recreate their script commands, call packaged scripts directly, or create wrapper recipes just to launch the maintained recipe.
 
 - [`pipeline-room-swarm`](../../recipes/pipeline-room-swarm.json): room-visible swarm coordination with roles, rounds, optional locker, artifact synthesis, and `subagent_ttl_ms` for hard participant budgets.
 - [`pipeline-repo-health`](../../recipes/pipeline-repo-health.json): git/doc/validation evidence → normalized repository health report.

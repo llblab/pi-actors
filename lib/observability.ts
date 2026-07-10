@@ -81,7 +81,7 @@ export interface RunUiSnapshot {
 
 export interface RunUiNotificationSink {
   notify(message: string, level: "info" | "warning" | "error"): void;
-  sendFollowUp(message: {
+  sendSteering(message: {
     customType: string;
     content: string;
     display: true;
@@ -140,12 +140,18 @@ export function deliverRunTransitionNotifications(
     const text = formatRunTransitionMessage(transition);
     sink.notify(text, getRunTransitionNotificationType(transition));
     if (!shouldSendRunTransitionFollowUp(transition)) continue;
-    sink.sendFollowUp({
+    sink.sendSteering({
       customType: "pi-actors-run",
       content: text,
       display: true,
       details: transition,
     });
+    if (transition.stateDir) {
+      AsyncRuns.markRunTerminalNotificationHandled(
+        transition.stateDir,
+        transition.to,
+      );
+    }
   }
 }
 
@@ -158,7 +164,7 @@ export function deliverRunOutboxNotifications(
     const text = formatRunOutboxMessage(event);
     sink.notify(text, getRunOutboxNotificationType(event));
     if (!shouldSendRunOutboxFollowUp(event)) continue;
-    sink.sendFollowUp({
+    sink.sendSteering({
       customType: "pi-actors-run-message",
       content: text,
       display: true,
@@ -747,9 +753,9 @@ export function detectRunTransitions(
   for (const run of summary.runs) {
     const key = runObservationKey(run);
     const old = previous.get(key);
-    if (old && old !== run.status && TERMINAL.has(run.status)) {
+    if (!run.terminalHandled && TERMINAL.has(run.status)) {
       transitions.push({
-        from: old,
+        from: old ?? "running",
         run: run.run,
         ...(run.stateDir ? { stateDir: run.stateDir } : {}),
         ...(run.artifacts ? { artifacts: run.artifacts } : {}),

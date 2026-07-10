@@ -81,18 +81,25 @@ Use `run_id` on async recipe tools or `as: "run:<id>"` on `spawn` when the calle
 - `{default_room}`: default room address, e.g. `room:review`.
 - `{communication_file}`: compact communication snapshot path.
 
+Review commands that require semantic evidence apply marker acceptance before command completion accounting. Rejected code-zero output is reported consistently as a failed command in events, progress, evidence, and outbox delivery; it cannot emit a success-level completion notification. Evidence records are written before command launch and lifecycle cancellation or kill finalizes any running record with its interrupted state, effective exit code, and attempt capture paths. Async attempt stdout/stderr files exist from attempt start, so even small partial streams remain auditable when a command never returns.
+
 ## State Files
 
 Use ordinary files under the extension temp directory so status tools stay simple and inspectable:
 
-- `run.json`: pid, optional source metadata (`launch_source`, `tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, mailbox metadata, created time, and state dir.
+- `.pi-actors-run-state.json`: runtime ownership marker binding the run id to the canonical state directory; launch reuse and destructive retention fail closed when it is absent, invalid, mismatched, or reached through a symlink alias. State reuse also fails closed whenever the persisted process identity mismatches a still-live pid, preventing corrupted metadata from admitting overlapping runners.
+- `run.json`: pid, cross-platform `process_identity` proof (start time, command, and canonical cwd where available), optional source metadata (`launch_source`, `tool`, `recipe`, `recipe_file`), command-template config, cwd, coordinator owner id, values, named `artifacts`, mailbox metadata, created time, and state dir. Existing launch cwd aliases are resolved through native `realpath` before proof matching, so symlinked working directories do not degrade control to `unsupported_proof`.
 - `communication.json`: compact actor communication snapshot with self/root/parent, default-room, member, and contact hints for room-aware scripts and agents.
 - `progress.json`: phase, active command count, completed count, failures, updated time, and optional `model_policy` provenance for inherited/explicit model and thinking values.
 - `events.jsonl`: append-only implementation lifecycle log.
 - `outbox.jsonl`: implementation storage for actor-message envelopes used by `inspect view=messages`, coordinator notifications, or follow-up context. Coordinator follow-ups preserve bounded `body` previews plus message metadata for decision points.
 - `stdout.log` and `stderr.log`: detached process output.
-- `prompts/command-NNN.md`: state-owned prompt files materialized for child `pi -p` commands so long prompts and appended recipe context travel as `@file` arguments instead of fragile inline argv text.
+- `prompts/command-NNN.md`: state-owned prompt files that collapse child `pi -p` natural-language positional fragments and appended recipe context into one authoritative `@file` prompt while preserving intentional file/image arguments.
+- `captures/command-NNN/attempt-NNN/{stdout,stderr}.log`: complete byte-exact command streams, retained even below the bounded in-memory capture limit and separated across retries.
+- `review-evidence.json`: stable command/stage manifest linking prompts, repeated branches, capture attempts, byte counts, exit state, semantic marker acceptance, recipe context, and model/thinking policy; terminal status aligns with the run. Review pipelines inject prior-stage `ACTOR_EVIDENCE_REF` values into downstream prompts, record cited/missing report sources, and fail closed if a normalized report claims `complete` without every required reviewer, verifier, merger, and judge reference.
 - `result.json`: final code, killed flag, output selector, and optional full-output path.
+
+Public `spawn` always uses the runtime-owned run root; caller-selected state directories are rejected so `run:<id>` addressing and retention share one boundary. Internal adapters may still supply isolated state directories for deterministic fixtures, but those are not part of the public actor contract. Every launched runner also persists a process identity proof and revalidates it for status, state reuse, message delivery, cancellation, kill, and retirement; dead pids, reused-pid owner mismatches, and unavailable platform proofs remain distinct diagnostics and destructive controls fail closed.
 
 For pi-actors, actor run state defaults to:
 
@@ -110,6 +117,8 @@ State files use this shape:
 ~/.pi/agent/tmp/pi-actors/runs/<run>/outbox.jsonl
 ~/.pi/agent/tmp/pi-actors/runs/<run>/stdout.log
 ~/.pi/agent/tmp/pi-actors/runs/<run>/stderr.log
+~/.pi/agent/tmp/pi-actors/runs/<run>/review-evidence.json
+~/.pi/agent/tmp/pi-actors/runs/<run>/captures/command-NNN/attempt-NNN/stdout.log
 ~/.pi/agent/tmp/pi-actors/runs/<run>/prompts/command-001.md
 ~/.pi/agent/tmp/pi-actors/runs/<run>/result.json
 ```
@@ -170,7 +179,7 @@ Low-level async actions map into the actor surface instead of forming a second p
 - Send/control → `message`
 - Status/tail/messages/list → `inspect`
 - Force kill → `message` with `control.kill`, with synchronous results
-- Archive/prune terminal state → `message` with `control.archive` or `control.prune`, with active runs rejected fail-closed
+- Archive/prune terminal state → `message` with `control.archive` or `control.prune`, with active runs rejected fail-closed; retained artifacts use collision-safe identity-derived filenames, preserve timestamps, skip missing optional files, and abort prune before source deletion on any copy failure
 
 Compact text is returned by default so async management does not flood agent context; use verbose inspection when the full state object is needed. List output intentionally shares one state root across music, subagents, timers, and other async work; source fields such as `tool` and `recipe` distinguish run purpose when the launcher recorded them. The run root may contain a rebuildable `index.json` with run id, state directory, owner, status, update time, and recipe/tool hints; corrupt indexes fall back to recursive scan. Registered tools are the preferred user-facing surface for reusable recipes. `control.prune` accepts `body.preserve_artifacts=true` to copy existing named artifacts beside the run root before deleting terminal state.
 
@@ -207,9 +216,9 @@ Runtime wake notifications are now modeled separately from durable queues. Messa
 
 ## Coordinator Notifications
 
-The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and delivers terminal `done`/`failed`/unhandled `killed`/`exited` transitions plus script-authored `notify`/`followup` actor messages back to the owning session. This gives the top-level async task a completion signal on the happy path while still letting recipe-local messages bubble up when scripts need finer-grained notifications. Terminal follow-ups include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Failures and in-flight parallel branch completions can bubble as follow-ups, while successful final leaf completions stay diagnostic to avoid flooding long sequential pipelines. Branch-level `command.done` follow-ups omit artifact manifests because the top-level terminal follow-up carries them once. Intentional `control.kill` and recipe-local stop commands stay out of follow-up context because the initiating message already returns synchronously or is handled by actor-local policy. If a follow-up asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` only when a delivered follow-up requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
+The launching coordinator should not busy-poll long-running async runs. The extension watches run state directories and steers terminal `done`/`failed`/unhandled `killed`/`exited` transitions back to the owning session with `triggerTurn: true`; a busy coordinator receives completion at the next safe tool boundary, while an idle coordinator starts a normal turn without a racy manual idle check. Script-authored `notify`/`followup` actor messages still follow their declared outbox delivery policy. Terminal notifications include recipe-level named `artifacts` when declared. The generic runner also emits compact `command.done` actor messages for completed leaf commands; recipe authors declare that capability in `mailbox.emits` rather than configuring a separate delivery policy. Failures and in-flight parallel branch completions can bubble according to outbox policy, while successful final leaf completions stay diagnostic to avoid flooding long sequential pipelines. Intentional `control.kill` and recipe-local stop commands stay out of coordinator context because the initiating message already returns synchronously or is handled by actor-local policy. If a notification asks for direction, answer with `message` rather than starting a polling loop. Use explicit `inspect` only when a delivered notification requests inspection, a real decision depends on state, or a suspected stuck run needs diagnosis — never merely because a timeout elapsed.
 
-Ambient status indicators may refresh while work is active, but coordinator attention is driven from run-state changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn`; the run signals back through lifecycle state, results, and actor messages. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
+Ambient status indicators may refresh while work is active, but coordinator attention is driven from run-state changes rather than a coordinator agent loop. This lets the coordinator continue other work after `spawn`; the run signals back through lifecycle state, results, and actor messages. An owned terminal run without `terminal-handled.json` remains retry-eligible during same-runtime and extension/session replacement reconciliation; the marker is written only after successful steering delivery, and initial reconciliation does not replay historical outbox traffic. This is an at-least-once contract: a process crash after send but before marker persistence can produce a duplicate notification, while a failed send remains durably retryable. The ambient triangle count represents active async work units: each running async run contributes at least one triangle, and a run with multiple active parallel command/subagent branches contributes the reported active branch count. If a coordinator starts one parent run with four active parallel branches, four triangles are shown; if the same coordinator starts five independent single-branch runs, five triangles are shown.
 
 ## Run Actor Messages
 

@@ -56,7 +56,7 @@ Or from git:
 pi install git:github.com/llblab/pi-actors
 ```
 
-The npm package is dist-first for JavaScript-only runtimes: Pi metadata points at compiled `dist/` entrypoints and mirrored runtime assets. Source TypeScript and source skills remain packaged for TypeScript-native or checkout-based runtimes.
+The npm package is dist-first for JavaScript-only runtimes: Pi metadata points at the named compiled entrypoint `dist/pi-actors/index.js` plus mirrored runtime assets, so extension discovery identifies `pi-actors` rather than an anonymous `dist` directory. Source TypeScript and source skills remain packaged for TypeScript-native or checkout-based runtimes.
 
 ## First run: actor mode in one minute
 
@@ -125,12 +125,12 @@ Routing comes from `to`, actor ownership, and runtime policy. `type` describes i
 | --- | --- | --- |
 | Command templates | Portable command graphs with placeholders, defaults, guards, retries, parallel nodes, recovery, and timeouts | Wrap a trusted local executable without writing a bespoke tool |
 | Recipes | JSON/Markdown capability specs with metadata, args, defaults, imports, mailbox contracts, artifacts, and async mode | Save a known-good local workflow as reusable muscle memory |
-| Async runs | File-backed detached lifecycle, logs, progress, output, cancellation, artifacts, and terminal follow-ups | Let model work, media jobs, services, or pipelines continue after the turn |
+| Async runs | File-backed detached lifecycle, logs, progress, output, cancellation, artifacts, and durable terminal steering notifications | Let model work, media jobs, services, or pipelines continue after the turn |
 | Message protocol | Typed envelopes across run, tool, branch, room, coordinator, and session targets | Continue, approve, kill, or route work without restarting actors |
 | Rooms and rosters | Run-local group timeline with actor join/leave, contacts, previews, and branch-aware delivery | Coordinate multiple subagents under one visible run |
 | Registry and recipe doctor | Discovered tools, overrides, drafts, invalid recipes, and advisory risk labels | Audit local capability memory before using or promoting it |
 | Draft promotion | Captured ad hoc spawn patterns can become explicit recipes after operator approval | Turn successful improvisation into durable local tools |
-| Review/swarm recipes | Maintained packaged pipelines with preflight, quorum knobs, model/thinking inheritance, prompt-file transport, and diagnostics | Delegate reviews without rebuilding fanout commands |
+| Review/swarm recipes | Maintained packaged pipelines with preflight, marked semantic evidence, quorum knobs, model/thinking inheritance, one-turn prompt-file transport, and diagnostics | Delegate reviews without rebuilding fanout commands |
 | Actor inspector | Compact TUI/debug views for active actor coordination, unread branch inboxes, room messages, and attention markers | Watch only the actor traffic that matters right now |
 | Packaged recipe QA | Installed-package-safe checks for helper paths, mailbox contracts, platform scope, artifacts, and recipe structure | Keep shipped actor components executable and diagnosable |
 
@@ -275,7 +275,7 @@ Packaged recipes are building blocks. Use `spawn file=<recipe>` for maintained p
 | A useful output that should survive context compression | Artifacts |
 | A repeated local workflow | Recipe/tool memory |
 
-When a directly spawned inline/ad hoc actor or a recipe outside the user recipe root completes successfully, `pi-actors` may send the launching agent a follow-up suggesting promotion. The agent should ask first and never auto-save.
+When a directly spawned inline/ad hoc actor or a recipe outside the user recipe root completes successfully, `pi-actors` may include a promotion suggestion in its terminal steering notification. The agent should ask first and never auto-save.
 
 ## Platform support
 

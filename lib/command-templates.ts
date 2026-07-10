@@ -5,8 +5,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { isAbsolute, join, resolve as resolvePath } from "node:path";
 
 export type CommandTemplateFailureScope = "continue" | "branch" | "root";
 
@@ -30,6 +31,7 @@ export interface CommandTemplateObjectConfig {
   defaults?: Record<string, unknown>;
   timeout?: number | string;
   delay?: number | string;
+  accept_output?: "review_evidence";
   output?: string;
   retry?: number | string;
   failure?: CommandTemplateFailureScope;
@@ -60,6 +62,8 @@ export interface CommandTemplateExecOptions {
   stdin?: string;
   killGrace?: number;
   retry?: number;
+  captureDir?: string;
+  captureLimitBytes?: number;
 }
 
 export interface CommandTemplateExecResult {
@@ -67,6 +71,12 @@ export interface CommandTemplateExecResult {
   stderr: string;
   code: number;
   killed: boolean;
+  stdoutBytes?: number;
+  stderrBytes?: number;
+  stdoutFile?: string;
+  stderrFile?: string;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
 }
 
 export type CommandTemplateRiskLabel =
@@ -79,6 +89,8 @@ export type CommandTemplateRiskLabel =
   | "risk.long_running"
   | "risk.platform_specific"
   | "risk.secret_touching";
+
+const DEFAULT_COMMAND_CAPTURE_LIMIT_BYTES = 1024 * 1024;
 
 const COMMAND_TEMPLATE_RISK_LABEL_ORDER: CommandTemplateRiskLabel[] = [
   "risk.shell",
@@ -584,9 +596,9 @@ export function expandCommandTemplateExecutable(
   cwd: string,
 ): string {
   if (command === "~") return homedir();
-  if (command.startsWith("~/")) return resolve(homedir(), command.slice(2));
+  if (command.startsWith("~/")) return resolvePath(homedir(), command.slice(2));
   if (command.includes("/") && !isAbsolute(command))
-    return resolve(cwd, command);
+    return resolvePath(cwd, command);
   return command;
 }
 
@@ -840,11 +852,81 @@ export async function execCommandTemplate(
     killed: false,
   };
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const result = await execCommandTemplateOnce(command, args, options);
+    const attemptOptions = options.captureDir
+      ? {
+          ...options,
+          captureDir: join(
+            options.captureDir,
+            `attempt-${String(attempt).padStart(3, "0")}`,
+          ),
+        }
+      : options;
+    const result = await execCommandTemplateOnce(command, args, attemptOptions);
     if (result.code === 0) return result;
     lastResult = result;
   }
   return lastResult;
+}
+
+interface BoundedCommandCapture {
+  append(value: Buffer | string): void;
+  result(): {
+    bytes: number;
+    content: string;
+    file?: string;
+    truncated: boolean;
+  };
+}
+
+function trimCaptureTail(value: Buffer, limit: number): Buffer {
+  if (value.length <= limit) return value;
+  let start = value.length - limit;
+  while (start < value.length && (value[start]! & 0xc0) === 0x80) start += 1;
+  return value.subarray(start);
+}
+
+function createBoundedCommandCapture(
+  stream: "stdout" | "stderr",
+  limit: number,
+  getCaptureDir: () => string,
+  persistCompleteStream: boolean,
+): BoundedCommandCapture {
+  let bytes = 0;
+  let content: Buffer = Buffer.alloc(0);
+  let file = persistCompleteStream
+    ? join(getCaptureDir(), `${stream}.log`)
+    : undefined;
+  if (file) writeFileSync(file, Buffer.alloc(0));
+  let truncated = false;
+  return {
+    append(value) {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      bytes += chunk.length;
+      if (bytes > limit) truncated = true;
+      if (!file && bytes <= limit) {
+        content = Buffer.concat([content, chunk]);
+        return;
+      }
+      if (!file) {
+        file = join(getCaptureDir(), `${stream}.log`);
+        writeFileSync(file, content);
+      }
+      appendFileSync(file, chunk);
+      content = trimCaptureTail(Buffer.concat([content, chunk]), limit);
+    },
+    result() {
+      if (!file && persistCompleteStream) {
+        file = join(getCaptureDir(), `${stream}.log`);
+        writeFileSync(file, content);
+      }
+      return {
+        bytes,
+        content: content.toString("utf8"),
+        ...(file ? { file } : {}),
+        truncated,
+      };
+    },
+  };
 }
 
 function execCommandTemplateOnce(
@@ -858,8 +940,32 @@ function execCommandTemplateOnce(
       shell: false,
       stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
-    let stdout = "";
-    let stderr = "";
+    const captureLimit = Math.max(
+      1,
+      options.captureLimitBytes ?? DEFAULT_COMMAND_CAPTURE_LIMIT_BYTES,
+    );
+    let captureDir: string | undefined;
+    const getCaptureDir = (): string => {
+      if (captureDir) return captureDir;
+      captureDir = options.captureDir
+        ? resolvePath(options.captureDir)
+        : mkdtempSync(join(tmpdir(), "pi-actors-command-"));
+      mkdirSync(captureDir, { recursive: true });
+      return captureDir;
+    };
+    const persistCompleteStreams = options.captureDir !== undefined;
+    const stdoutCapture = createBoundedCommandCapture(
+      "stdout",
+      captureLimit,
+      getCaptureDir,
+      persistCompleteStreams,
+    );
+    const stderrCapture = createBoundedCommandCapture(
+      "stderr",
+      captureLimit,
+      getCaptureDir,
+      persistCompleteStreams,
+    );
     let killed = false;
     let settled = false;
     let timeoutId: NodeJS.Timeout | undefined;
@@ -879,7 +985,20 @@ function execCommandTemplateOnce(
       if (killTimeoutId) clearTimeout(killTimeoutId);
       if (options.signal)
         options.signal.removeEventListener("abort", killProcess);
-      resolve({ stdout, stderr, code, killed });
+      const stdout = stdoutCapture.result();
+      const stderr = stderrCapture.result();
+      resolve({
+        stdout: stdout.content,
+        stderr: stderr.content,
+        code,
+        killed,
+        stdoutBytes: stdout.bytes,
+        stderrBytes: stderr.bytes,
+        ...(stdout.file ? { stdoutFile: stdout.file } : {}),
+        ...(stderr.file ? { stderrFile: stderr.file } : {}),
+        ...(stdout.truncated ? { stdoutTruncated: true } : {}),
+        ...(stderr.truncated ? { stderrTruncated: true } : {}),
+      });
     };
     if (options.signal) {
       if (options.signal.aborted) killProcess();
@@ -888,16 +1007,16 @@ function execCommandTemplateOnce(
     }
     if (options.timeout !== undefined && options.timeout > 0)
       timeoutId = setTimeout(killProcess, options.timeout);
-    proc.stdout?.on("data", (data) => {
-      stdout += data.toString();
+    proc.stdout?.on("data", (data: Buffer) => {
+      stdoutCapture.append(data);
     });
-    proc.stderr?.on("data", (data) => {
-      stderr += data.toString();
+    proc.stderr?.on("data", (data: Buffer) => {
+      stderrCapture.append(data);
     });
     proc.stdin?.on("error", () => {});
     if (options.stdin !== undefined) proc.stdin?.end(options.stdin);
     proc.on("error", (error) => {
-      stderr += error instanceof Error ? error.message : String(error);
+      stderrCapture.append(error instanceof Error ? error.message : String(error));
       settle(1);
     });
     proc.on("close", (code) => {

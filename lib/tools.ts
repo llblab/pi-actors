@@ -32,6 +32,14 @@ export interface CoreActorToolDefinitionDeps<
   setActiveTools: (toolNames: string[]) => void;
 }
 
+export function resolveActiveRuntimeTool(
+  name: string,
+  activeTools: Pick<Map<string, unknown>, "has">,
+  getDefinition: (name: string) => unknown,
+): unknown {
+  return activeTools.has(name) ? getDefinition(name) : undefined;
+}
+
 export const RESERVED_TOOL_NAMES = new Set([
   "read",
   "write",

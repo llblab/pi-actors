@@ -57,6 +57,7 @@ Common object fields:
 - `defaults`: Placeholder default values by name.
 - `timeout`: Optional execution timeout in milliseconds. Omit it, or set `0`, to leave the command unbounded. Set an explicit positive timeout when a tool must fail closed instead of waiting indefinitely. Numeric control fields may be literal numbers or placeholders such as `"{timeout_ms}"`.
 - `delay`: Optional wait in milliseconds before starting this node. Default is no delay. It may be a literal number or placeholder.
+- `accept_output`: Optional fail-closed semantic output contract. `review_evidence` requires successful stdout to begin with `ACTOR_REVIEW_RESULT`; missing markers become code-65 failures while rejected stdout remains visible in branch diagnostics.
 - `output`: Optional result selector. Default is `"stdout"`; runtime values such as `"ogg"` are valid.
 - `retry`: Optional max attempts including the first. Default is `1`.
 - `failure`: Optional failure propagation scope: `continue`, `branch`, or `root`. Default is `continue`.
@@ -185,7 +186,8 @@ Composition rules:
 - Top-level `args` and `defaults` apply to every leaf unless the leaf defines private values
 - Leaf `args` replace inherited `args`; leaf `defaults` merge over inherited defaults; `timeout` and `output` are not inherited into leaves
 - Timeout is disabled by default; configure a positive `timeout` for bounded commands that should fail closed
-- Each sequence leaf receives the previous leaf's stdout on stdin by default, while the final leaf stdout remains the default composition result
+- Child stdout and stderr are captured as raw bytes with independent bounded in-memory tails; streams that exceed the capture limit spill completely to byte-exact diagnostic files and return byte counts, truncation flags, and spill paths. Text tails align their start to a UTF-8 code-point boundary so chunking or truncation does not corrupt valid multibyte output. Async runs persist complete streams even below the capture limit under command- and retry-specific run-state paths
+- Each sequence leaf receives the previous leaf's complete stdout on stdin by default, reading the byte-complete spill when the model-facing capture is truncated; the final leaf stdout remains the bounded default composition result. Parallel joins likewise use complete branch spills for downstream stdin while branch details and returned output stay bounded. If a declared spill is unavailable, the pipeline fails closed instead of forwarding a partial tail
 - Skipped nodes preserve current stdin/stdout flow and do not execute commands
 - Each parallel child receives the same stdin, and child stdout values are joined in stable array order before flowing to the next sequence leaf
 - Parallel branch joins include branch label and status, and tool details include branch metadata plus coverage summary
@@ -401,7 +403,7 @@ string           → leaf command
 string[]         → sequential composition
 { template }     → leaf command object
 { parallel, template } → sequence or parallel subtree
-{ parallel, concurrency, min_successful, when, args, defaults, delay, retry, failure, recover, output, template } → full node
+{ parallel, concurrency, min_successful, when, args, defaults, delay, retry, failure, recover, accept_output, output, template } → full node
 ```
 
 Start with a string. Add composition when needed. Add `parallel: true` when independent work can run concurrently. Add `when` when a node is conditional. Add delay when launch pacing matters. Add retry when flaky. Add `failure` when propagation scope matters. Add `recover` when a retried node needs cleanup before another attempt. Same contract, growing capability, no dead weight.

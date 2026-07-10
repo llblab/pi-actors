@@ -145,7 +145,7 @@ test("Stored tool normalization accepts template recipe paths in template", () =
   });
 });
 
-test("Stored tool normalization accepts co-located template recipes", () => {
+test("Stored tool normalization ignores legacy custom recipe state dirs", () => {
   const result = normalizeStoredTool(
     "review_launcher",
     {
@@ -167,7 +167,6 @@ test("Stored tool normalization accepts co-located template recipes", () => {
     recipe: {
       async: true,
       name: "review-docs",
-      state_dir: "~/.pi/agent/tmp/pi-actors/runs/review-docs",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     },
@@ -383,7 +382,6 @@ test("Serialized co-located template recipe launchers keep recipe metadata befor
     recipe: {
       async: true,
       name: "review",
-      state_dir: "~/.pi/agent/tmp/pi-actors/runs/review",
       template: "review {scope}",
       values: { prompt: "Review risks." },
     },
@@ -398,7 +396,7 @@ test("Serialized co-located template recipe launchers keep recipe metadata befor
         unknown
       >,
     ),
-    ["description", "name", "async", "state_dir", "values", "template"],
+    ["description", "name", "async", "values", "template"],
   );
 });
 

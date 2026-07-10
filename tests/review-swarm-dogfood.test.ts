@@ -4,7 +4,15 @@
  */
 
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -37,12 +45,24 @@ function fakePiScript(): string {
     'import { readFileSync } from "node:fs";',
     "",
     "const args = process.argv.slice(2);",
-    'let prompt = args.join(" ");',
-    "for (const arg of args) {",
-    '  if (arg.startsWith("@")) {',
-    '    prompt += "\\n" + readFileSync(arg.slice(1), "utf8");',
+    'const valueOptions = new Set(["--model", "--thinking", "--tools"]);',
+    "const promptFiles = [];",
+    "const fragmentedPrompts = [];",
+    "for (let index = 0; index < args.length; index += 1) {",
+    "  const arg = args[index];",
+    '  if (arg === "-p" || arg === "--print" || arg === "--no-tools") continue;',
+    "  if (valueOptions.has(arg)) {",
+    "    index += 1;",
+    "    continue;",
     "  }",
+    '  if (arg.startsWith("@")) promptFiles.push(arg.slice(1));',
+    '  else if (!arg.startsWith("-")) fragmentedPrompts.push(arg);',
     "}",
+    "if (fragmentedPrompts.length > 0 || promptFiles.length !== 1) {",
+    '  console.error(`STRICT_PI_PROMPT_ARGV fragmented=${fragmentedPrompts.length} files=${promptFiles.length}`);',
+    "  process.exit(64);",
+    "}",
+    'const prompt = readFileSync(promptFiles[0], "utf8");',
     'const stdin = readFileSync(0, "utf8");',
     "const full = `${prompt}\\n${stdin}`;",
     'const task = full.split("Actor recipe context bundle follows")[0];',
@@ -55,30 +75,31 @@ function fakePiScript(): string {
     'if (task.includes("Review fixture-scope through this lens")) {',
     '  const lens = task.match(/lens: ([^\\n.]+)/)?.[1]?.trim() ?? "unknown";',
     '  if (lens === "security") {',
-    '    console.error("reviewer security simulated provider failure");',
-    "    process.exit(7);",
+    '    console.log("reviewer security placeholder without evidence marker");',
+    "    process.exit(0);",
     "  }",
-    '  console.log(`REVIEW ${lens}: evidence for fixture-scope`);',
+    '  console.log(`ACTOR_REVIEW_RESULT\\nREVIEW ${lens}: evidence for fixture-scope`);',
     "  process.exit(0);",
     "}",
     "",
     'if (task.includes("Verify this claim")) {',
-    '  console.log(`VERIFICATION: usable reviewer evidence confirmed\\n${stdin}`);',
+    '  console.log(`ACTOR_REVIEW_RESULT\\nVERIFICATION: usable reviewer evidence confirmed\\n${stdin}`);',
     "  process.exit(0);",
     "}",
     "",
     'if (task.includes("Merge these subagent outputs")) {',
-    '  console.log(`MERGED: preserved partial reviewer evidence\\n${stdin}`);',
+    '  console.log(`ACTOR_REVIEW_RESULT\\nMERGED: preserved partial reviewer evidence\\n${stdin}`);',
     "  process.exit(0);",
     "}",
     "",
     'if (task.includes("Judge this merged review")) {',
-    '  console.log(`JUDGE: degraded confidence accepted\\n${stdin}`);',
+    '  console.log(`ACTOR_REVIEW_RESULT\\nJUDGE: degraded confidence accepted\\n${stdin}`);',
     "  process.exit(0);",
     "}",
     "",
     'if (task.includes("Normalize this subagent output")) {',
-    '  console.log(`Status: degraded\\nSummary: deterministic dogfood fixture completed\\n${stdin}`);',
+    '  const refs = [...new Set(full.match(/ACTOR_EVIDENCE_REF: review-evidence\\.json#command-\\d{3}/g) || [])];',
+    '  console.log(`ACTOR_REVIEW_RESULT\\nStatus: degraded\\nSummary: deterministic dogfood fixture completed\\n${refs.join("\\n")}`);',
     "  process.exit(0);",
     "}",
     "",
@@ -126,19 +147,87 @@ test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", asy
     const stderr = await readFile(join(stateDir, "stderr.log"), "utf8");
     const events = await readFile(join(stateDir, "events.jsonl"), "utf8");
     const outbox = await readFile(join(stateDir, "outbox.jsonl"), "utf8");
+    const evidence = JSON.parse(
+      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+    );
 
     assert.equal(meta.model_policy?.model.source, "inherited");
-    assert.equal(status.status, "done");
+    assert.equal(status.status, "done", `${stdout}\n${stderr}`);
     assert.equal(result.code, 0);
     assert.equal(progress.phase, "done");
     assert.equal(Number(progress.activeSubagents ?? 0), 0);
+    assert.match(stdout, /ACTOR_REVIEW_RESULT/);
     assert.match(stdout, /Status: degraded/);
-    assert.match(stdout, /parallel_status: degraded usable: 2 expected: 3 minimum: 2/);
-    assert.match(stdout, /reviewer security simulated provider failure/);
-    assert.doesNotMatch(stdout, /all parallel branches failed/);
+    assert.doesNotMatch(stdout, /insufficient_data/);
     assert.equal(stderr.trim(), "");
     assert.match(events, /"prompt_file"/);
     assert.match(outbox, /"run_files"/);
+    assert.equal(evidence.status, "done");
+    assert.equal(evidence.model_policy.model.source, "inherited");
+    assert.equal(evidence.report_evidence.claims_complete, false);
+    assert.equal(
+      evidence.report_evidence.complete_allowed,
+      true,
+      `${JSON.stringify(evidence.report_evidence)}\n${stdout}`,
+    );
+    assert.deepEqual(evidence.report_evidence.missing, []);
+    assert.deepEqual(
+      evidence.report_evidence.cited,
+      [...evidence.report_evidence.required].sort(),
+    );
+    for (const reference of evidence.report_evidence.required) {
+      assert.match(stdout, new RegExp(`ACTOR_EVIDENCE_REF: ${reference}`));
+    }
+    assert.equal(evidence.commands.length, 11);
+    assert.equal(
+      evidence.commands.filter(
+        (command: { stage: string; semantic_acceptance: string }) =>
+          command.stage === "preflight" &&
+          command.semantic_acceptance === "accepted",
+      ).length,
+      4,
+    );
+    const reviewerEvidence = evidence.commands.filter(
+      (command: { stage: string }) => command.stage === "reviewer",
+    );
+    assert.deepEqual(
+      reviewerEvidence.map((command: { branch_index: string }) => command.branch_index),
+      ["0", "1", "2"],
+    );
+    assert.equal(
+      reviewerEvidence.filter(
+        (command: { semantic_acceptance: string }) =>
+          command.semantic_acceptance === "accepted",
+      ).length,
+      2,
+    );
+    const rejectedReviewers = evidence.commands.filter(
+      (command: { stage: string; semantic_acceptance: string }) =>
+        command.stage === "reviewer" &&
+        command.semantic_acceptance === "rejected",
+    );
+    assert.equal(rejectedReviewers.length, 1);
+    assert.equal(rejectedReviewers[0].exit_code, 0);
+    assert.equal(rejectedReviewers[0].effective_exit_code, 65);
+    assert.match(
+      await readFile(
+        join(stateDir, rejectedReviewers[0].attempts[0].stdout.path),
+        "utf8",
+      ),
+      /placeholder without evidence marker/,
+    );
+    assert.equal(
+      evidence.commands.every(
+        (command: { attempts: unknown[]; prompt_file?: string }) =>
+          command.attempts.length === 1 && Boolean(command.prompt_file),
+      ),
+      true,
+    );
+    const captureFiles = (
+      await readdir(join(stateDir, "captures"), { recursive: true })
+    ).filter((path) => /(?:stdout|stderr)\.log$/.test(path));
+    assert.equal(captureFiles.length, evidence.commands.length * 2);
+    assert.equal(new Set(captureFiles).size, captureFiles.length);
     await waitForFile(join(stateDir, "prompts", "command-001.md"));
   } finally {
     process.env.PATH = previousPath;

@@ -36,7 +36,11 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
         AsyncRuns.sendRunMessage(candidate.stateDir, "stop"),
     });
   };
-  const updateRunUi = (ctx: Pi.ExtensionContext, notify = false): void => {
+  const updateRunUi = (
+    ctx: Pi.ExtensionContext,
+    notify = false,
+    terminalOnly = false,
+  ): void => {
     const ownerId = getRunOwnerId(ctx);
     const snapshot = Observability.readRunUiSnapshot(runUi, ownerId);
     ctx.ui.setStatus(
@@ -78,10 +82,12 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
       notificationSink,
     );
     Observability.pruneRunUiObservationState(runUi, snapshot);
-    Observability.deliverRunOutboxNotifications(
-      snapshot.outboxEvents,
-      notificationSink,
-    );
+    if (!terminalOnly) {
+      Observability.deliverRunOutboxNotifications(
+        snapshot.outboxEvents,
+        notificationSink,
+      );
+    }
   };
   const closeRunWatchers = (): void => {
     runWatcher.close();
@@ -144,7 +150,7 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     activeRunContext = ctx;
     await Temp.prepareExtensionTempDir(Paths.EXTENSION_RUNTIME_PATHS.tempDir);
     runtime.loadTools(ctx);
-    updateRunUi(ctx);
+    updateRunUi(ctx, true, true);
     closeRunWatchers();
     recipeReload.close();
     runWatcher.refresh();
@@ -204,7 +210,12 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     Tools.createCoreActorToolDefinitions<Pi.ExtensionContext>({
       configPath: Paths.EXTENSION_RUNTIME_PATHS.configPath,
       getActiveTools: () => pi.getActiveTools(),
-      getRuntimeTool: (name) => actorToolDefinitions.get(name),
+      getRuntimeTool: (name) =>
+        Tools.resolveActiveRuntimeTool(
+          name,
+          runtime.getTools(),
+          (activeName) => actorToolDefinitions.get(activeName),
+        ),
       registryRuntime: runtime,
       setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
     }).map(withCurrentThinkingContext),

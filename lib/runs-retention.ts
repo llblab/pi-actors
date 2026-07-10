@@ -3,6 +3,7 @@
  * Owns terminal-run archive and prune filesystem behavior.
  */
 
+import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -12,6 +13,16 @@ import {
   type RunArtifactDeclaration,
 } from "./runs-artifacts.ts";
 import { safeRunId } from "./runs-identity.ts";
+import { assertOwnedRunStateDirectory } from "./runs-ownership.ts";
+
+function retainedArtifactFilename(name: string, path: string): string {
+  const readableName = name.replace(/[^A-Za-z0-9_.-]+/g, "_") || "artifact";
+  const identity = createHash("sha256")
+    .update(`${name}\0${path}`)
+    .digest("hex")
+    .slice(0, 8);
+  return `${readableName}-${identity}--${basename(path)}`;
+}
 
 function archivePathFor(run: string, stateDir: string): string {
   const archiveRoot = join(dirname(stateDir), "archived");
@@ -27,6 +38,7 @@ export function archiveTerminalRun(
 ): Record<string, unknown> {
   const stateDir = String(status.state_dir);
   const run = String(status.run ?? basename(stateDir));
+  assertOwnedRunStateDirectory(stateDir, run);
   const archiveDir = archivePathFor(run, stateDir);
   renameSync(stateDir, archiveDir);
   mkdirSync(stateDir, { recursive: true });
@@ -45,9 +57,11 @@ export function archiveTerminalRun(
 export function pruneTerminalRun(
   status: Record<string, unknown>,
   options: { preserveArtifacts?: boolean } = {},
+  deps: { copyArtifact?: typeof cpSync } = {},
 ): Record<string, unknown> {
   const stateDir = String(status.state_dir);
   const run = String(status.run ?? basename(stateDir));
+  assertOwnedRunStateDirectory(stateDir, run);
   const manifest = resolveArtifactManifest(
     status.artifacts as Record<string, RunArtifactDeclaration> | undefined,
   );
@@ -61,8 +75,14 @@ export function pruneTerminalRun(
     mkdirSync(preserveRoot, { recursive: true });
     for (const [name, artifact] of Object.entries(manifest)) {
       if (!artifact.exists) continue;
-      const target = join(preserveRoot, basename(artifact.path));
-      cpSync(artifact.path, target, { force: true });
+      const target = join(
+        preserveRoot,
+        retainedArtifactFilename(name, artifact.path),
+      );
+      (deps.copyArtifact ?? cpSync)(artifact.path, target, {
+        force: true,
+        preserveTimestamps: true,
+      });
       preserved[name] = target;
     }
   }

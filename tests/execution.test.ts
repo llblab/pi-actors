@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { execCommandTemplate } from "../lib/command-templates.ts";
 import { executeRegisteredTool } from "../lib/execution.ts";
 import type { RegisteredTool } from "../lib/config.ts";
 import { readResolvedRecipeConfig } from "../lib/recipes-references.ts";
@@ -59,6 +60,68 @@ test("Registered tool execution expands command and returns formatted payload", 
     `${join(homedir(), "bin/transcribe")} '/tmp/a b.ogg' ru`,
   );
   assert.equal(result.details.truncated, false);
+});
+
+test("Registered tool execution requires an exact review evidence marker line", async () => {
+  const reviewTool: RegisteredTool = {
+    ...tool,
+    template: {
+      accept_output: "review_evidence",
+      template: "./review",
+    },
+  };
+  for (const stdout of [
+    "ACTOR_REVIEW_RESULT_BOGUS\nreport",
+    "prefix ACTOR_REVIEW_RESULT\nreport",
+    "report\nACTOR_REVIEW_RESULT",
+  ]) {
+    await assert.rejects(
+      executeRegisteredTool(
+        reviewTool,
+        {},
+        async () => ({ stdout, stderr: "", code: 0, killed: false }),
+        "/work",
+      ),
+      /review evidence rejected: missing ACTOR_REVIEW_RESULT marker/,
+    );
+  }
+  const accepted = await executeRegisteredTool(
+    reviewTool,
+    {},
+    async () => ({
+      stdout: "\n  \n ACTOR_REVIEW_RESULT \nreport",
+      stderr: "",
+      code: 0,
+      killed: false,
+    }),
+    "/work",
+  );
+  assert.match(accepted.content[0].text, /ACTOR_REVIEW_RESULT/);
+});
+
+test("Registered tool execution accepts large marked evidence from the complete capture", async () => {
+  const bytes = 1_100_000;
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: {
+        accept_output: "review_evidence",
+        template: `${process.execPath} -e "process.stdout.write(['ACTOR_REVIEW_RESULT','X'.repeat(${bytes})].join(String.fromCharCode(10)))"`,
+      },
+    },
+    {},
+    (command, args, options) =>
+      execCommandTemplate(command, args, {
+        ...options,
+        captureLimitBytes: 128,
+      }),
+    process.cwd(),
+  );
+  assert.equal(result.details.code, 0);
+  assert.equal(result.details.stdoutTruncated, true);
+  assert.equal(result.details.stdoutBytes, bytes + 20);
+  assert.equal(result.content[0].text.length < 256, true);
+  assert.doesNotMatch(result.content[0].text, /ACTOR_REVIEW_RESULT/);
 });
 
 test("Registered tool execution passes actor recipe context to leaves", async () => {
@@ -195,6 +258,72 @@ test("Registered tool execution runs template sequences with previous stdout as 
     },
   ]);
   assert.deepEqual(result.content, [{ type: "text", text: "\nsecond out" }]);
+});
+
+test("Registered tool execution exposes final spill metadata", async () => {
+  const result = await executeRegisteredTool(
+    { ...tool, template: "./noisy" },
+    {},
+    async () => ({
+      stdout: "tail",
+      stderr: "warn",
+      code: 0,
+      killed: false,
+      stdoutBytes: 4096,
+      stderrBytes: 4,
+      stdoutFile: "/tmp/noisy-stdout.log",
+      stdoutTruncated: true,
+    }),
+    "/work",
+  );
+  assert.equal(result.details.stdoutBytes, 4096);
+  assert.equal(result.details.stdoutCapturedBytes, 4);
+  assert.equal(result.details.stdoutTruncated, true);
+  assert.equal(result.details.fullOutputPath, "/tmp/noisy-stdout.log");
+});
+
+test("Registered tool execution rejects truncated pipeline stdin", async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    executeRegisteredTool(
+      { ...tool, template: ["./noisy", "./consumer"] },
+      {},
+      async (command) => {
+        calls.push(command);
+        return {
+          stdout: "tail",
+          stderr: "",
+          code: 0,
+          killed: false,
+          stdoutBytes: 4096,
+          stdoutFile: "/tmp/noisy-stdout.log",
+          stdoutTruncated: true,
+        };
+      },
+      "/work",
+    ),
+    /incomplete pipeline stdin.*capture path unreadable: \/tmp\/noisy-stdout\.log/,
+  );
+  assert.deepEqual(calls, ["/work/noisy"]);
+});
+
+test("Registered tool execution delivers complete spilled sequential stdout downstream", async () => {
+  const bytes = 1_100_000;
+  const noisy = `${process.execPath} -e "process.stdout.write('Y'.repeat(${bytes}))"`;
+  const consumer = `${process.execPath} -e "let n=0;process.stdin.on('data',d=>n+=d.length);process.stdin.on('end',()=>console.log('BYTE_COUNT='+n))"`;
+  const result = await executeRegisteredTool(
+    { ...tool, template: [noisy, consumer] },
+    {},
+    (command, args, options) =>
+      execCommandTemplate(command, args, {
+        ...options,
+        captureLimitBytes: 128,
+      }),
+    process.cwd(),
+  );
+  assert.match(result.content[0].text, new RegExp(`BYTE_COUNT=${bytes}`));
+  assert.equal(result.details.stdoutTruncated, undefined);
+  assert.equal(result.content[0].text.length < 256, true);
 });
 
 test("Registered tool execution skips nodes when when guard is false", async () => {
@@ -445,6 +574,40 @@ test("Registered tool execution caps parallel branch concurrency", async () => {
   assert.equal(maxActive, 2);
 });
 
+test("Registered tool execution delivers complete spilled parallel stdout downstream", async () => {
+  const bytes = 1_100_000;
+  const noisy = `${process.execPath} -e "process.stdout.write('X'.repeat(${bytes}))"`;
+  const consumer = `${process.execPath} -e "let n=0;process.stdin.on('data',d=>n+=d.filter(b=>b===88).length);process.stdin.on('end',()=>console.log('X_COUNT='+n))"`;
+  const result = await executeRegisteredTool(
+    {
+      ...tool,
+      template: [
+        {
+          parallel: true,
+          template: [noisy, noisy],
+        },
+        consumer,
+      ],
+    },
+    {},
+    (command, args, options) =>
+      execCommandTemplate(command, args, {
+        ...options,
+        captureLimitBytes: 128,
+      }),
+    process.cwd(),
+  );
+  assert.match(result.content[0].text, new RegExp(`X_COUNT=${bytes * 2}`));
+  assert.equal(result.details.branches?.length, 2);
+  assert.equal(
+    result.details.branches?.every(
+      (branch) => branch.stdoutTruncated && branch.stdoutBytes === bytes,
+    ),
+    true,
+  );
+  assert.equal(result.details.stdoutTruncated, undefined);
+});
+
 test("Registered tool execution reports degraded soft quorum without aborting", async () => {
   const result = await executeRegisteredTool(
     {
@@ -616,7 +779,7 @@ test("Review coordinator preflight fails before reviewer fanout", async () => {
 });
 
 async function runReviewCoordinatorWithReviewerOutcomes(
-  reviewerOutcomes: boolean[],
+  reviewerOutcomes: Array<boolean | string>,
   minSuccessful = 1,
 ): Promise<{ calls: string[]; resultText?: string; rejected?: unknown }> {
   const calls: string[] = [];
@@ -636,14 +799,17 @@ async function runReviewCoordinatorWithReviewerOutcomes(
           return { stdout: "ACTOR_PREFLIGHT_OK", stderr: "", code: 0, killed: false };
         }
         if (prompt.includes("Review repo through this lens")) {
-          const ok = reviewerOutcomes[reviewerIndex] ?? false;
+          const outcome = reviewerOutcomes[reviewerIndex] ?? false;
           reviewerIndex += 1;
-          return ok
-            ? { stdout: `reviewer ${reviewerIndex} evidence`, stderr: "", code: 0, killed: false }
+          if (typeof outcome === "string") {
+            return { stdout: outcome, stderr: "", code: 0, killed: false };
+          }
+          return outcome
+            ? { stdout: `ACTOR_REVIEW_RESULT\nreviewer ${reviewerIndex} evidence`, stderr: "", code: 0, killed: false }
             : { stdout: "", stderr: `reviewer ${reviewerIndex} unavailable`, code: 2, killed: false };
         }
         return {
-          stdout: `stage output\n${options?.stdin ?? ""}`,
+          stdout: `ACTOR_REVIEW_RESULT\nstage output\n${options?.stdin ?? ""}`,
           stderr: "",
           code: 0,
           killed: false,
@@ -675,10 +841,30 @@ test("Review coordinator fails with insufficient reviewer evidence before verifi
   );
 });
 
-test("Review coordinator preserves degraded reviewer evidence above threshold", async () => {
-  const result = await runReviewCoordinatorWithReviewerOutcomes([true, false], 1);
+test("Review coordinator rejects code-zero placeholder evidence before verifier and merger", async () => {
+  const placeholder = "Waiting for the output format.";
+  const result = await runReviewCoordinatorWithReviewerOutcomes([placeholder, placeholder], 1);
+  assert(result.rejected instanceof Error);
+  assert.match(result.rejected.message, /parallel branch quorum not met/);
+  assert.match(result.rejected.message, /missing ACTOR_REVIEW_RESULT marker/);
+  assert.match(result.rejected.message, /Waiting for the output format/);
+  assert.equal(
+    result.calls.some((prompt) => prompt.includes("Verify this claim")),
+    false,
+  );
+  assert.equal(
+    result.calls.some((prompt) => prompt.includes("Merge these subagent outputs")),
+    false,
+  );
+});
+
+test("Review coordinator preserves degraded accepted and rejected reviewer evidence", async () => {
+  const result = await runReviewCoordinatorWithReviewerOutcomes([true, "Go ahead—provide the target format."], 1);
   assert.equal(result.rejected, undefined);
   assert.match(result.resultText ?? "", /parallel_status: degraded/);
+  assert.match(result.resultText ?? "", /reviewer 1 evidence/);
+  assert.match(result.resultText ?? "", /rejected_stdout: Go ahead—provide the target format/);
+  assert.match(result.resultText ?? "", /missing ACTOR_REVIEW_RESULT marker/);
   assert.equal(
     result.calls.some((prompt) => prompt.includes("Verify this claim")),
     true,
@@ -719,7 +905,7 @@ test("Review coordinator starts reviewer fanout only after preflight passes", as
           "verifier",
         ]);
       }
-      return { stdout: `ok ${callCount}`, stderr: "", code: 0, killed: false };
+      return { stdout: `ACTOR_REVIEW_RESULT\nok ${callCount}`, stderr: "", code: 0, killed: false };
     },
     "/work",
   );

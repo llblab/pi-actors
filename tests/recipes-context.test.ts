@@ -106,20 +106,42 @@ test("Actor recipe context ignores pi file args when finding the print prompt", 
   assert.equal(args[3].startsWith("image\n\nActor recipe context bundle"), true);
 });
 
+test("Fragmented Pi prompt argv and recipe context become one authoritative prompt file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-complete-prompt-file-"));
+  try {
+    const promptFile = join(root, "prompt.md");
+    const contextArgs = appendRecipeContextToPiArgs(
+      "pi",
+      ["-p", "--model", "m", "Preflight", "check", "for", "stage", "reviewer.", "Confirm", "launch."],
+      records,
+      { alias: "child" },
+    );
+    const result = materializePiPrintPromptArg("pi", contextArgs, promptFile);
+    assert.deepEqual(result.args, ["-p", "--model", "m", `@${promptFile}`]);
+    const materializedPrompt = await readFile(promptFile, "utf8");
+    assert.match(materializedPrompt, /^Preflight check for stage reviewer\. Confirm launch\./);
+    assert.match(materializedPrompt, /Actor recipe context bundle follows/);
+    assert.match(materializedPrompt, /"you_are_here":true/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Pi print prompts can be materialized into prompt files", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-prompt-file-"));
   try {
     const promptFile = join(root, "prompt.md");
     const prompt = "# Review\nQuoted \"text\", paths /tmp/a, and `code`.";
+    const expectedPrompt = `Describe ${prompt}`;
     const result = materializePiPrintPromptArg(
       "pi",
       ["-p", "@screen.png", "Describe", prompt],
       promptFile,
     );
-    assert.deepEqual(result.args, ["-p", "@screen.png", "Describe", `@${promptFile}`]);
+    assert.deepEqual(result.args, ["-p", "@screen.png", `@${promptFile}`]);
     assert.equal(result.promptFile, promptFile);
-    assert.equal(result.promptBytes, Buffer.byteLength(prompt));
-    assert.equal(await readFile(promptFile, "utf8"), prompt);
+    assert.equal(result.promptBytes, Buffer.byteLength(expectedPrompt));
+    assert.equal(await readFile(promptFile, "utf8"), expectedPrompt);
     assert.deepEqual(
       materializePiPrintPromptArg("echo", ["-p", "text"], join(root, "unused.md")),
       { args: ["-p", "text"] },

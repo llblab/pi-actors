@@ -65,6 +65,10 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
     Prompts.ONBOARDING_SYSTEM_PROMPT,
     /avoid runtime\/FIFO\/outbox vocabulary/,
   );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /wait for its terminal steering notification; do not schedule continuation loops/,
+  );
 });
 
 test("Registered tool prompt snippet includes the command template", () => {

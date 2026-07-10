@@ -39,7 +39,9 @@ Non-goals:
 
 ## Open Work
 
-No active implementation or release-preparation work remains. The `0.40.0` release candidate is validated locally; commit, tag, merge, publish, and release actions remain operator-gated rather than backlog work.
+### Manual draft-memory consolidation
+
+- [ ] Add a manually invoked command that launches an agent-led consolidation cycle over `~/.pi/agent/recipes/drafts`. The cycle must inventory and classify every draft, propose a complete `promote`, `merge`, or `discard` plan, require explicit operator confirmation before mutations, normalize approved reusable capabilities into active recipe-backed tools under `~/.pi/agent/recipes`, and remove every handled source so the drafts directory finishes empty. It must never run automatically or promote tools silently; preserve evidence for each decision and add regressions for plan-only, confirmation, promotion, merge, discard, failure recovery, and empty-directory completion.
 
 ## Backlog Curation Rules
 

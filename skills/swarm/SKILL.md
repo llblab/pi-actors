@@ -1,8 +1,8 @@
 ---
 name: swarm
-description: Subagent orchestration with scoped locks and quorum consensus. Use for multi-model review, parallel scoped work, delegated audit, and coordinated subagent execution.
+description: Subagent and actor orchestration with scoped locks, fanout, and quorum consensus. Use before launching multiple parallel actors or subagents for independent implementation, artifact generation, review, delegated audit, coordinated execution, or any workflow that needs autonomous coordinator decomposition and integration.
 metadata:
-  version: 0.40.0
+  version: 0.40.1
 ---
 
 # Swarm
@@ -12,6 +12,8 @@ Subagent orchestration: delegated review, quorum consensus, scoped locks, clean-
 ## Purpose
 
 Run subagents safely and predictably through reusable orchestration contracts.
+
+Activation rule: load this skill before launching multiple independent actors or subagents, even when the work is creative artifact generation rather than code review. The coordinator owns decomposition, disjoint scopes, launch correctness, result integration, and final validation; participants may choose local content or implementation details independently inside their assigned boundaries.
 
 Swarm is independent. It must not require concrete sibling skill names, private repositories, local model aliases, or a specific tool registry layout. Local agents may bind the contracts to their own tools, command templates, model names, and review protocols.
 

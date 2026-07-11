@@ -107,8 +107,8 @@ Pi host
 - Preserve node controls: `when`, positive `timeout`, `delay`, bounded `retry`, `failure`, and `recover` cleanup.
 - Persist every async command's complete byte-exact stdout/stderr under command- and retry-specific run-state paths while keeping returned tails bounded and pipeline stdin complete.
 - Keep async run state under `~/.pi/agent/tmp/pi-actors/runs` with injected `{run_id}` and `{state_dir}` values.
-- Preserve event-driven observability: durable retrying terminal steering notifications, coordinator-bound outbox messages, branch-aware triangles, process-tree expansion, and bounded body previews. Terminal delivery is at-least-once across the unavoidable send/handled-marker crash window.
-- When a deferred actor result gates the next step, wait for its terminal steering notification. Do not schedule continuation loops, repeatedly inspect, or mutate its reviewed scope while it runs; inspect early only on operator request, meaningful actor event, or diagnosis of an overdue/stuck run.
+- Preserve event-driven observability: durable retrying terminal follow-up notifications, coordinator-bound outbox messages, branch-aware triangles, process-tree expansion, and bounded body previews. Queue coordinator context through Pi follow-up delivery rather than steering so current work finishes before async results arrive and host follow-up batching policy can combine concurrent completions. Terminal delivery is at-least-once across the unavoidable send/handled-marker crash window.
+- When a deferred actor result gates the next step, wait for its terminal follow-up. Do not schedule continuation loops, repeatedly inspect, or mutate its reviewed scope while it runs; inspect early only on operator request, meaningful actor event, or diagnosis of an overdue/stuck run.
 - Do not restore busy-polling examples, duplicate terminal notifications, or duplicate notifications for handled `cancel`, `kill`, or control-stop actions.
 
 ## Recipes And Registry

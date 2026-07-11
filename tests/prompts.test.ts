@@ -67,7 +67,15 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /wait for its terminal steering notification; do not schedule continuation loops/,
+    /wait for its terminal follow-up; do not schedule continuation loops/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /shell-free: string leaves split into executable \+ argv/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /also read the bundled swarm skill; the coordinator owns decomposition/,
   );
 });
 

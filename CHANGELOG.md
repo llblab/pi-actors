@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.40.1: Follow-up Delivery Hotfix
+
+- `[Coordinator Delivery]` Queue terminal and coordinator-bound actor notifications through Pi's `followUp` delivery mode instead of `steer`, while retaining `triggerTurn: true` for idle sessions. Impact: active coordinators finish their current work before actor results arrive, and Pi can apply its configured follow-up batching policy to concurrently completed runs instead of injecting each result between tool calls.
+- `[Agent Autonomy]` Clarified in the injected prompt and bundled Actors skill that command-template strings execute directly without shell evaluation, so `&&`, pipes, redirects, and `cd` do not provide shell composition. Strengthened both skill descriptions and added explicit Swarm activation for multiple parallel actors, independent artifact generation, implementation fanout, and review; the coordinator now receives a compact preflight contract for disjoint scopes, stable run ids, artifacts, launch correctness, integration, and final validation. Impact: agents avoid malformed launches such as `cd <dir> && pi ...` and autonomously load the right orchestration guidance before multi-actor work.
 - `[CI Stability]` Wait for the detached runner process to exit before removing the large-review-evidence fixture directory, and wait for the terminal evidence manifest instead of racing its final write. Impact: Linux CI cleanup no longer intermittently fails with `ENOTEMPTY` after the assertions pass.
 
 ## 0.40.0: Durable Review and Runtime Hardening

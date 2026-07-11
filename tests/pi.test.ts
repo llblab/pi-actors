@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createNotificationSink } from "../lib/pi.ts";
 
-test("Actor notifications steer busy agents and trigger an idle turn", () => {
+test("Actor notifications queue follow-ups for busy agents and trigger an idle turn", () => {
   const sent: unknown[] = [];
   const sink = createNotificationSink(
     {
@@ -21,11 +21,11 @@ test("Actor notifications steer busy agents and trigger an idle turn", () => {
     display: true as const,
     details: { run: "review" },
   };
-  sink.sendSteering(message);
+  sink.sendFollowUp(message);
   assert.deepEqual(sent, [
     {
       message,
-      options: { deliverAs: "steer", triggerTurn: true },
+      options: { deliverAs: "followUp", triggerTurn: true },
     },
   ]);
 });

@@ -1,8 +1,8 @@
 ---
 name: actors
-description: Required practical guide for non-trivial pi-actors use. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
+description: Required practical guide for non-trivial pi-actors use, including parallel actor launches, subagent fanout, and autonomous coordinator workflows. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.40.0
+  version: 0.40.1
 ---
 
 # Actors (pi-actors)
@@ -53,6 +53,8 @@ Actor-mode trigger: if work may outlive this turn, needs steering/follow-up/arti
 
 Use for long work, background services, subagents, fanout, pipelines, and reusable recipes.
 
+Before a parallel launch, the coordinator should verify five things once: each actor owns a disjoint mutation scope, every run has a stable id, each durable result has an artifact path, every command template respects shell-free argv execution, and completion can return through follow-up delivery without polling. For multiple delegated implementation or review actors, also load the bundled Swarm skill before choosing decomposition, locks, or quorum shape.
+
 ```json
 {
   "as": "run:repo-health",
@@ -64,6 +66,7 @@ Use for long work, background services, subagents, fanout, pipelines, and reusab
 
 Rules:
 
+- Command-template strings execute directly without a shell. Operators such as `&&`, `||`, pipes, redirects, and `cd` remain literal argv unless an explicit trusted shell is the executable. Prefer absolute paths or template arrays for sequencing; put non-trivial shell behavior in a reviewed script.
 - Use `file`/`recipe` for saved recipes; bare names resolve under `~/.pi/agent/recipes`.
 - Use inline `template` for one-off experiments; promote useful repeats to recipes.
 - When a successful actor follow-up suggests persistence, decide whether the pattern deserves durable tool memory; call `register_tool` yourself only when the evidence is strong, and ask before writing the user recipe root.
@@ -130,7 +133,7 @@ Actor inspector commands:
 
 The table is compact and optimistic by default: bounded body previews, capped noisy room rows, branch-local inbox previews, stable event ids in selected-message details, and an inline roster summary in the form `name/role` that wraps only when needed. Use `unread` for queued branch inbox work and `branch <name>` / `current-branch <name>` for one branch's room/direct/inbox traffic. Rows with `metadata.requires_response=true` show a `!` attention marker. `/actors-inspect <number>` marks that row read for the current session filter. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
 
-Let terminal notifications arrive. When a deferred actor result gates the next step, wait for that terminal steering notification instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Busy coordinators receive it at the next safe tool boundary; idle coordinators start a normal turn. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
+Let terminal notifications arrive. They queue through Pi's follow-up delivery mode, so a busy coordinator finishes its current work before receiving concurrently completed actor results; the host's `followUpMode` controls whether queued results arrive together or one at a time. When a deferred actor result gates the next step, wait for that terminal follow-up instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Idle coordinators still start a normal turn through `triggerTurn: true`. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
 
 ## Runtime Communication Rules
 

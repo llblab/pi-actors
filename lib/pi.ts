@@ -13,7 +13,7 @@ export type { ExtensionAPI, ExtensionContext };
 
 export interface PiNotificationSink {
   notify(message: string, level: "info" | "warning" | "error"): void;
-  sendSteering(message: {
+  sendFollowUp(message: {
     customType: string;
     content: string;
     display: true;
@@ -31,9 +31,9 @@ export function createNotificationSink(
 ): PiNotificationSink {
   return {
     notify: (message, level) => ctx.ui.notify(message, level),
-    sendSteering: (message) =>
+    sendFollowUp: (message) =>
       pi.sendMessage(message, {
-        deliverAs: "steer",
+        deliverAs: "followUp",
         triggerTurn: true,
       }),
   };

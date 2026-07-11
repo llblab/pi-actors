@@ -447,7 +447,7 @@ test("Run observability replays one unhandled terminal transition after reload",
     const steering: unknown[] = [];
     deliverRunTransitionNotifications(transitions, {
       notify: () => {},
-      sendSteering: (message) => steering.push(message),
+      sendFollowUp: (message) => steering.push(message),
     });
     assert.equal(steering.length, 1);
     const handled = JSON.parse(
@@ -465,7 +465,7 @@ test("Run observability replays one unhandled terminal transition after reload",
   }
 });
 
-test("Run observability retries unhandled terminal steering after delivery failure", async () => {
+test("Run observability retries unhandled terminal follow-up after delivery failure", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-retry-"));
   const stateDir = join(root, "review");
   try {
@@ -487,7 +487,7 @@ test("Run observability retries unhandled terminal steering after delivery failu
       () =>
         deliverRunTransitionNotifications(first, {
           notify: () => {},
-          sendSteering: () => {
+          sendFollowUp: () => {
             throw new Error("delivery failed");
           },
         }),
@@ -502,7 +502,7 @@ test("Run observability retries unhandled terminal steering after delivery failu
     let delivered = 0;
     deliverRunTransitionNotifications(retry, {
       notify: () => {},
-      sendSteering: () => {
+      sendFollowUp: () => {
         delivered += 1;
       },
     });

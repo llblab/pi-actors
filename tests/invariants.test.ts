@@ -130,6 +130,12 @@ test("Operator guidance avoids stale FIFO queue wording", () => {
   }
 });
 
+test("README first-run actor uses a shell-free command template", () => {
+  const readme = readFileSync("README.md", "utf8");
+  assert.match(readme, /spawn template="sleep 30" as=run:demo/);
+  assert.doesNotMatch(readme, /spawn template="[^"]*(?:&&|\|\||[|<>])[^"]*" as=run:demo/);
+});
+
 test("Platform guidance makes native Windows FIFO limits visible", () => {
   const readme = readFileSync("README.md", "utf8");
   const asyncRuns = readFileSync("docs/async-runs.md", "utf8");

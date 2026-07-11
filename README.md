@@ -65,7 +65,7 @@ Use actors instead of ad hoc shell backgrounding when work is long-running, stat
 Start an actor:
 
 ```text
-spawn template="sleep 30 && echo done" as=run:demo
+spawn template="sleep 30" as=run:demo
 ```
 
 Inspect it when you need evidence:
@@ -125,7 +125,7 @@ Routing comes from `to`, actor ownership, and runtime policy. `type` describes i
 | --- | --- | --- |
 | Command templates | Portable command graphs with placeholders, defaults, guards, retries, parallel nodes, recovery, and timeouts | Wrap a trusted local executable without writing a bespoke tool |
 | Recipes | JSON/Markdown capability specs with metadata, args, defaults, imports, mailbox contracts, artifacts, and async mode | Save a known-good local workflow as reusable muscle memory |
-| Async runs | File-backed detached lifecycle, logs, progress, output, cancellation, artifacts, and durable terminal steering notifications | Let model work, media jobs, services, or pipelines continue after the turn |
+| Async runs | File-backed detached lifecycle, logs, progress, output, cancellation, artifacts, and durable terminal follow-up notifications | Let model work, media jobs, services, or pipelines continue after the turn |
 | Message protocol | Typed envelopes across run, tool, branch, room, coordinator, and session targets | Continue, approve, kill, or route work without restarting actors |
 | Rooms and rosters | Run-local group timeline with actor join/leave, contacts, previews, and branch-aware delivery | Coordinate multiple subagents under one visible run |
 | Registry and recipe doctor | Discovered tools, overrides, drafts, invalid recipes, and advisory risk labels | Audit local capability memory before using or promoting it |
@@ -275,7 +275,7 @@ Packaged recipes are building blocks. Use `spawn file=<recipe>` for maintained p
 | A useful output that should survive context compression | Artifacts |
 | A repeated local workflow | Recipe/tool memory |
 
-When a directly spawned inline/ad hoc actor or a recipe outside the user recipe root completes successfully, `pi-actors` may include a promotion suggestion in its terminal steering notification. The agent should ask first and never auto-save.
+When a directly spawned inline/ad hoc actor or a recipe outside the user recipe root completes successfully, `pi-actors` may include a promotion suggestion in its terminal follow-up notification. The agent should ask first and never auto-save.
 
 ## Platform support
 

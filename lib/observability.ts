@@ -81,7 +81,7 @@ export interface RunUiSnapshot {
 
 export interface RunUiNotificationSink {
   notify(message: string, level: "info" | "warning" | "error"): void;
-  sendSteering(message: {
+  sendFollowUp(message: {
     customType: string;
     content: string;
     display: true;
@@ -140,7 +140,7 @@ export function deliverRunTransitionNotifications(
     const text = formatRunTransitionMessage(transition);
     sink.notify(text, getRunTransitionNotificationType(transition));
     if (!shouldSendRunTransitionFollowUp(transition)) continue;
-    sink.sendSteering({
+    sink.sendFollowUp({
       customType: "pi-actors-run",
       content: text,
       display: true,
@@ -164,7 +164,7 @@ export function deliverRunOutboxNotifications(
     const text = formatRunOutboxMessage(event);
     sink.notify(text, getRunOutboxNotificationType(event));
     if (!shouldSendRunOutboxFollowUp(event)) continue;
-    sink.sendSteering({
+    sink.sendFollowUp({
       customType: "pi-actors-run-message",
       content: text,
       display: true,

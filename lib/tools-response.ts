@@ -7,6 +7,39 @@
 import * as Limits from "./limits.ts";
 import * as ToolsMailbox from "./tools-mailbox.ts";
 
+export function withLeadingBlankLine(text: string): string {
+  if (text.startsWith("\n\n")) return text;
+  return text.startsWith("\n") ? `\n${text}` : `\n\n${text}`;
+}
+
+export function spaceToolResult<T>(result: T): T {
+  if (!result || typeof result !== "object") return result;
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) return result;
+  return {
+    ...result,
+    content: content.map((item) =>
+      item &&
+      typeof item === "object" &&
+      (item as { type?: unknown }).type === "text" &&
+      typeof (item as { text?: unknown }).text === "string"
+        ? {
+            ...item,
+            text: withLeadingBlankLine((item as { text: string }).text),
+          }
+        : item,
+    ),
+  };
+}
+
+export function spaceToolError(error: unknown): unknown {
+  if (error instanceof Error) {
+    error.message = withLeadingBlankLine(error.message);
+    return error;
+  }
+  return new Error(withLeadingBlankLine(String(error)));
+}
+
 export function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

@@ -9,6 +9,7 @@ Living index of all documentation in the `/docs` directory.
 - [template-recipes.md](./template-recipes.md) — Saved JSON/Markdown recipe standard, imports, and reusable command-template graph composition
 - [async-runs.md](./async-runs.md) — Detached run lifecycle, state files, actor messages, cancellation, and ambient indicators
 - [actor-messages.md](./actor-messages.md) — Actor/message protocol for symmetric communication primitives
+- [actor-inspector.md](./actor-inspector.md) — Manual owned-run navigation across communication and persisted subagent turns
 - [tool-registry.md](./tool-registry.md) — Local `pi-actors` registry storage and `register_tool` adaptation
 - [recipe-library.md](./recipe-library.md) — Packaged standard recipe library such as async subagents, coordinator pipelines, utilities, and music playback
 - [task-first-recipes.md](./task-first-recipes.md) — Task-first design map for deriving high-level recipes and missing component cells

@@ -12,6 +12,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ActorMessage } from "./messages.ts";
 import * as Limits from "./limits.ts";
 import * as Paths from "./paths.ts";
+import * as SessionEvidence from "./session-evidence.ts";
 import {
   readJsonFileResilient,
   readJsonlFileResilient,
@@ -63,6 +64,7 @@ export interface ActorInspectorPreviewReadOptions {
   ownerId?: string;
   branch?: string;
   currentRunOnly?: boolean;
+  run?: string;
   channels?: ActorInspectorPreview["channel"][];
   mention?: string;
   readKeys?: Iterable<string>;
@@ -70,221 +72,144 @@ export interface ActorInspectorPreviewReadOptions {
   unreadOnly?: boolean;
 }
 
-export interface ActorInspectorControllerState {
-  branch?: string;
-  channels?: ActorInspectorPreview["channel"][];
-  mention?: string;
-  readKeys: Set<string>;
-  roomLimitPerRun: number;
-  rows: number;
-  selectedSequence?: number;
-  unreadOnly: boolean;
-  visible: boolean;
+export interface ActorInspectorRunItem {
+  run: string;
+  status: string;
+  updatedAt?: string;
 }
 
-export interface ActorInspectorCommandResult {
-  notify: string;
-  type: "info" | "warning";
-  update: boolean;
-}
-
-export const DEFAULT_ACTOR_INSPECTOR_ROWS = 12;
-
-export const ACTOR_INSPECTOR_COMMAND_DESCRIPTIONS = {
-  filter:
-    "Filter actor inspector rows: all, room, direct, broadcast, unread, branch <name>, mention <text>",
-  inspect: "Inspect actor message by visible number",
-  toggle: "Toggle actor inspector widget; optional row count",
-};
-
-export function createActorInspectorControllerState(): ActorInspectorControllerState {
-  return {
-    readKeys: new Set<string>(),
-    roomLimitPerRun: DEFAULT_ACTOR_INSPECTOR_ROWS,
-    rows: DEFAULT_ACTOR_INSPECTOR_ROWS,
-    unreadOnly: false,
-    visible: false,
-  };
-}
-
-export function getActorInspectorPreviewOptions(
-  state: ActorInspectorControllerState,
+export function readActorInspectorRuns(
+  stateRoot: string,
   ownerId: string,
-): ActorInspectorPreviewReadOptions {
-  return {
-    channels: state.channels,
-    currentRunOnly: true,
-    branch: state.branch,
-    mention: state.mention,
-    ownerId,
-    readKeys: state.readKeys,
-    roomLimitPerRun: state.roomLimitPerRun,
-    unreadOnly: state.unreadOnly,
-  };
+): ActorInspectorRunItem[] {
+  try {
+    return fs
+      .readdirSync(stateRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) => {
+        const stateDir = path.join(stateRoot, entry.name);
+        if (!matchesOwner(stateDir, ownerId)) return [];
+        const progress = readJsonFileResilient<Record<string, unknown>>(
+          path.join(stateDir, "progress.json"),
+          {},
+        ).value;
+        const result = readJsonFileResilient<Record<string, unknown>>(
+          path.join(stateDir, "result.json"),
+          {},
+        ).value;
+        return [{
+          run: entry.name,
+          status: String(progress.phase ?? (Object.keys(result).length ? "terminal" : "unknown")),
+          ...(typeof progress.updatedAt === "string"
+            ? { updatedAt: progress.updatedAt }
+            : typeof result.completedAt === "string"
+              ? { updatedAt: result.completedAt }
+              : {}),
+        }];
+      })
+      .sort((left, right) =>
+        String(left.updatedAt ?? "").localeCompare(String(right.updatedAt ?? "")),
+      );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    return [];
+  }
 }
 
-export function handleActorInspectorToggle(
-  state: ActorInspectorControllerState,
-  args: unknown,
-): ActorInspectorCommandResult {
-  const raw = Array.isArray(args) ? args[0] : String(args ?? "");
-  if (String(raw).trim()) {
-    const rows = Number.parseInt(String(raw), 10);
-    if (!Number.isFinite(rows) || rows <= 0) {
-      return {
-        notify: "Usage: /actors-inspector-toggle [rows] where rows > 0",
-        type: "warning",
-        update: false,
-      };
-    }
-    state.rows = rows;
-    state.roomLimitPerRun = rows;
-    state.selectedSequence = undefined;
-    state.visible = true;
-    return {
-      notify: `Actor inspector rows ${rows}`,
-      type: "info",
-      update: true,
-    };
-  }
-  if (state.selectedSequence !== undefined) {
-    state.selectedSequence = undefined;
-    state.visible = true;
-    return { notify: "Actor inspector table", type: "info", update: true };
-  }
-  if (state.visible) state.visible = false;
-  else {
-    state.rows = DEFAULT_ACTOR_INSPECTOR_ROWS;
-    state.roomLimitPerRun = DEFAULT_ACTOR_INSPECTOR_ROWS;
-    state.visible = true;
-  }
-  return {
-    notify: `Actor inspector ${state.visible ? "shown" : "hidden"}`,
-    type: "info",
-    update: true,
-  };
+export interface ActorInspectorTurnItem extends SessionEvidence.SessionEvidenceTurn {
+  commandId: string;
+  diagnostics: string[];
+  promptBytes?: number;
+  promptFile?: string;
+  recipeContext?: unknown;
+  sessionFile: string;
+  sessionTruncated: boolean;
+  stage?: string;
 }
 
-export function handleActorInspectorFilter(
-  state: ActorInspectorControllerState,
-  args: unknown,
-): ActorInspectorCommandResult {
-  const parts = Array.isArray(args)
-    ? args.map(String)
-    : String(args ?? "").split(/\s+/);
-  const mode = (parts[0] ?? "").trim().toLowerCase();
-  if (!mode || mode === "all" || mode === "clear") {
-    state.channels = undefined;
-    state.mention = undefined;
-    state.branch = undefined;
-    state.unreadOnly = false;
-  } else if (mode === "room" || mode === "direct" || mode === "broadcast") {
-    state.channels = [mode];
-    state.mention = undefined;
-  } else if (mode === "unread") {
-    state.unreadOnly = true;
-  } else if (mode === "branch" || mode === "current-branch") {
-    const branch = parts.slice(1).join(" ").trim();
-    if (!branch) {
-      return {
-        notify: `Usage: /actors-inspector-filter ${mode} <branch-name>`,
-        type: "warning",
-        update: false,
-      };
-    }
-    state.branch = branch;
-  } else if (mode === "mention") {
-    const mention = parts.slice(1).join(" ").trim();
-    if (!mention) {
-      return {
-        notify: "Usage: /actors-inspector-filter mention <text>",
-        type: "warning",
-        update: false,
-      };
-    }
-    state.channels = undefined;
-    state.mention = mention;
-  } else {
-    return {
-      notify:
-        "Usage: /actors-inspector-filter all|room|direct|broadcast|unread|branch <name>|mention <text>",
-      type: "warning",
-      update: false,
-    };
-  }
-  state.selectedSequence = undefined;
-  state.visible = true;
-  return {
-    notify: `Actor inspector filter ${mode || "all"}`,
-    type: "info",
-    update: true,
-  };
-}
-
-export function handleActorInspectorInspect(
-  state: ActorInspectorControllerState,
-  args: unknown,
-  previews: ActorInspectorPreview[],
-): ActorInspectorCommandResult {
-  const raw = Array.isArray(args) ? args[0] : String(args ?? "");
-  return selectActorInspectorSequence(
-    state,
-    Number.parseInt(String(raw), 10),
-    previews,
-  );
-}
-
-export function selectActorInspectorSequence(
-  state: ActorInspectorControllerState,
-  sequence: number,
-  previews: ActorInspectorPreview[],
-): ActorInspectorCommandResult {
-  if (!Number.isFinite(sequence) || sequence <= 0) {
-    return {
-      notify: "Usage: /actors-inspect <number>",
-      type: "warning",
-      update: false,
-    };
-  }
-  const preview = previews.find((item) => item.sequence === sequence);
-  if (preview) state.readKeys.add(inspectorPreviewReadKey(preview));
-  state.selectedSequence = sequence;
-  state.visible = true;
-  return {
-    notify: `Actor inspect item ${sequence}`,
-    type: "info",
-    update: true,
-  };
-}
-
-export function renderActorInspectorPanel(input: {
-  stateRoot: string;
-  state: ActorInspectorControllerState;
-  ownerId: string;
-  width: number;
-  style: ActorInspectorWidgetStyle;
-}): string[] {
-  const previews = readActorInspectorPreviews(
-    input.stateRoot,
-    input.state.rows,
-    getActorInspectorPreviewOptions(input.state, input.ownerId),
-  );
-  const rows =
-    (input.state.selectedSequence !== undefined
-      ? renderInspectorItemView(previews, input.width, input.style, {
-          sequence: input.state.selectedSequence,
-        })
-      : renderInspectorWidget(previews, input.width, input.style)) ?? [];
-  const run = previews[0]?.run;
-  const roster =
-    input.state.selectedSequence === undefined && run
-      ? renderInspectorRosterPanel(
-          readActorInspectorRoster(input.stateRoot, run),
-          input.width,
-          input.style,
-        )
+function ownedSessionPath(
+  stateDir: string,
+  sessionFile: string,
+): string | undefined {
+  if (path.isAbsolute(sessionFile)) return undefined;
+  const sessionsRoot = path.resolve(stateDir, "sessions");
+  const resolved = path.resolve(stateDir, sessionFile);
+  if (!resolved.startsWith(`${sessionsRoot}${path.sep}`)) return undefined;
+  try {
+    const canonicalRoot = fs.realpathSync(sessionsRoot);
+    const canonicalFile = fs.realpathSync(resolved);
+    return canonicalFile.startsWith(`${canonicalRoot}${path.sep}`)
+      ? canonicalFile
       : undefined;
-  return roster ? [...roster, ...rows] : rows;
+  } catch {
+    return undefined;
+  }
+}
+
+export function readActorInspectorTurns(stateDir: string): ActorInspectorTurnItem[] {
+  const evidence = readJsonFileResilient<Record<string, unknown>>(
+    path.join(stateDir, "review-evidence.json"),
+    {},
+  ).value;
+  const commands = Array.isArray(evidence.commands)
+    ? (evidence.commands as Array<Record<string, unknown>>)
+    : [];
+  const recordedFiles = new Set(
+    commands.flatMap((command) =>
+      (Array.isArray(command.session_files) ? command.session_files : []).filter(
+        (file): file is string => typeof file === "string",
+      ),
+    ),
+  );
+  let discoveredCommands: Array<Record<string, unknown>> = [];
+  try {
+    const sessionsDir = path.join(stateDir, "sessions");
+    discoveredCommands = fs
+      .readdirSync(sessionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) => {
+        const files = fs
+          .readdirSync(path.join(sessionsDir, entry.name), {
+            withFileTypes: true,
+          })
+          .filter((file) => file.isFile() && file.name.endsWith(".jsonl"))
+          .map((file) => path.join("sessions", entry.name, file.name))
+          .filter((file) => !recordedFiles.has(file));
+        return files.length > 0
+          ? [{ id: entry.name, session_files: files, stage: "subagent" }]
+          : [];
+      });
+  } catch {
+    discoveredCommands = [];
+  }
+  return [...commands, ...discoveredCommands].flatMap((command) =>
+    (Array.isArray(command.session_files) ? command.session_files : [])
+      .filter((file): file is string => typeof file === "string")
+      .flatMap((file) => {
+        const sessionPath = ownedSessionPath(stateDir, file);
+        if (!sessionPath) return [];
+        const session = SessionEvidence.readSessionEvidence(sessionPath);
+        return session.turns.map((turn) => ({
+          ...turn,
+          commandId: String(command.id ?? "unknown"),
+          diagnostics: session.diagnostics.map((item) =>
+            `${item.line === undefined ? "" : `line ${item.line}: `}${item.message}`,
+          ),
+          ...(typeof command.prompt_bytes === "number"
+            ? { promptBytes: command.prompt_bytes }
+            : {}),
+          ...(typeof command.prompt_file === "string"
+            ? { promptFile: command.prompt_file }
+            : {}),
+          ...(command.recipe_context !== undefined
+            ? { recipeContext: command.recipe_context }
+            : {}),
+          sessionFile: file,
+          sessionTruncated: session.truncated,
+          ...(typeof command.stage === "string" ? { stage: command.stage } : {}),
+        }));
+      }),
+  ).map((turn, index) => ({ ...turn, index: index + 1 }));
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -302,7 +227,9 @@ function previewValue(
   maxLength = Limits.INSPECTOR_BODY_PREVIEW_CHARS,
 ): string | undefined {
   if (value === undefined) return undefined;
-  const text = typeof value === "string" ? value : JSON.stringify(value);
+  const redacted = SessionEvidence.redactSessionEvidenceValue(value);
+  const text =
+    typeof redacted === "string" ? redacted : JSON.stringify(redacted);
   const compact = text.replaceAll(/\s+/g, " ").trim();
   if (!compact) return undefined;
   return compact.length > maxLength
@@ -606,6 +533,7 @@ export function readActorInspectorPreviews(
       .flatMap((entry) => {
         const stateDir = path.join(stateRoot, entry.name);
         if (!matchesOwner(stateDir, options.ownerId)) return [];
+        if (options.run && entry.name !== options.run) return [];
         return [
           ...readRoomPreviews(entry.name, stateDir),
           ...readInboxPreviews(entry.name, stateDir),

@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import {
   appendFile,
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -843,6 +844,46 @@ test("Async runs persist recipe context bundles for file-backed recipes", async 
     assert.match(JSON.stringify(meta.template), /actorRecipeContext/);
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async Pi commands persist owned session provenance in review evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-session-"));
+  const stateDir = join(root, "session-run");
+  const fakePi = join(root, "pi");
+  try {
+    await writeFile(
+      fakePi,
+      [
+        "#!/usr/bin/env node",
+        'const { mkdirSync, writeFileSync } = require("node:fs");',
+        'const { join } = require("node:path");',
+        'const index = process.argv.indexOf("--session-dir");',
+        'if (index >= 0) {',
+        '  const dir = process.argv[index + 1];',
+        '  mkdirSync(dir, { recursive: true });',
+        '  writeFileSync(join(dir, "session.jsonl"), JSON.stringify({ type: "session", version: 3, id: "test", cwd: process.cwd() }) + "\\n");',
+        '}',
+        'console.log("done");',
+      ].join("\n"),
+    );
+    await chmod(fakePi, 0o755);
+    startRun(
+      { state_dir: stateDir, template: `${fakePi} -p inspect turns` },
+      process.cwd(),
+    );
+    const result = await waitForResult(stateDir);
+    assert.equal(result.code, 0);
+    const evidence = JSON.parse(
+      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+    );
+    assert.equal(evidence.commands[0].session_dir, "sessions/command-001");
+    assert.deepEqual(evidence.commands[0].session_files, [
+      "sessions/command-001/session.jsonl",
+    ]);
+    assert.match(evidence.commands[0].command, /--session-dir/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -7,7 +7,7 @@
 
 import * as AsyncRuns from "./lib/async-runs.ts";
 import * as CommandTemplates from "./lib/command-templates.ts";
-import * as Inspector from "./lib/inspector.ts";
+import * as InspectorOverlay from "./lib/inspector-overlay.ts";
 import * as Observability from "./lib/observability.ts";
 import * as Paths from "./lib/paths.ts";
 import * as Pi from "./lib/pi.ts";
@@ -15,6 +15,7 @@ import * as Prompts from "./lib/prompts.ts";
 import * as Runtime from "./lib/runtime.ts";
 import * as Temp from "./lib/temp.ts";
 import * as Tools from "./lib/tools.ts";
+import * as ToolsResponse from "./lib/tools-response.ts";
 
 export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
   let runsAnimationInterval: NodeJS.Timeout | undefined;
@@ -22,7 +23,6 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
   let activeRunContext: Pi.ExtensionContext | undefined;
   const runUi = Observability.createRunUiObservationState();
   const retirementAttempts = new Set<string>();
-  const actorInspector = Inspector.createActorInspectorControllerState();
   const getRunOwnerId = Pi.getSessionId;
   const retireCandidateRuns = (
     ctx: Pi.ExtensionContext,
@@ -46,33 +46,6 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     ctx.ui.setStatus(
       "zz-pi-actors-runs",
       snapshot.status ? ctx.ui.theme.fg("dim", snapshot.status) : undefined,
-    );
-    ctx.ui.setWidget(
-      "zz-pi-actors-comms",
-      actorInspector.visible
-        ? () => ({
-            invalidate() {},
-            render(width: number) {
-              return Inspector.renderActorInspectorPanel({
-                stateRoot: Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
-                state: actorInspector,
-                ownerId,
-                width,
-                style: {
-                  actor: (text: string) => ctx.ui.theme.fg("accent", text),
-                  muted: (text: string) => ctx.ui.theme.fg("dim", text),
-                  preview: (text: string) => ctx.ui.theme.fg("text", text),
-                  stripe: (text: string) => text,
-                  stripeAlt: (text: string) =>
-                    ctx.ui.theme.bg("customMessageBg", text),
-                  target: (text: string) => ctx.ui.theme.fg("success", text),
-                  type: (text: string) => ctx.ui.theme.fg("warning", text),
-                },
-              });
-            },
-          })
-        : undefined,
-      { placement: "belowEditor" },
     );
     if (!notify) return;
     const notificationSink = Pi.createNotificationSink(pi, ctx);
@@ -115,7 +88,7 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     const execute = definition.execute as (...args: unknown[]) => unknown;
     return {
       ...definition,
-      execute: (...args: unknown[]) => {
+      execute: async (...args: unknown[]) => {
         const nextArgs = [...args];
         const ctx = nextArgs[4];
         if (ctx && typeof ctx === "object") {
@@ -124,7 +97,11 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
             getThinkingLevel: () => pi.getThinkingLevel(),
           };
         }
-        return execute(...nextArgs);
+        try {
+          return ToolsResponse.spaceToolResult(await execute(...nextArgs));
+        } catch (error) {
+          throw ToolsResponse.spaceToolError(error);
+        }
       },
     } as T;
   };
@@ -147,6 +124,8 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     return { skillPaths };
   });
   pi.on("session_start", async (_event, ctx) => {
+    // Clear the pre-overlay widget after hot reloads from older pi-actors builds.
+    ctx.ui.setWidget("zz-pi-actors-comms", undefined);
     activeRunContext = ctx;
     await Temp.prepareExtensionTempDir(Paths.EXTENSION_RUNTIME_PATHS.tempDir);
     runtime.loadTools(ctx);
@@ -167,39 +146,29 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     recipeReload.close();
   });
   pi.registerCommand("actors-inspector-toggle", {
-    description: Inspector.ACTOR_INSPECTOR_COMMAND_DESCRIPTIONS.toggle,
-    handler: async (args, ctx) => {
-      const result = Inspector.handleActorInspectorToggle(actorInspector, args);
-      if (result.update) updateRunUi(ctx);
-      ctx.ui.notify(result.notify, result.type);
-    },
-  });
-  pi.registerCommand("actors-inspector-filter", {
-    description: Inspector.ACTOR_INSPECTOR_COMMAND_DESCRIPTIONS.filter,
-    handler: async (args, ctx) => {
-      const result = Inspector.handleActorInspectorFilter(actorInspector, args);
-      if (result.update) updateRunUi(ctx);
-      ctx.ui.notify(result.notify, result.type);
-    },
-  });
-  pi.registerCommand("actors-inspect", {
-    description: Inspector.ACTOR_INSPECTOR_COMMAND_DESCRIPTIONS.inspect,
-    handler: async (args, ctx) => {
-      const previews = Inspector.readActorInspectorPreviews(
-        Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
-        actorInspector.rows,
-        Inspector.getActorInspectorPreviewOptions(
-          actorInspector,
-          getRunOwnerId(ctx),
-        ),
+    description: "Toggle the keyboard-driven actor inspector overlay",
+    handler: async (_args, ctx) => {
+      ctx.ui.setWidget("zz-pi-actors-comms", undefined);
+      await ctx.ui.custom<void>(
+        (tui, theme, _keybindings, done) =>
+          new InspectorOverlay.ActorInspectorOverlay({
+            done,
+            ownerId: getRunOwnerId(ctx),
+            stateRoot: Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
+            theme,
+            tui,
+          }),
+        {
+          overlay: true,
+          overlayOptions: {
+            anchor: "center",
+            width: "94%",
+            minWidth: 72,
+            maxHeight: "94%",
+            margin: 1,
+          },
+        },
       );
-      const result = Inspector.handleActorInspectorInspect(
-        actorInspector,
-        args,
-        previews,
-      );
-      if (result.update) updateRunUi(ctx);
-      ctx.ui.notify(result.notify, result.type);
     },
   });
   pi.on("before_agent_start", async (event) => ({

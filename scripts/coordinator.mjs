@@ -238,14 +238,24 @@ function terminateProcessGroup(child, signal) {
   }
 }
 
-function runPi(prompt, model, thinking, ttlMs = 0) {
+function sessionKey(value) {
+  return String(value).replaceAll(/[^A-Za-z0-9_.-]+/g, "-");
+}
+
+function runPi(prompt, model, thinking, ttlMs = 0, sessionDir, ownerSessionId) {
   return new Promise((resolve) => {
     const args = [
       "--tools",
       "inspect,message",
       "--no-context-files",
       "--no-skills",
-      "--no-session",
+      ...(sessionDir
+        ? [
+            "--session-dir",
+            sessionDir,
+            ...(ownerSessionId ? ["--session-id", ownerSessionId] : []),
+          ]
+        : ["--no-session"]),
     ];
     if (model) {
       args.push("--model", model);
@@ -346,7 +356,14 @@ async function synthesize(config, locker) {
   }
   const transcript = await readRoomTranscript(config);
   const prompt = `Synthesize this transcript into a concise Markdown artifact. Mission: ${config.mission}. Include: Title, Consensus, Roles, Protocol, Final Artifact Shape, Next Actions, Open Questions. Use only the transcript evidence below.\n\nTRANSCRIPT:\n${transcript.slice(-24000)}`;
-  const result = await runPi(prompt, config.model, config.thinking, config.subagentTtlMs);
+  const result = await runPi(
+    prompt,
+    config.model,
+    config.thinking,
+    config.subagentTtlMs,
+    `${runStateDir(config.runId)}/sessions/coordinator-synthesis`,
+    config.ownerSessionId,
+  );
   const output = result.stdout.trim();
   const diagnostics = config.stats
     ? `\n\n## Diagnostics\n\nparticipant_attempts=${config.stats.participantAttempts}\nparticipant_success=${config.stats.participantSuccess}\nparticipant_failures=${config.stats.participantFailures}\nsynthesis_code=${result.code}\ntranscript_messages=${transcript.trim() ? transcript.split("\n").length : 0}\n`
@@ -443,7 +460,7 @@ async function updateInboxMessagesStatus(runId, branchName, ids, status) {
   });
 }
 
-async function executeParticipantPrompt(role, basePrompt, config) {
+async function executeParticipantPrompt(role, basePrompt, config, phase) {
   const branchName = role.name;
   const queuedMessages = await claimQueuedInboxMessages(
     config.runId,
@@ -469,7 +486,14 @@ async function executeParticipantPrompt(role, basePrompt, config) {
     finalPrompt += inboxSection;
   }
 
-  const result = await runPi(finalPrompt, config.model, config.thinking, config.subagentTtlMs);
+  const result = await runPi(
+    finalPrompt,
+    config.model,
+    config.thinking,
+    config.subagentTtlMs,
+    `${runStateDir(config.runId)}/sessions/${sessionKey(`${role.name}-${phase}`)}`,
+    config.ownerSessionId,
+  );
 
   if (claimedIds.length > 0) {
     const finalStatus = result.code === 0 ? "handled" : "failed";
@@ -488,7 +512,7 @@ async function participantRound(role, round, config) {
   const displayName = role.name;
   const address = `branch:${config.runId}/${role.name}`;
   const prompt = `You are ${displayName} (${address}), ${role.persona}. Mission: ${config.mission}. Round ${round}/${config.rounds}. First call inspect target=${config.room} view=previews lines=30 and inspect target=${config.room} view=contacts. Then call message once to ${config.room} from ${address} type=chat.message. Body: 2-4 sentences that react to a named participant, propose the next coordination step, and refine the shared artifact. Use contacts for peer names and addresses. End stdout with summary <=160 chars.`;
-  const result = await executeParticipantPrompt(role, prompt, config);
+  const result = await executeParticipantPrompt(role, prompt, config, `round-${round}`);
   if (config.stats) {
     config.stats.participantAttempts += 1;
     if (result.code === 0) config.stats.participantSuccess += 1;
@@ -506,14 +530,28 @@ async function participantJoin(role, config) {
   const displayName = role.name;
   const address = `branch:${config.runId}/${role.name}`;
   const joinPrompt = `You are ${displayName}, ${role.persona}. Mission: ${config.mission}. Call tool message exactly once with to=${shellQuote(config.room)}, from=${shellQuote(address)}, type='actor.join', summary='${displayName} joined', body JSON {"role":${JSON.stringify(role.persona)},"display":${JSON.stringify(displayName)},"caps":["coordination","synthesis"],"claim":"coordinate on mission"}. Then print one short line.`;
-  await runPi(joinPrompt, config.model, config.thinking, config.subagentTtlMs);
+  await runPi(
+    joinPrompt,
+    config.model,
+    config.thinking,
+    config.subagentTtlMs,
+    `${runStateDir(config.runId)}/sessions/${sessionKey(`${role.name}-join`)}`,
+    config.ownerSessionId,
+  );
 }
 
 async function participantLeave(role, config) {
   const displayName = role.name;
   const address = `branch:${config.runId}/${role.name}`;
   const leavePrompt = `Call tool message exactly once with to=${shellQuote(config.room)}, from=${shellQuote(address)}, type='actor.leave', summary='${displayName} left', body='finished coordinated work'. Then print goodbye.`;
-  await runPi(leavePrompt, config.model, config.thinking, config.subagentTtlMs);
+  await runPi(
+    leavePrompt,
+    config.model,
+    config.thinking,
+    config.subagentTtlMs,
+    `${runStateDir(config.runId)}/sessions/${sessionKey(`${role.name}-leave`)}`,
+    config.ownerSessionId,
+  );
 }
 
 // 1. consensus / swarm mode: iterative chat in a room
@@ -601,7 +639,12 @@ async function runPool(config, locker) {
 
         const taskId = assignedTask.task;
         const prompt = `You are ${role.name}, ${role.persona}. You have been assigned task ${taskId}: "${assignedTask.task}". Solve it as part of the overall mission: ${config.mission}. End your response with a clear summary.`;
-        const result = await executeParticipantPrompt(role, prompt, config);
+        const result = await executeParticipantPrompt(
+          role,
+          prompt,
+          config,
+          `task-${taskId}`,
+        );
 
         process.stdout.write(
           `[${role.name} completed ${taskId}] code=${result.code}\n${result.stdout}\n`,
@@ -711,6 +754,9 @@ if (!config.model) {
   process.exit(2);
 }
 config.room = `room:${config.runId}`;
+config.ownerSessionId = String(
+  (await readJsonFile(`${runStateDir(config.runId)}/run.json`)).ownerId ?? "",
+);
 
 const failures = [];
 const locker = await startLocker(config);

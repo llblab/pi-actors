@@ -45,7 +45,7 @@ function fakePiScript(): string {
     'import { readFileSync } from "node:fs";',
     "",
     "const args = process.argv.slice(2);",
-    'const valueOptions = new Set(["--model", "--thinking", "--tools"]);',
+    'const valueOptions = new Set(["--model", "--session-dir", "--thinking", "--tools"]);',
     "const promptFiles = [];",
     "const fragmentedPrompts = [];",
     "for (let index = 0; index < args.length; index += 1) {",

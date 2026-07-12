@@ -62,10 +62,34 @@ test("room-swarm optional locker records artifact coordination", async () => {
     const fakeBin = join(root, "bin");
     await mkdir(fakeBin, { recursive: true });
     const fakePi = join(fakeBin, "pi");
-    await writeFile(fakePi, "#!/usr/bin/env bash\necho '# Fake synthesis'\necho\necho 'locker smoke'\n", "utf8");
+    await writeFile(
+      fakePi,
+      `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$ARG_LOG"
+session_dir=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--session-dir" ]]; then session_dir="$2"; shift 2; else shift; fi
+done
+if [[ -n "$session_dir" ]]; then
+  mkdir -p "$session_dir"
+  printf '%s\n' '{"type":"session","version":3,"id":"fake"}' > "$session_dir/session.jsonl"
+fi
+echo '# Fake synthesis'
+echo
+echo 'locker smoke'
+`,
+      "utf8",
+    );
     await chmod(fakePi, 0o755);
     const artifact = join(root, "artifact.md");
+    const argLog = join(root, "pi-args.log");
     const runId = "room-swarm-locker-test";
+    const runState = join(root, "tmp", "pi-actors", "runs", runId);
+    await mkdir(runState, { recursive: true });
+    await writeFile(
+      join(runState, "run.json"),
+      JSON.stringify({ ownerId: "owner-session", run: runId }),
+    );
     const result = spawnSync(roomSwarmScript, [
       `--run-id=${runId}`,
       "--mission=locker smoke",
@@ -82,11 +106,13 @@ test("room-swarm optional locker records artifact coordination", async () => {
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
         PI_CODING_AGENT_DIR: root,
+        ARG_LOG: argLog,
       },
       timeout: 10000,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(await readFile(artifact, "utf8"), /Fake synthesis/);
+    assert.match(await readFile(argLog, "utf8"), /--session-id owner-session/);
     const lockerDir = join(root, "tmp", "pi-actors", "runs", runId, "locker");
     const queue = JSON.parse(await readFile(join(lockerDir, "queue.json"), "utf8"));
     const locks = JSON.parse(await readFile(join(lockerDir, "locks.json"), "utf8"));
@@ -95,6 +121,22 @@ test("room-swarm optional locker records artifact coordination", async () => {
     assert.deepEqual(locks, {});
     assert.match(journal, /lock\.assigned/);
     assert.match(journal, /lock\.complete/);
+    assert.equal(
+      await readFile(
+        join(
+          root,
+          "tmp",
+          "pi-actors",
+          "runs",
+          runId,
+          "sessions",
+          "coordinator-synthesis",
+          "session.jsonl",
+        ),
+        "utf8",
+      ).then((text) => text.includes('"type":"session"')),
+      true,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

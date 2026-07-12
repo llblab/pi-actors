@@ -43,7 +43,7 @@ Pi host
   - `recipes-references.ts`, `recipes-discovery.ts`, `recipes-usage.ts`: recipe graph, discovery, and usage metadata.
   - `async-runs.ts`: detached run lifecycle facade; `runs-*` subdomains own artifacts, start guards, status, indexes, inbox/outbox, delivery, process control, and retention internals.
   - `runtime-notifier.ts`, `mailbox-loop.ts`: wake notifications and reusable run/branch mailbox worker loops.
-  - `messages.ts`, `rooms.ts`, `recipes-context.ts`, `inspector.ts`, `observability.ts`: addressed message protocol, rooms, recipe prompt context, communication previews, and ambient run status.
+  - `messages.ts`, `rooms.ts`, `recipes-context.ts`, `session-evidence.ts`, `inspector.ts`, `inspector-overlay.ts`, `observability.ts`: addressed message protocol, rooms, recipe prompt context, bounded/redacted child-session turns, inspector evidence/navigation, keyboard-driven overlay UI, and ambient run status.
   - `prompts.ts`, `temp.ts`: LLM-facing copy and temp cleanup.
   - `tools.ts`: public tool family composition and reserved tool names.
   - `tools-message.ts`: public `message` tool behavior, including run controls, branch/room routing, tool actor invocation, and delivery feedback.

@@ -131,7 +131,7 @@ Routing comes from `to`, actor ownership, and runtime policy. `type` describes i
 | Registry and recipe doctor | Discovered tools, overrides, drafts, invalid recipes, and advisory risk labels | Audit local capability memory before using or promoting it |
 | Draft promotion | Captured ad hoc spawn patterns can become explicit recipes after operator approval | Turn successful improvisation into durable local tools |
 | Review/swarm recipes | Maintained packaged pipelines with preflight, marked semantic evidence, quorum knobs, model/thinking inheritance, one-turn prompt-file transport, and diagnostics | Delegate reviews without rebuilding fanout commands |
-| Actor inspector | Compact TUI/debug views for active actor coordination, unread branch inboxes, room messages, and attention markers | Watch only the actor traffic that matters right now |
+| Actor inspector | One manual `Messages or Turns → filtered timeline → detail` overlay for owned actor messages and persisted subagent sessions, with bounded/redacted prompt, model, thinking, tool, result, usage, and provenance evidence | Follow actor traffic and every persisted subagent turn without exposing another session or inventing hidden reasoning |
 | Packaged recipe QA | Installed-package-safe checks for helper paths, mailbox contracts, platform scope, artifacts, and recipe structure | Keep shipped actor components executable and diagnosable |
 
 ## Golden path: from local workflow to actor memory
@@ -340,6 +340,7 @@ Core docs:
 - [Template recipes](./docs/template-recipes.md)
 - [Async runs](./docs/async-runs.md)
 - [Actor messages](./docs/actor-messages.md)
+- [Actor inspector](./docs/actor-inspector.md)
 - [Tool registry](./docs/tool-registry.md)
 - [Recipe library](./docs/recipe-library.md)
 

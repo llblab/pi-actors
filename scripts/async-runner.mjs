@@ -13,6 +13,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   statSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -31,8 +32,11 @@ async function importRuntimeModule(name) {
   );
 }
 
-const { appendRecipeContextToPiArgs, materializePiPrintPromptArg } =
-  await importRuntimeModule("recipes-context");
+const {
+  appendRecipeContextToPiArgs,
+  attachPiSessionDir,
+  materializePiPrintPromptArg,
+} = await importRuntimeModule("recipes-context");
 const { buildReviewPreflightDiagnostic, formatReviewPreflightDiagnostic } =
   await importRuntimeModule("preflight-diagnostics");
 const { execCommandTemplate } = await importRuntimeModule("command-templates");
@@ -126,11 +130,24 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     });
   }
 
+  function commandSessionFiles(sessionDir) {
+    if (!sessionDir) return [];
+    try {
+      return readdirSync(sessionDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+        .map((entry) => relative(stateDir, join(sessionDir, entry.name)))
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
   function commandEvidenceStartRecord({
     commandDetail,
     commandId,
     materialized,
     options,
+    sessionDir,
     stage,
     occurrence,
   }) {
@@ -155,6 +172,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       ...(materialized.promptBytes
         ? { prompt_bytes: materialized.promptBytes }
         : {}),
+      ...(sessionDir ? { session_dir: relative(stateDir, sessionDir) } : {}),
       attempts: [],
       semantic_acceptance:
         options?.evidenceContext?.acceptOutput === "review_evidence" ||
@@ -172,6 +190,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     options,
     result,
     rawExitCode,
+    sessionDir,
     stage,
     occurrence,
     startedAt,
@@ -233,6 +252,10 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
         : {}),
       ...(materialized.promptBytes
         ? { prompt_bytes: materialized.promptBytes }
+        : {}),
+      ...(sessionDir ? { session_dir: relative(stateDir, sessionDir) } : {}),
+      ...(commandSessionFiles(sessionDir).length > 0
+        ? { session_files: commandSessionFiles(sessionDir) }
         : {}),
       attempts,
       exit_code: rawExitCode ?? result.code,
@@ -301,21 +324,26 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
   }
 
   async function observedExec(command, args, options) {
+    captureCounter += 1;
+    const commandId = `command-${String(captureCounter).padStart(3, "0")}`;
     const contextArgs = appendRecipeContextToPiArgs(
       command,
       args,
       meta.recipe_context_records,
       options?.actorRecipeContext,
     );
-    const materialized = materializePiPrintPromptArg(
+    const session = attachPiSessionDir(
       command,
       contextArgs,
+      join(stateDir, "sessions", commandId),
+    );
+    const materialized = materializePiPrintPromptArg(
+      command,
+      session.args,
       promptFilePath,
     );
     const execArgs = materialized.args;
     const commandDetail = formatCommandDetail(command, execArgs);
-    captureCounter += 1;
-    const commandId = `command-${String(captureCounter).padStart(3, "0")}`;
     const stage =
       options?.actorRecipeContext?.alias ||
       options?.actorRecipeContext?.name ||
@@ -346,6 +374,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       commandId,
       materialized,
       options,
+      sessionDir: session.sessionDir,
       stage,
       occurrence,
     });
@@ -357,6 +386,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       command: commandDetail,
       ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
       ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
+      ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir) } : {}),
     });
     progressRunning();
     const captureDir = join(stateDir, "captures", commandId);
@@ -400,6 +430,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       options,
       result,
       rawExitCode: rawResult.code,
+      sessionDir: session.sessionDir,
       stage,
       occurrence,
       startedAt: startedEvidence.started_at,
@@ -426,6 +457,10 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       ...captureDetails(result),
       ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
       ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
+      ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir) } : {}),
+      ...(commandSessionFiles(session.sessionDir).length > 0
+        ? { session_files: commandSessionFiles(session.sessionDir) }
+        : {}),
       ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
     });
     outbox(

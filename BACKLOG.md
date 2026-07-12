@@ -43,6 +43,25 @@ Non-goals:
 
 - [ ] Add a manually invoked command that launches an agent-led consolidation cycle over `~/.pi/agent/recipes/drafts`. The cycle must inventory and classify every draft, propose a complete `promote`, `merge`, or `discard` plan, require explicit operator confirmation before mutations, normalize approved reusable capabilities into active recipe-backed tools under `~/.pi/agent/recipes`, and remove every handled source so the drafts directory finishes empty. It must never run automatically or promote tools silently; preserve evidence for each decision and add regressions for plan-only, confirmation, promotion, merge, discard, failure recovery, and empty-directory completion.
 
+### Overlay actor inspector
+
+- [ ] Replace the command-driven inspector workflow with one large keyboard-driven overlay while preserving the compact striped information design. Stop conditions: `/actors-inspector-toggle` only toggles the overlay; an operator can select an owned run and subagent, switch `Messages` / `Turns` tabs, navigate rows, open/close detail, scroll bounded content, and understand keys/current scope without entering subcommands.
+  - [x] Close the dogfood security prerequisites: reset selection across Pi sessions, revalidate ownership before every selected-run read, contain session evidence beneath the owned run state, broaden structured/text redaction, and add regressions.
+  - [x] Build the centered responsive overlay shell with bordered header/footer, tabs, owned-run/subagent selector, active-scope summary, empty/loading/error states, and Escape close.
+  - [x] Move compact striped Messages rows, filters, unread filtering/attention markers, roster context, and row detail into keyboard navigation.
+  - [x] Move Turns rows and full bounded provenance/tool detail into keyboard navigation with scrolling and explicit persisted/unavailable reasoning labels.
+  - [x] Remove the subcommand grammar and below-editor widget lifecycle, retain only the toggle command, and document discoverable key hints plus responsive behavior.
+  - [ ] Run full package, conformance, and context validation, then close this item. Component input/render/width/scroll/tab/ownership/live-refresh regressions and iterative manual TUI dogfood now cover the accepted visual interaction contract.
+
+### Inspector execution observability
+
+- [x] Consolidate the actor inspector into one manually opened, navigable operator surface for communication and execution evidence. Stop conditions: an operator can choose an owned run/subagent, switch between communication and turn timelines, open one bounded detail view, and inspect every persisted user/assistant/tool-result turn in source order without exposing another session or claiming unavailable hidden reasoning.
+  - [x] Persist deterministic Pi session provenance for each child `pi -p` command under its owned run state, without overriding an explicitly supplied session policy; record the session path in command evidence and tolerate commands that never create a session.
+  - [x] Add a resilient, bounded session-evidence reader that follows the active JSONL entry branch, groups assistant responses with correlated tool calls/results into turns, preserves model/usage/error metadata, redacts sensitive argument/content fields, and reports malformed or incomplete evidence honestly.
+  - [x] Replace communication-specific inspector controller state with a shared navigation model: run selector → `communication` or `turns` timeline → numbered detail, with stable back/toggle/filter behavior and useful empty states for actors that never send messages.
+  - [x] Render compact turn rows and bounded manual detail views for effective prompt/context references, assistant text, host-exposed thinking blocks, tool arguments/results, model/usage, and source-file provenance; label missing reasoning as unavailable rather than inferred.
+  - [x] Add ownership, truncation, redaction, malformed JSONL, active-branch ordering, tool correlation, parallel tool completion, terminal run, coordinator-launched subagent, and communication-navigation regressions; update the Actors skill and inspector documentation after the interaction contract stabilizes.
+
 ## Backlog Curation Rules
 
 - Completed work belongs in `CHANGELOG.md`, not in `BACKLOG.md`.

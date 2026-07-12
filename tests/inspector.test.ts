@@ -830,3 +830,126 @@ test("Actor inspector TUI renders selected item view", () => {
 test("Actor inspector TUI hides empty widgets", () => {
   assert.equal(renderInspectorWidget([]), undefined);
 });
+
+/* Superseded by inspector-overlay.test.ts.
+test("Actor inspector consolidates run, timeline, detail, and back navigation", () => {
+  const state = createActorInspectorControllerState();
+  const runs = [{ run: "demo", status: "running" }];
+  assert.equal(state.view, "runs");
+  assert.equal(handleActorInspectorCommand(state, "show", runs).update, true);
+  assert.equal(state.visible, true);
+  assert.equal(handleActorInspectorCommand(state, "run demo", runs).update, true);
+  assert.equal(state.run, "demo");
+  assert.equal(state.view, "timeline");
+  handleActorInspectorCommand(state, "turns", runs);
+  assert.equal(state.surface, "turns");
+  handleActorInspectorCommand(state, "open 2", runs);
+  assert.equal(state.view, "detail");
+  assert.equal(state.selectedSequence, 2);
+  handleActorInspectorCommand(state, "back", runs);
+  assert.equal(state.view, "timeline");
+  handleActorInspectorCommand(state, "back", runs);
+  assert.equal(state.view, "runs");
+  handleActorInspectorCommand(state, "back", runs);
+  assert.equal(state.visible, false);
+  assert.equal(
+    handleActorInspectorCommand(state, "run foreign", runs).type,
+    "warning",
+  );
+});
+
+test("Actor inspector renders owned run selection and persisted turn timelines", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-turns-"));
+  try {
+    const stateDir = join(root, "demo");
+    const sessionDir = join(stateDir, "sessions", "command-001");
+    const coordinatorSessionDir = join(
+      stateDir,
+      "sessions",
+      "worker-round-1",
+    );
+    await mkdir(sessionDir, { recursive: true });
+    await mkdir(coordinatorSessionDir, { recursive: true });
+    await writeFile(
+      join(stateDir, "run.json"),
+      JSON.stringify({ run: "demo", ownerId: "owner" }),
+    );
+    await writeFile(
+      join(stateDir, "progress.json"),
+      JSON.stringify({ phase: "done", updatedAt: "2026-01-01T00:00:00.000Z" }),
+    );
+    await writeFile(
+      join(stateDir, "review-evidence.json"),
+      JSON.stringify({
+        commands: [
+          {
+            id: "command-001",
+            prompt_bytes: 42,
+            prompt_file: "prompts/command-001.md",
+            recipe_context: { alias: "reviewer" },
+            session_files: ["sessions/command-001/session.jsonl"],
+            stage: "reviewer",
+          },
+        ],
+      }),
+    );
+    await writeFile(
+      join(sessionDir, "session.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "s" }),
+        JSON.stringify({ type: "message", id: "u", parentId: null, message: { role: "user", content: "Inspect this" } }),
+        JSON.stringify({ type: "message", id: "a", parentId: "u", message: { role: "assistant", provider: "test", model: "model", stopReason: "toolUse", usage: { totalTokens: 7 }, content: [{ type: "thinking", thinking: "Visible thought" }, { type: "text", text: "Done" }, { type: "toolCall", id: "call-1", name: "read", arguments: { path: "README.md", token: "hidden" } }] } }),
+        JSON.stringify({ type: "message", id: "r", parentId: "a", message: { role: "toolResult", toolCallId: "call-1", toolName: "read", content: [{ type: "text", text: "result" }], isError: false } }),
+        JSON.stringify({ type: "message", id: "u2", parentId: "r", message: { role: "user", content: "Continue" } }),
+        JSON.stringify({ type: "message", id: "a2", parentId: "u2", message: { role: "assistant", provider: "test", model: "model", content: [{ type: "text", text: "Finished" }] } }),
+      ].join("\n"),
+    );
+    await writeFile(
+      join(coordinatorSessionDir, "session.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "coordinator" }),
+        JSON.stringify({ type: "message", id: "cu", parentId: null, message: { role: "user", content: "Coordinate" } }),
+        JSON.stringify({ type: "message", id: "ca", parentId: "cu", message: { role: "assistant", provider: "test", model: "model", content: [{ type: "text", text: "Coordinated" }] } }),
+      ].join("\n"),
+    );
+    assert.deepEqual(readActorInspectorRuns(root, "other"), []);
+    assert.deepEqual(readActorInspectorRuns(root, "owner").map((item) => item.run), ["demo"]);
+    const state = createActorInspectorControllerState();
+    state.visible = true;
+    assert.match(
+      renderActorInspectorPanel({ stateRoot: root, state, ownerId: "owner", width: 80, style: plainInspectorStyle }).join("\n"),
+      /run:demo.*done/,
+    );
+    handleActorInspectorCommand(state, "run demo", readActorInspectorRuns(root, "owner"));
+    handleActorInspectorCommand(state, "turns", readActorInspectorRuns(root, "owner"));
+    const timeline = renderActorInspectorPanel({ stateRoot: root, state, ownerId: "owner", width: 80, style: plainInspectorStyle }).join("\n");
+    assert.match(timeline, /test\/model/);
+    assert.match(timeline, /Done/);
+    assert.match(timeline, /Coordinated/);
+    handleActorInspectorCommand(state, "open 1", readActorInspectorRuns(root, "owner"));
+    const detail = renderActorInspectorPanel({ stateRoot: root, state, ownerId: "owner", width: 80, style: plainInspectorStyle }).join("\n");
+    assert.match(detail, /session.*sessions\/command-001\/session.jsonl/);
+    assert.match(detail, /prompt.*prompts\/command-001\.md.*42 bytes/);
+    assert.match(detail, /recipe context.*reviewer/);
+    assert.match(detail, /user.*Inspect this/);
+    assert.match(detail, /reasoning.*persisted thinking block/);
+    assert.match(detail, /thinking.*Visible thought/);
+    assert.match(detail, /usage.*totalTokens.*7/);
+    assert.match(detail, /tool 1.*read.*call-1/);
+    assert.match(detail, /arguments.*README\.md.*REDACTED/);
+    assert.match(detail, /result.*result/);
+    for (const line of detail.split("\n")) assert.ok(visibleWidth(line) <= 80);
+    handleActorInspectorCommand(state, "back", readActorInspectorRuns(root, "owner"));
+    handleActorInspectorCommand(state, "open 2", readActorInspectorRuns(root, "owner"));
+    const unavailable = renderActorInspectorPanel({ stateRoot: root, state, ownerId: "owner", width: 80, style: plainInspectorStyle }).join("\n");
+    assert.match(unavailable, /reasoning.*unavailable/);
+    handleActorInspectorCommand(state, "back", readActorInspectorRuns(root, "owner"));
+    handleActorInspectorCommand(state, "open 3", readActorInspectorRuns(root, "owner"));
+    const discovered = renderActorInspectorPanel({ stateRoot: root, state, ownerId: "owner", width: 80, style: plainInspectorStyle }).join("\n");
+    assert.match(discovered, /command.*worker-round-1.*subagent/);
+    assert.match(discovered, /session.*worker-round-1\/session.jsonl/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+*/

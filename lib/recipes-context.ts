@@ -167,6 +167,31 @@ export function appendRecipeContextToPiArgs(
   return next;
 }
 
+export interface ManagedPiSessionArgs {
+  args: string[];
+  sessionDir?: string;
+}
+
+const PI_SESSION_POLICY_FLAGS = new Set([
+  "--fork",
+  "--no-session",
+  "--session",
+  "--session-dir",
+  "--session-id",
+]);
+
+export function attachPiSessionDir(
+  command: string,
+  args: string[],
+  sessionDir: string,
+): ManagedPiSessionArgs {
+  if (!isPiCommand(command) || findPiPrintPromptIndex(args) === undefined) {
+    return { args };
+  }
+  if (args.some((arg) => PI_SESSION_POLICY_FLAGS.has(arg))) return { args };
+  return { args: ["--session-dir", sessionDir, ...args], sessionDir };
+}
+
 export interface MaterializedPiPrintPromptArgs {
   args: string[];
   promptBytes?: number;

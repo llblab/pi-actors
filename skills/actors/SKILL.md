@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use, including parallel actor launches, subagent fanout, and autonomous coordinator workflows. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.40.1
+  version: 0.41.0
 ---
 
 # Actors (pi-actors)
@@ -125,13 +125,9 @@ Views:
 - `artifacts`: declared artifact paths/status plus the same bounded owned review-evidence manifest when present.
 - `recipes` target: registry summary for active, shadowed, invalid, disabled, and diagnostic recipe entries.
 
-Actor inspector commands:
+Actor inspector navigation uses one command: `/actors-inspector-toggle` opens the centered overlay. It exposes explicit Tabs → Filters → List → Detail focus zones over the first run owned by the current session. Tabs use ←/→; ↓ enters Filters; ↑ at the top boundary does nothing. The filter bar contains only selectable controls; arrows move focus, Enter opens a compact value popup anchored beneath that filter, ↑/↓ hover a value, and Enter applies it. A filter cannot move down into an empty list. Accent text marks current values, a light background marks keyboard focus, and opening a nested popup preserves both its blue parent filter and the striped timeline outside the occluded cells. Lists use ↑/↓ and Enter; detail uses ↑/↓ and Enter/←. Escape cancels options or closes the overlay. The list body carries the selected run and live status above compact striped evidence rows; tabs, live refresh, empty states, and key hints remain visible so no subcommand grammar is required.
 
-- `/actors-inspector-toggle [rows]`: open/close the compact table or set row count; default is 12 log rows when no size is supplied.
-- `/actors-inspector-filter all|room|direct|broadcast|unread|branch <name>|current-branch <name>|mention <text>`: narrow table previews without changing room/run state.
-- `/actors-inspect <number>`: open one visible row as a full-message view.
-
-The table is compact and optimistic by default: bounded body previews, capped noisy room rows, branch-local inbox previews, stable event ids in selected-message details, and an inline roster summary in the form `name/role` that wraps only when needed. Use `unread` for queued branch inbox work and `branch <name>` / `current-branch <name>` for one branch's room/direct/inbox traffic. Rows with `metadata.requires_response=true` show a `!` attention marker. `/actors-inspect <number>` marks that row read for the current session filter. Active roster members use the target color; members that sent `actor.leave` stay visible as inactive/muted participants from the current run. Actor display names come from `actor.join` bodies (`display`) or branch addresses, keeping debugger output plain and name-driven.
+Communication rows retain bounded body previews, capped noisy room traffic, branch-local inbox state, stable event ids, attention markers, and compact roster summaries. Turn rows come only from persisted owned child-session evidence and show source model/text at a glance. Turn detail remains bounded and includes command/stage, session/prompt/recipe provenance, user/assistant text, persisted thinking or explicit reasoning unavailability, stop/usage/error metadata, correlated tool arguments/results, truncation, and parse diagnostics. Active roster members use the target color, departed members stay muted, and display names come from `actor.join` bodies or branch addresses.
 
 Let terminal notifications arrive. They queue through Pi's follow-up delivery mode, so a busy coordinator finishes its current work before receiving concurrently completed actor results; the host's `followUpMode` controls whether queued results arrive together or one at a time. When a deferred actor result gates the next step, wait for that terminal follow-up instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Idle coordinators still start a normal turn through `triggerTurn: true`. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
 
@@ -166,6 +162,8 @@ Controls:
 - `repeat`: repeated node expansion.
 - `output`: output behavior selection.
 - Command stdout/stderr use bounded tails plus complete spill files; tool/run diagnostics expose byte counts, truncation, and spill paths, while pipelines fail with `incomplete pipeline stdin` rather than consuming a partial tail.
+- Detached child `pi -p` commands receive isolated session storage under `sessions/command-NNN` in their owned run state, and command evidence records any resulting JSONL files. Coordinator-managed room/swarm participants use role/phase-scoped directories under the same run-local `sessions/` root so their turns remain discoverable too. Explicit `--no-session`, `--session`, `--session-id`, `--session-dir`, or `--fork` policy remains caller-owned and is never replaced.
+- Persisted child-session inspection follows the latest JSONL entry branch, correlates tool results by call id, bounds previews, and redacts common secret-bearing fields/text. Thinking content is evidence only when Pi persisted an explicit `thinking` block; never infer or advertise hidden reasoning.
 
 Placeholders:
 

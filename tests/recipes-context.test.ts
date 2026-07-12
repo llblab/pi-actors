@@ -9,7 +9,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { appendRecipeContextToPiArgs, formatRecipeContextJsonl, materializePiPrintPromptArg } from "../lib/recipes-context.ts";
+import {
+  appendRecipeContextToPiArgs,
+  attachPiSessionDir,
+  formatRecipeContextJsonl,
+  materializePiPrintPromptArg,
+} from "../lib/recipes-context.ts";
 
 const records = [
   {
@@ -104,6 +109,31 @@ test("Actor recipe context ignores pi file args when finding the print prompt", 
   assert.equal(args[1], "@screen.png");
   assert.equal(args[2], "Describe");
   assert.equal(args[3].startsWith("image\n\nActor recipe context bundle"), true);
+});
+
+test("Pi print commands receive isolated session storage without overriding explicit policy", () => {
+  assert.deepEqual(
+    attachPiSessionDir("pi", ["-p", "review"], "/run/sessions/command-001"),
+    {
+      args: ["--session-dir", "/run/sessions/command-001", "-p", "review"],
+      sessionDir: "/run/sessions/command-001",
+    },
+  );
+  for (const args of [
+    ["--no-session", "-p", "review"],
+    ["--session", "/tmp/existing.jsonl", "-p", "review"],
+    ["--session-dir", "/tmp/sessions", "-p", "review"],
+    ["--session-id", "fixed", "-p", "review"],
+    ["--fork", "/tmp/parent.jsonl", "-p", "review"],
+  ]) {
+    assert.deepEqual(attachPiSessionDir("pi", args, "/run/managed"), { args });
+  }
+  assert.deepEqual(attachPiSessionDir("echo", ["-p", "review"], "/run/managed"), {
+    args: ["-p", "review"],
+  });
+  assert.deepEqual(attachPiSessionDir("pi", ["--help"], "/run/managed"), {
+    args: ["--help"],
+  });
 });
 
 test("Fragmented Pi prompt argv and recipe context become one authoritative prompt file", async () => {

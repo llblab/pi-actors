@@ -101,15 +101,19 @@ export function createRunUiObservationState(): RunUiObservationState {
 export function readRunUiSnapshot(
   state: RunUiObservationState,
   ownerId: string,
+  options: { includeOutbox?: boolean; stateRoot?: string } = {},
 ): RunUiSnapshot {
-  const summary = summarizeRuns(undefined, ownerId);
+  const summary = summarizeRuns(options.stateRoot, ownerId);
   const status = renderRunStatus(summary, state.frame++);
   return {
-    outboxEvents: detectRunOutboxEvents(
-      state.eventLines,
-      summary,
-      state.outboxEventIds,
-    ),
+    outboxEvents:
+      options.includeOutbox === false
+        ? []
+        : detectRunOutboxEvents(
+            state.eventLines,
+            summary,
+            state.outboxEventIds,
+          ),
     status,
     summary,
     transitions: detectRunTransitions(state.observed, summary),
@@ -134,25 +138,53 @@ export function pruneRunUiObservationState(
 export function deliverRunTransitionNotifications(
   transitions: RunTransition[],
   sink: RunUiNotificationSink,
+  inFlight: Set<string> = new Set(),
 ): void {
   for (const transition of transitions) {
     if (!shouldNotifyRunTransition(transition)) continue;
-    const text = formatRunTransitionMessage(transition);
-    sink.notify(text, getRunTransitionNotificationType(transition));
-    if (!shouldSendRunTransitionFollowUp(transition)) continue;
-    sink.sendFollowUp({
-      customType: "pi-actors-run",
-      content: text,
-      display: true,
-      details: transition,
-    });
-    if (transition.stateDir) {
-      AsyncRuns.markRunTerminalNotificationHandled(
-        transition.stateDir,
-        transition.to,
-      );
+    const key = transition.stateDir ?? transition.run;
+    if (inFlight.has(key)) continue;
+    inFlight.add(key);
+    try {
+      const text = formatRunTransitionMessage(transition);
+      sink.notify(text, getRunTransitionNotificationType(transition));
+      if (!shouldSendRunTransitionFollowUp(transition)) continue;
+      sink.sendFollowUp({
+        customType: "pi-actors-run",
+        content: text,
+        display: true,
+        details: transition,
+      });
+      if (transition.stateDir) {
+        AsyncRuns.markRunTerminalNotificationHandled(
+          transition.stateDir,
+          transition.to,
+        );
+      }
+    } finally {
+      inFlight.delete(key);
     }
   }
+}
+
+export function reconcileRunTerminalNotifications(input: {
+  inFlight?: Set<string>;
+  ownerId: string;
+  sink: RunUiNotificationSink;
+  state: RunUiObservationState;
+  stateRoot?: string;
+}): RunUiSnapshot {
+  const snapshot = readRunUiSnapshot(input.state, input.ownerId, {
+    includeOutbox: false,
+    stateRoot: input.stateRoot,
+  });
+  deliverRunTransitionNotifications(
+    snapshot.transitions,
+    input.sink,
+    input.inFlight,
+  );
+  pruneRunUiObservationState(input.state, snapshot);
+  return snapshot;
 }
 
 export function deliverRunOutboxNotifications(
@@ -189,18 +221,94 @@ export interface RunRetirementExecution {
   stateDir: string;
 }
 
+export type RunStateWatcherDiagnosticCode =
+  | "attach_failed"
+  | "error"
+  | "removed"
+  | "rearmed";
+
+export interface RunStateWatcherDiagnostic {
+  code: RunStateWatcherDiagnosticCode;
+  id: number;
+  message: string;
+  path: string;
+  scope: "root" | "run";
+  ts: string;
+}
+
 export interface RunStateWatcher {
   close(): void;
+  getDiagnostics(): RunStateWatcherDiagnostic[];
   refresh(): void;
 }
 
+const RUN_WATCHER_DIAGNOSTIC_LIMIT = 32;
+
 export function createRunStateWatcher(input: {
-  stateRoot?: string;
+  exists?: (path: string) => boolean;
+  listDirectories?: (path: string) => string[];
   onChange: () => void;
+  stateRoot?: string;
+  watchPath?: (path: string, onChange: () => void) => FSWatcher;
 }): RunStateWatcher {
   const stateRoot = input.stateRoot ?? Paths.getRunStateRoot();
+  const pathExists = input.exists ?? existsSync;
+  const listDirectories =
+    input.listDirectories ??
+    ((path: string) =>
+      readdirSync(path, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(path, entry.name)));
+  const watchPath = input.watchPath ?? ((path, onChange) => watch(path, onChange));
+  let diagnosticId = 0;
+  let rootDegraded = false;
   let stateRootWatcher: FSWatcher | undefined;
+  const degradedRunDirs = new Set<string>();
+  const diagnostics: RunStateWatcherDiagnostic[] = [];
+  const lastDiagnosticSignatures = new Map<string, string>();
   const runDirWatchers = new Map<string, FSWatcher>();
+  const record = (
+    code: RunStateWatcherDiagnosticCode,
+    scope: "root" | "run",
+    path: string,
+    error?: unknown,
+  ): void => {
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    const signature = `${code}${detail}`;
+    const signatureKey = `${scope}:${path}`;
+    if (lastDiagnosticSignatures.get(signatureKey) === signature) return;
+    lastDiagnosticSignatures.set(signatureKey, signature);
+    const recovery =
+      code === "rearmed"
+        ? "; terminal watch acceleration restored"
+        : "; terminal reconciliation remains active and watcher rearm will retry";
+    diagnostics.push({
+      code,
+      id: ++diagnosticId,
+      message: `Run-state ${scope} watcher ${code.replace("_", " ")} for ${path}${detail}${recovery}`,
+      path,
+      scope,
+      ts: new Date().toISOString(),
+    });
+    if (diagnostics.length > RUN_WATCHER_DIAGNOSTIC_LIMIT) diagnostics.shift();
+  };
+  const removeRunWatcher = (
+    stateDir: string,
+    watcher: FSWatcher,
+    options: { degraded?: boolean; error?: unknown } = {},
+  ): void => {
+    if (runDirWatchers.get(stateDir) !== watcher) return;
+    watcher.close();
+    runDirWatchers.delete(stateDir);
+    if (options.degraded === false) {
+      degradedRunDirs.delete(stateDir);
+      lastDiagnosticSignatures.delete(`run:${stateDir}`);
+      return;
+    }
+    degradedRunDirs.add(stateDir);
+    if (options.error) record("error", "run", stateDir, options.error);
+    record("removed", "run", stateDir);
+  };
   const close = (): void => {
     stateRootWatcher?.close();
     stateRootWatcher = undefined;
@@ -208,37 +316,95 @@ export function createRunStateWatcher(input: {
     runDirWatchers.clear();
   };
   const watchRunDir = (stateDir: string): void => {
-    if (runDirWatchers.has(stateDir) || !existsSync(stateDir)) return;
+    if (runDirWatchers.has(stateDir) || !pathExists(stateDir)) return;
     try {
-      const watcher = watch(stateDir, input.onChange);
-      watcher.on("error", () => {
-        watcher.close();
-        runDirWatchers.delete(stateDir);
-      });
+      const watcher = watchPath(stateDir, input.onChange);
+      watcher.on("error", (error) =>
+        removeRunWatcher(stateDir, watcher, { error }),
+      );
       runDirWatchers.set(stateDir, watcher);
-    } catch {
-      // Watching is best-effort; explicit inspect remains available.
+      if (degradedRunDirs.delete(stateDir)) record("rearmed", "run", stateDir);
+    } catch (error) {
+      degradedRunDirs.add(stateDir);
+      record("attach_failed", "run", stateDir, error);
     }
   };
   function refresh(): void {
-    if (!existsSync(stateRoot)) return;
+    if (!pathExists(stateRoot)) return;
     if (!stateRootWatcher) {
       try {
-        stateRootWatcher = watch(stateRoot, input.onChange);
-        stateRootWatcher.on("error", () => {
-          stateRootWatcher?.close();
+        const watcher = watchPath(stateRoot, input.onChange);
+        stateRootWatcher = watcher;
+        watcher.on("error", (error) => {
+          if (stateRootWatcher !== watcher) return;
+          watcher.close();
           stateRootWatcher = undefined;
+          rootDegraded = true;
+          record("error", "root", stateRoot, error);
+          record("removed", "root", stateRoot);
         });
-      } catch {
-        // Watching is best-effort; explicit inspect remains available.
+        if (rootDegraded) {
+          rootDegraded = false;
+          record("rearmed", "root", stateRoot);
+        }
+      } catch (error) {
+        rootDegraded = true;
+        record("attach_failed", "root", stateRoot, error);
       }
     }
-    for (const entry of readdirSync(stateRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      watchRunDir(`${stateRoot}/${entry.name}`);
+    let stateDirs: string[];
+    try {
+      stateDirs = listDirectories(stateRoot);
+    } catch (error) {
+      record("attach_failed", "root", stateRoot, error);
+      return;
     }
+    const present = new Set(stateDirs);
+    for (const [stateDir, watcher] of runDirWatchers) {
+      if (present.has(stateDir) && pathExists(stateDir)) continue;
+      removeRunWatcher(stateDir, watcher, { degraded: false });
+    }
+    for (const stateDir of stateDirs) watchRunDir(stateDir);
   }
-  return { close, refresh };
+  return {
+    close,
+    getDiagnostics: () => [...diagnostics],
+    refresh,
+  };
+}
+
+export interface RunTerminalReconciliationLoop {
+  close(): void;
+  reconcileNow(): void;
+  start(): void;
+}
+
+export function createRunTerminalReconciliationLoop(input: {
+  intervalMs?: number;
+  onError?: (error: unknown) => void;
+  reconcile: () => void;
+  refreshWatcher: () => void;
+}): RunTerminalReconciliationLoop {
+  const intervalMs = input.intervalMs ?? 10_000;
+  let interval: NodeJS.Timeout | undefined;
+  const reconcileNow = (): void => {
+    try {
+      input.refreshWatcher();
+      input.reconcile();
+    } catch (error) {
+      input.onError?.(error);
+    }
+  };
+  const close = (): void => {
+    if (interval) clearInterval(interval);
+    interval = undefined;
+  };
+  const start = (): void => {
+    close();
+    interval = setInterval(reconcileNow, intervalMs);
+    interval.unref?.();
+  };
+  return { close, reconcileNow, start };
 }
 
 export interface RunRetirementExecutorOptions {

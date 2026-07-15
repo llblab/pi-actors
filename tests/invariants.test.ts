@@ -45,6 +45,11 @@ test("Entrypoint imports local domains through namespace imports", () => {
   );
 });
 
+test("Entrypoint registers the concise actor inspector command", () => {
+  assert.match(indexSource, /registerCommand\("actors-inspector"/);
+  assert.doesNotMatch(indexSource, /registerCommand\("actors-inspector-toggle"/);
+});
+
 test("Entrypoint stays free of direct typebox and environment access", () => {
   assert.equal(indexSource.includes('from "typebox"'), false);
   assert.equal(indexSource.includes("process.env"), false);

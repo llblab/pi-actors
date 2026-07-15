@@ -119,6 +119,11 @@ test("Packaged skill markdown links resolve inside package", () => {
   }
 });
 
+test("Packaged actors skill stays focused on agent operations, not Inspector UI", () => {
+  const actorSkill = readFileSync("skills/actors/SKILL.md", "utf8");
+  assert.doesNotMatch(actorSkill, /\/actors-inspector|actor inspector|inside the overlay/i);
+});
+
 test("Packaged actors skill top recipes link prioritized recipes and deep inventory", () => {
   const actorSkill = readFileSync("skills/actors/SKILL.md", "utf8");
   const topRecipes = actorSkill.match(

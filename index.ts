@@ -21,8 +21,10 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
   let runsAnimationInterval: NodeJS.Timeout | undefined;
   let runsNotifyTimeout: NodeJS.Timeout | undefined;
   let activeRunContext: Pi.ExtensionContext | undefined;
+  let lastRunWatcherDiagnosticId = 0;
   const runUi = Observability.createRunUiObservationState();
   const retirementAttempts = new Set<string>();
+  const terminalNotificationsInFlight = new Set<string>();
   const getRunOwnerId = Pi.getSessionId;
   const retireCandidateRuns = (
     ctx: Pi.ExtensionContext,
@@ -53,6 +55,7 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     Observability.deliverRunTransitionNotifications(
       snapshot.transitions,
       notificationSink,
+      terminalNotificationsInFlight,
     );
     Observability.pruneRunUiObservationState(runUi, snapshot);
     if (!terminalOnly) {
@@ -64,22 +67,56 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
   };
   const closeRunWatchers = (): void => {
     runWatcher.close();
+    terminalReconciliation.close();
     if (runsNotifyTimeout) clearTimeout(runsNotifyTimeout);
     runsNotifyTimeout = undefined;
   };
-  const scheduleRunEventUpdate = (ctx: Pi.ExtensionContext): void => {
+  const reportRunWatcherDiagnostics = (ctx: Pi.ExtensionContext): void => {
+    for (const diagnostic of runWatcher.getDiagnostics()) {
+      if (diagnostic.id <= lastRunWatcherDiagnosticId) continue;
+      lastRunWatcherDiagnosticId = diagnostic.id;
+      ctx.ui.notify(
+        diagnostic.message,
+        diagnostic.code === "rearmed" ? "info" : "warning",
+      );
+    }
+  };
+  const scheduleRunEventUpdate = (): void => {
     if (runsNotifyTimeout) clearTimeout(runsNotifyTimeout);
     runsNotifyTimeout = setTimeout(() => {
+      const ctx = activeRunContext;
+      if (!ctx) return;
       runWatcher.refresh();
       updateRunUi(ctx, true);
+      reportRunWatcherDiagnostics(ctx);
     }, 50);
     runsNotifyTimeout.unref?.();
   };
   const runWatcher = Observability.createRunStateWatcher({
     stateRoot: Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
-    onChange: () =>
-      activeRunContext && scheduleRunEventUpdate(activeRunContext),
+    onChange: scheduleRunEventUpdate,
   });
+  const terminalReconciliation =
+    Observability.createRunTerminalReconciliationLoop({
+      onError: (error) => {
+        const ctx = activeRunContext;
+        if (!ctx) return;
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Actor terminal reconciliation failed: ${message}`, "error");
+      },
+      reconcile: () => {
+        const ctx = activeRunContext;
+        if (!ctx) return;
+        Observability.reconcileRunTerminalNotifications({
+          inFlight: terminalNotificationsInFlight,
+          ownerId: getRunOwnerId(ctx),
+          sink: Pi.createNotificationSink(pi, ctx),
+          state: runUi,
+        });
+        reportRunWatcherDiagnostics(ctx);
+      },
+      refreshWatcher: () => runWatcher.refresh(),
+    });
   const actorToolDefinitions = new Map<string, Tools.ActorToolDefinition>();
   const withCurrentThinkingContext = <T extends Tools.ActorToolDefinition>(
     definition: T,
@@ -127,15 +164,19 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     // Clear the pre-overlay widget after hot reloads from older pi-actors builds.
     ctx.ui.setWidget("zz-pi-actors-comms", undefined);
     activeRunContext = ctx;
-    await Temp.prepareExtensionTempDir(Paths.EXTENSION_RUNTIME_PATHS.tempDir);
-    runtime.loadTools(ctx);
-    updateRunUi(ctx, true, true);
     closeRunWatchers();
     recipeReload.close();
+    await Temp.prepareExtensionTempDir(Paths.EXTENSION_RUNTIME_PATHS.tempDir);
+    if (activeRunContext !== ctx) return;
+    runtime.loadTools(ctx);
+    updateRunUi(ctx, true, true);
     runWatcher.refresh();
+    terminalReconciliation.start();
     recipeReload.watch(ctx);
     if (runsAnimationInterval) clearInterval(runsAnimationInterval);
-    runsAnimationInterval = setInterval(() => updateRunUi(ctx, false), 1000);
+    runsAnimationInterval = setInterval(() => {
+      if (activeRunContext === ctx) updateRunUi(ctx, false);
+    }, 1000);
     runsAnimationInterval.unref?.();
   });
   pi.on("session_shutdown", async () => {
@@ -145,8 +186,8 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     closeRunWatchers();
     recipeReload.close();
   });
-  pi.registerCommand("actors-inspector-toggle", {
-    description: "Toggle the keyboard-driven actor inspector overlay",
+  pi.registerCommand("actors-inspector", {
+    description: "Open the keyboard-driven actor inspector overlay",
     handler: async (_args, ctx) => {
       ctx.ui.setWidget("zz-pi-actors-comms", undefined);
       await ctx.ui.custom<void>(

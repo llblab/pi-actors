@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.41.1: Actor Inspector and Delivery Hotfix
+
+- `Terminal Delivery`: Added bounded ten-second terminal reconciliation and watcher rearm so owned terminal follow-ups converge without reload when file watching misses or fails. Delivery still uses Pi follow-ups with owner filtering, `triggerTurn`, no historical outbox replay, and the existing at-least-once handled-marker contract; routine run-directory removal stays quiet while real watcher degradation remains diagnostic.
+- `Actor Inspector`: Finished the 0.41 overlay line around a compact meaning-first workflow. `/actors-inspector` now opens the latest numbered Run; Run, Message, and Turn lists show newest evidence first; bounded menus remain usable on short terminals; and humanized Turn rows lead into wrapped Evidence and a metadata-free readable transcript. Turn content now prioritizes User, Thinking, Assistant, and tool actions before Execution and Provenance, strips prompt transport wrappers in readable mode, keeps logical sections on one stripe, and removes false wraps, clipped values, redundant labels/separators, and blank rows.
+- `Tool Output`: Normalized successful results and errors to contribute exactly one leading line break, preserving one empty separator row beneath Pi's rendered tool-call header without occasional double gaps.
+- `Agent Guidance`: Kept Inspector behavior in user documentation and removed it from the bundled Actors skill, leaving that skill focused on agent-operational `spawn`, `message`, `inspect`, recipes, and lifecycle guidance.
+
 ## 0.41.0: Actor Inspector Overlay and Execution Observability
 
 - `[Inspector Menu Alignment]` Shifted value submenus one cell left so adjacent levels share a border, aligned Run and tab labels to one vertical grid, and made the Run dropdown begin immediately below Run by overlaying the tab row. Impact: nested menus read as one connected hierarchy and every top-level control follows the same anchored dropdown rhythm.

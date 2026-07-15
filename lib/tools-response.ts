@@ -7,9 +7,8 @@
 import * as Limits from "./limits.ts";
 import * as ToolsMailbox from "./tools-mailbox.ts";
 
-export function withLeadingBlankLine(text: string): string {
-  if (text.startsWith("\n\n")) return text;
-  return text.startsWith("\n") ? `\n${text}` : `\n\n${text}`;
+export function withLeadingLineBreak(text: string): string {
+  return `\n${text.replace(/^\n+/, "")}`;
 }
 
 export function spaceToolResult<T>(result: T): T {
@@ -25,7 +24,7 @@ export function spaceToolResult<T>(result: T): T {
       typeof (item as { text?: unknown }).text === "string"
         ? {
             ...item,
-            text: withLeadingBlankLine((item as { text: string }).text),
+            text: withLeadingLineBreak((item as { text: string }).text),
           }
         : item,
     ),
@@ -34,10 +33,10 @@ export function spaceToolResult<T>(result: T): T {
 
 export function spaceToolError(error: unknown): unknown {
   if (error instanceof Error) {
-    error.message = withLeadingBlankLine(error.message);
+    error.message = withLeadingLineBreak(error.message);
     return error;
   }
-  return new Error(withLeadingBlankLine(String(error)));
+  return new Error(withLeadingLineBreak(String(error)));
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {

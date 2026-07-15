@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use, including parallel actor launches, subagent fanout, and autonomous coordinator workflows. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.41.0
+  version: 0.41.1
 ---
 
 # Actors (pi-actors)
@@ -125,17 +125,13 @@ Views:
 - `artifacts`: declared artifact paths/status plus the same bounded owned review-evidence manifest when present.
 - `recipes` target: registry summary for active, shadowed, invalid, disabled, and diagnostic recipe entries.
 
-Actor inspector navigation uses one command: `/actors-inspector-toggle` opens the centered overlay. It exposes explicit Tabs → Filters → List → Detail focus zones over the first run owned by the current session. Tabs use ←/→; ↓ enters Filters; ↑ at the top boundary does nothing. The filter bar contains only selectable controls; arrows move focus, Enter opens a compact value popup anchored beneath that filter, ↑/↓ hover a value, and Enter applies it. A filter cannot move down into an empty list. Accent text marks current values, a light background marks keyboard focus, and opening a nested popup preserves both its blue parent filter and the striped timeline outside the occluded cells. Lists use ↑/↓ and Enter; detail uses ↑/↓ and Enter/←. Escape cancels options or closes the overlay. The list body carries the selected run and live status above compact striped evidence rows; tabs, live refresh, empty states, and key hints remain visible so no subcommand grammar is required.
-
-Communication rows retain bounded body previews, capped noisy room traffic, branch-local inbox state, stable event ids, attention markers, and compact roster summaries. Turn rows come only from persisted owned child-session evidence and show source model/text at a glance. Turn detail remains bounded and includes command/stage, session/prompt/recipe provenance, user/assistant text, persisted thinking or explicit reasoning unavailability, stop/usage/error metadata, correlated tool arguments/results, truncation, and parse diagnostics. Active roster members use the target color, departed members stay muted, and display names come from `actor.join` bodies or branch addresses.
-
-Let terminal notifications arrive. They queue through Pi's follow-up delivery mode, so a busy coordinator finishes its current work before receiving concurrently completed actor results; the host's `followUpMode` controls whether queued results arrive together or one at a time. When a deferred actor result gates the next step, wait for that terminal follow-up instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Idle coordinators still start a normal turn through `triggerTurn: true`. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
+Let terminal notifications arrive. They queue through Pi's follow-up delivery mode, so a busy coordinator finishes its current work before receiving concurrently completed actor results; the host's `followUpMode` controls whether queued results arrive together or one at a time. File watching accelerates delivery, while a bounded ten-second terminal-only reconciliation pass recovers missed or failed watcher activity without replaying outbox traffic; watcher degradation and rearm remain visible diagnostics. When a deferred actor result gates the next step, wait for that terminal follow-up instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Idle coordinators still start a normal turn through `triggerTurn: true`. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
 
 ## Runtime Communication Rules
 
 - Keep one public communication model: `spawn` creates actors, `message` sends typed envelopes, and `inspect` observes. Avoid adding public side channels or storage nouns when a normal actor address/view can express the operation.
 - Keep route and semantic type separate. Direct, room, coordinator, and session messages may share `type`; delivery behavior comes from `to`.
-- Treat inspector-visible communication logs as recipe evidence. Use `inspect room:<run> view=messages|previews`, `inspect run:<id> view=communication`, and the actor inspector table/full-message views to improve mailbox/artifact conventions after real runs.
+- Treat persisted communication logs as recipe evidence. Use `inspect room:<run> view=messages|previews` and `inspect run:<id> view=communication` to improve mailbox/artifact conventions after real runs.
 - Any UI, summary, or aggregate view that scans run directories must apply coordinator/session ownership filters before exposing summaries or body previews.
 - Treat `communication.json` as visible actor context, not a global mutable truth table. Run-level snapshots should identify the run actor; branch-local snapshots should identify the branch actor.
 - Prefer same-run provenance checks on lateral actor routes. If `from` is accepted for room or branch routes, validate that it belongs to the addressed run.

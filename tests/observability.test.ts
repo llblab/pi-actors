@@ -4,6 +4,8 @@
  */
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import type { FSWatcher } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,12 +13,16 @@ import test from "node:test";
 
 import {
   countRunningSubagents,
+  createRunStateWatcher,
+  createRunTerminalReconciliationLoop,
+  createRunUiObservationState,
   detectRunOutboxEvents,
   detectRunTransitions,
   deliverRunTransitionNotifications,
   executeRunRetirements,
   findRunRetirementCandidates,
   pruneRunObservationState,
+  reconcileRunTerminalNotifications,
   formatRunOutboxMessage,
   formatRunTransitionMessage,
   getRunOutboxNotificationType,
@@ -422,6 +428,185 @@ test("Run observability detects failed terminal transitions", () => {
   assert.deepEqual(transitions, [
     { from: "running", run: "review", to: "failed" },
   ]);
+});
+
+test("Periodic terminal reconciliation delivers without a watcher event", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-periodic-"));
+  const stateDir = join(root, "review");
+  const secondStateDir = join(root, "audit");
+  const foreignStateDir = join(root, "foreign");
+  let loop: ReturnType<typeof createRunTerminalReconciliationLoop> | undefined;
+  const degradedWatcher = createRunStateWatcher({
+    stateRoot: root,
+    onChange: () => assert.fail("watch callback should remain unused"),
+    watchPath: () => {
+      throw new Error("watch unavailable");
+    },
+  });
+  try {
+    await writeRun(root, "review", "done", [], 0, "session-a");
+    await writeRun(root, "audit", "done", [], 0, "session-a");
+    await writeRun(root, "foreign", "done", [], 0, "session-b");
+    const delivered: unknown[] = [];
+    const state = createRunUiObservationState();
+    loop = createRunTerminalReconciliationLoop({
+      intervalMs: 10,
+      reconcile: () =>
+        reconcileRunTerminalNotifications({
+          ownerId: "session-a",
+          sink: {
+            notify: () => {},
+            sendFollowUp: (message) => delivered.push(message),
+          },
+          state,
+          stateRoot: root,
+        }),
+      refreshWatcher: () => degradedWatcher.refresh(),
+    });
+    loop.start();
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline) {
+      try {
+        await Promise.all([
+          readFile(join(stateDir, "terminal-handled.json"), "utf8"),
+          readFile(join(secondStateDir, "terminal-handled.json"), "utf8"),
+        ]);
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    const handled = JSON.parse(
+      await readFile(join(stateDir, "terminal-handled.json"), "utf8"),
+    );
+    assert.equal(handled.status, "done");
+    assert.equal(delivered.length, 2);
+    assert.equal(
+      degradedWatcher
+        .getDiagnostics()
+        .some((diagnostic) => diagnostic.code === "attach_failed"),
+      true,
+    );
+    await assert.rejects(
+      readFile(join(foreignStateDir, "terminal-handled.json"), "utf8"),
+      /ENOENT/,
+    );
+  } finally {
+    loop?.close();
+    degradedWatcher.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Terminal reconciliation deduplicates a reentrant watcher race", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-race-"));
+  try {
+    await writeRun(root, "review", "done", [], 0, "session-a");
+    const state = createRunUiObservationState();
+    const inFlight = new Set<string>();
+    let delivered = 0;
+    const reconcile = () =>
+      reconcileRunTerminalNotifications({
+        inFlight,
+        ownerId: "session-a",
+        sink: {
+          notify: () => {},
+          sendFollowUp: () => {
+            delivered += 1;
+            if (delivered === 1) reconcile();
+          },
+        },
+        state,
+        stateRoot: root,
+      });
+    reconcile();
+    assert.equal(delivered, 1);
+    const handled = JSON.parse(
+      await readFile(join(root, "review", "terminal-handled.json"), "utf8"),
+    );
+    assert.equal(handled.status, "done");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run-state watcher records degradation and bounded rearm diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-watcher-diagnostics-"));
+  const stateDir = join(root, "review");
+  class FakeWatcher extends EventEmitter {
+    close(): void {}
+  }
+  let rootAttempts = 0;
+  let runWatcher: FakeWatcher | undefined;
+  const watcher = createRunStateWatcher({
+    stateRoot: root,
+    onChange: () => {},
+    watchPath: (path) => {
+      if (path === root && rootAttempts++ === 0)
+        throw new Error("root attach failed");
+      const next = new FakeWatcher();
+      if (path === stateDir) runWatcher = next;
+      return next as FSWatcher;
+    },
+  });
+  try {
+    await mkdir(stateDir, { recursive: true });
+    watcher.refresh();
+    watcher.refresh();
+    assert.ok(runWatcher);
+    const initialDiagnostics = watcher.getDiagnostics();
+    assert.equal(
+      initialDiagnostics.some(
+        (item) => item.scope === "root" && item.code === "attach_failed",
+      ),
+      true,
+    );
+    assert.equal(
+      initialDiagnostics.some(
+        (item) => item.scope === "root" && item.code === "rearmed",
+      ),
+      true,
+    );
+    for (let index = 0; index < 20; index += 1) {
+      runWatcher?.emit("error", new Error(`watch failed ${index}`));
+      watcher.refresh();
+    }
+    const diagnostics = watcher.getDiagnostics();
+    assert.equal(diagnostics.length <= 32, true);
+    assert.equal(diagnostics.some((item) => item.code === "removed"), true);
+    assert.equal(diagnostics.some((item) => item.code === "rearmed"), true);
+    assert.equal(
+      diagnostics.some((item) => item.message.includes("watch failed")),
+      true,
+    );
+  } finally {
+    watcher.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run-state watcher removes deleted run directories without degradation warnings", () => {
+  const root = "/virtual/runs";
+  const stateDir = `${root}/completed`;
+  class FakeWatcher extends EventEmitter {
+    close(): void {}
+  }
+  let runPresent = true;
+  const watcher = createRunStateWatcher({
+    exists: (path) => path === root || (path === stateDir && runPresent),
+    listDirectories: () => (runPresent ? [stateDir] : []),
+    onChange: () => {},
+    stateRoot: root,
+    watchPath: () => new FakeWatcher() as FSWatcher,
+  });
+  try {
+    watcher.refresh();
+    runPresent = false;
+    watcher.refresh();
+    assert.deepEqual(watcher.getDiagnostics(), []);
+  } finally {
+    watcher.close();
+  }
 });
 
 test("Run observability replays one unhandled terminal transition after reload", async () => {

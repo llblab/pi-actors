@@ -107,9 +107,12 @@ export function readActorInspectorRuns(
               : {}),
         }];
       })
-      .sort((left, right) =>
-        String(left.updatedAt ?? "").localeCompare(String(right.updatedAt ?? "")),
-      );
+      .sort((left, right) => {
+        const recency = String(right.updatedAt ?? "").localeCompare(
+          String(left.updatedAt ?? ""),
+        );
+        return recency || right.run.localeCompare(left.run);
+      });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     return [];

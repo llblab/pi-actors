@@ -1,6 +1,6 @@
 /**
  * Async run retention operations.
- * Owns terminal-run archive and prune filesystem behavior.
+ * Owns: terminal-run archive and prune filesystem behavior.
  */
 
 import { createHash } from "node:crypto";

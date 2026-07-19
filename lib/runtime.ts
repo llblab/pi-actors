@@ -182,18 +182,29 @@ export function createAutoToolsRuntime(
   };
 }
 
+export interface RecipeToolReloadWatcherDeps {
+  exists?: (path: string) => boolean;
+  recipeRoot?: string;
+  watchPath?: typeof watch;
+}
+
 export function createRecipeToolReloadWatcher(
   runtime: Pick<ToolRegistryRuntime, "loadTools">,
+  deps: RecipeToolReloadWatcherDeps = {},
 ): RecipeToolReloadWatcher {
+  const pathExists = deps.exists ?? existsSync;
+  const watchPath = deps.watchPath ?? watch;
   let reloadTimeout: NodeJS.Timeout | undefined;
   let rootWatcher: FSWatcher | undefined;
   let parentWatcher: FSWatcher | undefined;
   let failureNotified = false;
   const close = (): void => {
-    rootWatcher?.close();
+    const closingRoot = rootWatcher;
     rootWatcher = undefined;
-    parentWatcher?.close();
+    closingRoot?.close();
+    const closingParent = parentWatcher;
     parentWatcher = undefined;
+    closingParent?.close();
     if (reloadTimeout) clearTimeout(reloadTimeout);
     reloadTimeout = undefined;
   };
@@ -217,28 +228,31 @@ export function createRecipeToolReloadWatcher(
   const watchParent = (ctx: RuntimeContext, recipeRoot: string): void => {
     if (parentWatcher || rootWatcher) return;
     const parent = dirname(recipeRoot);
-    if (!existsSync(parent)) {
+    if (!pathExists(parent)) {
       notifyFailure(ctx);
       return;
     }
     try {
-      parentWatcher = watch(parent, (_event, changedFile) => {
+      const watcher = watchPath(parent, (_event, changedFile) => {
+        if (parentWatcher !== watcher) return;
         if (
           changedFile &&
           String(changedFile) !== basename(recipeRoot) &&
-          !existsSync(recipeRoot)
+          !pathExists(recipeRoot)
         ) {
           return;
         }
-        if (!existsSync(recipeRoot)) return;
-        parentWatcher?.close();
+        if (!pathExists(recipeRoot)) return;
         parentWatcher = undefined;
+        watcher.close();
         watchRoot(ctx, recipeRoot);
         scheduleReload(ctx);
       });
-      parentWatcher.on("error", () => {
-        parentWatcher?.close();
+      parentWatcher = watcher;
+      watcher.on("error", () => {
+        if (parentWatcher !== watcher) return;
         parentWatcher = undefined;
+        watcher.close();
         notifyFailure(ctx);
       });
     } catch {
@@ -247,25 +261,28 @@ export function createRecipeToolReloadWatcher(
   };
   const watchRoot = (ctx: RuntimeContext, recipeRoot: string): void => {
     if (rootWatcher) return;
-    if (!existsSync(recipeRoot)) {
+    if (!pathExists(recipeRoot)) {
       watchParent(ctx, recipeRoot);
       return;
     }
     try {
-      rootWatcher = watch(recipeRoot, () => {
-        if (!existsSync(recipeRoot)) {
-          rootWatcher?.close();
+      const watcher = watchPath(recipeRoot, () => {
+        if (rootWatcher !== watcher) return;
+        if (!pathExists(recipeRoot)) {
           rootWatcher = undefined;
+          watcher.close();
           scheduleReload(ctx);
           watchParent(ctx, recipeRoot);
           return;
         }
         scheduleReload(ctx);
       });
-      rootWatcher.on("error", () => {
-        rootWatcher?.close();
+      rootWatcher = watcher;
+      watcher.on("error", () => {
+        if (rootWatcher !== watcher) return;
         rootWatcher = undefined;
-        if (existsSync(recipeRoot)) notifyFailure(ctx);
+        watcher.close();
+        if (pathExists(recipeRoot)) notifyFailure(ctx);
         else watchParent(ctx, recipeRoot);
       });
     } catch {
@@ -276,7 +293,7 @@ export function createRecipeToolReloadWatcher(
     close,
     watch(ctx: RuntimeContext): void {
       if (rootWatcher || parentWatcher) return;
-      watchRoot(ctx, Paths.getRecipeRoot());
+      watchRoot(ctx, deps.recipeRoot ?? Paths.getRecipeRoot());
     },
   };
 }

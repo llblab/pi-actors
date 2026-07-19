@@ -1,6 +1,6 @@
 /**
  * Async run process identity helpers.
- * Owns cross-platform liveness and stable runner process identity proofs.
+ * Owns: cross-platform liveness and stable runner process identity proofs.
  */
 
 import { spawnSync } from "node:child_process";

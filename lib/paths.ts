@@ -17,6 +17,13 @@ export function getAgentDir(
     : join(homedir(), ".pi", "agent");
 }
 
+export function isAutomaticRecipeReviewEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const value = env.PI_ACTORS_AUTOMATIC_REVIEW?.trim().toLowerCase();
+  return value === undefined || !["0", "false", "off"].includes(value);
+}
+
 export interface ExtensionRuntimePaths {
   configPath: string;
   runStateRoot: string;
@@ -36,6 +43,42 @@ export function getExtensionTmpDir(
 
 export function getRunStateRoot(agentDir = getAgentDir()): string {
   return join(getExtensionTmpDir(agentDir), "runs");
+}
+
+export function getDraftSleepRoot(agentDir = getAgentDir()): string {
+  return join(getExtensionTmpDir(agentDir), "draft-sleep");
+}
+
+export function getDraftSleepStatePath(agentDir = getAgentDir()): string {
+  return join(getDraftSleepRoot(agentDir), "state.json");
+}
+
+export function getDraftSleepBatchDir(
+  batchId: string,
+  agentDir = getAgentDir(),
+): string {
+  if (!/^[a-f0-9-]{36}$/u.test(batchId)) {
+    throw new Error("Invalid draft sleep batch id.");
+  }
+  return join(getDraftSleepRoot(agentDir), "batches", batchId);
+}
+
+export function getToolReviewRoot(agentDir = getAgentDir()): string {
+  return join(getExtensionTmpDir(agentDir), "tool-review");
+}
+
+export function getToolReviewStatePath(agentDir = getAgentDir()): string {
+  return join(getToolReviewRoot(agentDir), "state.json");
+}
+
+export function getToolReviewBatchDir(
+  reviewId: string,
+  agentDir = getAgentDir(),
+): string {
+  if (!/^[a-f0-9-]{36}$/u.test(reviewId)) {
+    throw new Error("Invalid tool review id.");
+  }
+  return join(getToolReviewRoot(agentDir), "batches", reviewId);
 }
 
 export function getExtensionRuntimePaths(

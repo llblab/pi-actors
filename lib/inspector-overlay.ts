@@ -12,21 +12,36 @@ import {
   matchesKey,
   truncateToWidth,
   visibleWidth,
-  wrapTextWithAnsi,
   type TUI,
 } from "@earendil-works/pi-tui";
 
 import * as Inspector from "./inspector.ts";
 
-export type ActorInspectorOverlayTab = "communications" | "turns";
+export type ActorInspectorOverlayTab = "recipe" | "communications" | "turns";
+
+const INSPECTOR_TABS: ActorInspectorOverlayTab[] = [
+  "recipe",
+  "communications",
+  "turns",
+];
 
 type DetailLogicalLine = string | { sectionBreak: true };
 
 const DETAIL_SECTION_BREAK: DetailLogicalLine = { sectionBreak: true };
 
+export interface ActorInspectorOverlayActionResult {
+  ok: boolean;
+  message: string;
+}
+
 export interface ActorInspectorOverlayOptions {
   done: () => void;
+  killRun?: (
+    run: string,
+    runInstanceId: string,
+  ) => ActorInspectorOverlayActionResult;
   ownerId: string;
+  readTurns?: (stateDir: string) => Inspector.ActorInspectorTurnItem[];
   stateRoot: string;
   theme: Theme;
   tui: TUI;
@@ -34,7 +49,12 @@ export interface ActorInspectorOverlayOptions {
 
 export class ActorInspectorOverlay {
   private readonly done: () => void;
+  private readonly killRun?: (
+    run: string,
+    runInstanceId: string,
+  ) => ActorInspectorOverlayActionResult;
   private readonly ownerId: string;
+  private readonly readTurns: (stateDir: string) => Inspector.ActorInspectorTurnItem[];
   private readonly stateRoot: string;
   private readonly theme: Theme;
   private readonly tui: TUI;
@@ -48,24 +68,32 @@ export class ActorInspectorOverlay {
   private detailOpen = false;
   private detailScroll = 0;
   private detailTurn?: Inspector.ActorInspectorTurnItem;
-  private detailView: "evidence" | "transcript" = "evidence";
+  private feedback?: ActorInspectorOverlayActionResult;
+  private killConfirmation?: { run: string; runInstanceId: string };
   private readonly readKeys = new Set<string>();
-  private focus: "runs" | "tabs" | "list" | "detail" | "select" = "tabs";
+  private focus: "runs" | "tabs" | "recipe" | "list" | "detail" | "select" = "tabs";
   private filterControlIndex = 0;
   private menuLevel: "run" | "filter" | "value" = "filter";
   private selectorIndex = 0;
+  private recipeScroll = 0;
   private rowIndex = 0;
   private selectedRun?: string;
   private subagentIndex = 0;
-  private tab: ActorInspectorOverlayTab = "communications";
+  private tab: ActorInspectorOverlayTab = "recipe";
+  private turnCache?: { run: string; turns: Inspector.ActorInspectorTurnItem[] };
 
   constructor(options: ActorInspectorOverlayOptions) {
     this.done = options.done;
+    this.killRun = options.killRun;
     this.ownerId = options.ownerId;
+    this.readTurns = options.readTurns ?? Inspector.readActorInspectorTurns;
     this.stateRoot = options.stateRoot;
     this.theme = options.theme;
     this.tui = options.tui;
-    this.refreshTimer = setInterval(() => this.tui.requestRender(), 1000);
+    this.refreshTimer = setInterval(() => {
+      if (this.focus !== "list" && this.focus !== "detail") this.turnCache = undefined;
+      this.tui.requestRender();
+    }, 1000);
     this.refreshTimer.unref?.();
   }
 
@@ -76,6 +104,21 @@ export class ActorInspectorOverlay {
       this.done();
       return;
     }
+    if (this.killConfirmation) {
+      if (matchesKey(data, "escape") || data.toLowerCase() === "n") {
+        this.feedback = { ok: false, message: "Kill cancelled." };
+        this.killConfirmation = undefined;
+      } else if (matchesKey(data, "return") || data.toLowerCase() === "y") {
+        this.confirmKill();
+      }
+      this.tui.requestRender();
+      return;
+    }
+    if (data.toLowerCase() === "k") {
+      this.requestKill(runs);
+      this.tui.requestRender();
+      return;
+    }
     if (matchesKey(data, "escape")) {
       if (this.focus === "select") {
         if (this.menuLevel === "value") {
@@ -83,6 +126,7 @@ export class ActorInspectorOverlay {
           this.selectorIndex = this.filterControlIndex;
         } else this.focus = this.menuLevel === "run" ? "runs" : "tabs";
       } else if (this.focus === "detail") this.backDetail();
+      else if (this.focus === "recipe") this.focus = "tabs";
       else this.done();
       this.tui.requestRender();
       return;
@@ -102,18 +146,27 @@ export class ActorInspectorOverlay {
       this.tui.requestRender();
       return;
     }
+    if (this.focus === "recipe") {
+      if (matchesKey(data, "up")) {
+        if (this.recipeScroll === 0) this.focus = "tabs";
+        else this.recipeScroll -= 1;
+      } else if (matchesKey(data, "down")) this.recipeScroll += 1;
+      else if (matchesKey(data, "pageUp"))
+        this.recipeScroll = Math.max(0, this.recipeScroll - this.contentViewportRows());
+      else if (matchesKey(data, "pageDown"))
+        this.recipeScroll += this.contentViewportRows();
+      else if (matchesKey(data, "left")) this.focus = "tabs";
+      this.tui.requestRender();
+      return;
+    }
     if (this.focus === "detail") {
       if (matchesKey(data, "up")) this.detailScroll = Math.max(0, this.detailScroll - 1);
       else if (matchesKey(data, "down")) this.detailScroll += 1;
+      else if (matchesKey(data, "pageUp"))
+        this.detailScroll = Math.max(0, this.detailScroll - this.contentViewportRows());
+      else if (matchesKey(data, "pageDown"))
+        this.detailScroll += this.contentViewportRows();
       else if (matchesKey(data, "left")) this.backDetail();
-      else if (
-        (matchesKey(data, "right") || matchesKey(data, "return")) &&
-        this.detailView === "evidence" &&
-        this.tab === "turns"
-      ) {
-        this.detailView = "transcript";
-        this.detailScroll = 0;
-      }
       this.tui.requestRender();
       return;
     }
@@ -124,16 +177,30 @@ export class ActorInspectorOverlay {
       else if (matchesKey(data, "return") && runs.length > 0) this.openRunMenu();
     } else if (this.focus === "tabs") {
       if (matchesKey(data, "left") || matchesKey(data, "right")) {
-        this.tab = this.tab === "communications" ? "turns" : "communications";
+        const current = INSPECTOR_TABS.indexOf(this.tab);
+        const direction = matchesKey(data, "right") ? 1 : -1;
+        this.tab = INSPECTOR_TABS[
+          (current + direction + INSPECTOR_TABS.length) % INSPECTOR_TABS.length
+        ]!;
         this.filterControlIndex = 0;
+        this.recipeScroll = 0;
         this.rowIndex = 0;
       } else if (matchesKey(data, "up")) this.focus = "runs";
+      else if (
+        (matchesKey(data, "down") || matchesKey(data, "return")) &&
+        this.tab === "recipe"
+      ) this.focus = "recipe";
       else if (matchesKey(data, "down") && this.listItemCount() > 0)
         this.focus = "list";
       else if (matchesKey(data, "return")) this.openFilterMenu();
     } else if (this.focus === "list") {
       const count = this.tab === "communications" ? this.communicationPreviews().length : this.turnItems().length;
-      if (matchesKey(data, "up")) {
+      if (matchesKey(data, "left")) this.focus = "tabs";
+      else if (matchesKey(data, "pageUp"))
+        this.rowIndex = Math.max(0, this.rowIndex - this.contentViewportRows());
+      else if (matchesKey(data, "pageDown"))
+        this.rowIndex = Math.min(Math.max(0, count - 1), this.rowIndex + this.contentViewportRows());
+      else if (matchesKey(data, "up")) {
         if (this.rowIndex === 0) this.focus = "tabs";
         else this.rowIndex -= 1;
       } else if (matchesKey(data, "down"))
@@ -194,11 +261,26 @@ export class ActorInspectorOverlay {
       );
     } else lines.push(this.border("├", "", "┤", innerWidth));
     this.contentStripeIndices = [];
-    const content = this.detailOpen
-      ? this.renderDetail(innerWidth)
-      : this.selectedRun
-        ? this.renderTimeline(innerWidth)
-        : this.renderRunSelector(innerWidth);
+    const baseContent = this.killConfirmation
+      ? this.renderKillConfirmation()
+      : this.detailOpen
+        ? this.renderDetail(innerWidth)
+        : this.selectedRun
+          ? this.renderTimeline(innerWidth)
+          : this.renderRunSelector(innerWidth);
+    const content = this.feedback && !this.killConfirmation
+      ? [
+          this.theme.fg(
+            this.feedback.ok
+              ? "success"
+              : /^Kill (failed|rejected):/.test(this.feedback.message)
+                ? "error"
+                : "warning",
+            ` ${this.feedback.message}`,
+          ),
+          ...baseContent.slice(0, Math.max(0, this.contentViewportRows() - 1)),
+        ]
+      : baseContent;
     const contentViewportRows = this.contentViewportRows();
     const selectorRows = selector.slice(1);
     for (let index = 0; index < Math.max(content.length, contentViewportRows); index += 1) {
@@ -256,7 +338,9 @@ export class ActorInspectorOverlay {
 
   private selectRun(run: string, index: number): void {
     this.selectedRun = run;
+    this.turnCache = undefined;
     this.runIndex = index;
+    this.recipeScroll = 0;
     this.rowIndex = 0;
     this.subagentIndex = 0;
     this.communicationFrom = "all";
@@ -276,7 +360,74 @@ export class ActorInspectorOverlay {
     if (next) this.selectRun(next.run, nextIndex);
   }
 
+  private requestKill(runs: Inspector.ActorInspectorRunItem[]): void {
+    this.feedback = undefined;
+    if (this.focus !== "runs") {
+      this.feedback = { ok: false, message: "Focus Run before using Kill." };
+      return;
+    }
+    const run = runs.find((item) => item.run === this.selectedRun);
+    if (!run) {
+      this.feedback = { ok: false, message: "Kill unavailable: no owned run." };
+      return;
+    }
+    if (!this.killRun) {
+      this.feedback = { ok: false, message: "Kill unavailable in this Inspector." };
+      return;
+    }
+    if (run.status !== "running") {
+      this.feedback = {
+        ok: false,
+        message: `Kill unavailable: run is ${run.status}.`,
+      };
+      return;
+    }
+    if (!run.runInstanceId) {
+      this.feedback = {
+        ok: false,
+        message: "Kill unavailable: run generation unavailable.",
+      };
+      return;
+    }
+    this.killConfirmation = {
+      run: run.run,
+      runInstanceId: run.runInstanceId,
+    };
+  }
+
+  private confirmKill(): void {
+    const confirmation = this.killConfirmation;
+    this.killConfirmation = undefined;
+    if (!confirmation || !this.killRun) {
+      this.feedback = { ok: false, message: "Kill unavailable in this Inspector." };
+      return;
+    }
+    try {
+      this.feedback = this.killRun(
+        confirmation.run,
+        confirmation.runInstanceId,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.feedback = {
+        ok: false,
+        message: `Kill failed: ${message.replaceAll(/\s+/g, " ").slice(0, 160)}.`,
+      };
+    }
+  }
+
+  private renderKillConfirmation(): string[] {
+    return [
+      this.theme.fg(
+        "error",
+        ` Kill running actor run:${this.killConfirmation?.run}?`,
+      ),
+      this.theme.fg("muted", " This sends canonical control.kill and cannot be undone."),
+    ];
+  }
+
   private listItemCount(): number {
+    if (this.tab === "recipe") return 0;
     return this.tab === "communications"
       ? this.communicationPreviews().length
       : this.turnItems().length;
@@ -287,7 +438,11 @@ export class ActorInspectorOverlay {
       const runControl = stripVTControlCharacters(this.renderRunControl());
       return Math.max(0, runControl.indexOf("Run:") - 2);
     }
-    const label = this.tab === "communications" ? "Messages" : "Turns";
+    const label = this.tab === "communications"
+      ? "Messages"
+      : this.tab === "turns"
+        ? "Turns"
+        : "Recipe";
     const tabs = stripVTControlCharacters(this.renderTabs());
     return Math.max(0, tabs.indexOf(label) - 2);
   }
@@ -295,18 +450,25 @@ export class ActorInspectorOverlay {
   private renderKeyHints(): string {
     const hint = (keys: string, description: string) =>
       `${this.theme.fg("accent", keys)}${this.theme.fg("dim", ` ${description}`)}`;
+    if (this.killConfirmation)
+      return ` ${hint("y/enter", "confirm kill")}  ${hint("n/esc", "cancel")}`;
     if (this.focus === "select")
       return this.menuLevel === "value"
         ? ` ${hint("↑↓", "option")}  ${hint("enter", "apply")}  ${hint("←/esc", "back")}`
         : ` ${hint("↑↓", "option")}  ${hint("→/enter", "open")}  ${hint("←/esc", "back")}`;
+    if (this.focus === "recipe")
+      return ` ${hint("↑↓/pgup/pgdn", "scroll")}  ${hint("↑ at top", "tabs")}  ${hint("←/esc", "tabs")}`;
     if (this.focus === "detail")
-      return this.tab === "turns" && this.detailView === "evidence"
-        ? ` ${hint("↑↓", "scroll")}  ${hint("→/enter", "readable")}  ${hint("←/esc", "back")}`
-        : ` ${hint("↑↓", "scroll")}  ${hint("←/esc", this.detailView === "transcript" ? "evidence" : "back")}`;
+      return ` ${hint("↑↓/pgup/pgdn", "scroll")}  ${hint("←/esc", "back")}`;
     if (this.focus === "list")
-      return ` ${hint("↑↓", "row")}  ${hint("→/enter", "open")}  ${hint("esc", "close")}`;
-    if (this.focus === "runs")
-      return ` ${hint("←→", "run")}  ${hint("↓", "tabs")}  ${hint("enter", "list")}  ${hint("esc", "close")}`;
+      return ` ${hint("↑↓/pgup/pgdn", "row")}  ${hint("→/enter", "open")}  ${hint("←", "tabs")}  ${hint("esc", "close")}`;
+    if (this.focus === "runs") {
+      const run = this.runs().find((item) => item.run === this.selectedRun);
+      const killHint = this.killRun && run?.status === "running" && run.runInstanceId
+        ? `  ${hint("k", "kill")}`
+        : "";
+      return ` ${hint("←→", "run")}  ${hint("↓", "tabs")}  ${hint("enter", "list")}${killHint}  ${hint("esc", "close")}`;
+    }
     return ` ${hint("←→", "navigate")}  ${hint("↑↓", "change row")}  ${hint("enter", "select")}  ${hint("esc", "close")}`;
   }
 
@@ -359,7 +521,7 @@ export class ActorInspectorOverlay {
     const subagent = this.subagents()[this.subagentIndex] ?? "all";
     const messagesLabel = `Messages${messageFilters.length > 0 ? ` (${messageFilters.join(", ")})` : ""}`;
     const turnsLabel = `Turns${subagent === "all" ? "" : ` (${subagent})`}`;
-    return `${tab("communications", messagesLabel)} ${tab("turns", turnsLabel)}`;
+    return `${tab("recipe", "Recipe")} ${tab("communications", messagesLabel)} ${tab("turns", turnsLabel)}`;
   }
 
   private renderRunSelector(width: number): string[] {
@@ -384,6 +546,7 @@ export class ActorInspectorOverlay {
       this.selectedRun = undefined;
       return [this.theme.fg("warning", " Selected run is no longer owned by this session")];
     }
+    if (this.tab === "recipe") return this.renderRecipe(width);
     const rows =
       this.tab === "communications"
         ? this.communicationRows()
@@ -429,6 +592,51 @@ export class ActorInspectorOverlay {
           ? this.theme.fg("accent", ` ▶ ${row}`)
           : `   ${row}`;
       });
+  }
+
+  private renderRecipe(width: number): string[] {
+    if (!this.selectedRun) return [];
+    const recipe = Inspector.readActorInspectorRecipe(
+      path.join(this.stateRoot, this.selectedRun),
+    );
+    const logicalLines: DetailLogicalLine[] = [
+      ...this.detailSection(
+        "Identity",
+        this.readableValueLines(recipe.identity, "  "),
+      ),
+      ...(recipe.definition
+        ? this.detailSection(
+            "Recipe",
+            this.readableValueLines(recipe.definition, "  "),
+          )
+        : []),
+      ...this.detailSection(
+        "Launch",
+        this.readableValueLines(recipe.launch, "  "),
+      ),
+      ...(recipe.composition.length > 0
+        ? this.detailSection(
+            "Composition",
+            this.readableValueLines(recipe.composition, "  "),
+          )
+        : []),
+      ...this.detailSection("Diagnostics", recipe.diagnostics),
+    ];
+    const wrapped = this.wrapDetailLines(
+      logicalLines.length > 0 ? logicalLines : [" No persisted recipe evidence"],
+      width,
+    );
+    const viewportRows = this.contentViewportRows();
+    const maxStart = Math.max(0, wrapped.lines.length - viewportRows);
+    this.recipeScroll = Math.min(this.recipeScroll, maxStart);
+    this.contentStripeIndices = wrapped.stripeIndices.slice(
+      this.recipeScroll,
+      this.recipeScroll + viewportRows,
+    );
+    return wrapped.lines.slice(
+      this.recipeScroll,
+      this.recipeScroll + viewportRows,
+    );
   }
 
   private communicationPreviews(): Inspector.ActorInspectorPreview[] {
@@ -496,7 +704,7 @@ export class ActorInspectorOverlay {
         ["inbox", preview.inbox_status],
         ["timestamp", preview.timestamp],
       ];
-      return fields
+      const lines = fields
         .filter(([, value]) => value !== undefined)
         .map(([label, value]) =>
           truncateToWidth(
@@ -505,12 +713,14 @@ export class ActorInspectorOverlay {
             "…",
           ),
         );
+      const viewportRows = this.contentViewportRows();
+      const maxStart = Math.max(0, lines.length - viewportRows);
+      this.detailScroll = Math.min(this.detailScroll, maxStart);
+      return lines.slice(this.detailScroll, this.detailScroll + viewportRows);
     }
     const turn = this.detailTurn;
     if (!turn) return [this.theme.fg("warning", " Turn row is no longer available")];
-    const logicalLines = this.detailView === "transcript"
-      ? this.turnTranscriptLines(turn)
-      : this.turnEvidenceLines(turn);
+    const logicalLines = this.turnEvidenceLines(turn);
     const wrapped = this.wrapDetailLines(logicalLines, width);
     const viewportRows = this.contentViewportRows();
     const maxStart = Math.max(0, wrapped.lines.length - viewportRows);
@@ -543,11 +753,39 @@ export class ActorInspectorOverlay {
         const leading = physicalLine.match(/^ */)?.[0] ?? "";
         const content = physicalLine.slice(leading.length);
         const contentWidth = Math.max(1, width - visibleWidth(leading));
-        const wrapped = visibleWidth(physicalLine) <= width
-          ? [physicalLine]
-          : wrapTextWithAnsi(content, contentWidth).map(
-              (visualLine) => `${leading}${visualLine}`,
-            );
+        const labeled = /^(\s*(?:-\s+)?[^:]+:\s+)(\S.*)$/u.exec(physicalLine);
+        let wrapped: string[];
+        if (
+          visibleWidth(physicalLine) > width &&
+          labeled &&
+          visibleWidth(labeled[1]) < width
+        ) {
+          const prefix = labeled[1];
+          const value = labeled[2];
+          const firstWidth = Math.max(1, width - visibleWidth(prefix));
+          const first = this.wrapPreferred(value, firstWidth)[0] ??
+            this.takeVisiblePrefix(value, firstWidth);
+          const remainder = value.slice(first.length).trimStart();
+          const continuation = `${leading}  `;
+          const continuationWidth = Math.max(
+            1,
+            width - visibleWidth(continuation),
+          );
+          wrapped = [
+            `${prefix}${first}`,
+            ...(remainder
+              ? this.wrapPreferred(remainder, continuationWidth).map(
+                  (visualLine) => `${continuation}${visualLine}`,
+                )
+              : []),
+          ];
+        } else {
+          wrapped = visibleWidth(physicalLine) <= width
+            ? [physicalLine]
+            : this.wrapPreferred(content, contentWidth).map(
+                (visualLine) => `${leading}${visualLine}`,
+              );
+        }
         for (const visualLine of wrapped) {
           if (!visualLine.trim()) continue;
           wrappedLines.push(visualLine);
@@ -556,6 +794,37 @@ export class ActorInspectorOverlay {
       }
     }
     return { lines: wrappedLines, stripeIndices };
+  }
+
+  private wrapPreferred(content: string, width: number): string[] {
+    const lines: string[] = [];
+    let remaining = stripVTControlCharacters(content).trimEnd();
+    while (remaining && visibleWidth(remaining) > width) {
+      const candidate = this.takeVisiblePrefix(remaining, width);
+      let splitAt = -1;
+      let trimBoundary = false;
+      for (let index = 1; index < candidate.length; index += 1) {
+        if (/\s/u.test(candidate[index]!)) {
+          splitAt = index + 1;
+          trimBoundary = true;
+        } else if (/[-+=/_,.:]/u.test(candidate[index]!)) {
+          splitAt = index;
+          trimBoundary = false;
+        }
+      }
+      if (splitAt <= 0) splitAt = candidate.length;
+      const head = remaining.slice(0, splitAt).trimEnd();
+      if (!head) {
+        lines.push(candidate);
+        remaining = remaining.slice(candidate.length);
+        continue;
+      }
+      lines.push(head);
+      remaining = remaining.slice(splitAt);
+      if (trimBoundary) remaining = remaining.trimStart();
+    }
+    if (remaining) lines.push(remaining);
+    return lines;
   }
 
   private detailSection(
@@ -612,9 +881,14 @@ export class ActorInspectorOverlay {
         }
         if (!item || typeof item !== "object")
           return [`${indent}- ${String(item)}`];
+        const [first = "", ...rest] = this.readableValueLines(
+          item,
+          `${indent}  `,
+          depth + 1,
+        );
         return [
-          `${indent}-`,
-          ...this.readableValueLines(item, `${indent}  `, depth + 1),
+          `${indent}- ${first.trimStart()}`,
+          ...rest,
         ];
       });
     }
@@ -650,7 +924,9 @@ export class ActorInspectorOverlay {
         : "";
     lines.push(` Subagent ${subagent}${stage}`, DETAIL_SECTION_BREAK);
     if (turn.userText)
-      lines.push(...this.detailSection("User", [turn.userText]));
+      lines.push(
+        ...this.detailSection("User", [this.readablePromptText(turn.userText)]),
+      );
     if (turn.thinking)
       lines.push(...this.detailSection("Thinking", [turn.thinking]));
     if (turn.assistantText)
@@ -698,12 +974,6 @@ export class ActorInspectorOverlay {
             `  ${turn.promptFile}${turn.promptBytes ? ` (${turn.promptBytes} bytes)` : ""}`,
           ]
         : []),
-      ...(turn.recipeContext === undefined
-        ? []
-        : [
-            "Recipe Context",
-            ...this.readableValueLines(turn.recipeContext, "  "),
-          ]),
     ];
     lines.push(...this.detailSection("Provenance", provenance));
     return lines.length > 0 ? lines : [" No persisted turn evidence"];
@@ -714,44 +984,17 @@ export class ActorInspectorOverlay {
     return wrapped?.[1]?.trim() || text;
   }
 
-  private turnTranscriptLines(
-    turn: Inspector.ActorInspectorTurnItem,
-  ): DetailLogicalLine[] {
-    const lines: DetailLogicalLine[] = [];
-    if (turn.userText)
-      lines.push(
-        ...this.detailSection("User", [this.readablePromptText(turn.userText)]),
-      );
-    if (turn.thinking)
-      lines.push(...this.detailSection("Thinking", [turn.thinking]));
-    if (turn.assistantText)
-      lines.push(...this.detailSection("Assistant", [turn.assistantText]));
-    for (const tool of turn.toolCalls) {
-      const content = [
-        ...(tool.arguments === undefined
-          ? []
-          : ["Input", ...this.readableValueLines(tool.arguments, "  ")]),
-        ...(tool.result === undefined
-          ? []
-          : ["Result", ...this.readableValueLines(tool.result, "  ")]),
-      ];
-      lines.push(
-        ...this.detailSection(
-          `Tool (${tool.name}${tool.resultError ? ", Error" : ""})`,
-          content,
-        ),
-      );
-    }
-    if (turn.error) lines.push(...this.detailSection("Error", [turn.error]));
-    return lines.length > 0 ? lines : [" No readable turn content"];
+  private allTurnItems(): Inspector.ActorInspectorTurnItem[] {
+    if (!this.selectedRun) return [];
+    if (this.turnCache?.run === this.selectedRun) return this.turnCache.turns;
+    const turns = this.readTurns(path.join(this.stateRoot, this.selectedRun));
+    this.turnCache = { run: this.selectedRun, turns };
+    return turns;
   }
 
   private turnItems(): Inspector.ActorInspectorTurnItem[] {
-    if (!this.selectedRun) return [];
     const selectedSubagent = this.subagents()[this.subagentIndex];
-    return Inspector.readActorInspectorTurns(
-      path.join(this.stateRoot, this.selectedRun),
-    )
+    return this.allTurnItems()
       .filter(
         (turn) =>
           !selectedSubagent ||
@@ -793,9 +1036,7 @@ export class ActorInspectorOverlay {
 
   private subagents(): string[] {
     if (!this.selectedRun || this.tab !== "turns") return ["all"];
-    const ids = Inspector.readActorInspectorTurns(
-      path.join(this.stateRoot, this.selectedRun),
-    ).map((turn) => turn.commandId);
+    const ids = this.allTurnItems().map((turn) => turn.commandId);
     return ["all", ...new Set(ids)];
   }
 
@@ -982,17 +1223,11 @@ export class ActorInspectorOverlay {
       if (preview) this.readKeys.add(Inspector.inspectorPreviewReadKey(preview));
     } else this.detailTurn = this.turnItems()[this.rowIndex];
     this.detailScroll = 0;
-    this.detailView = "evidence";
     this.detailOpen = Boolean(this.detailCommunication || this.detailTurn);
     if (this.detailOpen) this.focus = "detail";
   }
 
   private backDetail(): void {
-    if (this.detailView === "transcript") {
-      this.detailView = "evidence";
-      this.detailScroll = 0;
-      return;
-    }
     this.closeDetail();
   }
 
@@ -1001,7 +1236,6 @@ export class ActorInspectorOverlay {
     this.detailCommunication = undefined;
     this.detailTurn = undefined;
     this.detailScroll = 0;
-    this.detailView = "evidence";
     this.focus = "list";
   }
 

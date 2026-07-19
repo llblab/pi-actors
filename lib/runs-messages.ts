@@ -1,6 +1,6 @@
 /**
  * Async run message delivery.
- * Owns run control endpoint resolution, inbox enqueueing, wake notification,
+ * Owns: run control endpoint resolution, inbox enqueueing, wake notification,
  * transport writes, and delivery receipts.
  */
 

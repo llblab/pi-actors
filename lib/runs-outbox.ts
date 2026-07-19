@@ -1,6 +1,6 @@
 /**
  * Async run outbox events.
- * Owns outbox event normalization, parsing, and append payload formatting.
+ * Owns: outbox event normalization, parsing, and append payload formatting.
  */
 
 export type RunOutboxDelivery = "log" | "notify" | "followup";

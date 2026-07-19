@@ -1,12 +1,13 @@
 # Actor Inspector
 
-The actor inspector is a manually opened, read-only TUI navigator for owned actor runs. It keeps communication evidence and persisted subagent execution evidence in one hierarchy without merging their meanings.
+The actor inspector is a manually opened TUI navigator for owned actor runs. Evidence remains read-only; its one explicit lifecycle action can send canonical `control.kill` to the selected running run after confirmation. It keeps recipe/launch identity, communication evidence, and persisted subagent execution evidence in one hierarchy without merging their meanings.
 
 ```text
 owned run
+  → recipe
   → messages | turns
     → filtered timeline
-      → bounded detail
+      → one bounded detail level
 ```
 
 ## Navigation
@@ -16,17 +17,19 @@ owned run
 The overlay exposes an explicit focus hierarchy:
 
 ```text
-Run       ←/→ chooses the previous/next owned run, Enter opens runs, ↓ enters tabs
-Tabs      ←/→ chooses Messages or Turns, Enter opens filter parameters
-Filters   ↑/↓ chooses Channel/State or Subagent, Enter opens values to the right
+Run       ←/→ chooses the previous/next owned run, Enter opens runs, K asks to Kill a running run, ↓ enters tabs
+Tabs      ←/→ chooses Recipe, Messages, or Turns
+Recipe    ↑/↓ scroll; PageUp/PageDown jumps by viewport; ↑ at top, Escape, or ← returns to tabs
+Filters   Enter on Messages/Turns opens Channel/State or Subagent; Enter opens values
 Values    ↑/↓ hovers, Enter applies, Escape returns one menu level
-List      ↑/↓ chooses, Enter/→ opens detail
-Detail    ↑/↓ scroll, Enter/→ opens readable transcript, Escape/← returns
-Readable  ↑/↓ scroll, Escape/← returns to evidence detail
+List      ↑/↓ chooses, PageUp/PageDown jumps by viewport, Enter/→ opens detail, ← returns to tabs
+Detail    ↑/↓ scroll, PageUp/PageDown jumps by viewport, Escape/← returns to the list
 Escape    Close (or cancel the active options popup)
 ```
 
 Navigation stays bounded by available actions. `↑` on Run does nothing because no higher control exists. `↓` on Tabs enters the timeline only when it contains rows. Empty timelines therefore never receive focus.
+
+`K` appears only while Run is focused and the selected owned run reports `running`. It opens an in-overlay destructive confirmation; `Y`/Enter confirms and `N`/Escape cancels. Confirmation captures the immutable run generation and routes expected owner/generation through canonical `control.kill`; control compares both while serialized against same-directory restart, so terminal, ownership, or replacement-generation races reject without signaling. Success, cancellation, rejection, and failure remain bounded in the content area; terminal runs expose no Kill hint and reject a stale keypress.
 
 Selection and focus remain separate visual states. Accent-blue text marks the current tab, active filter popup, and applied option. The Run control uses `← … →` markers plus a light neutral background to show both focus and horizontal cycling; menus and timeline rows retain the single `▶` focus marker, while selected tabs retain brackets. Opening a popup keeps its parent filter blue so the relationship remains visible. The footer uses accent color only for key names and arrows; descriptions remain muted.
 
@@ -36,7 +39,13 @@ Filters live behind their tab rather than occupying a permanent row. Non-default
 
 Nested menus overlay rather than replace the timeline. Only rows and columns containing menu borders or values occlude underlying cells. When adjacent menus have different heights, the unused corner remains transparent and preserves the separator, striped background, and timeline data beneath it. Every run, filter, and nested value menu is viewport-bounded: ↑/↓ moves through the complete option set, the visible window follows focus, and `↑`/`↓` border markers disclose hidden options above or below without growing past the available inspector rows.
 
-The overlay uses most of the available terminal width and height and reduces its content/menu viewport on shorter terminals. The bordered header keeps both tabs visible, while the list body shows the selected run and its current status above the evidence rows. Run, Message, and Turn lists place the newest retained item directly below their control; a newly opened Inspector therefore selects the latest owned run, and ↓ moves backward in time toward older entries. Run options, Messages, and Turns all use compact descending `#N` labels, providing one timestamp-free time axis without repeating type words on every row. Evidence rows retain stable alternating backgrounds based on their absolute timeline position, including while scrolling: even rows keep the dark overlay background, while odd rows use the neutral `customMessageBg` stripe. Unused viewport padding stays on the plain overlay background instead of drawing fake striped rows beneath the last item. The footer exposes the active keys. Messages retain attention markers and unread filtering and open into bounded detail without leaving the overlay. The overlay refreshes while visible and distinguishes true empty timelines from filtered-empty results; filtered-empty copy points back to Enter on the active tab without moving focus.
+The overlay uses most of the available terminal width and height and reduces its content/menu viewport on shorter terminals. The bordered header keeps all three tabs visible, while the body shows the selected run and its current status above the active document or evidence rows. Run, Message, and Turn lists place the newest retained item directly below their control; a newly opened Inspector therefore selects the latest owned run, and ↓ moves backward in time toward older entries. Run options, Messages, and Turns all use compact descending `#N` labels, providing one timestamp-free time axis without repeating type words on every row. Evidence rows retain stable alternating backgrounds based on their absolute timeline position, including while scrolling: even rows keep the dark overlay background, while odd rows use the neutral `customMessageBg` stripe. Unused viewport padding stays on the plain overlay background instead of drawing fake striped rows beneath the last item. The footer exposes the active keys. Messages retain attention markers and unread filtering and open into bounded detail without leaving the overlay. The overlay refreshes while visible and distinguishes true empty timelines from filtered-empty results; filtered-empty copy points back to Enter on the active tab without moving focus.
+
+## Recipe Document
+
+`Recipe` is the first and initially selected tab. It reads only persisted owned-run evidence from `run.json`: recipe identity and source, the authored recipe context captured at launch, the resolved executable template and runtime values, composition records, model policy, mailbox, artifacts, notification/retirement policy, and bounded read diagnostics. It never follows a mutable external recipe path while the Inspector is open.
+
+The document renders as labeled, indented terminal text rather than raw JSON and scrolls as one level. Secret-bearing values receive the same redaction as turn evidence. Recipe context lives here rather than repeating inside every Turn.
 
 ## Communication Timeline
 
@@ -64,9 +73,9 @@ Each turn groups:
 - Tool calls in assistant source order;
 - Tool results correlated by `toolCallId`, regardless of completion order.
 
-Enter/→ opens the selected turn as structured evidence inside the overlay. A compact `Subagent N` heading with an optional meaningful role leads into meaning-first sections: User, persisted Thinking, Assistant, Tools, Execution, and Diagnostics. A final Provenance section retains session/prompt paths, truncation state, and recipe context without making transport metadata the first screen. Generic internal stages such as `command` and `subagent` stay hidden; technical `command-NNN` provenance remains available through the session and prompt paths without producing a redundant `Command / command-NNN (command)` block. Secondary qualifiers use parentheses rather than centered-dot separators. Long text, paths, and structured values wrap to subsequent terminal rows instead of receiving visual ellipsis; lines that already fit the available inner width remain intact, leading indentation is reserved before wrapping long unbroken paths so it cannot become a whitespace-only row, and every section plus all of its explicit or wrapped continuations keeps one background stripe. Blank-only source lines and trailing line breaks are omitted from both evidence and readable rendering. Section boundaries change the stripe without inserting separator rows, so the next heading follows the previous value immediately. ↑/↓ scrolls the resulting visual-row document while the footer remains visible. Source evidence remains bounded by the persisted session reader, but the detail view no longer truncates that retained evidence to one terminal row per field.
+Enter/→ opens the selected turn as one structured, scrollable detail document inside the overlay. A compact `Subagent N` heading with an optional meaningful role leads into meaning-first sections: User, persisted Thinking, Assistant, Tools, Execution, and Diagnostics. A final Provenance section retains session/prompt paths and truncation state without duplicating recipe context from the Recipe tab. Generic internal stages such as `command` and `subagent` stay hidden; technical `command-NNN` provenance remains available through the session and prompt paths without producing a redundant `Command / command-NNN (command)` block. Secondary qualifiers use parentheses rather than centered-dot separators. Long text, paths, and structured values wrap to subsequent terminal rows instead of receiving visual ellipsis; lines that already fit the available inner width remain intact, leading indentation is reserved before wrapping long unbroken paths so it cannot become a whitespace-only row, and every section plus all of its explicit or wrapped continuations keeps one background stripe. Blank-only source lines and trailing line breaks are omitted from both evidence and readable rendering. Section boundaries change the stripe without inserting separator rows, so the next heading follows the previous value immediately. ↑/↓ scrolls the resulting visual-row document while the footer remains visible. Source evidence remains bounded by the persisted session reader, but the detail view no longer truncates that retained evidence to one terminal row per field.
 
-Enter/→ once more opens a plain readable transcript of the same turn. This second level removes provenance, model, usage, ids, and other evidence metadata, retaining only User, Thinking when persisted, Assistant, Tool input/result, and Error content in execution order. When Pi persisted the user prompt as one `<file name="…">…</file>` transport wrapper, readable mode removes that wrapper and shows only its actual prompt text. Structured values render as indented key/value text rather than one-line JSON. Escape/← returns from transcript to evidence detail, then from evidence detail to the Turns list.
+The detail view removes a single enclosing `<file name="…">…</file>` prompt transport wrapper and renders structured values as indented key/value text rather than one-line JSON. It has no nested transcript mode: Escape/← returns directly to the Turns list.
 
 ## Evidence And Privacy Boundary
 

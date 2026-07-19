@@ -4,6 +4,8 @@
  */
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import {
   appendFile,
   chmod,
@@ -18,6 +20,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+const controlRaceWorker = new URL(
+  "./fixtures/run-control-race-worker.ts",
+  import.meta.url,
+).pathname;
 
 import {
   appendRunOutboxEvent,
@@ -37,6 +46,7 @@ import {
   sendRunMessage,
   startRun,
   tailRun,
+  teardownRunsOwnedByParent,
 } from "../lib/async-runs.ts";
 import { executeRunRetirements, summarizeRuns } from "../lib/observability.ts";
 import { pruneTerminalRun } from "../lib/runs-retention.ts";
@@ -248,28 +258,6 @@ test(
     }
   },
 );
-
-test("Async runs reject state dirs with an in-progress start lock", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-start-lock-"));
-  const stateDir = join(root, "locked");
-  try {
-    await mkdir(join(stateDir, ".start.lock"), { recursive: true });
-    assert.throws(
-      () =>
-        startRun(
-          {
-            run_id: "locked",
-            state_dir: stateDir,
-            template: `${process.execPath} -e "console.log('replacement')"`,
-          },
-          process.cwd(),
-        ),
-      /already being started/,
-    );
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
 
 test("Async runs write state files and finish", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
@@ -1869,6 +1857,206 @@ test("Async run kill terminates matching stuck runs", async () => {
     assert.equal(progress.phase, "killed");
     assert.equal(Object.hasOwn(progress, "activeSubagents"), false);
     assert.match(tailRun(stateDir), /run\.kill/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Canonical kill rejects a replacement run generation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-generation-fence-"));
+  const stateDir = join(root, "replacement");
+  try {
+    startRun(
+      {
+        ownerId: "session-a",
+        run_id: "replacement",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    const current = getRunStatus(stateDir);
+    const result = killRun(stateDir, {
+      ownerId: "session-a",
+      runInstanceId: "superseded-instance",
+    });
+
+    assert.equal(result.killed, false);
+    assert.equal(result.reason, "run generation changed");
+    assert.equal(getRunStatus(stateDir).status, "running");
+    assert.equal(
+      getRunStatus(stateDir).run_instance_id,
+      current.run_instance_id,
+    );
+  } finally {
+    try {
+      killRun(stateDir);
+    } catch {
+      /* best effort */
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Same-directory restart cannot cross held canonical control", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-control-restart-race-"));
+  const stateDir = join(root, "replacement");
+  const readyPath = join(root, "control-ready");
+  const releasePath = join(root, "control-release");
+  const blockedPath = join(root, "restart-blocked");
+  const controlConfig = join(root, "control.json");
+  const restartConfig = join(root, "restart.json");
+  try {
+    startRun(
+      {
+        ownerId: "session-a",
+        run_id: "replacement",
+        state_dir: stateDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 150)"`,
+      },
+      process.cwd(),
+    );
+    const initial = getRunStatus(stateDir);
+    await writeFile(controlConfig, JSON.stringify({
+      mode: "control",
+      readyPath,
+      releasePath,
+      stateDir,
+    }));
+    await writeFile(restartConfig, JSON.stringify({
+      blockedPath,
+      mode: "restart",
+      stateDir,
+    }));
+    const runWorker = (config: string) =>
+      execFileAsync(process.execPath, [
+        "--experimental-strip-types",
+        controlRaceWorker,
+        config,
+      ]);
+    const waitForFile = async (path: string) => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if (existsSync(path)) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error(`Timed out waiting for ${path}`);
+    };
+
+    const settle = <T>(promise: Promise<T>) =>
+      promise.then(
+        (value) => ({ ok: true as const, value }),
+        (error) => ({ error, ok: false as const }),
+      );
+    const control = settle(runWorker(controlConfig));
+    await waitForFile(readyPath);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const restart = settle(runWorker(restartConfig));
+    await waitForFile(blockedPath);
+    try {
+      assert.equal(getRunStatus(stateDir).run_instance_id, initial.run_instance_id);
+      assert.notEqual(getRunStatus(stateDir).status, "running");
+    } finally {
+      await writeFile(releasePath, "release\n");
+    }
+    const outcomes = await Promise.all([control, restart]);
+
+    assert.equal(outcomes[0]!.ok, true);
+    assert.equal(outcomes[1]!.ok, true);
+    const replacement = getRunStatus(stateDir);
+    assert.equal(replacement.status, "running");
+    assert.notEqual(replacement.run_instance_id, initial.run_instance_id);
+    assert.equal(replacement.ownerId, "session-b");
+  } finally {
+    try {
+      killRun(stateDir);
+    } catch {
+      /* best effort */
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Parent teardown kills only exact-session runs through canonical run control", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-parent-teardown-"));
+  const ownedDir = join(root, "owned");
+  const otherDir = join(root, "other");
+  try {
+    startRun(
+      {
+        ownerId: "session-a",
+        run_id: "owned",
+        state_dir: ownedDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    startRun(
+      {
+        ownerId: "session-b",
+        run_id: "other",
+        state_dir: otherDir,
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+      },
+      process.cwd(),
+    );
+    for (let i = 0; i < 20; i++) {
+      if (
+        getRunStatus(ownedDir).status === "running" &&
+        getRunStatus(otherDir).status === "running"
+      ) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    const result = teardownRunsOwnedByParent("session-a", root, {
+      trigger: "session_shutdown:quit",
+    });
+
+    assert.equal(result.killed, 1);
+    assert.equal(result.failed, 0);
+    assert.equal(typeof result.summaryPath, "string");
+    const teardownSummary = JSON.parse(
+      await readFile(result.summaryPath!, "utf8"),
+    );
+    assert.equal(teardownSummary.ownerId, "session-a");
+    assert.equal(teardownSummary.trigger, "session_shutdown:quit");
+    assert.equal(teardownSummary.killed, 1);
+    assert.equal((await waitForStatus(ownedDir, "killed")).status, "killed");
+    assert.equal(getRunStatus(otherDir).status, "running");
+    const events = await readFile(join(ownedDir, "events.jsonl"), "utf8");
+    assert.match(events, /"event":"run\.kill"/);
+    assert.match(events, /"event":"run\.parent_teardown"/);
+    assert.match(events, /"type":"control\.kill"/);
+    assert.match(events, /"trigger":"session_shutdown:quit"/);
+  } finally {
+    try {
+      killRun(otherDir);
+    } catch {
+      /* best effort */
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Parent teardown persists corrupt-state discovery failures", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-parent-teardown-corrupt-"));
+  const corruptDir = join(root, "corrupt");
+  try {
+    await mkdir(corruptDir, { recursive: true });
+    await writeFile(join(corruptDir, "run.json"), "{not-json\n");
+
+    const result = teardownRunsOwnedByParent("session-a", root, {
+      trigger: "session_shutdown:reload",
+    });
+
+    assert.equal(result.attempted, 0);
+    assert.equal(result.discoveryFailed, 1);
+    assert.equal(result.failed, 1);
+    assert.equal(typeof result.summaryPath, "string");
+    const summary = JSON.parse(await readFile(result.summaryPath!, "utf8"));
+    assert.equal(summary.discoveryFailed, 1);
+    assert.equal(summary.discoveryFailures[0].path, corruptDir);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

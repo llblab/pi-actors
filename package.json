@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.41.1",
+  "version": "0.42.0",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -30,7 +30,8 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "pack:dry": "npm pack --dry-run",
     "recipes:qa": "node scripts/validate-recipe.mjs recipes --all --qa --summary",
-    "validate": "npx tsc --noEmit && npm run recipes:qa && npm run build && npm run check && npm test && npm run pack:dry",
+    "release:validate": "npm run validate && node scripts/release-gates.mjs",
+    "validate": "npx tsc --noEmit && npm run recipes:qa && npm run build && npm run check && npm test && npm run conformance && npm audit --audit-level=high && npm run pack:dry",
     "build": "node scripts/build-dist.mjs",
     "prepack": "npm run build"
   },

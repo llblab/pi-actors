@@ -1,6 +1,6 @@
 /**
  * Async run state index.
- * Owns recursive run-state discovery, index rebuild/read, and status filtering.
+ * Owns: recursive run-state discovery, index rebuild/read, and status filtering.
  */
 
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
@@ -30,27 +30,63 @@ function matchesStatusFilter(
   return status === filter;
 }
 
-export function listRunStateDirs(
+export interface RunStateDiscoveryIssue {
+  path: string;
+  reason: "depth_truncated" | "unreadable";
+}
+
+export interface RunStateDiscoveryResult {
+  issues: RunStateDiscoveryIssue[];
+  stateDirs: string[];
+}
+
+export function discoverRunStateDirs(
   stateRoot: string,
-  depth = 0,
-  seen = new Set<string>(),
-): string[] {
-  if (!existsSync(stateRoot) || seen.has(resolve(stateRoot))) return [];
-  seen.add(resolve(stateRoot));
-  let entries: import("node:fs").Dirent[];
-  try {
-    entries = readdirSync(stateRoot, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const result: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const child = join(stateRoot, entry.name);
-    if (existsSync(join(child, "run.json"))) result.push(child);
-    if (depth + 1 < 8) result.push(...listRunStateDirs(child, depth + 1, seen));
-  }
-  return result;
+  maxDepth = 8,
+): RunStateDiscoveryResult {
+  const issues: RunStateDiscoveryIssue[] = [];
+  const stateDirs: string[] = [];
+  const seen = new Set<string>();
+  const visit = (directory: string, depth: number): void => {
+    const canonical = resolve(directory);
+    if (!existsSync(directory) || seen.has(canonical)) return;
+    seen.add(canonical);
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      issues.push({ path: directory, reason: "unreadable" });
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const child = join(directory, entry.name);
+      if (existsSync(join(child, "run.json"))) stateDirs.push(child);
+      if (depth + 1 < maxDepth) visit(child, depth + 1);
+      else {
+        try {
+          if (
+            readdirSync(child, { withFileTypes: true }).some((item) =>
+              item.isDirectory(),
+            )
+          ) {
+            issues.push({ path: child, reason: "depth_truncated" });
+          }
+        } catch {
+          issues.push({ path: child, reason: "unreadable" });
+        }
+      }
+    }
+  };
+  visit(stateRoot, 0);
+  return {
+    issues: issues.sort((left, right) => left.path.localeCompare(right.path)),
+    stateDirs: [...new Set(stateDirs)].sort(),
+  };
+}
+
+export function listRunStateDirs(stateRoot: string): string[] {
+  return discoverRunStateDirs(stateRoot).stateDirs;
 }
 
 function runIndexPath(stateRoot: string): string {

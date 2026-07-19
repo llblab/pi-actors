@@ -13,14 +13,16 @@ Helper scripts that belong to library recipes live in root `scripts/`. The music
 
 ## Install Locally
 
-Recipes can be copied into the user recipe root:
+Select only the operator-facing recipe or wrapper you intend to own locally. For example:
 
 ```bash
 mkdir -p ~/.pi/agent/recipes
-cp <repo>/recipes/*.json ~/.pi/agent/recipes/
+cp <repo>/recipes/pipeline-review-readiness.json ~/.pi/agent/recipes/
 ```
 
-Or a registered tool can point directly at a recipe path when that is more convenient.
+Do not bulk-copy `recipes/*.json`. The packaged library also contains internal composition stages, including `draft-review.json` and `tool-review.json`; the automatic-review runtime launches those selectors with fenced inputs and they must not become user-installed callable tools.
+
+A registered tool can instead point at one selected recipe path when a durable operator-facing name is useful. Prefer a thin wrapper for public defaults or policy rather than copying the wrapper's internal imports.
 
 ## Async Subagent Components
 
@@ -32,6 +34,8 @@ Core subagent recipes:
 - `recipes/subagent-preflight.json`: Tiny model/thinking/tool-policy smoke check before expensive fanout; failures surface `ACTOR_PREFLIGHT_FAILED` with stage, selected policy, provider error class, prompt file, and override args.
 - Packaged reviewer, verifier, merger, judge, and normalizer stages use `accept_output: review_evidence` and require `ACTOR_REVIEW_RESULT` as the exact first non-whitespace output line. Marker prefixes, format acknowledgements, and input requests therefore remain rejected branch diagnostics rather than usable quorum evidence.
 - `recipes/subagent-review.json`: Evidence-grounded review lens.
+- `recipes/draft-review.json`: Internal no-tools selector for one immutable automatic draft batch. It receives an attached value-free structural projection with batch-local opaque occurrence/content-group identities, counts, risk labels, and usage—not canonical names, draft basenames, raw hashes, recipe bodies, template text, defaults, authored prose, or filesystem paths—then emits one terminal `DRAFT_REVIEW_RESULT` with quota-free promote/discard decisions. The executor derives any promotion from the separate trusted captured source.
+- `recipes/tool-review.json`: Internal no-tools selector for one immutable 36-tool portfolio. It receives the same identity-opaque value-free structural projection and may recommend quota-free keep, unchanged-source rename (`evolve`), unchanged-source demote, or identical-source merge decisions. `replace`, `split`, and returned recipe content fail mechanically; deterministic executors alone read trusted captured recipes and own validated safe-boundary activation.
 - `recipes/subagent-critic.json`: Assumption and failure-mode critique.
 - `recipes/subagent-plan.json`: Bounded plan slices and validation gates.
 - `recipes/subagent-evidence-map.json`: Evidence and confidence map.

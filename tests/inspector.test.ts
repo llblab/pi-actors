@@ -9,12 +9,49 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   inspectorPreviewReadKey,
   readActorInspectorPreviews,
+  readActorInspectorRecipe,
   readActorInspectorRoster,
   renderInspectorItemView,
   renderInspectorRosterLine,
   renderInspectorRosterPanel,
   renderInspectorWidget,
 } from "../lib/inspector.ts";
+
+test("Actor inspector projects persisted recipe and launch evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-recipe-"));
+  try {
+    await writeFile(join(root, "run.json"), JSON.stringify({
+      artifacts: { report: "artifacts/report.md" },
+      cwd: "/workspace",
+      launch_source: "spawn",
+      recipe: "review",
+      recipe_context_records: [{
+        depth: 0,
+        file: "/recipes/review.json",
+        import_path: [],
+        name: "review",
+        recipe: {
+          args: ["scope:path"],
+          description: "Review one scope",
+          template: "review {scope}",
+        },
+      }],
+      recipe_file: "/recipes/review.json",
+      run: "review-run",
+      template: "review /workspace",
+      values: { apiKey: "secret-value", scope: "/workspace" },
+    }));
+
+    const recipe = readActorInspectorRecipe(root);
+    assert.equal(recipe.identity.recipe, "review");
+    assert.equal(recipe.definition?.description, "Review one scope");
+    assert.equal(recipe.launch.template, "review /workspace");
+    assert.equal(JSON.stringify(recipe).includes("secret-value"), false);
+    assert.equal(recipe.composition.length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("Actor inspector TUI reads room and direct previews", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-"));

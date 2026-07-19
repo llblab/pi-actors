@@ -162,8 +162,14 @@ export function createRuntimeToolDefinition(
       ctx: RuntimeToolContext,
     ) {
       try {
-        if (cfg.sourcePath)
-          RecipesUsage.recordRecipeLaunch(cfg.sourcePath, new Date(), "tool");
+        if (
+          cfg.sourcePath &&
+          !RecipesUsage.recordRecipeLaunch(cfg.sourcePath, new Date(), "tool")
+        ) {
+          throw new Error(
+            `Recipe launch rejected because its source changed during activation: ${cfg.sourcePath}. Reload recipe tools and retry.`,
+          );
+        }
         if (isAsyncRecipe) {
           const input = params as Record<string, unknown>;
           const { run_id, ...values } = input;

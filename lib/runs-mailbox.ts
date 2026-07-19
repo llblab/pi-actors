@@ -1,6 +1,6 @@
 /**
  * Async run mailbox state.
- * Owns durable run inbox records, claim locks, and handler status transitions.
+ * Owns: durable run inbox records, claim locks, and handler status transitions.
  */
 
 import { randomUUID } from "node:crypto";

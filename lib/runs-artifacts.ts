@@ -1,6 +1,6 @@
 /**
  * Async run artifact declarations and manifest resolution.
- * Owns artifact path template expansion and filesystem-backed artifact metadata.
+ * Owns: artifact path template expansion and filesystem-backed artifact metadata.
  */
 
 import { createHash } from "node:crypto";

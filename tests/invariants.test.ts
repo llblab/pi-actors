@@ -17,6 +17,18 @@ const runtimeSource = await readFile(
   new URL("../lib/runtime.ts", import.meta.url),
   "utf8",
 );
+const automaticReviewRuntimeSource = await readFile(
+  new URL("../lib/automatic-review-runtime.ts", import.meta.url),
+  "utf8",
+);
+const runUiRuntimeSource = await readFile(
+  new URL("../lib/run-ui-runtime.ts", import.meta.url),
+  "utf8",
+);
+const inspectorCommandSource = await readFile(
+  new URL("../lib/inspector-command.ts", import.meta.url),
+  "utf8",
+);
 const toolsSource = await readFile(
   new URL("../lib/tools.ts", import.meta.url),
   "utf8",
@@ -24,6 +36,19 @@ const toolsSource = await readFile(
 const changelogSource = await readFile(
   new URL("../CHANGELOG.md", import.meta.url),
   "utf8",
+);
+const packageJson = JSON.parse(
+  await readFile(new URL("../package.json", import.meta.url), "utf8"),
+) as { scripts?: Record<string, string> };
+const validateWorkflowSource = await readFile(
+  new URL("../.github/workflows/validate.yml", import.meta.url),
+  "utf8",
+);
+const automaticReviewerRecipes = await Promise.all(
+  ["draft-review.json", "tool-review.json"].map(async (name) => ({
+    name,
+    source: await readFile(new URL(`../recipes/${name}`, import.meta.url), "utf8"),
+  })),
 );
 
 function listFiles(dir: string): string[] {
@@ -45,9 +70,12 @@ test("Entrypoint imports local domains through namespace imports", () => {
   );
 });
 
-test("Entrypoint registers the concise actor inspector command", () => {
-  assert.match(indexSource, /registerCommand\("actors-inspector"/);
+test("Entrypoint exposes only current manual actor commands", () => {
+  assert.match(indexSource, /InspectorCommand\.registerActorInspectorCommand/);
+  assert.match(inspectorCommandSource, /registerCommand\("actors-inspector"/);
+  assert.doesNotMatch(indexSource, /registerCommand\("actors-consolidate-drafts"/);
   assert.doesNotMatch(indexSource, /registerCommand\("actors-inspector-toggle"/);
+  assert.doesNotMatch(indexSource, /handleDraftConsolidationCommand/);
 });
 
 test("Entrypoint stays free of direct typebox and environment access", () => {
@@ -65,6 +93,23 @@ test("Runtime reports recipe watcher failures", () => {
   assert.match(indexSource, /Runtime\.createRecipeToolReloadWatcher/);
   assert.match(runtimeSource, /Recipe live reload watcher failed/);
   assert.match(runtimeSource, /notifyFailure\(ctx\)/);
+});
+
+test("Session shutdown tears down exact-parent runs through the run UI runtime", () => {
+  assert.match(indexSource, /pi\.on\("session_shutdown"/);
+  assert.match(indexSource, /runUiRuntime\.shutdown\(event\.reason, ctx\)/);
+  assert.match(runUiRuntimeSource, /AsyncRuns\.teardownRunsOwnedByParent/);
+  assert.match(runUiRuntimeSource, /session_shutdown:\$\{eventReason\}/);
+});
+
+test("Entrypoint delegates low-level review and run lifecycle operations", () => {
+  assert.match(indexSource, /AutomaticReviewRuntime\.createAutomaticReviewRuntime/);
+  assert.match(indexSource, /RunUiRuntime\.createRunUiRuntime/);
+  assert.doesNotMatch(indexSource, /AsyncRuns\.(?:startRun|listRuns|cancelRun|killRun)/);
+  assert.doesNotMatch(indexSource, /create(?:DraftSleep|ToolReview)Scheduler/);
+  assert.doesNotMatch(indexSource, /createRunStateWatcher|createRunTerminalReconciliationLoop/);
+  assert.match(automaticReviewRuntimeSource, /DraftSleep\.createDraftSleepScheduler/);
+  assert.match(automaticReviewRuntimeSource, /ToolReviewScheduler\.createToolReviewScheduler/);
 });
 
 const publicGuidanceFiles = [
@@ -100,6 +145,14 @@ test("Public guidance avoids stale concrete model aliases", () => {
       );
     }
   }
+});
+
+test("Recipe installation guidance excludes internal reviewers from bulk install", () => {
+  const content = readFileSync("docs/recipe-library.md", "utf8");
+  assert.doesNotMatch(content, /cp\s+[^\n]*recipes\/\*\.json/);
+  assert.match(content, /Do not bulk-copy `recipes\/\*\.json`/);
+  assert.match(content, /`draft-review\.json` and `tool-review\.json`/);
+  assert.match(content, /must not become user-installed callable tools/);
 });
 
 test("Operator guidance uses snake_case docs review examples", () => {
@@ -153,6 +206,27 @@ test("Platform guidance makes native Windows FIFO limits visible", () => {
     asyncRuns,
     /Mailbox-only endpoint[\s\S]*Use for cross-platform workers/,
   );
+});
+
+test("Primary validation includes protocol conformance and dependency audit", () => {
+  assert.match(packageJson.scripts?.validate ?? "", /npm run conformance/);
+  assert.match(packageJson.scripts?.validate ?? "", /npm audit --audit-level=high/);
+});
+
+test("CI release validation includes exact-tree, Domain DAG, and ABCd gates", () => {
+  const releaseValidate = packageJson.scripts?.["release:validate"] ?? "";
+  assert.match(releaseValidate, /npm run validate/);
+  assert.match(releaseValidate, /node scripts\/release-gates\.mjs/);
+  assert.match(validateWorkflowSource, /npm run release:validate/);
+});
+
+test("Automatic recipe reviewers have no general filesystem tools", () => {
+  for (const recipe of automaticReviewerRecipes) {
+    const parsed = JSON.parse(recipe.source) as { template?: string };
+    assert.match(parsed.template ?? "", /--no-tools/);
+    assert.doesNotMatch(parsed.template ?? "", /--tools\s+read/);
+    assert.match(parsed.template ?? "", /@\{input_path\}/);
+  }
 });
 
 test("Unreleased changelog items avoid version literals", () => {

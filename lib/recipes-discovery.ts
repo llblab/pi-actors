@@ -703,32 +703,40 @@ function templatePreview(value: unknown): string | undefined {
 
 export function listDraftRecipes(root: string): Array<Record<string, unknown>> {
   return listRecipeFiles(root).map((path) => {
-    const id = RecipesReferences.getRecipeIdFromPath(path);
-    const bytes = readFileSync(path);
-    const stat = statSync(path);
-    const config = RecipesReferences.readRawRecipeConfig(path);
-    const resolved = RecipesReferences.readResolvedRecipeConfig(path);
-    const diagnostics = getRecipeConfigDiagnostics(path, resolved);
-    const sourceRun = String(config?.description ?? "").match(
-      /spawn run ([^\s]+)/,
-    )?.[1];
-    const preview = templatePreview(config?.template);
-    const riskLabels = getRecipeRiskLabels(resolved);
-    return {
-      id,
-      path,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      size: bytes.byteLength,
-      created_at: stat.birthtime.toISOString(),
-      modified_at: stat.mtime.toISOString(),
-      valid: Boolean(resolved),
-      diagnostics,
-      ...(riskLabels.length ? { risk_labels: riskLabels } : {}),
-      ...(config?.description ? { description: config.description } : {}),
-      ...(sourceRun ? { source_run: sourceRun } : {}),
-      ...(config?.async !== undefined ? { async: config.async } : {}),
-      ...(preview ? { template_preview: preview } : {}),
-    };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const id = RecipesReferences.getRecipeIdFromPath(path);
+      const bytes = readFileSync(path);
+      const fingerprint = createHash("sha256").update(bytes).digest("hex");
+      const stat = statSync(path);
+      const config = RecipesReferences.readRawRecipeConfig(path);
+      const resolved = RecipesReferences.readResolvedRecipeConfig(path);
+      const diagnostics = getRecipeConfigDiagnostics(path, resolved);
+      const after = readFileSync(path);
+      if (createHash("sha256").update(after).digest("hex") !== fingerprint) {
+        continue;
+      }
+      const sourceRun = String(config?.description ?? "").match(
+        /spawn run ([^\s]+)/,
+      )?.[1];
+      const preview = templatePreview(config?.template);
+      const riskLabels = getRecipeRiskLabels(resolved);
+      return {
+        id,
+        path,
+        sha256: fingerprint,
+        size: bytes.byteLength,
+        created_at: stat.birthtime.toISOString(),
+        modified_at: stat.mtime.toISOString(),
+        valid: Boolean(resolved),
+        diagnostics,
+        ...(riskLabels.length ? { risk_labels: riskLabels } : {}),
+        ...(config?.description ? { description: config.description } : {}),
+        ...(sourceRun ? { source_run: sourceRun } : {}),
+        ...(config?.async !== undefined ? { async: config.async } : {}),
+        ...(preview ? { template_preview: preview } : {}),
+      };
+    }
+    throw new Error(`Draft changed repeatedly during inventory: ${path}`);
   });
 }
 

@@ -74,6 +74,7 @@ export interface ActorInspectorPreviewReadOptions {
 
 export interface ActorInspectorRunItem {
   run: string;
+  runInstanceId?: string;
   status: string;
   updatedAt?: string;
 }
@@ -89,6 +90,10 @@ export function readActorInspectorRuns(
       .flatMap((entry) => {
         const stateDir = path.join(stateRoot, entry.name);
         if (!matchesOwner(stateDir, ownerId)) return [];
+        const runMeta = readJsonFileResilient<Record<string, unknown>>(
+          path.join(stateDir, "run.json"),
+          {},
+        ).value;
         const progress = readJsonFileResilient<Record<string, unknown>>(
           path.join(stateDir, "progress.json"),
           {},
@@ -99,6 +104,9 @@ export function readActorInspectorRuns(
         ).value;
         return [{
           run: entry.name,
+          ...(typeof runMeta.run_instance_id === "string"
+            ? { runInstanceId: runMeta.run_instance_id }
+            : {}),
           status: String(progress.phase ?? (Object.keys(result).length ? "terminal" : "unknown")),
           ...(typeof progress.updatedAt === "string"
             ? { updatedAt: progress.updatedAt }
@@ -117,6 +125,70 @@ export function readActorInspectorRuns(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     return [];
   }
+}
+
+export interface ActorInspectorRecipeView {
+  composition: Array<Record<string, unknown>>;
+  definition?: Record<string, unknown>;
+  diagnostics: string[];
+  identity: Record<string, unknown>;
+  launch: Record<string, unknown>;
+}
+
+export function readActorInspectorRecipe(
+  stateDir: string,
+): ActorInspectorRecipeView {
+  const result = readJsonFileResilient<Record<string, unknown>>(
+    path.join(stateDir, "run.json"),
+    {},
+  );
+  const meta = result.value;
+  const contexts = Array.isArray(meta.recipe_context_records)
+    ? meta.recipe_context_records
+        .filter((entry): entry is Record<string, unknown> =>
+          Boolean(entry && typeof entry === "object" && !Array.isArray(entry)),
+        )
+    : [];
+  const primary = contexts.find((entry) => entry.depth === 0) ?? contexts[0];
+  const definition = primary?.recipe && typeof primary.recipe === "object" &&
+      !Array.isArray(primary.recipe)
+    ? primary.recipe as Record<string, unknown>
+    : undefined;
+  const redacted = (value: unknown): unknown =>
+    SessionEvidence.redactSessionEvidenceValue(value);
+  const redactedRecord = (value: Record<string, unknown>): Record<string, unknown> =>
+    redacted(Object.fromEntries(
+      Object.entries(value).filter(([, entry]) => entry !== undefined),
+    )) as Record<string, unknown>;
+  return {
+    composition: contexts.map((entry) => redactedRecord({
+      ...(typeof entry.alias === "string" ? { alias: entry.alias } : {}),
+      depth: entry.depth,
+      file: entry.file,
+      import_path: entry.import_path,
+      name: entry.name,
+    })),
+    ...(definition
+      ? { definition: redactedRecord(definition) }
+      : {}),
+    diagnostics: result.diagnostics.map((diagnostic) => diagnostic.message),
+    identity: redactedRecord({
+      run: meta.run,
+      recipe: meta.recipe,
+      recipe_file: meta.recipe_file,
+      launch_source: meta.launch_source,
+    }),
+    launch: redactedRecord({
+      cwd: meta.cwd,
+      template: meta.template,
+      values: meta.values,
+      model_policy: meta.model_policy,
+      mailbox: meta.mailbox,
+      artifacts: meta.artifacts,
+      notification_policy: meta.notification_policy,
+      retire_when: meta.retire_when,
+    }),
+  };
 }
 
 export interface ActorInspectorTurnItem extends SessionEvidence.SessionEvidenceTurn {

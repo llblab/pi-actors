@@ -129,10 +129,12 @@ Routing comes from `to`, actor ownership, and runtime policy. `type` describes i
 | Message protocol | Typed envelopes across run, tool, branch, room, coordinator, and session targets | Continue, approve, kill, or route work without restarting actors |
 | Rooms and rosters | Run-local group timeline with actor join/leave, contacts, previews, and branch-aware delivery | Coordinate multiple subagents under one visible run |
 | Registry and recipe doctor | Discovered tools, overrides, drafts, invalid recipes, and advisory risk labels | Audit local capability memory before using or promoting it |
-| Draft promotion | Captured ad hoc spawn patterns can become explicit recipes after operator approval | Turn successful improvisation into durable local tools |
+| Draft promotion | Captured ad hoc spawn patterns can become explicit recipes through one operator-selected promotion or bounded automatic unchanged-source review | Turn successful improvisation into durable local tools without granting a reviewer executable-authoring authority |
 | Review/swarm recipes | Maintained packaged pipelines with preflight, marked semantic evidence, quorum knobs, model/thinking inheritance, one-turn prompt-file transport, and diagnostics | Delegate reviews without rebuilding fanout commands |
-| Actor inspector | One manual `Messages or Turns → filtered timeline → detail` overlay for owned actor messages and persisted subagent sessions, with bounded/redacted prompt, model, thinking, tool, result, usage, and provenance evidence | Follow actor traffic and every persisted subagent turn without exposing another session or inventing hidden reasoning |
+| Actor inspector | One manual `Recipe → Messages or Turns → timeline → one detail level` overlay for owned actor evidence, plus confirmed `K` → `control.kill` for the selected running run | Understand the selected recipe and launch, follow actor traffic and persisted subagent turns, or explicitly terminate one owned actor without exposing another session or signaling directly |
 | Packaged recipe QA | Installed-package-safe checks for helper paths, mailbox contracts, platform scope, artifacts, and recipe structure | Keep shipped actor components executable and diagnosable |
+
+Detached actors survive ordinary agent turns. When their owning Pi session quits, reloads, or is replaced, pi-actors scans run state without the ordinary index depth cap and attempts canonical `control.kill` for each readable still-running exact-owner run. Destructive control is fenced by immutable run generation and serialized against state-directory restart; terminal, ambiguous, changed-generation, and other-session runs remain untouched. Unreadable/corrupt state becomes an explicit failure and every shutdown writes a bounded summary under the run root; actors owned by descendant Pi sessions remain outside the exact-owner contract and require their own shutdown hook or manual OS recovery.
 
 ## Golden path: from local workflow to actor memory
 
@@ -198,7 +200,8 @@ Rules:
 - Same-id JSON recipes shadow Markdown recipes in the same priority layer.
 - Packaged recipes are standard-library components, not automatically installed operator policy.
 - Draft recipes in `~/.pi/agent/recipes/drafts/` are replayable memory, not active tools.
-- `register_tool` creates, updates, lists, deletes, or explicitly promotes draft recipe files through the normal agent interface.
+- `register_tool` creates, updates, lists, deletes, or explicitly promotes one draft recipe file through the normal agent interface.
+- Batch draft consolidation is automatic and silent. Prefer fenced `register_tool draft=...` for one early promotion; deliberate move/copy into the recipe root remains valid but may defer an already captured batch.
 
 Register a foreground tool:
 
@@ -223,13 +226,28 @@ Promote a captured draft only after explicit operator approval:
 register_tool name=docs_review draft=~/.pi/agent/recipes/drafts/spawned-run.json
 ```
 
+Successful inline spawns accumulate draft memory automatically. When twelve drafts exist, pi-actors waits for the foreground turn and active actors to finish, captures an exact immutable batch, and attaches a value-free structural projection to a silent reviewer with no tools. The projection replaces canonical names, draft basenames, and raw hashes with batch-local opaque occurrence IDs and equality-only content groups, and omits recipe bodies, template text, defaults, authored prose, and filesystem paths; the reviewer selects one quota-free `promote` or `discard` decision per source but cannot return recipe content. The executor derives every promotion from the exact captured source, applies the batch through its journaled transaction, garbage-collects discarded drafts, and leaves newer drafts for the next cycle.
+
+Automatic review and mutation remain separate trust boundaries: reviewers receive only value-free structural/usage evidence and have neither filesystem tools, raw recipe access, mutation tools, nor executable-authoring authority. Active-tool portfolio review excludes recipes detected as sensitive and can only select `keep`, unchanged-source rename (`evolve`), unchanged-source `demote`, or deduplication of canonically identical recipes (`merge`). `replace`, `split`, and any executable contract change require an explicit operator-authored recipe mutation through the existing recipe/register surface. Deterministic executors revalidate the exact batch, source and target hashes, complete captured recipes, quarantine state, and journals before committing or recovering internally. The runtime exposes no separate manual batch command.
+
 Inspect the registry:
 
 ```text
 inspect target=recipes view=status
+inspect target=recipes view=reviews
 inspect target=recipes view=summary verbose=true
 inspect target=tool:pi-actors view=triage
 ```
+
+Failed automatic cycles retain a bounded failed stage, error, retry count, and exact next action. Retry the same immutable scope through the reserved runtime actor; reset only disposable failed/completed admission state:
+
+```text
+message to=tool:pi-actors type=review.retry body={"scope":"draft"}
+message to=tool:pi-actors type=review.retry body={"scope":"tool"}
+message to=tool:pi-actors type=review.reset body={"scope":"draft"}
+```
+
+Draft retry with an existing transaction journal resumes the original reviewer run and uses the journal’s authenticated decisions for lineage/evidence; it never launches a second reviewer over already-committed filesystem state. Tool review recovery that already has approved/transaction evidence cannot be reset; retry preserves that evidence and may require `/reload` for the safe `session_start` activation boundary.
 
 ## Command templates
 
@@ -298,7 +316,7 @@ Packaged recipes should prefer mailbox/wake behavior for portable control. Recip
 
 Commands execute directly without shell evaluation where possible, but trusted executables still run with the same system permissions as Pi. Only register commands, scripts, recipes, and paths you trust.
 
-High-risk templates such as shells, interpreter eval modes, network access, external side effects, and broad filesystem mutation may surface warnings, but the runtime is not a security boundary.
+High-risk templates such as shells, interpreter eval modes, network access, external side effects, and broad filesystem mutation may surface warnings, but the runtime is not a security boundary. Automatic reviewers cannot author or change executable contracts: they receive attached immutable evidence with no tools and may only select unchanged-source lifecycle/name operations. Disable all automatic draft/tool review and safe-boundary activation before starting Pi with `PI_ACTORS_AUTOMATIC_REVIEW=off`; `inspect target=tool:pi-actors view=status` reports `automatic_review=false`.
 
 Prefer:
 

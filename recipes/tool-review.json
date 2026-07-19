@@ -1,0 +1,24 @@
+{
+  "async": true,
+  "args": [
+    "input_path:path",
+    "model:string",
+    "thinking:string"
+  ],
+  "defaults": {
+    "model": "{current_model}",
+    "thinking": "{current_thinking}"
+  },
+  "description": "Read-only background reviewer for one immutable 36-tool evolution portfolio.",
+  "mailbox": {
+    "accepts": [
+      "control.kill"
+    ],
+    "emits": [
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
+  },
+  "template": "pi -p --model {model} --thinking {thinking} --no-tools @{input_path} Review the attached immutable pi-actors active-tool portfolio. Evaluate all 36 tools independently using lifetime and revision usage, adaptability, redundancy, safety, contract quality, and likely future usefulness. Treat source/name and sha256 fields as batch-local opaque occurrence/content-group identifiers, return them verbatim, and infer exact duplication only from a shared content group. Choose exactly one keep, evolve, demote, or merge decision per tool; there is no action quota. evolve may only rename one unchanged captured recipe, demote moves the unchanged recipe to draft memory, and merge may only deduplicate at least two canonically identical captured recipes. Never return recipe or outputs fields; replace and split require explicit operator-authored mutation and are unavailable to automatic review. Do not mutate, register, move, or delete recipes. End stdout with TOOL_REVIEW_RESULT on its own line followed by exactly one JSON object with reviewId, createdAt, and decisions."
+}

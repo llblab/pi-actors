@@ -4,6 +4,7 @@
  */
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -304,6 +305,68 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Stale recipe watcher callbacks cannot close a replacement watcher", async () => {
+  class FakeWatcher extends EventEmitter {
+    closed = false;
+    readonly path: string;
+    readonly listener: (event: string, changedFile: string | null) => void;
+
+    constructor(
+      path: string,
+      listener: (event: string, changedFile: string | null) => void,
+    ) {
+      super();
+      this.path = path;
+      this.listener = listener;
+    }
+
+    close(): void {
+      this.closed = true;
+    }
+
+    change(changedFile: string | null = null): void {
+      this.listener("rename", changedFile);
+    }
+  }
+
+  const recipeRoot = "/agent/recipes";
+  let rootExists = true;
+  let loads = 0;
+  const watchers: FakeWatcher[] = [];
+  const watcher = createRecipeToolReloadWatcher(
+    { loadTools: () => { loads += 1; } },
+    {
+      exists: (path) => path === "/agent" || (path === recipeRoot && rootExists),
+      recipeRoot,
+      watchPath: ((path: string, listener: FakeWatcher["listener"]) => {
+        const created = new FakeWatcher(path, listener);
+        watchers.push(created);
+        return created;
+      }) as unknown as typeof import("node:fs").watch,
+    },
+  );
+  const ctx = { hasUI: true, ui: { notify() {} } };
+
+  watcher.watch(ctx);
+  const firstRoot = watchers[0]!;
+  rootExists = false;
+  firstRoot.change();
+  const parent = watchers[1]!;
+  rootExists = true;
+  parent.change("recipes");
+  const replacementRoot = watchers[2]!;
+
+  firstRoot.emit("error", new Error("delayed stale error"));
+  firstRoot.change("stale-event.json");
+  assert.equal(replacementRoot.closed, false);
+  replacementRoot.change("tool.json");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  assert.equal(loads, 1);
+  assert.equal(replacementRoot.closed, false);
+  watcher.close();
 });
 
 test("Recipe watcher rearms when the recipe root appears", async () => {

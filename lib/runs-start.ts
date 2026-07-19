@@ -1,28 +1,23 @@
 /**
  * Async run start guards.
- * Owns active-run reuse checks, start lock acquisition, and safe state-dir
+ * Owns: active-run reuse checks, start lock acquisition, and safe state-dir
  * preparation before a new runner process is spawned.
  */
 
-import {
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  acquireFileMutationLock,
+  type FileMutationLockOptions,
+} from "./file-state.ts";
+import {
   isAlive,
-  readProcessIdentity,
   verifyRunProcessIdentity,
   type RunProcessIdentity,
 } from "./runs-process.ts";
 
-const START_LOCK_MAX_AGE_MS = 5 * 60 * 1000;
-
-export type RunJsonReader = (path: string) => Record<string, unknown> | undefined;
+type RunJsonReader = (path: string) => Record<string, unknown> | undefined;
 
 export function assertNoActiveRunState(
   stateDir: string,
@@ -55,62 +50,11 @@ export function assertNoActiveRunState(
   }
 }
 
-function writeStartLockOwner(lockDir: string, recovered = false): void {
-  const processIdentity = readProcessIdentity(process.pid);
-  writeFileSync(
-    join(lockDir, "owner.json"),
-    `${JSON.stringify({
-      pid: process.pid,
-      createdAt: new Date().toISOString(),
-      ...(processIdentity ? { process_identity: processIdentity } : {}),
-      ...(recovered ? { recovered: true } : {}),
-    })}\n`,
-    "utf8",
-  );
-}
-
-function isStartLockOwnerProvenDead(lockDir: string): boolean {
-  try {
-    const owner = JSON.parse(
-      readFileSync(join(lockDir, "owner.json"), "utf8"),
-    ) as Record<string, unknown>;
-    const pid = Number(owner.pid || 0);
-    if (!pid) return false;
-    return verifyRunProcessIdentity(
-      pid,
-      owner.process_identity as RunProcessIdentity | undefined,
-    ).status === "dead_pid";
-  } catch {
-    return false;
-  }
-}
-
-export function acquireStateStartLock(stateDir: string): () => void {
-  const lockDir = join(stateDir, ".start.lock");
-  try {
-    mkdirSync(lockDir);
-    writeStartLockOwner(lockDir);
-  } catch (error) {
-    try {
-      const stat = statSync(lockDir);
-      if (
-        Date.now() - stat.mtimeMs > START_LOCK_MAX_AGE_MS &&
-        isStartLockOwnerProvenDead(lockDir)
-      ) {
-        rmSync(lockDir, { recursive: true, force: true });
-        mkdirSync(lockDir);
-        writeStartLockOwner(lockDir, true);
-        return () => rmSync(lockDir, { recursive: true, force: true });
-      }
-    } catch {
-      // Keep the original lock acquisition error below.
-    }
-    throw new Error(
-      `Run state is already being started: ${stateDir}. Retry after the current start finishes.`,
-      { cause: error },
-    );
-  }
-  return () => rmSync(lockDir, { recursive: true, force: true });
+export function acquireStateStartLock(
+  stateDir: string,
+  options: FileMutationLockOptions = {},
+): () => void {
+  return acquireFileMutationLock(join(stateDir, ".lifecycle"), options);
 }
 
 export function prepareStateDirForStart(

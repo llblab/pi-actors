@@ -8,10 +8,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
+import { withFileMutationLock } from "./file-state.ts";
 import * as Messages from "./messages.ts";
 import * as ModelContext from "./model-context.ts";
 import * as Paths from "./paths.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
+import * as RecipesUsage from "./recipes-usage.ts";
 import * as Rooms from "./rooms.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsResponse from "./tools-response.ts";
@@ -90,7 +92,12 @@ function writeSpawnDraftRecipe(
     ...(defaults ? { defaults } : {}),
     template: input.template,
   };
-  writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`, { flag: "wx" });
+  withFileMutationLock(root, () =>
+    withFileMutationLock(path, () =>
+      writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`, { flag: "wx" }),
+    ),
+  );
+  RecipesUsage.recordRecipeLaunch(path, new Date(), "spawn", Paths.getRecipeRoot());
   return path;
 }
 

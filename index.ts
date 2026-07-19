@@ -5,118 +5,32 @@
  * Wraps command templates as callable pi tools, stores durable user tools as recipe files, and exposes actor orchestration across reloads and sessions.
  */
 
-import * as AsyncRuns from "./lib/async-runs.ts";
+import * as AutomaticReviewRuntime from "./lib/automatic-review-runtime.ts";
 import * as CommandTemplates from "./lib/command-templates.ts";
-import * as InspectorOverlay from "./lib/inspector-overlay.ts";
-import * as Observability from "./lib/observability.ts";
+import * as InspectorCommand from "./lib/inspector-command.ts";
 import * as Paths from "./lib/paths.ts";
 import * as Pi from "./lib/pi.ts";
 import * as Prompts from "./lib/prompts.ts";
+import * as RunUiRuntime from "./lib/run-ui-runtime.ts";
 import * as Runtime from "./lib/runtime.ts";
 import * as Temp from "./lib/temp.ts";
 import * as Tools from "./lib/tools.ts";
 import * as ToolsResponse from "./lib/tools-response.ts";
 
 export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
-  let runsAnimationInterval: NodeJS.Timeout | undefined;
-  let runsNotifyTimeout: NodeJS.Timeout | undefined;
   let activeRunContext: Pi.ExtensionContext | undefined;
-  let lastRunWatcherDiagnosticId = 0;
-  const runUi = Observability.createRunUiObservationState();
-  const retirementAttempts = new Set<string>();
-  const terminalNotificationsInFlight = new Set<string>();
   const getRunOwnerId = Pi.getSessionId;
-  const retireCandidateRuns = (
-    ctx: Pi.ExtensionContext,
-    summary: Observability.RunSummary,
-  ): void => {
-    void Observability.executeRunRetirements(summary, {
-      attempted: retirementAttempts,
-      cancelRun: (candidate) => AsyncRuns.cancelRun(candidate.stateDir),
-      notify: (message, level) => ctx.ui.notify(message, level),
-      sendStop: (candidate) =>
-        AsyncRuns.sendRunMessage(candidate.stateDir, "stop"),
-    });
-  };
-  const updateRunUi = (
-    ctx: Pi.ExtensionContext,
-    notify = false,
-    terminalOnly = false,
-  ): void => {
-    const ownerId = getRunOwnerId(ctx);
-    const snapshot = Observability.readRunUiSnapshot(runUi, ownerId);
-    ctx.ui.setStatus(
-      "zz-pi-actors-runs",
-      snapshot.status ? ctx.ui.theme.fg("dim", snapshot.status) : undefined,
-    );
-    if (!notify) return;
-    const notificationSink = Pi.createNotificationSink(pi, ctx);
-    retireCandidateRuns(ctx, snapshot.summary);
-    Observability.deliverRunTransitionNotifications(
-      snapshot.transitions,
-      notificationSink,
-      terminalNotificationsInFlight,
-    );
-    Observability.pruneRunUiObservationState(runUi, snapshot);
-    if (!terminalOnly) {
-      Observability.deliverRunOutboxNotifications(
-        snapshot.outboxEvents,
-        notificationSink,
-      );
-    }
-  };
-  const closeRunWatchers = (): void => {
-    runWatcher.close();
-    terminalReconciliation.close();
-    if (runsNotifyTimeout) clearTimeout(runsNotifyTimeout);
-    runsNotifyTimeout = undefined;
-  };
-  const reportRunWatcherDiagnostics = (ctx: Pi.ExtensionContext): void => {
-    for (const diagnostic of runWatcher.getDiagnostics()) {
-      if (diagnostic.id <= lastRunWatcherDiagnosticId) continue;
-      lastRunWatcherDiagnosticId = diagnostic.id;
-      ctx.ui.notify(
-        diagnostic.message,
-        diagnostic.code === "rearmed" ? "info" : "warning",
-      );
-    }
-  };
-  const scheduleRunEventUpdate = (): void => {
-    if (runsNotifyTimeout) clearTimeout(runsNotifyTimeout);
-    runsNotifyTimeout = setTimeout(() => {
-      const ctx = activeRunContext;
-      if (!ctx) return;
-      runWatcher.refresh();
-      updateRunUi(ctx, true);
-      reportRunWatcherDiagnostics(ctx);
-    }, 50);
-    runsNotifyTimeout.unref?.();
-  };
-  const runWatcher = Observability.createRunStateWatcher({
-    stateRoot: Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
-    onChange: scheduleRunEventUpdate,
+  const automaticReview = AutomaticReviewRuntime.createAutomaticReviewRuntime({
+    getActiveContext: () => activeRunContext,
+    getRunOwnerId,
+    getThinkingLevel: () => pi.getThinkingLevel(),
   });
-  const terminalReconciliation =
-    Observability.createRunTerminalReconciliationLoop({
-      onError: (error) => {
-        const ctx = activeRunContext;
-        if (!ctx) return;
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Actor terminal reconciliation failed: ${message}`, "error");
-      },
-      reconcile: () => {
-        const ctx = activeRunContext;
-        if (!ctx) return;
-        Observability.reconcileRunTerminalNotifications({
-          inFlight: terminalNotificationsInFlight,
-          ownerId: getRunOwnerId(ctx),
-          sink: Pi.createNotificationSink(pi, ctx),
-          state: runUi,
-        });
-        reportRunWatcherDiagnostics(ctx);
-      },
-      refreshWatcher: () => runWatcher.refresh(),
-    });
+  const runUiRuntime = RunUiRuntime.createRunUiRuntime({
+    getActiveContext: () => activeRunContext,
+    getRunOwnerId,
+    onRunEvent: automaticReview.schedule,
+    pi,
+  });
   const actorToolDefinitions = new Map<string, Tools.ActorToolDefinition>();
   const withCurrentThinkingContext = <T extends Tools.ActorToolDefinition>(
     definition: T,
@@ -164,54 +78,26 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     // Clear the pre-overlay widget after hot reloads from older pi-actors builds.
     ctx.ui.setWidget("zz-pi-actors-comms", undefined);
     activeRunContext = ctx;
-    closeRunWatchers();
+    runUiRuntime.close();
+    automaticReview.close();
     recipeReload.close();
     await Temp.prepareExtensionTempDir(Paths.EXTENSION_RUNTIME_PATHS.tempDir);
     if (activeRunContext !== ctx) return;
+    automaticReview.start(ctx);
     runtime.loadTools(ctx);
-    updateRunUi(ctx, true, true);
-    runWatcher.refresh();
-    terminalReconciliation.start();
+    runUiRuntime.start(ctx);
     recipeReload.watch(ctx);
-    if (runsAnimationInterval) clearInterval(runsAnimationInterval);
-    runsAnimationInterval = setInterval(() => {
-      if (activeRunContext === ctx) updateRunUi(ctx, false);
-    }, 1000);
-    runsAnimationInterval.unref?.();
   });
-  pi.on("session_shutdown", async () => {
-    if (runsAnimationInterval) clearInterval(runsAnimationInterval);
-    runsAnimationInterval = undefined;
+  pi.on("agent_end", async (_event, ctx) => {
+    if (activeRunContext === ctx) automaticReview.schedule();
+  });
+  pi.on("session_shutdown", async (event, ctx) => {
     activeRunContext = undefined;
-    closeRunWatchers();
+    automaticReview.close();
     recipeReload.close();
+    runUiRuntime.shutdown(event.reason, ctx);
   });
-  pi.registerCommand("actors-inspector", {
-    description: "Open the keyboard-driven actor inspector overlay",
-    handler: async (_args, ctx) => {
-      ctx.ui.setWidget("zz-pi-actors-comms", undefined);
-      await ctx.ui.custom<void>(
-        (tui, theme, _keybindings, done) =>
-          new InspectorOverlay.ActorInspectorOverlay({
-            done,
-            ownerId: getRunOwnerId(ctx),
-            stateRoot: Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
-            theme,
-            tui,
-          }),
-        {
-          overlay: true,
-          overlayOptions: {
-            anchor: "center",
-            width: "94%",
-            minWidth: 72,
-            maxHeight: "94%",
-            margin: 1,
-          },
-        },
-      );
-    },
-  });
+  InspectorCommand.registerActorInspectorCommand(pi, getRunOwnerId);
   pi.on("before_agent_start", async (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,
   }));
@@ -221,11 +107,10 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
       configPath: Paths.EXTENSION_RUNTIME_PATHS.configPath,
       getActiveTools: () => pi.getActiveTools(),
       getRuntimeTool: (name) =>
-        Tools.resolveActiveRuntimeTool(
-          name,
-          runtime.getTools(),
-          (activeName) => actorToolDefinitions.get(activeName),
+        Tools.resolveActiveRuntimeTool(name, runtime.getTools(), (activeName) =>
+          actorToolDefinitions.get(activeName),
         ),
+      handleRuntimeMessage: automaticReview.handleMessage,
       registryRuntime: runtime,
       setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
     }).map(withCurrentThinkingContext),

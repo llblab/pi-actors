@@ -290,6 +290,10 @@ function compactActorMessageResult(
 
 export interface ActorMessageToolDeps<TContext = unknown> {
   getTool?: (name: string) => any | undefined;
+  handleRuntimeMessage?: (
+    type: string,
+    body: unknown,
+  ) => Record<string, unknown>;
 }
 
 export function createActorMessageToolDefinition<TContext = unknown>(
@@ -363,7 +367,14 @@ export function createActorMessageToolDefinition<TContext = unknown>(
               ]
             : [];
         if (message.type === "control.kill") {
-          result = AsyncRuns.killRun(address.value);
+          result = typeof status.run_instance_id === "string"
+            ? AsyncRuns.killRun(address.value, {
+                ...(typeof status.ownerId === "string"
+                  ? { ownerId: status.ownerId }
+                  : {}),
+                runInstanceId: status.run_instance_id,
+              })
+            : { killed: false, reason: "run generation unavailable" };
         } else if (message.type === "control.archive") {
           result = AsyncRuns.archiveRun(address.value);
         } else if (message.type === "control.prune") {
@@ -463,36 +474,40 @@ export function createActorMessageToolDefinition<TContext = unknown>(
             : {}),
         };
       } else if (address.kind === "tool" && address.value) {
-        const tool = deps.getTool?.(address.value);
-        if (!tool || typeof tool.execute !== "function") {
-          throw new Error(
-            `tool actor not found or not executable: ${address.value}`,
-          );
+        if (address.value === "pi-actors" && deps.handleRuntimeMessage) {
+          result = deps.handleRuntimeMessage(message.type, message.body);
+        } else {
+          const tool = deps.getTool?.(address.value);
+          if (!tool || typeof tool.execute !== "function") {
+            throw new Error(
+              `tool actor not found or not executable: ${address.value}`,
+            );
+          }
+          const toolParams = messageBodyToToolParams(message);
+          let toolResult: unknown;
+          try {
+            toolResult = await tool.execute(
+              `message:${message.type}`,
+              toolParams,
+              _signal,
+              _onUpdate,
+              ctx,
+            );
+          } catch (error) {
+            throw formatToolActorFailure(
+              address.value,
+              message,
+              toolParams,
+              error,
+            );
+          }
+          result = {
+            invoked: true,
+            sent: true,
+            tool: address.value,
+            tool_result: toolResult,
+          };
         }
-        const toolParams = messageBodyToToolParams(message);
-        let toolResult: unknown;
-        try {
-          toolResult = await tool.execute(
-            `message:${message.type}`,
-            toolParams,
-            _signal,
-            _onUpdate,
-            ctx,
-          );
-        } catch (error) {
-          throw formatToolActorFailure(
-            address.value,
-            message,
-            toolParams,
-            error,
-          );
-        }
-        result = {
-          invoked: true,
-          sent: true,
-          tool: address.value,
-          tool_result: toolResult,
-        };
       } else if (address.kind === "coordinator" || address.kind === "session") {
         if (!message.from) {
           throw new Error(`message to ${address.kind} requires from=run:<id>.`);

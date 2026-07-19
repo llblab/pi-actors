@@ -43,6 +43,7 @@ export interface RunObservation {
   artifacts?: Record<string, string>;
   launchSource?: AsyncRuns.AsyncRunLaunchSource;
   modelPolicy?: Record<string, unknown>;
+  notificationPolicy?: "normal" | "silent";
   recipeFile?: string;
   terminalHandled?: boolean;
   retireWhen?: string;
@@ -531,6 +532,9 @@ function observeRun(stateDir: string): RunObservation | undefined {
       !Array.isArray(status.model_policy)
         ? { modelPolicy: status.model_policy as Record<string, unknown> }
         : {}),
+      ...(status.notification_policy === "silent"
+        ? { notificationPolicy: "silent" as const }
+        : {}),
       ...(typeof status.recipe_file === "string"
         ? { recipeFile: status.recipe_file }
         : {}),
@@ -919,7 +923,11 @@ export function detectRunTransitions(
   for (const run of summary.runs) {
     const key = runObservationKey(run);
     const old = previous.get(key);
-    if (!run.terminalHandled && TERMINAL.has(run.status)) {
+    if (
+      run.notificationPolicy !== "silent" &&
+      !run.terminalHandled &&
+      TERMINAL.has(run.status)
+    ) {
       transitions.push({
         from: old ?? "running",
         run: run.run,
@@ -1037,6 +1045,11 @@ export function detectRunOutboxEvents(
     const key = run.stateDir ?? run.run;
     const records = readOutboxRecords(run);
     const previousCount = previousLineCounts.get(key) ?? 0;
+    if (run.notificationPolicy === "silent") {
+      previousLineCounts.set(key, records.length);
+      seenEventIds.set(key, seenEventIds.get(key) ?? new Set<string>());
+      continue;
+    }
     const start = Math.min(previousCount, records.length);
     const seen = seenEventIds.get(key) ?? new Set<string>();
     for (let index = start; index < records.length; index += 1) {

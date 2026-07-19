@@ -13,6 +13,7 @@ import * as Limits from "./limits.ts";
 import * as Messages from "./messages.ts";
 import * as Paths from "./paths.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
+import * as ReviewDiagnostics from "./review-diagnostics.ts";
 import * as Rooms from "./rooms.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsAccess from "./tools-access.ts";
@@ -21,6 +22,17 @@ import * as ToolsResponse from "./tools-response.ts";
 
 const asRecord = ToolsResponse.asRecord;
 const maybeJsonText = ToolsResponse.maybeJsonText;
+
+function compactAutomaticReviewDiagnostics(
+  diagnostics: Record<string, unknown>,
+): string {
+  const draft = asRecord(diagnostics.draft_review);
+  const tool = asRecord(diagnostics.tool_review);
+  return [
+    `automatic_reviews draft=${String(draft.phase ?? "idle")} tool=${String(tool.phase ?? "idle")}`,
+    `lineages=${String(diagnostics.lineage_count ?? 0)} revision_snapshots=${String(diagnostics.revision_snapshots ?? 0)}`,
+  ].join("\n");
+}
 
 function compactRunMessages(messages: AsyncRuns.RunOutboxEvent[]): string {
   if (messages.length === 0) return "\n(no actor messages)";
@@ -259,6 +271,7 @@ function getPiActorsRuntimeStatus(): Record<string, unknown> {
   }
   const entrypoint = new URL(import.meta.url).pathname;
   return {
+    automatic_recipe_review: Paths.isAutomaticRecipeReviewEnabled(),
     entrypoint,
     git_commit,
     mode: entrypoint.includes("/dist/") ? "dist" : "source",
@@ -271,7 +284,7 @@ function getPiActorsRuntimeStatus(): Record<string, unknown> {
 }
 
 function compactPiActorsRuntimeStatus(status: Record<string, unknown>): string {
-  return `\npi-actors version=${String(status.version)} mode=${String(status.mode)} path=${String(status.package_root)} entrypoint=${String(status.entrypoint)}${status.git_commit ? ` git=${String(status.git_commit)}` : ""}`;
+  return `\npi-actors version=${String(status.version)} mode=${String(status.mode)} automatic_review=${String(status.automatic_recipe_review)} path=${String(status.package_root)} entrypoint=${String(status.entrypoint)}${status.git_commit ? ` git=${String(status.git_commit)}` : ""}`;
 }
 
 function isStaleClaim(message: AsyncRuns.RunInboxMessage, now: number): boolean {
@@ -515,11 +528,28 @@ export function createInspectToolDefinition<TContext = unknown>(
           view !== "status" &&
           view !== "summary" &&
           view !== "doctor" &&
-          view !== "imports"
+          view !== "imports" &&
+          view !== "reviews"
         ) {
           throw new Error(
-            "inspect recipes supports view=status, view=summary, view=doctor, or view=imports.",
+            "inspect recipes supports view=status, view=summary, view=doctor, view=imports, or view=reviews.",
           );
+        }
+        if (view === "reviews") {
+          const diagnostics = ReviewDiagnostics.readAutomaticReviewDiagnostics({
+            recipeRoot: deps.recipeRoot ?? Paths.getRecipeRoot(),
+          });
+          return {
+            content: [{
+              type: "text" as const,
+              text: maybeJsonText(
+                diagnostics,
+                input.verbose === true,
+                compactAutomaticReviewDiagnostics(diagnostics),
+              ),
+            }],
+            details: diagnostics,
+          };
         }
         const discovered = RecipesDiscovery.discoverRecipeSources([
           {

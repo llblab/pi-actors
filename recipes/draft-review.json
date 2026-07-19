@@ -1,0 +1,24 @@
+{
+  "async": true,
+  "args": [
+    "input_path:path",
+    "model:string",
+    "thinking:string"
+  ],
+  "defaults": {
+    "model": "{current_model}",
+    "thinking": "{current_thinking}"
+  },
+  "description": "Read-only background reviewer for one immutable automatic draft-memory batch.",
+  "mailbox": {
+    "accepts": [
+      "control.kill"
+    ],
+    "emits": [
+      "command.done",
+      "run.done",
+      "run.failed"
+    ]
+  },
+  "template": "pi -p --model {model} --thinking {thinking} --no-tools @{input_path} Review the attached immutable pi-actors draft batch. Evaluate every draft independently using launch history, universality, flexibility, parameterization, duplication, safety, and likely future usefulness. Treat draft and sha256 fields as batch-local opaque occurrence/content-group identifiers and return them verbatim. Choose exactly one promote or discard decision per draft; there is no selection quota. Promotion requires a unique absent snake_case target and targetSha256 null. Never return recipe content: the executor derives the exact immutable captured source. Invalid or secret-touching drafts must be discarded. Include assessment with launches, universality, flexibility, futureUsefulness, and safety. Do not mutate, move, register, or delete recipes. End stdout with DRAFT_REVIEW_RESULT on its own line followed by exactly one JSON object with batchId, createdAt, and decisions."
+}

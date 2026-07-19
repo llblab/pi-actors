@@ -2,7 +2,7 @@
 name: swarm
 description: Subagent and actor orchestration with scoped locks, fanout, and quorum consensus. Use before launching multiple parallel actors or subagents for independent implementation, artifact generation, review, delegated audit, coordinated execution, or any workflow that needs autonomous coordinator decomposition and integration.
 metadata:
-  version: 0.41.1
+  version: 0.42.0
 ---
 
 # Swarm

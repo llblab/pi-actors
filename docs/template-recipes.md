@@ -107,20 +107,13 @@ The high-priority user recipe directory is also the default tool set: recipes pl
 
 Higher-priority files shadow lower-priority files with the same basename. Within one priority layer, same-id JSON shadows Markdown because JSON is the canonical precise format. A highest-priority invalid recipe is still visible and blocks fallback so operators do not accidentally run packaged behavior when a user override is broken. A highest-priority recipe with `disabled: true` also blocks fallback, is not launchable, and intentionally disables that id. Healthy overrides are silent; failed bare-name launches caused by invalid or disabled shadowing include compact `reason=shadowed_invalid` or `reason=shadowed_disabled` diagnostics with the active path, blocked candidate, and recipe-doctor hint.
 
-## Usage Metadata
+## Usage And Lineage Metadata
 
-User-owned recipe launches may accumulate extension-maintained usage metadata in `.usage/<recipe-filename>.json` sidecars:
+User-owned recipe launches update extension-maintained lineage ledgers under `.usage/recipes/<recipe-name>.json` plus a path index. Authored recipes remain untouched. The ledger keeps lifetime and revision-local launch counts, executable fingerprints, former names and paths, bounded revision ancestry, transition events, and review epochs.
 
-```json
-{
-  "calls": 12,
-  "last_called": "2026-05-22T10:30:00.000Z"
-}
-```
+Lifetime usage survives rename, promotion, demotion, and executable revision. Revision-local counters restart when executable content changes, making the new fingerprint eligible for portfolio review without erasing prior evidence. Discovery merges current lineage evidence into inspection; packaged standard-library recipes receive no mutable usage ledger. The unreleased format stays intentionally unversioned until a public compatibility boundary exists.
 
-The extension increments `calls` and updates `last_called` when it starts that concrete recipe, either through a recipe-backed tool call or a direct async recipe-file run. The sidecar also stores a content `fingerprint`; if authored recipe content changes, the next launch resets `calls` before counting the new launch and records `reset_at`. Keeping telemetry outside the recipe prevents usage writes from replacing concurrent operator edits; discovery merges sidecar usage into inspection. Agents should treat these fields as cleanup evidence, not as authored recipe contract. Packaged standard-library recipes do not receive usage metadata.
-
-There is intentionally no failure counter in the recipe contract. A failed launch can reflect caller misuse, missing runtime values, or an environmental problem rather than recipe uselessness. Cleanup decisions should be explicit operator work: keep as a tool, move out of the agent recipe root to retain recipe-only memory, merge, delete, or archive.
+There is intentionally no failure counter: a failed launch can reflect caller misuse, missing values, or environment state rather than recipe quality. Usage remains evidence, not an automatic usefulness verdict. Automatic review combines it with contract quality, portability, duplication, safety, and likely future value. `register_tool draft=...` is the preferred fenced single-draft override; a deliberate move/copy from `drafts/` into the recipe root also remains valid, though it may defer an already captured automatic batch.
 
 For object form, keep `template` last. Recipe metadata comes first; executable content stays last.
 

@@ -12,6 +12,7 @@ import test from "node:test";
 import type { RegisteredTool } from "../lib/config.ts";
 import { cancelRun, startRun } from "../lib/async-runs.ts";
 import { getRunStateRoot } from "../lib/paths.ts";
+import { readRecipeUsage } from "../lib/recipes-usage.ts";
 import { createActorMessageToolDefinition } from "../lib/tools-message.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
@@ -342,6 +343,22 @@ test("Inspect tool reads recipe registry summaries", async () => {
     assert.equal(draft.valid, true);
     assert.equal(typeof draft.sha256, "string");
     assert.equal(draft.template_preview, "echo draft");
+    const reviews = await definition.execute(
+      "call-inspect-reviews",
+      { target: "recipes", view: "reviews" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    assert.match(reviews.content[0].text, /automatic_reviews draft=/);
+    assert.match(reviews.content[0].text, /lineages=0 revision_snapshots=0/);
+    assert.deepEqual(Object.keys(reviews.details).sort(), [
+      "draft_review",
+      "lineage_count",
+      "lineages",
+      "revision_snapshots",
+      "tool_review",
+    ]);
     assert.deepEqual(result.details.next_actions, [
       "inspect target=recipes view=doctor",
       "inspect target=recipes view=summary verbose=true",
@@ -1061,6 +1078,8 @@ test("Inspect tool reads pi-actors runtime status", async () => {
   );
   assert.match(result.content[0].text, /pi-actors version=/);
   assert.match(result.content[0].text, /mode=(source|dist)/);
+  assert.match(result.content[0].text, /automatic_review=(true|false)/);
+  assert.equal(typeof result.details.automatic_recipe_review, "boolean");
   assert.equal(result.details.package_name, "@llblab/pi-actors");
   assert.equal(typeof result.details.entrypoint, "string");
 });
@@ -1278,6 +1297,30 @@ test("Actor message tool routes tool actors to executable tools", async () => {
   assert.equal(result.details.result.persisted, false);
   assert.equal(result.details.result.consumer, "tool");
   assert.equal(result.details.result.reason, "tool_invoked");
+});
+
+test("Actor message tool routes explicit review control to tool:pi-actors", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const definition = createActorMessageToolDefinition({
+    handleRuntimeMessage: (type, body) => {
+      calls.push({ body, type });
+      return { changed: true, phase: "captured", sent: true };
+    },
+  });
+  const result = await definition.execute(
+    "call-review-retry",
+    {
+      body: { scope: "draft" },
+      to: "tool:pi-actors",
+      type: "review.retry",
+    },
+    undefined,
+    undefined,
+    undefined,
+  );
+  assert.deepEqual(calls, [{ body: { scope: "draft" }, type: "review.retry" }]);
+  assert.equal(result.details.result.phase, "captured");
+  assert.equal(result.details.result.consumer, "tool");
 });
 
 test("Actor message tool preserves target tool failure shape", async () => {
@@ -1816,6 +1859,12 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
     assert.equal(draftRecipe.template, `${process.execPath} -e "console.log('spawned')"`);
     assert.deepEqual(draftRecipe.artifacts, result.details.artifacts);
     assert.equal(draftRecipe.defaults, undefined);
+    const draftUsage = readRecipeUsage(
+      String(result.details.draft_recipe),
+      join(root, "recipes"),
+    )!;
+    assert.equal(draftUsage.lifetime_calls, 1);
+    assert.equal(draftUsage.spawn_calls, 1);
     assert.deepEqual(result.details.artifacts, {
       missing: { path: `${stateDir}/missing.md`, required: true },
       report: { path: `${stateDir}/report.md`, kind: "markdown", media_type: "text/markdown", required: true },

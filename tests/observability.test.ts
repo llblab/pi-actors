@@ -50,6 +50,7 @@ async function writeRun(
   launchSource?: "spawn" | "tool",
   recipeFile?: string,
   tool?: string,
+  notificationPolicy?: "normal" | "silent",
 ): Promise<void> {
   const dir = join(root, run);
   await mkdir(dir, { recursive: true });
@@ -64,6 +65,7 @@ async function writeRun(
       ...(launchSource ? { launch_source: launchSource } : {}),
       ...(recipeFile ? { recipe_file: recipeFile } : {}),
       ...(tool ? { tool } : {}),
+      ...(notificationPolicy ? { notification_policy: notificationPolicy } : {}),
       pid: status === "running" ? process.pid : 999999999,
       ...(status === "running"
         ? { process_identity: readProcessIdentity(process.pid) }
@@ -279,6 +281,27 @@ test("Run observability detects terminal transitions", () => {
     "Run review completed successfully.\nArtifacts:\n- Base: `artifacts`\n- Files: `report.md`\nNext actions: inspect target=run:review view=status | inspect target=run:review view=artifacts | inspect target=run:review view=messages",
   );
   assert.equal(previous.get("review"), "done");
+});
+
+test("Silent background runs emit no terminal transition", () => {
+  const previous = new Map([["draft-sleep", "running" as const]]);
+  const transitions = detectRunTransitions(previous, {
+    cancelled: 0,
+    done: 1,
+    exited: 0,
+    failed: 0,
+    killed: 0,
+    running: 0,
+    runningSubagents: 0,
+    runs: [{
+      notificationPolicy: "silent",
+      run: "draft-sleep",
+      status: "done",
+    }],
+    total: 1,
+  });
+  assert.deepEqual(transitions, []);
+  assert.equal(previous.get("draft-sleep"), "done");
 });
 
 test("Run observability includes model policy in terminal follow-ups", () => {

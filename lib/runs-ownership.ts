@@ -1,6 +1,6 @@
 /**
  * Async run state-directory ownership.
- * Owns the marker proof required before launch and destructive retention.
+ * Owns: the marker proof required before launch and destructive retention.
  */
 
 import {

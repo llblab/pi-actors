@@ -1,20 +1,26 @@
 /**
  * Async run status and log readers.
- * Owns status derivation from run state files plus bounded log/event tails.
+ * Owns: status derivation from run state files plus bounded log/event tails.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AsyncRunStatus } from "./async-runs.ts";
 import {
-  isWithinRunnerIdentityGrace,
   verifyRunProcessIdentity,
   type RunProcessIdentity,
 } from "./runs-process.ts";
 import { readJsonlFileResilient } from "./state-readers.ts";
 
-export type RunJsonReader = (path: string) => Record<string, unknown> | undefined;
+export type AsyncRunStatus =
+  | "running"
+  | "done"
+  | "failed"
+  | "exited"
+  | "cancelled"
+  | "killed";
+
+type RunJsonReader = (path: string) => Record<string, unknown> | undefined;
 
 function getInterruptedRunStatus(
   stateDir: string,
@@ -35,7 +41,7 @@ export function buildRunStatus(
   meta: Record<string, unknown>,
   readJson: RunJsonReader,
   _runnerPath: string,
-  runnerIdentityGraceMs: number,
+  _runnerIdentityGraceMs: number,
 ): Record<string, unknown> {
   const result = readJson(join(stateDir, "result.json"));
   const pid = Number(meta.pid || 0);
@@ -45,9 +51,7 @@ export function buildRunStatus(
   );
   const aliveOwnedRunner = Boolean(
     pid &&
-      (processIdentity.valid ||
-        (processIdentity.status === "unsupported_proof" &&
-          isWithinRunnerIdentityGrace(meta, runnerIdentityGraceMs))),
+      (processIdentity.valid || processIdentity.status === "unsupported_proof"),
   );
   const status: AsyncRunStatus = result
     ? Number(result.code ?? 0) === 0

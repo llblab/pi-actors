@@ -36,7 +36,7 @@ test("Async run start increments user recipe launch counter", async () => {
       recipe,
       JSON.stringify({
         async: true,
-        template: "printf counted",
+        template: `${process.execPath} -e "console.log('counted')"`,
       }),
     );
 

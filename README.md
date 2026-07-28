@@ -295,6 +295,8 @@ Packaged recipes are building blocks. Use `spawn file=<recipe>` for maintained p
 
 When a directly spawned inline/ad hoc actor or a recipe outside the user recipe root completes successfully, `pi-actors` may include a promotion suggestion in its terminal follow-up notification. The agent should ask first and never auto-save.
 
+Terminal completion returns one bounded semantic result to the originating coordinator, not only run-state paths. `spawn` and saved async tools preserve their tool-call correlation automatically; callers may add `correlation_id` plus bounded `transport_context` when an adapter must retain an exact detached route, including Telegram `chat_id`/`thread_id`. Recipes that advertise `review.completed` either emit that envelope explicitly or receive one synthesized from successfully accepted review output. Watcher and periodic reconciliation share one in-flight guard, while failed sends remain retryable and visible in run status.
+
 ## Platform support
 
 Core actor state, inspection, foreground tools, and basic async runs are portable Node.js behavior. Run-local messaging and stop/kill use platform adapters under the same `message` API.

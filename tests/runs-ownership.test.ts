@@ -45,6 +45,15 @@ test("Run state ownership claims only empty canonical directories", async () => 
       () => claimRunStateDirectory(alias, "owned-run"),
       /cannot be a symlink/,
     );
+
+    const realParent = join(root, "real-parent");
+    const parentAlias = join(root, "parent-alias");
+    await mkdir(realParent);
+    await symlink(realParent, parentAlias, "dir");
+    assert.throws(
+      () => claimRunStateDirectory(join(parentAlias, "nested"), "nested-run"),
+      /ambiguous symlink alias/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

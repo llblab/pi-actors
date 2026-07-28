@@ -135,7 +135,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     try {
       return readdirSync(sessionDir, { withFileTypes: true })
         .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-        .map((entry) => relative(stateDir, join(sessionDir, entry.name)))
+        .map((entry) => relative(stateDir, join(sessionDir, entry.name)).replaceAll("\\", "/"))
         .sort();
     } catch {
       return [];
@@ -167,12 +167,12 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       ...(recipeContext ? { recipe_context: recipeContext } : {}),
       command: commandDetail,
       ...(materialized.promptFile
-        ? { prompt_file: relative(stateDir, materialized.promptFile) }
+        ? { prompt_file: relative(stateDir, materialized.promptFile).replaceAll("\\", "/") }
         : {}),
       ...(materialized.promptBytes
         ? { prompt_bytes: materialized.promptBytes }
         : {}),
-      ...(sessionDir ? { session_dir: relative(stateDir, sessionDir) } : {}),
+      ...(sessionDir ? { session_dir: relative(stateDir, sessionDir).replaceAll("\\", "/") } : {}),
       attempts: [],
       semantic_acceptance:
         options?.evidenceContext?.acceptOutput === "review_evidence" ||
@@ -209,11 +209,11 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       attempts.push({
         attempt,
         stdout: {
-          path: relative(stateDir, stdoutFile),
+          path: relative(stateDir, stdoutFile).replaceAll("\\", "/"),
           bytes: existsSync(stdoutFile) ? statSync(stdoutFile).size : 0,
         },
         stderr: {
-          path: relative(stateDir, stderrFile),
+          path: relative(stateDir, stderrFile).replaceAll("\\", "/"),
           bytes: existsSync(stderrFile) ? statSync(stderrFile).size : 0,
         },
       });
@@ -248,12 +248,12 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       ...(recipeContext ? { recipe_context: recipeContext } : {}),
       command: commandDetail,
       ...(materialized.promptFile
-        ? { prompt_file: relative(stateDir, materialized.promptFile) }
+        ? { prompt_file: relative(stateDir, materialized.promptFile).replaceAll("\\", "/") }
         : {}),
       ...(materialized.promptBytes
         ? { prompt_bytes: materialized.promptBytes }
         : {}),
-      ...(sessionDir ? { session_dir: relative(stateDir, sessionDir) } : {}),
+      ...(sessionDir ? { session_dir: relative(stateDir, sessionDir).replaceAll("\\", "/") } : {}),
       ...(commandSessionFiles(sessionDir).length > 0
         ? { session_files: commandSessionFiles(sessionDir) }
         : {}),
@@ -386,7 +386,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       command: commandDetail,
       ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
       ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
-      ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir) } : {}),
+      ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir).replaceAll("\\", "/") } : {}),
     });
     progressRunning();
     const captureDir = join(stateDir, "captures", commandId);
@@ -457,7 +457,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       ...captureDetails(result),
       ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
       ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
-      ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir) } : {}),
+      ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir).replaceAll("\\", "/") } : {}),
       ...(commandSessionFiles(session.sessionDir).length > 0
         ? { session_files: commandSessionFiles(session.sessionDir) }
         : {}),

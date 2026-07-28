@@ -28,7 +28,12 @@ function packageRoot() {
 
 const result = spawnSync(
   process.execPath,
-  ["--experimental-strip-types", "--test", ...conformanceSuites],
+  [
+    "--experimental-strip-types",
+    "--test",
+    "--test-concurrency=1",
+    ...conformanceSuites,
+  ],
   { cwd: packageRoot(), encoding: "utf8", stdio: "pipe" },
 );
 

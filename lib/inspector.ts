@@ -248,7 +248,7 @@ export function readActorInspectorTurns(stateDir: string): ActorInspectorTurnIte
             withFileTypes: true,
           })
           .filter((file) => file.isFile() && file.name.endsWith(".jsonl"))
-          .map((file) => path.join("sessions", entry.name, file.name))
+          .map((file) => path.posix.join("sessions", entry.name, file.name))
           .filter((file) => !recordedFiles.has(file));
         return files.length > 0
           ? [{ id: entry.name, session_files: files, stage: "subagent" }]

@@ -12,7 +12,8 @@ import {
   realpathSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { writeJsonAtomic } from "./file-state.ts";
 
@@ -35,13 +36,31 @@ function comparablePath(path: string): string {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
+function isSystemTempRootAlias(resolved: string, canonical: string): boolean {
+  const tempRoot = resolve(tmpdir());
+  const relativeStateDir = relative(tempRoot, resolved);
+  if (
+    relativeStateDir === ".." ||
+    relativeStateDir.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+    isAbsolute(relativeStateDir)
+  ) {
+    return false;
+  }
+  const canonicalTempRoot = realpathSync.native(tempRoot);
+  const expectedCanonical = resolve(canonicalTempRoot, relativeStateDir);
+  return comparablePath(canonical) === comparablePath(expectedCanonical);
+}
+
 function assertCanonicalDirectory(stateDir: string): string {
   const resolved = resolve(stateDir);
   if (lstatSync(resolved).isSymbolicLink()) {
     throw new Error(`Run state directory cannot be a symlink: ${resolved}`);
   }
-  const canonical = realpathSync(resolved);
-  if (comparablePath(canonical) !== comparablePath(resolved)) {
+  const canonical = realpathSync.native(resolved);
+  if (
+    comparablePath(canonical) !== comparablePath(resolved) &&
+    !isSystemTempRootAlias(resolved, canonical)
+  ) {
     throw new Error(`Run state directory has an ambiguous symlink alias: ${resolved}`);
   }
   return resolved;

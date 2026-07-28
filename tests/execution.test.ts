@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +15,23 @@ import type { RegisteredTool } from "../lib/config.ts";
 import { readResolvedRecipeConfig } from "../lib/recipes-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const nativeWorkRoot = resolve("/work");
+
+function normalizeWorkCommand(command: string): string {
+  if (command === nativeWorkRoot) return "/work";
+  if (command.startsWith(`${nativeWorkRoot}${sep}`)) {
+    return `/work/${command.slice(nativeWorkRoot.length + 1).replaceAll(sep, "/")}`;
+  }
+  return command;
+}
+
+function normalizeWorkCommandLine(command: string): string {
+  const quoted = command.match(/^'([^']+)'(.*)$/s);
+  if (quoted) return `${normalizeWorkCommand(quoted[1])}${quoted[2]}`;
+  const separator = command.indexOf(" ");
+  if (separator < 0) return normalizeWorkCommand(command);
+  return `${normalizeWorkCommand(command.slice(0, separator))}${command.slice(separator)}`;
+}
 
 const tool: RegisteredTool = {
   name: "transcribe",
@@ -57,7 +74,7 @@ test("Registered tool execution expands command and returns formatted payload", 
   assert.equal(result.details.tool, "transcribe");
   assert.equal(
     result.details.command,
-    `${join(homedir(), "bin/transcribe")} '/tmp/a b.ogg' ru`,
+    `${process.platform === "win32" ? `'${join(homedir(), "bin/transcribe")}'` : join(homedir(), "bin/transcribe")} '/tmp/a b.ogg' ru`,
   );
   assert.equal(result.details.truncated, false);
 });
@@ -225,6 +242,7 @@ test("Registered tool execution runs template sequences with previous stdout as 
     },
     { file: "/tmp/a.ogg" },
     async (command, args, options) => {
+      command = normalizeWorkCommand(command);
       calls.push({
         command,
         args,
@@ -289,7 +307,7 @@ test("Registered tool execution rejects truncated pipeline stdin", async () => {
       { ...tool, template: ["./noisy", "./consumer"] },
       {},
       async (command) => {
-        calls.push(command);
+        calls.push(normalizeWorkCommand(command));
         return {
           stdout: "tail",
           stderr: "",
@@ -506,6 +524,7 @@ test("Registered tool execution runs nested parallel template nodes", async () =
     },
     { file: "/tmp/a.ogg" },
     async (command, _args, options) => {
+      command = normalizeWorkCommand(command);
       calls.push({ command, stdin: options?.stdin });
       if (command.endsWith("prepare"))
         return { stdout: "prepared", stderr: "", code: 0, killed: false };
@@ -952,6 +971,7 @@ test("Registered tool execution passes retry into template steps", async () => {
     },
     { file: "/tmp/a.ogg" },
     async (command, _args, options) => {
+      command = normalizeWorkCommand(command);
       calls.push({ command, retry: options?.retry });
       return { stdout: "ok", stderr: "", code: 0, killed: false };
     },
@@ -992,6 +1012,7 @@ test("Registered tool execution waits before delayed leaf steps", async () => {
     },
     { file: "/tmp/a.ogg" },
     async (command, _args, options) => {
+      command = normalizeWorkCommand(command);
       calls.push({
         command,
         elapsed: Date.now() - startedAt,
@@ -1021,6 +1042,7 @@ test("Registered tool execution waits before delayed sequence nodes", async () =
     },
     { file: "/tmp/a.ogg" },
     async (command) => {
+      command = normalizeWorkCommand(command);
       calls.push({ command, elapsed: Date.now() - startedAt });
       return {
         stdout: command.endsWith("first") ? "one" : "two",
@@ -1056,6 +1078,7 @@ test("Registered tool execution applies parallel branch delays independently", a
     },
     { file: "/tmp/a.ogg" },
     async (command) => {
+      command = normalizeWorkCommand(command);
       calls.push({ command, elapsed: Date.now() - startedAt });
       return {
         stdout: command.endsWith("fast") ? "fast" : "slow",
@@ -1083,6 +1106,7 @@ test("Registered tool execution continues after non-critical composition failure
     },
     { file: "/tmp/a.ogg" },
     async (command) => {
+      command = normalizeWorkCommand(command);
       calls.push(command);
       if (command === "/work/scan")
         return { stdout: "", stderr: "skip", code: 1, killed: false };
@@ -1092,7 +1116,10 @@ test("Registered tool execution continues after non-critical composition failure
   );
   assert.deepEqual(calls, ["/work/scan", "/work/transcribe"]);
   assert.deepEqual(result.content, [{ type: "text", text: "\ntext" }]);
-  assert.deepEqual(result.details.nonCriticalFailures, [
+  assert.deepEqual(result.details.nonCriticalFailures?.map((failure) => ({
+    ...failure,
+    command: normalizeWorkCommandLine(failure.command),
+  })), [
     { code: 1, command: "/work/scan /tmp/a.ogg", killed: false },
   ]);
 });
@@ -1110,6 +1137,7 @@ test("Registered tool execution aborts on root composition failures", async () =
       },
       { file: "/tmp/a.ogg" },
       async (command) => {
+        command = normalizeWorkCommand(command);
         calls.push(command);
         return { stdout: "", stderr: "fatal", code: 1, killed: false };
       },
@@ -1146,6 +1174,7 @@ test("Registered tool execution stops a failed branch without cancelling sibling
     },
     { file: "/tmp/a.ogg" },
     async (command, _args, options) => {
+      command = normalizeWorkCommand(command);
       calls.push(command);
       if (command === "/work/validate-a")
         return { stdout: "", stderr: "invalid", code: 2, killed: false };
@@ -1211,6 +1240,7 @@ test("Registered tool execution retries a sequence with recover between attempts
     },
     { file: "/tmp/a.ogg" },
     async (command) => {
+      command = normalizeWorkCommand(command);
       calls.push(command);
       if (command === "/work/validate") {
         validationAttempts += 1;
@@ -1235,7 +1265,10 @@ test("Registered tool execution retries a sequence with recover between attempts
     "/work/publish",
   ]);
   assert.deepEqual(result.content, [{ type: "text", text: "\npublished" }]);
-  assert.deepEqual(result.details.nonCriticalFailures, [
+  assert.deepEqual(result.details.nonCriticalFailures?.map((failure) => ({
+    ...failure,
+    command: normalizeWorkCommandLine(failure.command),
+  })), [
     { code: 1, command: "/work/validate /tmp/a.ogg", killed: false },
   ]);
 });
@@ -1257,6 +1290,7 @@ test("Registered tool execution stops retries when recover fails", async () => {
       },
       { file: "/tmp/a.ogg" },
       async (command) => {
+        command = normalizeWorkCommand(command);
         calls.push(command);
         if (command === "/work/reset")
           return { stdout: "", stderr: "reset failed", code: 3, killed: false };

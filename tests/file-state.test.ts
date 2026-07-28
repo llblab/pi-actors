@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -17,7 +18,7 @@ import {
   writeJsonAtomic,
 } from "../lib/file-state.ts";
 
-const worker = new URL("./fixtures/file-lock-worker.ts", import.meta.url).pathname;
+const worker = fileURLToPath(new URL("./fixtures/file-lock-worker.ts", import.meta.url));
 
 interface WorkerPaths {
   acquired: string;
@@ -130,6 +131,36 @@ test(
         root,
         join(realParent, "recipe.json"),
         join(aliasParent, "recipe.json"),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "Windows junction aliases share one canonical mutation lock",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const root = join(
+      tmpdir(),
+      `pi-actors-file-lock-junction-${process.pid}-${Date.now()}`,
+    );
+    const realParent = join(root, "real");
+    const junctionParent = join(root, "junction");
+    try {
+      await mkdir(realParent, { recursive: true });
+      await symlink(realParent, junctionParent, "junction");
+      const realTarget = join(realParent, "recipe.json");
+      const junctionTarget = join(junctionParent, "recipe.json");
+      assert.equal(
+        mutationLockPath(realTarget),
+        mutationLockPath(junctionTarget),
+      );
+      await assertDeterministicContention(
+        root,
+        realTarget,
+        junctionTarget,
       );
     } finally {
       await rm(root, { recursive: true, force: true });

@@ -9,10 +9,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const execFileAsync = promisify(execFile);
-const script = new URL("../scripts/validate-recipe.mjs", import.meta.url).pathname;
+const script = fileURLToPath(new URL("../scripts/validate-recipe.mjs", import.meta.url));
 const nodeArgs = ["--experimental-strip-types", script];
 
 test("validate-recipe validates one recipe file", async () => {

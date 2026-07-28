@@ -208,9 +208,15 @@ test("Platform guidance makes native Windows FIFO limits visible", () => {
   );
 });
 
-test("Primary validation includes protocol conformance and dependency audit", () => {
+test("Platform-neutral validation includes protocol conformance", () => {
   assert.match(packageJson.scripts?.validate ?? "", /npm run conformance/);
-  assert.match(packageJson.scripts?.validate ?? "", /npm audit --audit-level=high/);
+  assert.doesNotMatch(packageJson.scripts?.validate ?? "", /npm audit/);
+});
+
+test("CI runs the dependency audit once on Ubuntu", () => {
+  assert.equal(packageJson.scripts?.["audit:dependencies"], "npm audit --audit-level=high --omit=peer");
+  assert.equal(validateWorkflowSource.match(/npm run audit:dependencies/g)?.length, 1);
+  assert.match(validateWorkflowSource, /dependency-audit:[\s\S]*runs-on: ubuntu-latest/);
 });
 
 test("CI release validation includes exact-tree, Domain DAG, and ABCd gates", () => {

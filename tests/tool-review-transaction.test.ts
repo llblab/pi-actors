@@ -19,6 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { writeJsonAtomic } from "../lib/file-state.ts";
 import {
@@ -26,18 +27,15 @@ import {
   recordRecipeLaunch,
 } from "../lib/recipes-usage.ts";
 
-const activationCrashWorker = new URL(
-  "./fixtures/tool-review-activation-crash-worker.ts",
-  import.meta.url,
-).pathname;
-const boundaryWorker = new URL(
-  "./fixtures/tool-review-boundary-worker.ts",
-  import.meta.url,
-).pathname;
-const crashWorker = new URL(
-  "./fixtures/tool-review-crash-worker.ts",
-  import.meta.url,
-).pathname;
+const activationCrashWorker = fileURLToPath(
+  new URL("./fixtures/tool-review-activation-crash-worker.ts", import.meta.url),
+);
+const boundaryWorker = fileURLToPath(
+  new URL("./fixtures/tool-review-boundary-worker.ts", import.meta.url),
+);
+const crashWorker = fileURLToPath(
+  new URL("./fixtures/tool-review-crash-worker.ts", import.meta.url),
+);
 
 function startBoundaryWorker(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {

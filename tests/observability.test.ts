@@ -283,6 +283,130 @@ test("Run observability detects terminal transitions", () => {
   assert.equal(previous.get("review"), "done");
 });
 
+test("Successful reviews deliver one bounded correlated semantic result", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-semantic-review-"));
+  const stateDir = join(root, "review");
+  try {
+    await writeRun(root, "review", "done", [], 0, "session-a");
+    const meta = JSON.parse(await readFile(join(stateDir, "run.json"), "utf8"));
+    await writeFile(
+      join(stateDir, "run.json"),
+      JSON.stringify({
+        ...meta,
+        launch_correlation: {
+          correlation_id: "task-42",
+          tool_call_id: "call-17",
+        },
+        transport_context: {
+          transport: "telegram",
+          chat_id: 123456,
+          thread_id: 77,
+        },
+        mailbox: { emits: ["review.completed", "run.done"] },
+      }),
+    );
+    await writeFile(
+      join(stateDir, "stdout.log"),
+      `ACTOR_REVIEW_RESULT\nStatus: complete\nFinding: ${"x".repeat(6_000)}\n`,
+    );
+    const previous = new Map([[stateDir, "running" as const]]);
+    const [transition] = detectRunTransitions(
+      previous,
+      summarizeRuns(root, "session-a"),
+    );
+    assert.equal(transition.semanticResult?.type, "review.completed");
+    assert.equal(transition.semanticResult?.synthesized, true);
+    assert.equal(transition.semanticResult?.correlationId, "task-42");
+    assert.match(transition.semanticResult?.body ?? "", /^Status: complete/);
+    assert.equal((transition.semanticResult?.body?.length ?? 0) <= 4_000, true);
+
+    const delivered: Array<{ content: string; details: unknown }> = [];
+    deliverRunTransitionNotifications([transition], {
+      notify: () => {},
+      sendFollowUp: (message) => delivered.push(message),
+    });
+    assert.equal(delivered.length, 1);
+    assert.match(delivered[0].content, /Semantic result: review\.completed/);
+    assert.match(delivered[0].content, /Correlation: task-42/);
+    assert.match(delivered[0].content, /Result:\nStatus: complete/);
+    assert.equal(
+      (delivered[0].details as { semanticResult?: { correlationId?: string } })
+        .semanticResult?.correlationId,
+      "task-42",
+    );
+    assert.deepEqual(
+      (delivered[0].details as {
+        semanticResult?: { metadata?: { transport_context?: unknown } };
+      }).semanticResult?.metadata?.transport_context,
+      {
+        transport: "telegram",
+        chat_id: 123456,
+        thread_id: 77,
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Explicit advertised review completion wins over synthesis", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-semantic-explicit-"));
+  const stateDir = join(root, "review");
+  try {
+    await writeRun(root, "review", "done", [], 0, "session-a");
+    const meta = JSON.parse(await readFile(join(stateDir, "run.json"), "utf8"));
+    await writeFile(
+      join(stateDir, "run.json"),
+      JSON.stringify({ ...meta, mailbox: { emits: ["review.completed"] } }),
+    );
+    await writeFile(
+      join(stateDir, "outbox.jsonl"),
+      `${JSON.stringify({
+        body: { verdict: "ship" },
+        correlation_id: "review-9",
+        delivery: "followup",
+        event: "review.completed",
+        summary: "Review accepted.",
+      })}\n`,
+    );
+    const [transition] = detectRunTransitions(
+      new Map([[stateDir, "running" as const]]),
+      summarizeRuns(root, "session-a"),
+    );
+    assert.deepEqual(transition.semanticResult, {
+      body: "{\"verdict\":\"ship\"}",
+      correlationId: "review-9",
+      metadata: { run: "review", status: "done" },
+      summary: "Review accepted.",
+      synthesized: false,
+      type: "review.completed",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Failed runs deliver the bounded terminal error as semantic output", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-semantic-failed-"));
+  const stateDir = join(root, "review");
+  try {
+    await writeRun(root, "review", "failed", [], 0, "session-a");
+    await writeFile(
+      join(stateDir, "result.json"),
+      JSON.stringify({ code: 65, error: "accepted review output missing" }),
+    );
+    const [transition] = detectRunTransitions(
+      new Map([[stateDir, "running" as const]]),
+      summarizeRuns(root, "session-a"),
+    );
+    assert.equal(transition.semanticResult?.type, "run.failed");
+    assert.equal(transition.semanticResult?.body, "accepted review output missing");
+    assert.match(formatRunTransitionMessage(transition), /Result:\naccepted review output missing/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Silent background runs emit no terminal transition", () => {
   const previous = new Map([["draft-sleep", "running" as const]]);
   const transitions = detectRunTransitions(previous, {
@@ -553,6 +677,53 @@ test("Terminal reconciliation deduplicates a reentrant watcher race", async () =
   }
 });
 
+test("Terminal delivery failures stay visible and retry without a handled marker", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-failure-"));
+  const stateDir = join(root, "review");
+  try {
+    await writeRun(root, "review", "done", [], 0, "session-a");
+    const state = createRunUiObservationState();
+    const notifications: string[] = [];
+    let attempts = 0;
+    const reconcile = () =>
+      reconcileRunTerminalNotifications({
+        ownerId: "session-a",
+        sink: {
+          notify: (message) => notifications.push(message),
+          sendFollowUp: () => {
+            attempts += 1;
+            if (attempts === 1) throw new Error("transport unavailable");
+          },
+        },
+        state,
+        stateRoot: root,
+      });
+
+    reconcile();
+    assert.equal(attempts, 1);
+    assert.match(notifications.at(-1) ?? "", /terminal delivery failed/);
+    const failure = JSON.parse(
+      await readFile(join(stateDir, "terminal-delivery-failure.json"), "utf8"),
+    );
+    assert.equal(failure.attempts, 1);
+    assert.equal(failure.status, "done");
+    assert.equal(failure.error, "transport unavailable");
+    await assert.rejects(
+      readFile(join(stateDir, "terminal-handled.json"), "utf8"),
+      /ENOENT/,
+    );
+
+    reconcile();
+    assert.equal(attempts, 2);
+    const handled = JSON.parse(
+      await readFile(join(stateDir, "terminal-handled.json"), "utf8"),
+    );
+    assert.equal(handled.status, "done");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Run-state watcher records degradation and bounded rearm diagnostics", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-watcher-diagnostics-"));
   const stateDir = join(root, "review");
@@ -691,19 +862,21 @@ test("Run observability retries unhandled terminal follow-up after delivery fail
     };
     const observed = new Map();
     const first = detectRunTransitions(observed, summary);
-    assert.throws(
-      () =>
-        deliverRunTransitionNotifications(first, {
-          notify: () => {},
-          sendFollowUp: () => {
-            throw new Error("delivery failed");
-          },
-        }),
-      /delivery failed/,
-    );
+    const notifications: string[] = [];
+    deliverRunTransitionNotifications(first, {
+      notify: (message) => notifications.push(message),
+      sendFollowUp: () => {
+        throw new Error("delivery failed");
+      },
+    });
+    assert.match(notifications.at(-1) ?? "", /terminal delivery failed/);
     await assert.rejects(
       readFile(join(stateDir, "terminal-handled.json"), "utf8"),
       /ENOENT/,
+    );
+    assert.equal(
+      JSON.parse(await readFile(join(stateDir, "terminal-delivery-failure.json"), "utf8")).attempts,
+      1,
     );
     const retry = detectRunTransitions(observed, summary);
     assert.equal(retry.length, 1);

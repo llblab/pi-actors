@@ -16,7 +16,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 
 function usage() {
   console.error(`Usage:
@@ -101,7 +101,7 @@ function collectRunSummary(rootValue) {
   const root = resolve(
     rootValue.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"),
   );
-  const files = walkFiles(root, 2).filter((file) => file.endsWith("/run.json"));
+  const files = walkFiles(root, 2).filter((file) => basename(file) === "run.json");
   const rows = [];
   for (const file of files) {
     const run = readJson(file);
@@ -118,7 +118,7 @@ function collectRunSummary(rootValue) {
     const progress = readJson(join(runDir, "progress.json"));
     const result = readJson(join(runDir, "result.json"));
     rows.push({
-      run: run.run_id ?? run.run ?? relative(root, file).split("/")[0],
+      run: run.run_id ?? run.run ?? relative(root, file).split(sep)[0],
       status: getRunStatus(run, progress, result),
       recipe: run.recipe ?? run.recipe_file ?? "",
       updated:

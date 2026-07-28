@@ -54,7 +54,7 @@ test("Mailbox loop handles one run inbox message", async () => {
           type: "task.assign",
         }),
       ),
-      /Run control FIFO not found/,
+      /Run control (?:FIFO not found|endpoint is not ready)/,
     );
 
     const seen: unknown[] = [];

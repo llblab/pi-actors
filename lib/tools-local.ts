@@ -143,6 +143,14 @@ export function createRuntimeToolDefinition(
     paramSchema.run_id = Schema.stringSchema(
       "Optional run id override for this async template recipe invocation.",
     );
+  if (isAsyncRecipe) {
+    paramSchema.correlation_id = Schema.stringSchema(
+      "Optional workflow correlation id preserved in terminal follow-up delivery.",
+    );
+    paramSchema.transport_context = Schema.looseObjectSchema(
+      "Optional originating transport route preserved for detached terminal follow-up.",
+    );
+  }
   return {
     name: cfg.name,
     label: cfg.name,
@@ -155,7 +163,7 @@ export function createRuntimeToolDefinition(
         )
       : Prompts.formatRegisteredToolPromptSnippet(cfg.template),
     async execute(
-      _toolCallId: string,
+      toolCallId: string,
       params: unknown,
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
@@ -172,7 +180,7 @@ export function createRuntimeToolDefinition(
         }
         if (isAsyncRecipe) {
           const input = params as Record<string, unknown>;
-          const { run_id, ...values } = input;
+          const { correlation_id, run_id, transport_context, ...values } = input;
           const base = cfg.recipe ? cfg.recipe : { file: String(cfg.template) };
           const runId =
             typeof run_id === "string" && run_id.trim()
@@ -182,6 +190,17 @@ export function createRuntimeToolDefinition(
             {
               ...base,
               launch_source: "tool",
+              launch_correlation: {
+                ...(typeof correlation_id === "string"
+                  ? { correlation_id } : {}),
+                tool_call_id: toolCallId,
+              },
+              ...(transport_context &&
+              typeof transport_context === "object" &&
+              !Array.isArray(transport_context)
+                ? {
+                    transport_context: transport_context as Record<string, unknown>,
+                  } : {}),
               ownerId: getRunOwnerId(ctx),
               run_id: runId,
               tool: cfg.name,

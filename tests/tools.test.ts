@@ -20,6 +20,8 @@ import { createRegisterToolDefinition } from "../lib/tools-register.ts";
 import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 import { resolveActiveRuntimeTool } from "../lib/tools.ts";
 
+const ACTIVE_RUN_TEMPLATE = `${process.execPath} -e "setTimeout(() => {}, 5000)"`;
+
 async function waitForFile(path: string): Promise<void> {
   for (let i = 0; i < 40; i++) {
     try {
@@ -329,7 +331,7 @@ test("Inspect tool reads recipe registry summaries", async () => {
     assert.match(result.content[0].text, /invalid=1/);
     assert.match(result.content[0].text, /current_policy=1/);
     assert.match(result.content[0].text, /next=.*inspect_target=recipes_view=doctor/);
-    assert.match(result.content[0].text, /next=.*spawn_file=.*recipes\/drafts\/draft\.json/);
+    assert.match(result.content[0].text, /next=.*spawn_file=.*recipes[\\/]drafts[\\/]draft\.json/);
     assert.equal((result.details.active as unknown[]).length, 5);
     assert.equal((result.details.drafts as unknown[]).length, 1);
     const policy = (result.details.active as Array<Record<string, unknown>>).find(
@@ -566,8 +568,17 @@ test("Actor message tool reports queued branch delivery when run control endpoin
       `inspect target=run:${meta.run} view=status`,
     ]);
   } finally {
-    cancelRun(meta.state_dir);
-    await rm(meta.state_dir, { recursive: true, force: true });
+    try {
+      cancelRun(meta.state_dir);
+    } catch {
+      // Best-effort cleanup.
+    }
+    await rm(meta.state_dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 25,
+    });
   }
 });
 
@@ -576,7 +587,7 @@ test("Actor message tool rejects cross-run branch senders before inbox writes", 
   const meta = startRun(
     {
       run_id: `branch-safety-${process.pid}-${Date.now()}`,
-      template: "true",
+      template: ACTIVE_RUN_TEMPLATE,
     },
     process.cwd(),
   );
@@ -602,18 +613,20 @@ test("Actor message tool rejects cross-run branch senders before inbox writes", 
       /ENOENT/,
     );
   } finally {
+    cancelRun(meta.state_dir);
     await rm(meta.state_dir, { recursive: true, force: true });
   }
 });
 
 test("Actor message and inspect tools support room timelines and rosters", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-room-"));
+  const runId = `room-run-${process.pid}-${Date.now()}`;
   let stateDir = "";
   try {
     const meta = startRun(
       {
-        run_id: "room-run",
-        template: "true",
+        run_id: runId,
+        template: ACTIVE_RUN_TEMPLATE,
       },
       process.cwd(),
     );
@@ -771,7 +784,19 @@ test("Actor message and inspect tools support room timelines and rosters", async
     assert.match(messagesResult.content[0].text, /type=actor.leave/);
     assert.equal(messagesResult.details.messages[0].to, `room:${run}`);
   } finally {
-    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    if (stateDir) {
+      try {
+        cancelRun(stateDir);
+      } catch {
+        // Best-effort cleanup.
+      }
+      await rm(stateDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 25,
+      });
+    }
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -869,7 +894,7 @@ test("Actor message tool rejects cross-run room senders before timeline writes",
   const meta = startRun(
     {
       run_id: `room-safety-${process.pid}-${Date.now()}`,
-      template: "true",
+      template: ACTIVE_RUN_TEMPLATE,
     },
     process.cwd(),
   );
@@ -894,6 +919,7 @@ test("Actor message tool rejects cross-run room senders before timeline writes",
       /ENOENT/,
     );
   } finally {
+    cancelRun(meta.state_dir);
     await rm(meta.state_dir, { recursive: true, force: true });
   }
 });
@@ -903,7 +929,7 @@ test("Actor message tool rejects room multicast outside the run", async () => {
   const meta = startRun(
     {
       run_id: `room-multicast-invalid-${process.pid}-${Date.now()}`,
-      template: "true",
+      template: ACTIVE_RUN_TEMPLATE,
     },
     process.cwd(),
   );
@@ -925,6 +951,7 @@ test("Actor message tool rejects room multicast outside the run", async () => {
       /room multicast recipient must be branch:/,
     );
   } finally {
+    cancelRun(meta.state_dir);
     await rm(meta.state_dir, { recursive: true, force: true });
   }
 });
@@ -934,7 +961,7 @@ test("Actor message tool rejects non-branch room multicast recipients before tim
   const meta = startRun(
     {
       run_id: `room-multicast-nonbranch-${process.pid}-${Date.now()}`,
-      template: "true",
+      template: ACTIVE_RUN_TEMPLATE,
     },
     process.cwd(),
   );
@@ -960,6 +987,7 @@ test("Actor message tool rejects non-branch room multicast recipients before tim
       /ENOENT/,
     );
   } finally {
+    cancelRun(meta.state_dir);
     await rm(meta.state_dir, { recursive: true, force: true });
   }
 });
@@ -970,7 +998,7 @@ test("Actor message tool rejects same-run branch room posts across session owner
     {
       run_id: `room-nested-session-${process.pid}-${Date.now()}`,
       ownerId: "parent-session",
-      template: "true",
+      template: ACTIVE_RUN_TEMPLATE,
     },
     process.cwd(),
   );
@@ -991,7 +1019,17 @@ test("Actor message tool rejects same-run branch room posts across session owner
       /reason=session_mismatch owner_session=parent-session current_session=nested-subagent-session/,
     );
   } finally {
-    await rm(meta.state_dir, { recursive: true, force: true });
+    try {
+      cancelRun(meta.state_dir);
+    } catch {
+      // Best-effort cleanup.
+    }
+    await rm(meta.state_dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 25,
+    });
   }
 });
 
@@ -1004,7 +1042,7 @@ test("Actor message tool rejects branch messages across session ownership", asyn
       {
         run_id: runId,
         ownerId: "other-session",
-        template: "true",
+        template: ACTIVE_RUN_TEMPLATE,
       },
       process.cwd(),
     );
@@ -1024,7 +1062,19 @@ test("Actor message tool rejects branch messages across session ownership", asyn
       /reason=session_mismatch owner_session=other-session current_session=current-session/,
     );
   } finally {
-    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    if (stateDir) {
+      try {
+        cancelRun(stateDir);
+      } catch {
+        // Best-effort cleanup.
+      }
+      await rm(stateDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 25,
+      });
+    }
   }
 });
 
@@ -1033,7 +1083,7 @@ test("Actor message tool rejects anonymous or cross-run room messages", async ()
   const meta = startRun(
     {
       run_id: `room-anon-${process.pid}-${Date.now()}`,
-      template: "true",
+      template: ACTIVE_RUN_TEMPLATE,
     },
     process.cwd(),
   );
@@ -1063,6 +1113,7 @@ test("Actor message tool rejects anonymous or cross-run room messages", async ()
       new RegExp(`requires from=run:${meta.run}`),
     );
   } finally {
+    cancelRun(meta.state_dir);
     await rm(meta.state_dir, { recursive: true, force: true });
   }
 });
@@ -1363,12 +1414,13 @@ test("Actor message tool preserves target tool failure shape", async () => {
 test("Actor message tool routes coordinator messages through run outboxes", async () => {
   const definition = createActorMessageToolDefinition();
   const root = await mkdtemp(join(tmpdir(), "pi-actors-message-"));
+  const runId = `sender-${process.pid}-${Date.now()}`;
   let stateDir = "";
   try {
     const meta = startRun(
       {
-        run_id: "sender",
-        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+        run_id: runId,
+        template: ACTIVE_RUN_TEMPLATE,
       },
       process.cwd(),
     );
@@ -1377,7 +1429,7 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
       "call-coordinator-message",
       {
         body: { ready: true },
-        from: "run:sender",
+        from: `run:${runId}`,
         metadata: { checkpoint: "ready" },
         summary: "Ready",
         to: "coordinator",
@@ -1396,7 +1448,7 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
     assert.equal(result.details.result.reason, "coordinator_outbox_persisted");
     const event = JSON.parse(await readFile(join(stateDir, "outbox.jsonl"), "utf8"));
     assert.equal(event.to, "coordinator");
-    assert.equal(event.from, "run:sender");
+    assert.equal(event.from, `run:${runId}`);
     assert.equal(event.type, "checkpoint.ready");
     assert.equal(event.delivery, "notify");
     assert.deepEqual(event.body, { ready: true });
@@ -1405,7 +1457,7 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
     const followupResult = await definition.execute(
       "call-coordinator-message-response-required",
       {
-        from: "run:sender",
+        from: `run:${runId}`,
         metadata: { requires_response: true, reason: "approval" },
         summary: "Approval needed",
         to: "coordinator",
@@ -1422,9 +1474,15 @@ test("Actor message tool routes coordinator messages through run outboxes", asyn
       .map((line) => JSON.parse(line));
     assert.equal(outbox[1].delivery, "followup");
     assert.deepEqual(outbox[1].metadata, { requires_response: true, reason: "approval" });
-    await waitForFile(join(stateDir, "result.json"));
   } finally {
-    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    if (stateDir) {
+      try {
+        cancelRun(stateDir);
+      } catch {
+        // Best-effort cleanup.
+      }
+      await rm(stateDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+    }
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1438,7 +1496,7 @@ test("Actor message tool routes session messages through owned run outboxes", as
       {
         run_id: runId,
         ownerId: "session-target",
-        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+        template: ACTIVE_RUN_TEMPLATE,
       },
       process.cwd(),
     );
@@ -1469,9 +1527,15 @@ test("Actor message tool routes session messages through owned run outboxes", as
     assert.equal(event.type, "checkpoint.needs_scope");
     assert.equal(event.delivery, "followup");
     assert.deepEqual(event.body, { needs: "scope" });
-    await waitForFile(join(stateDir, "result.json"));
   } finally {
-    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    if (stateDir) {
+      try {
+        cancelRun(stateDir);
+      } catch {
+        // Best-effort cleanup.
+      }
+      await rm(stateDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+    }
   }
 });
 
@@ -1484,7 +1548,7 @@ test("Actor message tool rejects session messages from differently owned runs", 
       {
         run_id: runId,
         ownerId: "session-owner",
-        template: `${process.execPath} -e "setTimeout(() => {}, 50)"`,
+        template: ACTIVE_RUN_TEMPLATE,
       },
       process.cwd(),
     );
@@ -1503,9 +1567,15 @@ test("Actor message tool rejects session messages from differently owned runs", 
       ),
       /reason=session_mismatch owner_session=other-session current_session=session-owner hint=inspect_session:other-session/,
     );
-    await waitForFile(join(stateDir, "result.json"));
   } finally {
-    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    if (stateDir) {
+      try {
+        cancelRun(stateDir);
+      } catch {
+        // Best-effort cleanup.
+      }
+      await rm(stateDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+    }
   }
 });
 
@@ -1665,7 +1735,7 @@ test("Spawn tool enriches shadowed recipe launch failures", async () => {
         assert(error instanceof Error);
         assert.match(error.message, /reason=shadowed_invalid/);
         assert.match(error.message, /active_path=.*actor-worker\.json/);
-        assert.match(error.message, /blocked_fallback=.*recipes\/actor-worker\.json/);
+        assert.match(error.message, /blocked_fallback=.*recipes[\\/]actor-worker\.json/);
         assert.match(error.message, /hint=inspect_recipes_doctor/);
         assert.equal((error as unknown as Record<string, unknown>).reason, "shadowed_invalid");
         return true;
@@ -1836,6 +1906,12 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
           report: { path: "{state_dir}/report.md", kind: "markdown", media_type: "text/markdown", required: true },
         },
         as: `run:${runId}`,
+        correlation_id: "workflow-42",
+        transport_context: {
+          transport: "telegram",
+          chat_id: 123456,
+          thread_id: 77,
+        },
         template: `${process.execPath} -e "console.log('spawned')"`,
       },
       undefined,
@@ -1843,10 +1919,22 @@ test("Spawn tool starts run actors with artifact metadata", async () => {
       { cwd: process.cwd() },
     );
     stateDir = String(result.details.state_dir);
+    const runMeta = JSON.parse(
+      await readFile(join(stateDir, "run.json"), "utf8"),
+    );
+    assert.deepEqual(runMeta.launch_correlation, {
+      correlation_id: "workflow-42",
+      tool_call_id: "call-spawn",
+    });
+    assert.deepEqual(runMeta.transport_context, {
+      transport: "telegram",
+      chat_id: 123456,
+      thread_id: 77,
+    });
     assert.match(result.content[0].text, /run=spawned-/);
     assert.match(result.content[0].text, /next=inspect_target=run:spawned-/);
     assert.match(result.content[0].text, /message_to=run:spawned-/);
-    assert.match(result.content[0].text, /draft_recipe=.*recipes\/drafts\/spawned-/);
+    assert.match(result.content[0].text, /draft_recipe=.*recipes[\\/]drafts[\\/]spawned-/);
     assert.deepEqual(result.details.next_actions, [
       `inspect target=run:${runId} view=status`,
       `inspect target=run:${runId} view=messages`,
@@ -2209,7 +2297,7 @@ test("Inspect branch mailbox reports corrupted inbox record counts", async () =>
     const meta = startRun(
       {
         run_id: runId,
-        template: "true",
+        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
@@ -2238,7 +2326,19 @@ test("Inspect branch mailbox reports corrupted inbox record counts", async () =>
     assert.equal(result.details.corrupted, 1);
     assert.equal(result.details.messages.length, 1);
   } finally {
-    if (stateDir) await rm(stateDir, { recursive: true, force: true });
+    if (stateDir) {
+      try {
+        cancelRun(stateDir);
+      } catch {
+        // Best-effort cleanup.
+      }
+      await rm(stateDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 25,
+      });
+    }
   }
 });
 
@@ -2257,7 +2357,7 @@ test("Actor tools start, inspect, and stop run actors", async () => {
       "call-1",
       {
         as: `run:${runId}`,
-        template: `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
+        template: ACTIVE_RUN_TEMPLATE,
       },
       undefined,
       undefined,
@@ -2338,7 +2438,7 @@ test("Actor message tool only treats control.kill as runtime termination", async
     const meta = startRun(
       {
         run_id: runId,
-        template: `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
+        template: ACTIVE_RUN_TEMPLATE,
       },
       process.cwd(),
     );
@@ -2351,7 +2451,7 @@ test("Actor message tool only treats control.kill as runtime termination", async
         undefined,
         undefined,
       ),
-      /Run control FIFO not found/,
+      /Run control (?:FIFO not found|endpoint is not ready)/,
     );
     await assert.rejects(
       () => message.execute(
@@ -2361,7 +2461,7 @@ test("Actor message tool only treats control.kill as runtime termination", async
         undefined,
         undefined,
       ),
-      /Run control FIFO not found/,
+      /Run control (?:FIFO not found|endpoint is not ready)/,
     );
     const killed = await message.execute(
       "call-actor-kill",
@@ -2423,7 +2523,15 @@ test("Runtime async tools report inherited current policy", async () => {
   try {
     const result = await definition.execute(
       "call-runtime-current-policy",
-      { run_id: runId },
+      {
+        correlation_id: "runtime-workflow",
+        run_id: runId,
+        transport_context: {
+          transport: "telegram",
+          chat_id: 555,
+          thread_id: 9,
+        },
+      },
       undefined,
       undefined,
       {
@@ -2433,6 +2541,18 @@ test("Runtime async tools report inherited current policy", async () => {
       },
     );
     stateDir = String(result.details.state_dir);
+    const runMeta = JSON.parse(
+      await readFile(join(stateDir, "run.json"), "utf8"),
+    );
+    assert.deepEqual(runMeta.launch_correlation, {
+      correlation_id: "runtime-workflow",
+      tool_call_id: "call-runtime-current-policy",
+    });
+    assert.deepEqual(runMeta.transport_context, {
+      transport: "telegram",
+      chat_id: 555,
+      thread_id: 9,
+    });
     assert.equal(stateDir, join(getRunStateRoot(), runId));
     assert.equal(result.details.model_policy.model.source, "inherited");
     assert.equal(result.details.model_policy.thinking.source, "inherited");

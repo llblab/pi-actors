@@ -8,10 +8,13 @@ import { spawn, spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const script = new URL("../scripts/locker.mjs", import.meta.url).pathname;
-const roomSwarmScript = new URL("../scripts/coordinator.mjs", import.meta.url).pathname;
+const script = fileURLToPath(new URL("../scripts/locker.mjs", import.meta.url));
+const roomSwarmScript = fileURLToPath(
+  new URL("../scripts/coordinator.mjs", import.meta.url),
+);
 
 async function waitForPath(path: string): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -23,6 +26,17 @@ async function waitForPath(path: string): Promise<void> {
     }
   }
   throw new Error(`Timed out waiting for ${path}`);
+}
+
+async function readJsonEventually(path: string): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      return JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  throw new Error(`Timed out reading complete JSON from ${path}`);
 }
 
 async function sendLine(path: string, value: unknown): Promise<void> {
@@ -56,7 +70,9 @@ async function waitForOutboxEvent(stateDir: string, type: string): Promise<void>
   throw new Error(`Timed out waiting for outbox event ${type}`);
 }
 
-test("room-swarm optional locker records artifact coordination", async () => {
+test("room-swarm optional locker records artifact coordination", {
+  skip: process.platform === "win32" ? "requires a POSIX fake pi executable" : false,
+}, async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-room-swarm-locker-"));
   try {
     const fakeBin = join(root, "bin");
@@ -90,7 +106,7 @@ echo 'locker smoke'
       join(runState, "run.json"),
       JSON.stringify({ ownerId: "owner-session", run: runId }),
     );
-    const result = spawnSync(roomSwarmScript, [
+    const result = spawnSync(process.execPath, [roomSwarmScript,
       `--run-id=${runId}`,
       "--mission=locker smoke",
       "--model=fake-model",
@@ -114,8 +130,8 @@ echo 'locker smoke'
     assert.match(await readFile(artifact, "utf8"), /Fake synthesis/);
     assert.match(await readFile(argLog, "utf8"), /--session-id owner-session/);
     const lockerDir = join(root, "tmp", "pi-actors", "runs", runId, "locker");
-    const queue = JSON.parse(await readFile(join(lockerDir, "queue.json"), "utf8"));
-    const locks = JSON.parse(await readFile(join(lockerDir, "locks.json"), "utf8"));
+    const queue = await readJsonEventually(join(lockerDir, "queue.json"));
+    const locks = await readJsonEventually(join(lockerDir, "locks.json"));
     const journal = await readFile(join(lockerDir, "journal.jsonl"), "utf8");
     assert.deepEqual(queue.items, []);
     assert.deepEqual(locks, {});
@@ -151,7 +167,7 @@ test("coordinator fails when all participant rounds fail and synthesis is empty"
     await writeFile(fakePi, "#!/usr/bin/env bash\nexit 1\n", "utf8");
     await chmod(fakePi, 0o755);
     const artifact = join(root, "artifact.md");
-    const result = spawnSync(roomSwarmScript, [
+    const result = spawnSync(process.execPath, [roomSwarmScript,
       "--run-id=empty-synthesis-test",
       "--mission=empty synthesis boundary",
       "--model=fake-model",
@@ -181,7 +197,9 @@ test("coordinator fails when all participant rounds fail and synthesis is empty"
   }
 });
 
-test("coordinator kills timed-out subagent processes", async () => {
+test("coordinator kills timed-out subagent processes", {
+  skip: process.platform === "win32" ? "requires a POSIX fake pi executable" : false,
+}, async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-ttl-"));
   try {
     const fakeBin = join(root, "bin");
@@ -203,7 +221,7 @@ fi
     );
     await chmod(fakePi, 0o755);
     const artifact = join(root, "artifact.md");
-    const result = spawnSync(roomSwarmScript, [
+    const result = spawnSync(process.execPath, [roomSwarmScript,
       "--run-id=ttl-kill-test",
       "--mission=ttl kill boundary",
       "--model=fake-model",
@@ -241,7 +259,7 @@ fi
 test("coordinator rejects unknown modes before running default consensus", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-mode-"));
   try {
-    const result = spawnSync(roomSwarmScript, [
+    const result = spawnSync(process.execPath, [roomSwarmScript,
       "--run-id=unknown-mode-test",
       "--mode=typo",
       "--mission=mode boundary",
@@ -264,7 +282,9 @@ test("coordinator rejects unknown modes before running default consensus", async
   }
 });
 
-test("coordinator processes and handles direct inbox messages", async () => {
+test("coordinator processes and handles direct inbox messages", {
+  skip: process.platform === "win32" ? "requires a POSIX fake pi executable" : false,
+}, async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-direct-inbox-"));
   try {
     const fakeBin = join(root, "bin");
@@ -305,7 +325,7 @@ test("coordinator processes and handles direct inbox messages", async () => {
     await writeFile(inboxFile, `${JSON.stringify(testMessage)}\n${JSON.stringify(legacyMessage)}\n`, "utf8");
 
     const artifact = join(root, "artifact.md");
-    const result = spawnSync(roomSwarmScript, [
+    const result = spawnSync(process.execPath, [roomSwarmScript,
       `--run-id=${runId}`,
       "--mode=pipeline",
       "--mission=solve task",
@@ -350,9 +370,11 @@ test("coordinator processes and handles direct inbox messages", async () => {
   }
 });
 
-test("coordinator-locker queues, assigns, locks, and stops", async () => {
+test("coordinator-locker queues, assigns, locks, and stops", {
+  skip: process.platform === "win32" ? "exercises the documented Unix FIFO endpoint" : false,
+}, async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-coordinator-locker-"));
-  const child = spawn(script, ["serve", "--state-dir", stateDir, "--lease-ms", "1000"], {
+  const child = spawn(process.execPath, [script, "serve", "--state-dir", stateDir, "--lease-ms", "1000"], {
     env: { ...process.env, run_id: "coord-test" },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -390,7 +412,7 @@ test("coordinator-locker queues, assigns, locks, and stops", async () => {
     assert.equal(messages.some((message) => message.type === "lock.renewed"), true);
     assert.equal(messages.some((message) => message.type === "lock.denied"), true);
     assert.equal(messages.at(-1)?.type, "lock.stopped");
-    const snapshot = spawn(script, ["snapshot", "--state-dir", stateDir, "--lines", "5"], {
+    const snapshot = spawn(process.execPath, [script, "snapshot", "--state-dir", stateDir, "--lines", "5"], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     const snapshotStdout = await new Promise<string>((resolve) => {

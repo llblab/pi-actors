@@ -19,6 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { writeJsonAtomic } from "../lib/file-state.ts";
 import {
@@ -36,10 +37,9 @@ import type {
   ToolReviewApprovedTarget,
 } from "../lib/tool-review-transaction.ts";
 
-const crashWorker = new URL(
-  "./fixtures/tool-review-lineage-crash-worker.ts",
-  import.meta.url,
-).pathname;
+const crashWorker = fileURLToPath(
+  new URL("./fixtures/tool-review-lineage-crash-worker.ts", import.meta.url),
+);
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;

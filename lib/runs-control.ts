@@ -42,6 +42,7 @@ export function getRunProcessSignalPlan(
 export interface RunProcessSignalDeps {
   killProcess?: typeof process.kill;
   runtimePlatform?: NodeJS.Platform;
+  spawnProcess?: typeof spawnSync;
   verifyIdentity?: (
     pid: number,
     expected: RunProcessIdentity,
@@ -70,8 +71,26 @@ export function signalOwnedRunProcess(
   }
   const plan = getRunProcessSignalPlan(pid, signal, runtimePlatform);
   if (plan.command && plan.args) {
-    const result = spawnSync(plan.command, plan.args, { encoding: "utf8" });
+    const spawnProcess = deps.spawnProcess ?? spawnSync;
+    let result = spawnProcess(plan.command, plan.args, { encoding: "utf8" });
+    if (
+      runtimePlatform === "win32" &&
+      result.status !== 0 &&
+      !plan.args.includes("/F")
+    ) {
+      result = spawnProcess(plan.command, [...plan.args, "/F"], {
+        encoding: "utf8",
+      });
+    }
     if (result.status !== 0) {
+      if (expectedIdentity) {
+        const finalProof = (deps.verifyIdentity ?? verifyRunProcessIdentity)(
+          pid,
+          expectedIdentity,
+          runtimePlatform,
+        );
+        if (finalProof.status === "dead_pid") return plan;
+      }
       throw new Error(
         result.stderr?.trim() ||
           result.stdout?.trim() ||

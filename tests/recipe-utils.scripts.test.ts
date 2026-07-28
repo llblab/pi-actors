@@ -5,14 +5,27 @@
 
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
+import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const execFileAsync = promisify(execFile);
-const script = new URL("../scripts/recipe-utils.mjs", import.meta.url).pathname;
+const script = fileURLToPath(new URL("../scripts/recipe-utils.mjs", import.meta.url));
+
+function runScript(
+  args: string[],
+  options: SpawnSyncOptionsWithStringEncoding,
+) {
+  return spawnSync(process.execPath, [script, ...args], options);
+}
+
+function runScriptAsync(args: string[]) {
+  return execFileAsync(process.execPath, [script, ...args]);
+}
 
 async function writeRun(
   root: string,
@@ -58,7 +71,7 @@ test("recipe-utils package-summary emits bounded package metadata", async () => 
         devDependencies: { typescript: "latest" },
       }),
     );
-    const { stdout } = await execFileAsync(script, ["package-summary", file]);
+    const { stdout } = await runScriptAsync(["package-summary", file]);
     const summary = JSON.parse(stdout);
     assert.equal(summary.name, "demo");
     assert.equal(summary.version, "1.2.3");
@@ -80,7 +93,7 @@ test("recipe-utils skill-summary emits packaged skill metadata evidence", async 
       skillFile,
       `---\nname: demo\ndescription: Demo skill guide\nmetadata:\n  version: 1.2.3\n---\n\n# Demo\n\n## Use\n`,
     );
-    const { stdout } = await execFileAsync(script, ["skill-summary", skillFile, packageFile]);
+    const { stdout } = await runScriptAsync(["skill-summary", skillFile, packageFile]);
     const summary = JSON.parse(stdout);
     assert.equal(summary.name, "demo");
     assert.equal(summary.version, "1.2.3");
@@ -96,18 +109,18 @@ test("recipe-utils artifact-write writes stdin with explicit mode", async () => 
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     const file = join(root, "artifacts", "report.md");
-    const created = spawnSync(script, ["artifact-write", file, "create"], {
+    const created = runScript(["artifact-write", file, "create"], {
       encoding: "utf8",
       input: "# Report\n",
     });
     assert.equal(created.status, 0, created.stderr);
     assert.equal(await readFile(file, "utf8"), "# Report\n");
-    const duplicate = spawnSync(script, ["artifact-write", file, "create"], {
+    const duplicate = runScript(["artifact-write", file, "create"], {
       encoding: "utf8",
       input: "again",
     });
     assert.notEqual(duplicate.status, 0);
-    const appended = spawnSync(script, ["artifact-write", file, "append"], {
+    const appended = runScript(["artifact-write", file, "append"], {
       encoding: "utf8",
       input: "More\n",
     });
@@ -119,8 +132,7 @@ test("recipe-utils artifact-write writes stdin with explicit mode", async () => 
 });
 
 test("recipe-utils actor-message emits deterministic envelopes", () => {
-  const result = spawnSync(
-    script,
+  const result = runScript(
     ["actor-message", "artifact.written", "coordinator", "run:writer", "Done", '{"path":"report.md"}', "task-1", "msg-0"],
     { encoding: "utf8", input: '{"written":true}' },
   );
@@ -137,8 +149,7 @@ test("recipe-utils actor-message emits deterministic envelopes", () => {
 });
 
 test("recipe-utils actor-message rejects invalid envelopes", () => {
-  const result = spawnSync(
-    script,
+  const result = runScript(
     ["actor-message", "bad type", "coordinator", "run:writer"],
     { encoding: "utf8", input: "body" },
   );
@@ -153,7 +164,7 @@ test("recipe-utils run-ops-snapshot combines runs, messages, and recommendations
     await writeRun(root, "failed", "failed");
     const eventFile = join(root, "active", "outbox.jsonl");
     await writeFile(eventFile, `${JSON.stringify({ event: "demo", summary: "Demo" })}\n`);
-    const { stdout } = await execFileAsync(script, ["run-ops-snapshot", root, "active", "5", "1"]);
+    const { stdout } = await runScriptAsync(["run-ops-snapshot", root, "active", "5", "1"]);
     const snapshot = JSON.parse(stdout);
     assert.equal(snapshot.runs.length, 2);
     assert.equal(snapshot.inspectedRun, "active");
@@ -185,7 +196,7 @@ test("recipe-utils run-summary reads live progress status over static run status
   try {
     await writeRun(root, "finished", "done");
     await writeRun(root, "active", "running");
-    const { stdout } = await execFileAsync(script, ["run-summary", root]);
+    const { stdout } = await runScriptAsync(["run-summary", root]);
     const rows = JSON.parse(stdout);
     assert.equal(
       rows.find((row: { run: string }) => row.run === "finished")?.status,

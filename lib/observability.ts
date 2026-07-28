@@ -5,9 +5,13 @@
  */
 
 import {
+  closeSync,
   existsSync,
+  fstatSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   watch,
   type FSWatcher,
 } from "node:fs";
@@ -41,6 +45,7 @@ export interface RunObservation {
   failures?: number;
   ownerId?: string;
   artifacts?: Record<string, string>;
+  launchCorrelation?: Record<string, string>;
   launchSource?: AsyncRuns.AsyncRunLaunchSource;
   modelPolicy?: Record<string, unknown>;
   notificationPolicy?: "normal" | "silent";
@@ -48,6 +53,7 @@ export interface RunObservation {
   terminalHandled?: boolean;
   retireWhen?: string;
   run: string;
+  semanticResult?: RunTerminalSemanticResult;
   tool?: string;
   stateDir?: string;
   status: RunObservedStatus;
@@ -162,6 +168,19 @@ export function deliverRunTransitionNotifications(
           transition.to,
         );
       }
+    } catch (error) {
+      if (transition.stateDir) {
+        AsyncRuns.recordRunTerminalDeliveryFailure(
+          transition.stateDir,
+          transition.to,
+          error,
+        );
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      sink.notify(
+        `Actor terminal delivery failed for run:${transition.run}: ${message.replaceAll(/\s+/g, " ").slice(0, 240)}`,
+        "error",
+      );
     } finally {
       inFlight.delete(key);
     }
@@ -420,12 +439,23 @@ export interface RunTransition {
   run: string;
   stateDir?: string;
   artifacts?: Record<string, string>;
+  launchCorrelation?: Record<string, string>;
   launchSource?: AsyncRuns.AsyncRunLaunchSource;
   modelPolicy?: Record<string, unknown>;
   recipeFile?: string;
   terminalHandled?: boolean;
   to: RunObservedStatus;
   tool?: string;
+  semanticResult?: RunTerminalSemanticResult;
+}
+
+export interface RunTerminalSemanticResult {
+  body?: string;
+  correlationId?: string;
+  metadata: Record<string, unknown>;
+  summary: string;
+  synthesized: boolean;
+  type: string;
 }
 
 export interface RunOutboxEvent {
@@ -504,15 +534,145 @@ function scanRunStateDirs(
   return result;
 }
 
+const TERMINAL_RESULT_BYTES = 8 * 1024;
+const TERMINAL_RESULT_CHARS = 4_000;
+
+function readBoundedStart(path: string): string {
+  if (!existsSync(path)) return "";
+  const fd = openSync(path, "r");
+  try {
+    const size = Math.min(fstatSync(fd).size, TERMINAL_RESULT_BYTES);
+    const buffer = Buffer.alloc(size);
+    const bytes = readSync(fd, buffer, 0, size, 0);
+    const text = buffer.subarray(0, bytes).toString("utf8").trim();
+    return text.length > TERMINAL_RESULT_CHARS
+      ? `${text.slice(0, TERMINAL_RESULT_CHARS - 1)}…`
+      : text;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function semanticBodyFromStdout(stateDir: string): string | undefined {
+  const text = readBoundedStart(join(stateDir, "stdout.log"));
+  if (!text) return undefined;
+  const withoutMarker = text.replace(/^ACTOR_REVIEW_RESULT\s*(?:\r?\n)?/, "").trim();
+  return withoutMarker || undefined;
+}
+
+function terminalSemanticResult(
+  status: Record<string, unknown>,
+  stateDir: string,
+  observedStatus: RunObservedStatus,
+): RunTerminalSemanticResult {
+  const correlation = status.launch_correlation &&
+    typeof status.launch_correlation === "object" &&
+    !Array.isArray(status.launch_correlation)
+    ? status.launch_correlation as Record<string, unknown>
+    : {};
+  const correlationId =
+    typeof correlation.correlation_id === "string"
+      ? correlation.correlation_id
+      : typeof correlation.tool_call_id === "string"
+        ? correlation.tool_call_id
+        : undefined;
+  const mailbox = status.mailbox &&
+    typeof status.mailbox === "object" &&
+    !Array.isArray(status.mailbox)
+    ? status.mailbox as Record<string, unknown>
+    : {};
+  const emits = Array.isArray(mailbox.emits)
+    ? mailbox.emits.filter((item): item is string => typeof item === "string")
+    : [];
+  const outbox = readJsonlFileResilient<Record<string, unknown>>(
+    join(stateDir, "outbox.jsonl"),
+  ).records;
+  const explicit = outbox.findLast((record) => {
+    const type = String(record.type ?? record.event ?? "");
+    return emits.includes(type) && !["command.done", "run.done", "run.failed"].includes(type);
+  });
+  if (explicit) {
+    const type = String(explicit.type ?? explicit.event);
+    return {
+      ...(explicit.body === undefined
+        ? {} : { body: formatSemanticBody(explicit.body) }),
+      ...(typeof explicit.correlation_id === "string"
+        ? { correlationId: explicit.correlation_id } : correlationId ? { correlationId } : {}),
+      metadata: {
+        ...(explicit.metadata &&
+        typeof explicit.metadata === "object" &&
+        !Array.isArray(explicit.metadata)
+          ? explicit.metadata as Record<string, unknown> : {}),
+        ...(status.transport_context &&
+        typeof status.transport_context === "object" &&
+        !Array.isArray(status.transport_context)
+          ? {
+              transport_context: status.transport_context as Record<string, unknown>,
+            } : {}),
+        run: String(status.run ?? ""),
+        status: observedStatus,
+      },
+      summary: String(explicit.summary ?? type),
+      synthesized: false,
+      type,
+    };
+  }
+  const reviewCompleted = observedStatus === "done" && emits.includes("review.completed");
+  const result = status.result &&
+    typeof status.result === "object" &&
+    !Array.isArray(status.result)
+    ? status.result as Record<string, unknown>
+    : {};
+  const type = reviewCompleted
+    ? "review.completed"
+    : observedStatus === "done" ? "run.done" : "run.failed";
+  const stdoutBody = observedStatus === "done"
+    ? semanticBodyFromStdout(stateDir) : undefined;
+  return {
+    ...(stdoutBody
+      ? { body: stdoutBody }
+      : typeof result.error === "string" ? { body: result.error } : {}),
+    ...(correlationId ? { correlationId } : {}),
+    metadata: {
+      ...(status.transport_context &&
+      typeof status.transport_context === "object" &&
+      !Array.isArray(status.transport_context)
+        ? {
+            transport_context: status.transport_context as Record<string, unknown>,
+          } : {}),
+      run: String(status.run ?? ""), status: observedStatus,
+    },
+    summary: reviewCompleted ? "Review completed." :
+      observedStatus === "done" ? "Run completed." : `Run ${observedStatus}.`,
+    synthesized: true,
+    type,
+  };
+}
+
+function formatSemanticBody(body: unknown): string {
+  const rendered = typeof body === "string" ? body : JSON.stringify(body);
+  const text = typeof rendered === "string" ? rendered : String(body);
+  const compact = text.trim();
+  return compact.length > TERMINAL_RESULT_CHARS
+    ? `${compact.slice(0, TERMINAL_RESULT_CHARS - 1)}…`
+    : compact;
+}
+
 function observeRun(stateDir: string): RunObservation | undefined {
   try {
     const status = AsyncRuns.getRunStatus(stateDir);
     const progress = getProgress(status);
     const run = typeof status.run === "string" ? status.run : undefined;
     if (!run) return undefined;
+    const observedStatus = status.status as RunObservedStatus;
     return {
       activeSubagents: toNumber(progress.activeSubagents),
       completed: toNumber(progress.completed),
+      ...(status.launch_correlation &&
+      typeof status.launch_correlation === "object" &&
+      !Array.isArray(status.launch_correlation)
+        ? { launchCorrelation: status.launch_correlation as Record<string, string> }
+        : {}),
       failures: Array.isArray(progress.failures)
         ? progress.failures.length
         : undefined,
@@ -542,9 +702,12 @@ function observeRun(stateDir: string): RunObservation | undefined {
       ...(typeof status.retire_when === "string"
         ? { retireWhen: status.retire_when }
         : {}),
+      ...(TERMINAL.has(observedStatus)
+        ? { semanticResult: terminalSemanticResult(status, stateDir, observedStatus) }
+        : {}),
       run,
       stateDir,
-      status: status.status as RunObservedStatus,
+      status: observedStatus,
       ...(typeof status.tool === "string" ? { tool: status.tool } : {}),
       updatedAt: getUpdatedAt(status),
     };
@@ -933,9 +1096,11 @@ export function detectRunTransitions(
         run: run.run,
         ...(run.stateDir ? { stateDir: run.stateDir } : {}),
         ...(run.artifacts ? { artifacts: run.artifacts } : {}),
+        ...(run.launchCorrelation ? { launchCorrelation: run.launchCorrelation } : {}),
         ...(run.launchSource ? { launchSource: run.launchSource } : {}),
         ...(run.modelPolicy ? { modelPolicy: run.modelPolicy } : {}),
         ...(run.recipeFile ? { recipeFile: run.recipeFile } : {}),
+        ...(run.semanticResult ? { semanticResult: run.semanticResult } : {}),
         ...(run.terminalHandled ? { terminalHandled: true } : {}),
         to: run.status,
         ...(run.tool ? { tool: run.tool } : {}),
@@ -1195,7 +1360,8 @@ function isUserRecipeFile(file: string | undefined): boolean {
   if (!file) return false;
   const recipeRoot = resolve(Paths.getRecipeRoot());
   const path = resolve(file);
-  return path === recipeRoot || path.startsWith(`${recipeRoot}/`);
+  const relation = relative(recipeRoot, path);
+  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
 }
 
 export function shouldSuggestRecipePersistence(
@@ -1245,16 +1411,26 @@ function formatTransitionNextActions(transition: RunTransition): string {
   return `\nNext actions: ${actions.join(" | ")}`;
 }
 
+function formatTransitionSemanticResult(transition: RunTransition): string {
+  const result = transition.semanticResult;
+  if (!result) return "";
+  const correlation = result.correlationId
+    ? `\nCorrelation: ${result.correlationId}` : "";
+  const body = result.body ? `\nResult:\n${result.body}` : "";
+  return `\nSemantic result: ${result.type} — ${result.summary}${correlation}${body}`;
+}
+
 export function formatRunTransitionMessage(transition: RunTransition): string {
   const artifacts = formatNamedArtifacts(transition.artifacts);
   const runFiles = formatRunFileList(getRunArtifacts(transition));
   const persistenceSuggestion = formatRecipePersistenceSuggestion(transition);
   const policy = formatTransitionPolicy(transition);
   const nextActions = formatTransitionNextActions(transition);
+  const semanticResult = formatTransitionSemanticResult(transition);
   if (transition.to === "done")
-    return `Run ${transition.run} completed successfully.${policy}${artifacts}${runFiles}${nextActions}${persistenceSuggestion}`;
+    return `Run ${transition.run} completed successfully.${semanticResult}${policy}${artifacts}${runFiles}${nextActions}${persistenceSuggestion}`;
   if (transition.to === "failed")
-    return `Run ${transition.run} failed.${policy}${artifacts}${runFiles}${nextActions}`;
+    return `Run ${transition.run} failed.${semanticResult}${policy}${artifacts}${runFiles}${nextActions}`;
   if (transition.to === "cancelled")
     return `Run ${transition.run} was cancelled.${policy}${nextActions}`;
   if (transition.to === "killed")

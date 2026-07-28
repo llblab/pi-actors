@@ -13,6 +13,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   symlink,
@@ -20,7 +21,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import type {
@@ -38,7 +40,9 @@ import { createRecipeToolReloadWatcher } from "../lib/runtime.ts";
 
 const CYCLE_ID = "12345678-1234-1234-1234-123456789abc";
 const execFileAsync = promisify(execFile);
-const worker = new URL("./fixtures/draft-consolidation-worker.ts", import.meta.url).pathname;
+const worker = fileURLToPath(
+  new URL("./fixtures/draft-consolidation-worker.ts", import.meta.url),
+);
 
 function hash(bytes: Buffer | string): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -66,7 +70,9 @@ function plan(
 }
 
 async function fixture() {
-  const agentRoot = await mkdtemp(join(tmpdir(), "pi-actors-consolidation-"));
+  const agentRoot = await realpath(
+    await mkdtemp(join(tmpdir(), "pi-actors-consolidation-")),
+  );
   const recipeRoot = join(agentRoot, "recipes");
   const draftRoot = join(recipeRoot, "drafts");
   const cycleDir = join(agentRoot, "tmp", CYCLE_ID);
@@ -89,7 +95,7 @@ async function workerConfig(
 ): Promise<string> {
   const path = join(
     paths.agentRoot,
-    `worker-${control.crashAt ?? control.startedPath?.split("/").at(-1) ?? "apply"}.json`,
+    `worker-${control.crashAt ?? (control.startedPath ? basename(control.startedPath) : "apply")}.json`,
   );
   await writeFile(path, JSON.stringify({
     ...control,
@@ -859,6 +865,103 @@ for (const recoveryState of ["rollback", "roll-forward", "terminal"] as const) {
     },
   );
 }
+
+test(
+  "Windows consolidation journals retain bigint NTFS root identity",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const paths = await fixture();
+    try {
+      const item = await source(paths.draftRoot, "draft", { template: "draft" });
+      applyDraftConsolidationPlan(plan([{
+        action: "discard",
+        draft: item.path,
+        rationale: "Discard",
+        sha256: item.sha256,
+      }]), {
+        ...paths,
+        inventory: [item],
+      });
+      const journal = JSON.parse(
+        await readFile(join(paths.cycleDir, "journal.json"), "utf8"),
+      ) as DraftConsolidationJournal;
+      for (const root of Object.values(journal.roots)) {
+        assert.equal(typeof root.dev, "string");
+        assert.equal(typeof root.ino, "string");
+        assert.doesNotThrow(() => BigInt(root.dev));
+        assert.doesNotThrow(() => BigInt(root.ino));
+        assert.equal(root.realpath.length > 0, true);
+      }
+    } finally {
+      await rm(paths.agentRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "Windows recovery rejects draft-root junction substitution",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const paths = await fixture();
+    const displaced = `${paths.draftRoot}-real`;
+    try {
+      const item = await source(paths.draftRoot, "draft", { template: "draft" });
+      const transactionPlan = plan([{
+        action: "discard",
+        draft: item.path,
+        rationale: "Discard",
+        sha256: item.sha256,
+      }]);
+      const configPath = await workerConfig(paths, transactionPlan, [item], {
+        crashAt: "source_quarantined",
+      });
+      await assert.rejects(runWorker(configPath));
+      await rename(paths.draftRoot, displaced);
+      await symlink(displaced, paths.draftRoot, "junction");
+
+      assert.throws(
+        () => recoverDraftConsolidationCycle(paths),
+        /Symlink is not allowed|root identity changed/i,
+      );
+    } finally {
+      await rm(paths.draftRoot, { recursive: true, force: true });
+      await rm(displaced, { recursive: true, force: true });
+      await rm(paths.agentRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "Windows recovery rejects trusted-root junction replacement",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const paths = await fixture();
+    const displacedRoot = `${paths.agentRoot}-real`;
+    try {
+      const item = await source(paths.draftRoot, "draft", { template: "draft" });
+      const transactionPlan = plan([{
+        action: "discard",
+        draft: item.path,
+        rationale: "Discard",
+        sha256: item.sha256,
+      }]);
+      const configPath = await workerConfig(paths, transactionPlan, [item], {
+        crashAt: "sources_quarantined",
+      });
+      await assert.rejects(runWorker(configPath));
+      await rename(paths.agentRoot, displacedRoot);
+      await symlink(displacedRoot, paths.agentRoot, "junction");
+
+      assert.throws(
+        () => recoverDraftConsolidationCycle(paths),
+        /Consolidation root identity changed|Symlink is not allowed/i,
+      );
+    } finally {
+      await rm(paths.agentRoot, { recursive: true, force: true });
+      await rm(displacedRoot, { recursive: true, force: true });
+    }
+  },
+);
 
 test("Recovery rolls forward quarantined sources and recreates evidence", async () => {
   const paths = await fixture();

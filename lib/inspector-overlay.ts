@@ -69,7 +69,8 @@ export class ActorInspectorOverlay {
   private detailScroll = 0;
   private detailTurn?: Inspector.ActorInspectorTurnItem;
   private feedback?: ActorInspectorOverlayActionResult;
-  private killConfirmation?: { run: string; runInstanceId: string };
+  private killConfirmation?: { run: string; runInstanceId: string; status: string };
+  private killDialogChoice: "cancel" | "kill" = "cancel";
   private readonly readKeys = new Set<string>();
   private focus: "runs" | "tabs" | "recipe" | "list" | "detail" | "select" = "tabs";
   private filterControlIndex = 0;
@@ -105,11 +106,21 @@ export class ActorInspectorOverlay {
       return;
     }
     if (this.killConfirmation) {
-      if (matchesKey(data, "escape") || data.toLowerCase() === "n") {
-        this.feedback = { ok: false, message: "Kill cancelled." };
-        this.killConfirmation = undefined;
-      } else if (matchesKey(data, "return") || data.toLowerCase() === "y") {
+      const key = data.toLowerCase();
+      if (matchesKey(data, "escape") || key === "n") {
+        this.cancelKill();
+      } else if (
+        matchesKey(data, "left") ||
+        matchesKey(data, "right") ||
+        matchesKey(data, "tab")
+      ) {
+        this.killDialogChoice =
+          this.killDialogChoice === "cancel" ? "kill" : "cancel";
+      } else if (key === "y") {
         this.confirmKill();
+      } else if (matchesKey(data, "return")) {
+        if (this.killDialogChoice === "kill") this.confirmKill();
+        else this.cancelKill();
       }
       this.tui.requestRender();
       return;
@@ -215,6 +226,8 @@ export class ActorInspectorOverlay {
     this.ensureSelectedRun(this.runs());
     const safeWidth = Math.max(24, width);
     const innerWidth = Math.max(1, safeWidth - 2);
+    if (this.killConfirmation)
+      return this.renderKillDialog(safeWidth, innerWidth);
     const lines: string[] = [];
     lines.push(this.border("╭", " Actor Inspector ", "╮", innerWidth));
     lines.push(this.row(this.renderRunControl(), innerWidth));
@@ -261,9 +274,7 @@ export class ActorInspectorOverlay {
       );
     } else lines.push(this.border("├", "", "┤", innerWidth));
     this.contentStripeIndices = [];
-    const baseContent = this.killConfirmation
-      ? this.renderKillConfirmation()
-      : this.detailOpen
+    const baseContent = this.detailOpen
         ? this.renderDetail(innerWidth)
         : this.selectedRun
           ? this.renderTimeline(innerWidth)
@@ -392,12 +403,21 @@ export class ActorInspectorOverlay {
     this.killConfirmation = {
       run: run.run,
       runInstanceId: run.runInstanceId,
+      status: run.status,
     };
+    this.killDialogChoice = "cancel";
+  }
+
+  private cancelKill(): void {
+    this.feedback = { ok: false, message: "Kill cancelled." };
+    this.killConfirmation = undefined;
+    this.killDialogChoice = "cancel";
   }
 
   private confirmKill(): void {
     const confirmation = this.killConfirmation;
     this.killConfirmation = undefined;
+    this.killDialogChoice = "cancel";
     if (!confirmation || !this.killRun) {
       this.feedback = { ok: false, message: "Kill unavailable in this Inspector." };
       return;
@@ -416,14 +436,40 @@ export class ActorInspectorOverlay {
     }
   }
 
-  private renderKillConfirmation(): string[] {
-    return [
-      this.theme.fg(
-        "error",
-        ` Kill running actor run:${this.killConfirmation?.run}?`,
-      ),
-      this.theme.fg("muted", " This sends canonical control.kill and cannot be undone."),
+  private renderKillDialog(_width: number, innerWidth: number): string[] {
+    const confirmation = this.killConfirmation!;
+    const totalRows = this.contentViewportRows() + 7;
+    const cancel = this.killDialogChoice === "cancel"
+      ? this.theme.bg("selectedBg", this.theme.fg("accent", "  Cancel  "))
+      : this.theme.fg("muted", "  Cancel  ");
+    const kill = this.killDialogChoice === "kill"
+      ? this.theme.bg("selectedBg", this.theme.fg("error", "  Kill actor  "))
+      : this.theme.fg("error", "  Kill actor  ");
+    const body = [
+      "",
+      this.theme.fg("error", "Kill this running actor?"),
+      "",
+      `${this.theme.fg("muted", "Run:")} ${this.theme.fg("accent", `run:${confirmation.run}`)}`,
+      `${this.theme.fg("muted", "Current status:")} ${this.theme.fg("warning", confirmation.status)}`,
+      "",
+      this.theme.fg("text", "This sends canonical control.kill."),
+      this.theme.fg("error", "The action is destructive and cannot be undone."),
+      "",
+      `${cancel}    ${kill}`,
+      "",
     ];
+    const lines = [this.border("╭", " Confirm Actor Kill ", "╮", innerWidth)];
+    const availableRows = Math.max(1, totalRows - 2);
+    const topPadding = Math.max(0, Math.floor((availableRows - body.length) / 2));
+    const dialogRows = [
+      ...Array.from({ length: topPadding }, () => ""),
+      ...body,
+    ].slice(0, availableRows);
+    while (dialogRows.length < availableRows) dialogRows.push("");
+    for (const line of dialogRows)
+      lines.push(this.row(this.center(line, innerWidth), innerWidth));
+    lines.push(this.border("╰", " ←→/tab choose · enter activate · esc cancel ", "╯", innerWidth));
+    return lines;
   }
 
   private listItemCount(): number {
@@ -1291,6 +1337,12 @@ export class ActorInspectorOverlay {
       index += character.length;
     }
     return plain.slice(index);
+  }
+
+  private center(content: string, width: number): string {
+    const contentWidth = visibleWidth(content);
+    const leading = Math.max(0, Math.floor((width - contentWidth) / 2));
+    return `${" ".repeat(leading)}${content}`;
   }
 
   private fit(content: string, width: number): string {

@@ -93,6 +93,7 @@ export function prepareStateDirForStart(
     "result.json",
     "stderr.log",
     "stdout.log",
+    "terminal-delivery-failure.json",
     "terminal-handled.json",
   ]) {
     rmSync(join(stateDir, file), { force: true });

@@ -4,6 +4,8 @@
  */
 
 import assert from "node:assert/strict";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import test from "node:test";
 
 import {
@@ -21,6 +23,10 @@ test("Command templates split shell-like words without invoking a shell", () => 
     splitCommandTemplate("tool 'literal words' --name hello\\ world"),
     ["tool", "literal words", "--name", "hello world"],
   );
+  assert.deepEqual(
+    splitCommandTemplate("C:\\Program\\ Files\\node.exe --version"),
+    ["C:\\Program Files\\node.exe", "--version"],
+  );
 });
 
 test("Command templates accept shorthand string configs", () => {
@@ -30,7 +36,7 @@ test("Command templates accept shorthand string configs", () => {
     "/work",
   );
   assert.deepEqual(invocation, {
-    command: "/work/tts",
+    command: resolve("/work", "tts"),
     args: ["--text", "hello world", "--lang", "ru"],
   });
 });
@@ -278,7 +284,7 @@ test("Command templates resolve defaults and inline placeholder defaults", () =>
     "/work",
   );
   assert.deepEqual(invocation, {
-    command: "/work/tts",
+    command: resolve("/work", "tts"),
     args: ["--text", "hello world", "--lang", "ru", "--rate", "+30%"],
   });
 });
@@ -437,12 +443,12 @@ test("Command template timeout escalates when SIGTERM is ignored", async () => {
 });
 
 test("Command template retry succeeds on second attempt", async () => {
-  const counterFile = `/tmp/ct-retry-${process.pid}.txt`;
+  const counterFile = join(tmpdir(), `ct-retry-${process.pid}.txt`);
   const { writeFileSync, readFileSync, unlinkSync } = await import("node:fs");
   writeFileSync(counterFile, "0");
   const script = `
     const fs = require("fs");
-    const p = "${counterFile}";
+    const p = ${JSON.stringify(counterFile)};
     let n = parseInt(fs.readFileSync(p, "utf8"));
     n++;
     fs.writeFileSync(p, String(n));
@@ -458,14 +464,14 @@ test("Command template retry succeeds on second attempt", async () => {
 });
 
 test("Command template retries keep high-volume captures bounded", async () => {
-  const counterFile = `/tmp/ct-capture-retry-${process.pid}.txt`;
+  const counterFile = join(tmpdir(), `ct-capture-retry-${process.pid}.txt`);
   const { writeFileSync, unlinkSync } = await import("node:fs");
   const { dirname } = await import("node:path");
   const { readFile, rm } = await import("node:fs/promises");
   writeFileSync(counterFile, "0");
   const script = `
     const fs = require("fs");
-    const p = "${counterFile}";
+    const p = ${JSON.stringify(counterFile)};
     const n = Number(fs.readFileSync(p, "utf8")) + 1;
     fs.writeFileSync(p, String(n));
     process.stdout.write(String(n).repeat(4096));

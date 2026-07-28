@@ -49,26 +49,26 @@ test("Automatic recipe review has one explicit environment opt-out", () => {
 });
 
 test("Config path points to the tool registry under the agent dir", () => {
-  assert.equal(getConfigPath("/agent"), "/agent/tool-registry.json");
+  assert.equal(getConfigPath("/agent"), join("/agent", "tool-registry.json"));
 });
 
 test("Extension tmp dir lives under the pi agent tmp tree", () => {
-  assert.equal(getExtensionTmpDir("/agent"), "/agent/tmp/pi-actors");
+  assert.equal(getExtensionTmpDir("/agent"), join("/agent", "tmp", "pi-actors"));
 });
 
 test("Run state root lives under the extension tmp dir", () => {
-  assert.equal(getRunStateRoot("/agent"), "/agent/tmp/pi-actors/runs");
+  assert.equal(getRunStateRoot("/agent"), join("/agent", "tmp", "pi-actors", "runs"));
 });
 
 test("Draft sleep state and immutable batches remain extension-local", () => {
   const batchId = "12345678-1234-1234-1234-123456789abc";
   assert.equal(
     getDraftSleepStatePath("/agent"),
-    "/agent/tmp/pi-actors/draft-sleep/state.json",
+    join("/agent", "tmp", "pi-actors", "draft-sleep", "state.json"),
   );
   assert.equal(
     getDraftSleepBatchDir(batchId, "/agent"),
-    `/agent/tmp/pi-actors/draft-sleep/batches/${batchId}`,
+    join("/agent", "tmp", "pi-actors", "draft-sleep", "batches", batchId),
   );
   assert.throws(
     () => getDraftSleepBatchDir("../escape", "/agent"),
@@ -80,11 +80,11 @@ test("Tool review state and immutable portfolios remain extension-local", () => 
   const batchId = "12345678-1234-1234-1234-123456789abc";
   assert.equal(
     getToolReviewStatePath("/agent"),
-    "/agent/tmp/pi-actors/tool-review/state.json",
+    join("/agent", "tmp", "pi-actors", "tool-review", "state.json"),
   );
   assert.equal(
     getToolReviewBatchDir(batchId, "/agent"),
-    `/agent/tmp/pi-actors/tool-review/batches/${batchId}`,
+    join("/agent", "tmp", "pi-actors", "tool-review", "batches", batchId),
   );
   assert.throws(
     () => getToolReviewBatchDir("../escape", "/agent"),
@@ -93,11 +93,11 @@ test("Tool review state and immutable portfolios remain extension-local", () => 
 });
 
 test("Recipe root lives under the agent dir", () => {
-  assert.equal(getRecipeRoot("/agent"), "/agent/recipes");
+  assert.equal(getRecipeRoot("/agent"), join("/agent", "recipes"));
 });
 
 test("Recipe draft root lives below the recipe root", () => {
-  assert.equal(getRecipeDraftRoot("/agent"), "/agent/recipes/drafts");
+  assert.equal(getRecipeDraftRoot("/agent"), join("/agent", "recipes", "drafts"));
 });
 
 test("Packaged recipe root resolves to the repository recipes directory", () => {

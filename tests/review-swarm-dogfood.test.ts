@@ -108,7 +108,9 @@ function fakePiScript(): string {
   ].join("\n");
 }
 
-test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", async () => {
+test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
+  skip: process.platform === "win32" ? "requires a POSIX fake pi executable" : false,
+}, async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-review-dogfood-"));
   const binDir = join(root, "bin");
   const stateDir = join(root, "run-state");

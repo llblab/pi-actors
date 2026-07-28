@@ -61,6 +61,9 @@ export function buildRunStatus(
       ? "running"
       : (getInterruptedRunStatus(stateDir) ?? "exited");
   const terminalHandled = readJson(join(stateDir, "terminal-handled.json"));
+  const terminalDeliveryFailure = readJson(
+    join(stateDir, "terminal-delivery-failure.json"),
+  );
   return {
     ...meta,
     eventsFile: join(stateDir, "events.jsonl"),
@@ -70,6 +73,8 @@ export function buildRunStatus(
     process_identity_status: processIdentity.status,
     progress: readJson(join(stateDir, "progress.json")) || null,
     result: result || null,
+    ...(terminalDeliveryFailure
+      ? { terminal_delivery_failure: terminalDeliveryFailure } : {}),
     ...(terminalHandled ? { terminal_handled: terminalHandled } : {}),
     state_dir: String(meta.state_dir ?? stateDir),
     stderrLog: join(stateDir, "stderr.log"),

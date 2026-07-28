@@ -688,15 +688,47 @@ test("actor inspector Kill requires confirmation and reports success", async () 
     assert.match(overlay.render(90).join("\n"), /k kill/);
     overlay.handleInput("k");
     let output = overlay.render(90).join("\n");
-    assert.match(output, /Kill running actor run:demo\?/);
+    assert.match(output, /Confirm Actor Kill/);
+    assert.match(output, /Kill this running actor\?/);
+    assert.match(output, /Run:\s+run:demo/);
+    assert.match(output, /Current status:\s+running/);
     assert.match(output, /canonical control\.kill/);
-    assert.match(output, /y\/enter confirm kill/);
+    assert.match(output, /destructive and cannot be undone/);
+    assert.doesNotMatch(output, /Actor Inspector/);
     assert.deepEqual(killed, []);
+    for (const line of overlay.render(42)) {
+      assert.equal(visibleWidth(line), 42);
+    }
 
+    overlay.handleInput("\u001b[C");
     overlay.handleInput("\r");
     output = overlay.render(90).join("\n");
     assert.deepEqual(killed, ["demo"]);
     assert.match(output, /Killed run:demo\./);
+  } finally {
+    overlay.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("actor inspector Kill dialog defaults keyboard focus to Cancel", async () => {
+  const { root, stateDir } = await fixture();
+  await writeFile(join(stateDir, "progress.json"), JSON.stringify({ phase: "running" }));
+  let calls = 0;
+  const { overlay } = createOverlay(root, theme, 30, () => {
+    calls += 1;
+    return { ok: true, message: "unexpected" };
+  });
+  try {
+    overlay.handleInput("\u001b[A");
+    overlay.handleInput("k");
+    assert.match(overlay.render(90).join("\n"), /Cancel\s+Kill actor/);
+
+    overlay.handleInput("\r");
+
+    assert.equal(calls, 0);
+    assert.match(overlay.render(90).join("\n"), /Kill cancelled\./);
+    assert.match(overlay.render(90).join("\n"), /Actor Inspector/);
   } finally {
     overlay.dispose();
     await rm(root, { recursive: true, force: true });

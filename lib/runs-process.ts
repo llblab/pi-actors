@@ -6,7 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { platform } from "node:os";
-import { resolve } from "node:path";
+import { posix, win32 } from "node:path";
 
 export interface RunProcessIdentity {
   command: string;
@@ -125,8 +125,9 @@ export function captureRunProcessIdentity(
   if (!identity.command.includes(runnerPath) || !identity.command.includes(stateDir)) {
     return undefined;
   }
-  const resolvedCwd = resolve(cwd);
-  const canonicalCwd = existsSync(resolvedCwd)
+  const pathApi = runtimePlatform === "win32" ? win32 : posix;
+  const resolvedCwd = pathApi.resolve(cwd);
+  const canonicalCwd = runtimePlatform === platform() && existsSync(resolvedCwd)
     ? realpathSync.native(resolvedCwd)
     : resolvedCwd;
   const expectedCwd =

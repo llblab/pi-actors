@@ -144,6 +144,9 @@ export function createSpawnToolDefinition<
         as: Schema.stringSchema(
           "Optional actor address for the spawned run, e.g. run:<id>.",
         ),
+        correlation_id: Schema.stringSchema(
+          "Optional workflow correlation id preserved in terminal follow-up delivery.",
+        ),
         file: Schema.stringSchema(
           "Optional template recipe JSON file. Bare names resolve under ~/.pi/agent/recipes.",
         ),
@@ -162,6 +165,9 @@ export function createSpawnToolDefinition<
         values: Schema.looseObjectSchema(
           "Runtime placeholder values passed to the actor.",
         ),
+        transport_context: Schema.looseObjectSchema(
+          "Optional originating transport route preserved for detached terminal follow-up, e.g. Telegram chat_id and thread_id.",
+        ),
         verbose: Schema.booleanSchema(
           "Return full JSON instead of compact text.",
         ),
@@ -169,7 +175,7 @@ export function createSpawnToolDefinition<
       [],
     ),
     async execute(
-      _toolCallId: string,
+      toolCallId: string,
       params: unknown,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
@@ -196,7 +202,14 @@ export function createSpawnToolDefinition<
           {
             file: recipe,
             launch_source: "spawn",
+            launch_correlation: {
+              ...(typeof input.correlation_id === "string"
+                ? { correlation_id: input.correlation_id } : {}),
+              tool_call_id: toolCallId,
+            },
             ownerId: getRunOwnerId(ctx),
+            ...(input.transport_context
+              ? { transport_context: asRecord(input.transport_context) } : {}),
             run_id: runId,
             ...(input.template !== undefined
               ? {

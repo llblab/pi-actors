@@ -556,7 +556,7 @@ export function splitCommandTemplate(input: string): string[] {
   let active = false;
   for (const char of input) {
     if (escaped) {
-      current += char;
+      current += /[\s'"\\]/u.test(char) ? char : `\\${char}`;
       escaped = false;
       active = true;
       continue;

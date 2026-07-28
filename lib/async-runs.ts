@@ -16,7 +16,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
@@ -94,6 +94,29 @@ export interface AsyncRunControlEndpoint {
   type: "fifo" | "mailbox" | "named-pipe";
 }
 
+export function normalizeRunTransportContext(
+  value: unknown,
+): Record<string, string | number | boolean> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const normalized: Record<string, string | number | boolean> = {};
+  for (const [key, item] of Object.entries(
+    value as Record<string, unknown>,
+  ).slice(0, 16)) {
+    const safeKey = key.trim().slice(0, 64);
+    if (!safeKey) continue;
+    if (typeof item === "string") {
+      normalized[safeKey] = item.trim().slice(0, 256);
+      continue;
+    }
+    if (typeof item === "number" && Number.isFinite(item)) {
+      normalized[safeKey] = item;
+      continue;
+    }
+    if (typeof item === "boolean") normalized[safeKey] = item;
+  }
+  return Object.keys(normalized).length ? normalized : undefined;
+}
+
 export interface AsyncRunStartParams {
   async?: boolean;
   control?: AsyncRunControlEndpoint;
@@ -101,6 +124,10 @@ export interface AsyncRunStartParams {
   launch_source?: AsyncRunLaunchSource;
   lifecycleHooks?: {
     onLockContention?(): void;
+  };
+  launch_correlation?: {
+    correlation_id?: string;
+    tool_call_id?: string;
   };
   name?: string;
   ownerId?: string;
@@ -126,6 +153,7 @@ export interface AsyncRunStartParams {
   retry?: number | string;
   failure?: CommandTemplateFailureScope;
   recover?: CommandTemplateValue;
+  transport_context?: Record<string, unknown>;
   repeat?: number;
   values?: Record<string, unknown>;
   policy_values?: Record<string, unknown>;
@@ -140,6 +168,10 @@ export interface AsyncRunMeta {
   createdAt: string;
   cwd: string;
   launch_source?: AsyncRunLaunchSource;
+  launch_correlation?: {
+    correlation_id?: string;
+    tool_call_id?: string;
+  };
   ownerId?: string;
   pid: number;
   recipe?: string;
@@ -159,6 +191,7 @@ export interface AsyncRunMeta {
   process_identity?: RunProcessIdentity;
   recipe_context_records?: RecipesReferences.TemplateRecipeContextRecord[];
   retire_when?: "children_terminal";
+  transport_context?: Record<string, unknown>;
 }
 
 const DEFAULT_STATE_ROOT = Paths.getRunStateRoot();
@@ -242,7 +275,8 @@ function resolveRecipeFile(file: string): string {
 function isMutableUsageRecipeFile(file: string): boolean {
   const userRoot = resolve(DEFAULT_RECIPE_ROOT);
   const resolved = resolve(file);
-  return resolved.startsWith(`${userRoot}/`);
+  const relation = relative(userRoot, resolved);
+  return relation !== "" && !relation.startsWith("..") && !isAbsolute(relation);
 }
 
 function readRecipeFile(file: string): AsyncRunStartParams {
@@ -498,6 +532,9 @@ export function startRun(
       ...(startParams.defaults || {}),
       ...values,
     };
+    const transportContext = normalizeRunTransportContext(
+      startParams.transport_context,
+    );
     const artifacts = resolveArtifactPaths(startParams.artifacts, outputValues);
     const meta: AsyncRunMeta = {
       argv: [process.execPath, ...argv],
@@ -506,6 +543,8 @@ export function startRun(
       ...(startParams.launch_source
         ? { launch_source: startParams.launch_source }
         : {}),
+      ...(startParams.launch_correlation
+        ? { launch_correlation: startParams.launch_correlation } : {}),
       ...(startParams.ownerId ? { ownerId: startParams.ownerId } : {}),
       pid: 0,
       ...(recipe ? { recipe } : {}),
@@ -530,6 +569,8 @@ export function startRun(
       ...(startParams.retire_when === "children_terminal"
         ? { retire_when: "children_terminal" as const }
         : {}),
+      ...(transportContext
+        ? { transport_context: transportContext } : {}),
     };
     writeJsonAtomic(join(stateDir, "run.json"), meta);
     const child = spawn(process.execPath, argv, {
@@ -576,7 +617,7 @@ export type {
 
 function resolveRunStateDir(runOrDir: string): string {
   return resolve(
-    runOrDir.includes("/")
+    /[\\/]/u.test(runOrDir)
       ? runOrDir
       : join(DEFAULT_STATE_ROOT, safeRunId(runOrDir)),
   );
@@ -906,11 +947,11 @@ function finalizeInterruptedReviewEvidence(
             return {
               attempt: index + 1,
               stdout: {
-                path: relative(stateDir, stdoutFile),
+                path: relative(stateDir, stdoutFile).replaceAll("\\", "/"),
                 bytes: existsSync(stdoutFile) ? statSync(stdoutFile).size : 0,
               },
               stderr: {
-                path: relative(stateDir, stderrFile),
+                path: relative(stateDir, stderrFile).replaceAll("\\", "/"),
                 bytes: existsSync(stderrFile) ? statSync(stderrFile).size : 0,
               },
             };
@@ -1027,6 +1068,25 @@ export function markRunTerminalNotificationHandled(
   markTerminalHandled(stateDir, {
     event: "run.notification",
     status,
+  });
+}
+
+export function recordRunTerminalDeliveryFailure(
+  stateDir: string,
+  status: string,
+  error: unknown,
+): void {
+  const path = join(stateDir, "terminal-delivery-failure.json");
+  const previous = readJson(path);
+  const message = (error instanceof Error ? error.message : String(error))
+    .replaceAll(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+  writeJsonAtomic(path, {
+    attempts: Math.max(0, Number(previous?.attempts ?? 0)) + 1,
+    error: message || "unknown delivery failure",
+    status,
+    ts: new Date().toISOString(),
   });
 }
 

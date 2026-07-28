@@ -12,7 +12,7 @@ import packageJson from "../package.json" with { type: "json" };
 
 const packagedSkillPaths = readdirSync("skills", { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
-  .map((entry) => join("skills", entry.name, "SKILL.md"))
+  .map((entry) => join("skills", entry.name, "SKILL.md").replaceAll("\\", "/"))
   .sort();
 
 function listMarkdownFiles(dir: string): string[] {
@@ -25,7 +25,7 @@ function listMarkdownFiles(dir: string): string[] {
 
 function readSkillFrontmatter(path: string): string {
   const content = readFileSync(path, "utf8");
-  return content.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+  return content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
 }
 
 function readSkillMetadataVersion(path: string): string | undefined {
@@ -127,7 +127,7 @@ test("Packaged actors skill stays focused on agent operations, not Inspector UI"
 test("Packaged actors skill top recipes link prioritized recipes and deep inventory", () => {
   const actorSkill = readFileSync("skills/actors/SKILL.md", "utf8");
   const topRecipes = actorSkill.match(
-    /## Top Recipes\n(?<body>[\s\S]*?)\n## Deep References/,
+    /## Top Recipes\r?\n(?<body>[\s\S]*?)\r?\n## Deep References/,
   )?.groups?.body;
   assert.ok(topRecipes, "actors skill should contain a Top Recipes section");
   assert.match(actorSkill, /docs\/actors-deep-reference\.md/);

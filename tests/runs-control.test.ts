@@ -94,3 +94,31 @@ test("Process-group authorization errors fail closed without pid fallback", () =
   );
   assert.deepEqual(targets, [-123]);
 });
+
+test("Windows process-tree signaling tolerates exit after identity validation", () => {
+  let proofs = 0;
+  const result = signalOwnedRunProcess(123, "SIGTERM", identity, {
+    runtimePlatform: "win32",
+    spawnProcess: (() => ({
+      pid: 0,
+      output: [],
+      signal: null,
+      status: 128,
+      stderr: "ERROR: The process \"123\" not found.",
+      stdout: "",
+    })) as unknown as typeof import("node:child_process").spawnSync,
+    verifyIdentity: () => {
+      proofs += 1;
+      return proofs === 1
+        ? { status: "valid", valid: true }
+        : { status: "dead_pid", valid: false };
+    },
+  });
+
+  assert.deepEqual(result, {
+    args: ["/PID", "123", "/T"],
+    command: "taskkill",
+    signalTarget: "processTree",
+  });
+  assert.equal(proofs, 2);
+});

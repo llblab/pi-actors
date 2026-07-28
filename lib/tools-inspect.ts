@@ -7,6 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Limits from "./limits.ts";
@@ -269,7 +270,7 @@ function getPiActorsRuntimeStatus(): Record<string, unknown> {
   } catch {
     git_commit = undefined;
   }
-  const entrypoint = new URL(import.meta.url).pathname;
+  const entrypoint = fileURLToPath(import.meta.url);
   return {
     automatic_recipe_review: Paths.isAutomaticRecipeReviewEnabled(),
     entrypoint,

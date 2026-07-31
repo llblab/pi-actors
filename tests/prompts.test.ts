@@ -71,6 +71,10 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /Terminal follow-up content stays minimal: run, status, one base path, and relative artifact names only/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
     /shell-free: string leaves split into executable \+ argv/,
   );
   assert.match(

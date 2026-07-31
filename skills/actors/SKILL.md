@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use, including parallel actor launches, subagent fanout, and autonomous coordinator workflows. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.42.1
+  version: 0.42.2
 ---
 
 # Actors (pi-actors)
@@ -69,7 +69,7 @@ Rules:
 - Command-template strings execute directly without a shell. Operators such as `&&`, `||`, pipes, redirects, and `cd` remain literal argv unless an explicit trusted shell is the executable. Prefer absolute paths or template arrays for sequencing; put non-trivial shell behavior in a reviewed script.
 - Use `file`/`recipe` for saved recipes; bare names resolve under `~/.pi/agent/recipes`.
 - Use inline `template` for one-off experiments; promote useful repeats to recipes.
-- When a successful actor follow-up suggests persistence, decide whether the pattern deserves durable tool memory; call `register_tool` yourself only when the evidence is strong, and ask before writing the user recipe root.
+- Terminal follow-up context contains only run id, status, one base path, and relative artifact names. Inspect the run for contents; semantic output and correlation remain in non-LLM details and state. Decide whether a successful pattern deserves durable tool memory only after inspection, and ask before writing the user recipe root.
 - Use stable `as` names when you will inspect or message the actor later.
 - Public run state is runtime-owned; do not pass custom `state_dir` paths. This keeps `run:<id>` addressability and retention on one boundary.
 - `async: true` on the recipe is the detached run switch.
@@ -126,7 +126,7 @@ Views:
 - `artifacts`: declared artifact paths/status plus the same bounded owned review-evidence manifest when present.
 - `recipes` target: registry summary for active, shadowed, invalid, disabled, and diagnostic recipe entries.
 
-Let terminal notifications arrive. They queue through Pi's follow-up delivery mode, so a busy coordinator finishes its current work before receiving concurrently completed actor results; the host's `followUpMode` controls whether queued results arrive together or one at a time. File watching accelerates delivery, while a bounded ten-second terminal-only reconciliation pass recovers missed or failed watcher activity without replaying outbox traffic; watcher degradation and rearm remain visible diagnostics. When a deferred actor result gates the next step, wait for that terminal follow-up instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Idle coordinators still start a normal turn through `triggerTurn: true`. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
+Let terminal notifications arrive. They queue through Pi's follow-up delivery mode, so a busy coordinator finishes its current work before receiving concurrently completed actor results; the host's `followUpMode` controls whether queued results arrive together or one at a time. Their LLM context content stays limited to run id, status, one base path, and relative artifact names; inspect state for raw output while correlation and semantic details remain outside LLM context. File watching accelerates delivery, while a bounded ten-second terminal-only reconciliation pass recovers missed or failed watcher activity without replaying outbox traffic; watcher degradation and rearm remain visible diagnostics. When a deferred actor result gates the next step, wait for that terminal follow-up instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Idle coordinators still start a normal turn through `triggerTurn: true`. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
 
 ## Runtime Communication Rules
 

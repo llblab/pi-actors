@@ -517,6 +517,11 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       };
       throw error;
     }
+    writeEvidenceManifest("done");
+    progress("done", {
+      completed: 1,
+      failures: result.details.nonCriticalFailures || [],
+    });
     writeJsonAtomic(resultPath, {
       code: result.details.code,
       command: result.details.command,
@@ -525,26 +530,11 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       truncated: result.details.truncated,
       completedAt: new Date().toISOString(),
     });
-    writeEvidenceManifest("done");
-    progress("done", {
-      completed: 1,
-      failures: result.details.nonCriticalFailures || [],
-    });
     event("run.done", { code: result.details.code });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const details = error && typeof error === "object" ? error.details : undefined;
     appendFileSync(stderrPath, `${message}\n`);
-    writeJsonAtomic(resultPath, {
-      code: typeof details?.code === "number" ? details.code : 1,
-      error: message,
-      killed: Boolean(details?.killed),
-      ...(Array.isArray(details?.branches) ? { branches: details.branches } : {}),
-      ...(details?.failureReason ? { failure_reason: details.failureReason } : {}),
-      ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
-      ...(details?.softQuorum ? { soft_quorum: details.softQuorum } : {}),
-      completedAt: new Date().toISOString(),
-    });
     writeEvidenceManifest("failed");
     progress("failed", {
       completed: 0,
@@ -554,6 +544,16 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
           ? subagentFailures
           : [{ message }],
       ...(details?.failureReason ? { failureReason: details.failureReason } : {}),
+    });
+    writeJsonAtomic(resultPath, {
+      code: typeof details?.code === "number" ? details.code : 1,
+      error: message,
+      killed: Boolean(details?.killed),
+      ...(Array.isArray(details?.branches) ? { branches: details.branches } : {}),
+      ...(details?.failureReason ? { failure_reason: details.failureReason } : {}),
+      ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
+      ...(details?.softQuorum ? { soft_quorum: details.softQuorum } : {}),
+      completedAt: new Date().toISOString(),
     });
     event("run.failed", {
       error: message,

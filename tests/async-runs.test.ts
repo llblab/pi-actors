@@ -118,16 +118,20 @@ async function waitForJsonField(
   field: string,
   expected: unknown,
 ): Promise<Record<string, any>> {
+  let observed: unknown;
   for (let i = 0; i < 200; i++) {
     try {
       const value = JSON.parse(await readFile(path, "utf8"));
-      if (value[field] === expected) return value;
+      observed = value[field];
+      if (observed === expected) return value;
     } catch {
       // File is not ready yet.
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error(`json field did not appear: ${path} -> ${field}=${String(expected)}`);
+  throw new Error(
+    `json field did not appear: ${path} -> ${field}=${String(expected)} (observed ${String(observed)})`,
+  );
 }
 
 async function waitForWakeCount(

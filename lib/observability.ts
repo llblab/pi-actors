@@ -21,7 +21,6 @@ import {
   isAbsolute,
   join,
   relative,
-  resolve,
 } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
@@ -1345,97 +1344,40 @@ export function shouldSendRunTransitionFollowUp(
   return shouldNotifyRunTransition(transition);
 }
 
-function getRunArtifacts(transition: RunTransition): string[] {
-  if (!transition.stateDir) return [];
-  return [
-    join(transition.stateDir, "stdout.log"),
-    join(transition.stateDir, "stderr.log"),
-    join(transition.stateDir, "result.json"),
-    join(transition.stateDir, "events.jsonl"),
-    join(transition.stateDir, "outbox.jsonl"),
-  ];
+const TERMINAL_FOLLOW_UP_ARTIFACT_LIMIT = 4;
+const TERMINAL_FOLLOW_UP_IDENTIFIER_CHARS = 120;
+const TERMINAL_FOLLOW_UP_PATH_CHARS = 320;
+
+function compactTerminalText(value: string, limit: number): string {
+  const compact = value.replaceAll(/\s+/g, " ").trim();
+  return compact.length > limit ? `${compact.slice(0, limit - 1)}…` : compact;
 }
 
-function isUserRecipeFile(file: string | undefined): boolean {
-  if (!file) return false;
-  const recipeRoot = resolve(Paths.getRecipeRoot());
-  const path = resolve(file);
-  const relation = relative(recipeRoot, path);
-  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
+function formatTerminalPath(path: string): string {
+  return `\`${compactTerminalText(path, TERMINAL_FOLLOW_UP_PATH_CHARS)}\``;
 }
 
-export function shouldSuggestRecipePersistence(
-  transition: RunTransition,
-): boolean {
-  if (transition.to !== "done") return false;
-  if (isUserRecipeFile(transition.recipeFile)) return false;
-  return Boolean(transition.recipeFile) || transition.launchSource === "spawn";
-}
-
-function formatRecipePersistenceSuggestion(transition: RunTransition): string {
-  if (!shouldSuggestRecipePersistence(transition)) return "";
-  if (transition.recipeFile) {
-    return `\nAgent note: this actor completed successfully from recipe ${transition.recipeFile}. If this recipe fits this machine's recurring workflow, ask the operator whether to copy or register it as a durable tool recipe under ~/.pi/agent/recipes. Do not auto-save without confirmation.`;
-  }
-  return `\nAgent note: this actor was spawned directly and completed successfully. If this pattern fits this machine's recurring workflow, ask the operator whether to save it as a durable recipe/tool under ~/.pi/agent/recipes with register_tool. Do not auto-save without confirmation.`;
-}
-
-function formatTransitionPolicy(transition: RunTransition): string {
-  if (!transition.modelPolicy) return "";
-  const axis = (key: "model" | "thinking", label: string): string | undefined => {
-    const value = transition.modelPolicy?.[key];
-    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-    const record = value as Record<string, unknown>;
-    const source = typeof record.source === "string" ? record.source : "unused";
-    if (source === "unused") return undefined;
-    const renderedValue =
-      typeof record.value === "string" && record.value.trim()
-        ? ` (${record.value.trim()})`
-        : "";
-    return `${label}: ${source}${renderedValue}`;
-  };
-  const lines = [axis("model", "Model"), axis("thinking", "Thinking")].filter(
-    (line): line is string => Boolean(line),
-  );
-  return lines.length ? `\nPolicy:\n- ${lines.join("\n- ")}` : "";
-}
-
-function formatTransitionNextActions(transition: RunTransition): string {
-  const actions = [
-    `inspect target=run:${transition.run} view=status`,
-    transition.to === "done" && Object.keys(transition.artifacts ?? {}).length > 0
-      ? `inspect target=run:${transition.run} view=artifacts`
-      : `inspect target=run:${transition.run} view=tail`,
-    `inspect target=run:${transition.run} view=messages`,
-  ].filter(Boolean);
-  return `\nNext actions: ${actions.join(" | ")}`;
-}
-
-function formatTransitionSemanticResult(transition: RunTransition): string {
-  const result = transition.semanticResult;
-  if (!result) return "";
-  const correlation = result.correlationId
-    ? `\nCorrelation: ${result.correlationId}` : "";
-  const body = result.body ? `\nResult:\n${result.body}` : "";
-  return `\nSemantic result: ${result.type} — ${result.summary}${correlation}${body}`;
+function formatTerminalResultLocations(transition: RunTransition): string {
+  const artifactPaths = [...new Set(
+    Object.values(transition.artifacts ?? {}).filter(
+      (path): path is string => typeof path === "string" && path.length > 0,
+    ),
+  )];
+  if (artifactPaths.length === 0)
+    return transition.stateDir ? `\nBase: ${formatTerminalPath(transition.stateDir)}` : "";
+  const base = commonDirectory(artifactPaths);
+  const artifactPreview = artifactPaths
+    .slice(0, TERMINAL_FOLLOW_UP_ARTIFACT_LIMIT)
+    .map((path) => formatTerminalPath(base ? relativeName(base, path) : path));
+  const omitted = artifactPaths.length - artifactPreview.length;
+  const artifacts = `${artifactPreview.join(", ")}${omitted > 0 ? ` (+${omitted} more)` : ""}`;
+  return `${base ? `\nBase: ${formatTerminalPath(base)}` : ""}\nArtifacts: ${artifacts}`;
 }
 
 export function formatRunTransitionMessage(transition: RunTransition): string {
-  const artifacts = formatNamedArtifacts(transition.artifacts);
-  const runFiles = formatRunFileList(getRunArtifacts(transition));
-  const persistenceSuggestion = formatRecipePersistenceSuggestion(transition);
-  const policy = formatTransitionPolicy(transition);
-  const nextActions = formatTransitionNextActions(transition);
-  const semanticResult = formatTransitionSemanticResult(transition);
-  if (transition.to === "done")
-    return `Run ${transition.run} completed successfully.${semanticResult}${policy}${artifacts}${runFiles}${nextActions}${persistenceSuggestion}`;
-  if (transition.to === "failed")
-    return `Run ${transition.run} failed.${semanticResult}${policy}${artifacts}${runFiles}${nextActions}`;
-  if (transition.to === "cancelled")
-    return `Run ${transition.run} was cancelled.${policy}${nextActions}`;
-  if (transition.to === "killed")
-    return `Run ${transition.run} was force-killed.${policy}${nextActions}`;
-  if (transition.to === "exited")
-    return `Run ${transition.run} exited before writing a result.${policy}${nextActions}`;
-  return `Run ${transition.run} finished with status ${transition.to}.${policy}${nextActions}`;
+  const run = compactTerminalText(
+    transition.run,
+    TERMINAL_FOLLOW_UP_IDENTIFIER_CHARS,
+  );
+  return `Run: \`${run}\`\nStatus: \`${transition.to}\`${formatTerminalResultLocations(transition)}`;
 }

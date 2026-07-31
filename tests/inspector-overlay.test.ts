@@ -246,10 +246,11 @@ test("actor inspector overlay navigates run, nested filters, tabs, and detail", 
     );
     assert.ok(subagentIndex >= 0);
     assert.match(evidenceRows[subagentIndex + 1] ?? "", /User/);
-    assert.doesNotMatch(output, /Provenance|sessions\/command-001/);
+    assert.match(output, /Provenance/);
+    assert.match(output, /sessions\/command-001/);
     const narrowDetail = overlay.render(32);
     for (const line of narrowDetail) assert.equal(visibleWidth(line), 32);
-    assert.doesNotMatch(narrowDetail.slice(4, -3).join("\n"), /…/);
+    assert.doesNotMatch(narrowDetail.slice(4, -1).join("\n"), /…/);
     for (let index = 0; index < 30; index += 1)
       overlay.handleInput("\u001b[B");
     output = overlay.render(90).join("\n");
@@ -267,6 +268,65 @@ test("actor inspector overlay navigates run, nested filters, tabs, and detail", 
     assert.doesNotMatch(output, /readable/);
     overlay.handleInput("\u001b[D");
     assert.ok(renders() >= 4);
+  } finally {
+    overlay.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("actor inspector threads key hints through its bottom border", async () => {
+  const { root } = await fixture();
+  const calls: Array<{ color: string; text: string }> = [];
+  const recordingTheme = {
+    bg: (_color: string, text: string) => text,
+    fg: (color: string, text: string) => {
+      calls.push({ color, text });
+      return text;
+    },
+  } as unknown as Theme;
+  const { overlay } = createOverlay(root, recordingTheme);
+  try {
+    const lines = overlay.render(90);
+    const footer = lines.at(-1) ?? "";
+    assert.match(
+      footer,
+      /^╰ ←→ navigate ─ ↑↓ change row ─ enter select ─ esc close ─+╯$/,
+    );
+    assert.doesNotMatch(footer, /·/);
+    assert.equal(lines.length, 28);
+    assert.equal(
+      calls.some((call) => call.color === "accent" && call.text === "←→"),
+      true,
+    );
+    assert.equal(
+      calls.some((call) => call.color === "borderAccent" && call.text === " navigate"),
+      true,
+    );
+    assert.equal(
+      calls.some((call) => call.color === "borderAccent" && call.text === " ─ "),
+      true,
+    );
+    assert.equal(
+      calls.some(
+        (call) => call.color === "borderAccent" && call.text.startsWith("╭ Actor Inspector"),
+      ),
+      true,
+    );
+  } finally {
+    overlay.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("actor inspector caps its main viewport at twenty-four rows", async () => {
+  const { root } = await fixture();
+  const { overlay } = createOverlay(root, theme, 40);
+  try {
+    const viewport = (
+      overlay as unknown as { contentViewportRows(): number }
+    ).contentViewportRows();
+    assert.equal(viewport, 24);
+    assert.equal(overlay.render(90).length, 29);
   } finally {
     overlay.dispose();
     await rm(root, { recursive: true, force: true });
@@ -413,7 +473,7 @@ test("actor inspector run control cycles with arrows and left-aligns its scrolli
     );
     await writeFile(join(stateDir, "progress.json"), JSON.stringify({ phase: "done" }));
   }
-  const { overlay } = createOverlay(root);
+  const { overlay } = createOverlay(root, theme, 20);
   try {
     overlay.handleInput("\u001b[A");
     let lines = overlay.render(90);
@@ -435,7 +495,7 @@ test("actor inspector run control cycles with arrows and left-aligns its scrolli
     assert.match(output, /╭↑/);
     assert.match(output, /╰↓/);
     assert.match(output, /▶ #11\s+run-10\s{2}done/);
-    assert.equal(lines.length, 23);
+    assert.equal(lines.length, 18);
     overlay.handleInput("\r");
     assert.match(overlay.render(90)[1] ?? "", /Run: #11\s{2}run-10\s{2}done/);
   } finally {
@@ -637,7 +697,7 @@ test("actor inspector overlay keeps persisted multiline content inside one termi
     for (const key of ["\u001b[C", "\u001b[B"]) {
       overlay.handleInput(key);
       const lines = overlay.render(72);
-      assert.equal(lines.length, 23);
+      assert.equal(lines.length, 28);
       for (const line of lines) {
         assert.doesNotMatch(line, /[\r\n\t]/);
         assert.equal(visibleWidth(line), 72);
@@ -695,6 +755,12 @@ test("actor inspector Kill requires confirmation and reports success", async () 
     assert.match(output, /canonical control\.kill/);
     assert.match(output, /destructive and cannot be undone/);
     assert.doesNotMatch(output, /Actor Inspector/);
+    const killFooter = overlay.render(90).at(-1) ?? "";
+    assert.match(
+      killFooter,
+      /^╰ ←→\/tab choose ─ enter\/y confirm ─ esc\/n cancel ─+╯$/,
+    );
+    assert.doesNotMatch(killFooter, /·/);
     assert.deepEqual(killed, []);
     for (const line of overlay.render(42)) {
       assert.equal(visibleWidth(line), 42);

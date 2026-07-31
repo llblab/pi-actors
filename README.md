@@ -293,9 +293,7 @@ Packaged recipes are building blocks. Use `spawn file=<recipe>` for maintained p
 | A useful output that should survive context compression | Artifacts |
 | A repeated local workflow | Recipe/tool memory |
 
-When a directly spawned inline/ad hoc actor or a recipe outside the user recipe root completes successfully, `pi-actors` may include a promotion suggestion in its terminal follow-up notification. The agent should ask first and never auto-save.
-
-Terminal completion returns one bounded semantic result to the originating coordinator, not only run-state paths. `spawn` and saved async tools preserve their tool-call correlation automatically; callers may add `correlation_id` plus bounded `transport_context` when an adapter must retain an exact detached route, including Telegram `chat_id`/`thread_id`. Recipes that advertise `review.completed` either emit that envelope explicitly or receive one synthesized from successfully accepted review output. Watcher and periodic reconciliation share one in-flight guard, while failed sends remain retryable and visible in run status.
+Terminal completion queues a minimal follow-up with run id, status, one base path, and relative artifact names only. Bounded semantic output, launch/tool-call correlation, and optional transport context remain in non-LLM follow-up details and run state, so adapters retain the exact launch/result relationship without injecting actor output into coordinator context. Inspect the run before deciding whether a successful pattern deserves recipe persistence; never auto-save without the operator's confirmation.
 
 ## Platform support
 

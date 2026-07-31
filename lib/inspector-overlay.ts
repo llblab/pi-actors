@@ -270,7 +270,7 @@ export class ActorInspectorOverlay {
         Math.max(0, innerWidth - visibleWidth(selectorTop) - selectorAnchor),
       );
       lines.push(
-        `${this.theme.fg("border", `├${leadingBorder}`)}${selectorTop}${this.theme.fg("border", `${remainingBorder}┤`)}`,
+        `${this.theme.fg("borderAccent", `├${leadingBorder}`)}${selectorTop}${this.theme.fg("borderAccent", `${remainingBorder}┤`)}`,
       );
     } else lines.push(this.border("├", "", "┤", innerWidth));
     this.contentStripeIndices = [];
@@ -322,9 +322,7 @@ export class ActorInspectorOverlay {
       );
       lines.push(this.row(`${leadingBase}${visiblePopup}${preservedBase}`, innerWidth, true));
     }
-    lines.push(this.border("├", "", "┤", innerWidth));
-    lines.push(this.row(this.renderKeyHints(), innerWidth));
-    lines.push(this.border("╰", "", "╯", innerWidth));
+    lines.push(this.footerBorder(this.renderKeyHints(), innerWidth));
     return lines;
   }
 
@@ -344,7 +342,7 @@ export class ActorInspectorOverlay {
 
   private contentViewportRows(): number {
     const overlayRows = Math.floor(this.tui.terminal.rows * 0.94);
-    return Math.max(4, Math.min(16, overlayRows - 7));
+    return Math.max(4, Math.min(24, overlayRows - 5));
   }
 
   private selectRun(run: string, index: number): void {
@@ -438,7 +436,7 @@ export class ActorInspectorOverlay {
 
   private renderKillDialog(_width: number, innerWidth: number): string[] {
     const confirmation = this.killConfirmation!;
-    const totalRows = this.contentViewportRows() + 7;
+    const totalRows = this.contentViewportRows() + 5;
     const cancel = this.killDialogChoice === "cancel"
       ? this.theme.bg("selectedBg", this.theme.fg("accent", "  Cancel  "))
       : this.theme.fg("muted", "  Cancel  ");
@@ -468,7 +466,7 @@ export class ActorInspectorOverlay {
     while (dialogRows.length < availableRows) dialogRows.push("");
     for (const line of dialogRows)
       lines.push(this.row(this.center(line, innerWidth), innerWidth));
-    lines.push(this.border("╰", " ←→/tab choose · enter activate · esc cancel ", "╯", innerWidth));
+    lines.push(this.footerBorder(this.renderKeyHints(), innerWidth));
     return lines;
   }
 
@@ -495,27 +493,53 @@ export class ActorInspectorOverlay {
 
   private renderKeyHints(): string {
     const hint = (keys: string, description: string) =>
-      `${this.theme.fg("accent", keys)}${this.theme.fg("dim", ` ${description}`)}`;
+      `${this.theme.fg("accent", keys)}${this.theme.fg("borderAccent", ` ${description}`)}`;
+    const divider = this.theme.fg("borderAccent", " ─ ");
+    const hints = (...items: Array<[string, string]>) =>
+      items.map(([keys, description]) => hint(keys, description)).join(divider);
     if (this.killConfirmation)
-      return ` ${hint("y/enter", "confirm kill")}  ${hint("n/esc", "cancel")}`;
+      return hints(
+        ["←→/tab", "choose"],
+        ["enter/y", "confirm"],
+        ["esc/n", "cancel"],
+      );
     if (this.focus === "select")
       return this.menuLevel === "value"
-        ? ` ${hint("↑↓", "option")}  ${hint("enter", "apply")}  ${hint("←/esc", "back")}`
-        : ` ${hint("↑↓", "option")}  ${hint("→/enter", "open")}  ${hint("←/esc", "back")}`;
+        ? hints(["↑↓", "option"], ["enter", "apply"], ["←/esc", "back"])
+        : hints(["↑↓", "option"], ["→/enter", "open"], ["←/esc", "back"]);
     if (this.focus === "recipe")
-      return ` ${hint("↑↓/pgup/pgdn", "scroll")}  ${hint("↑ at top", "tabs")}  ${hint("←/esc", "tabs")}`;
+      return hints(
+        ["↑↓/pgup/pgdn", "scroll"],
+        ["↑ at top", "tabs"],
+        ["←/esc", "tabs"],
+      );
     if (this.focus === "detail")
-      return ` ${hint("↑↓/pgup/pgdn", "scroll")}  ${hint("←/esc", "back")}`;
+      return hints(["↑↓/pgup/pgdn", "scroll"], ["←/esc", "back"]);
     if (this.focus === "list")
-      return ` ${hint("↑↓/pgup/pgdn", "row")}  ${hint("→/enter", "open")}  ${hint("←", "tabs")}  ${hint("esc", "close")}`;
+      return hints(
+        ["↑↓/pgup/pgdn", "row"],
+        ["→/enter", "open"],
+        ["←", "tabs"],
+        ["esc", "close"],
+      );
     if (this.focus === "runs") {
+      const items: Array<[string, string]> = [
+        ["←→", "run"],
+        ["↓", "tabs"],
+        ["enter", "list"],
+      ];
       const run = this.runs().find((item) => item.run === this.selectedRun);
-      const killHint = this.killRun && run?.status === "running" && run.runInstanceId
-        ? `  ${hint("k", "kill")}`
-        : "";
-      return ` ${hint("←→", "run")}  ${hint("↓", "tabs")}  ${hint("enter", "list")}${killHint}  ${hint("esc", "close")}`;
+      if (this.killRun && run?.status === "running" && run.runInstanceId)
+        items.push(["k", "kill"]);
+      items.push(["esc", "close"]);
+      return hints(...items);
     }
-    return ` ${hint("←→", "navigate")}  ${hint("↑↓", "change row")}  ${hint("enter", "select")}  ${hint("esc", "close")}`;
+    return hints(
+      ["←→", "navigate"],
+      ["↑↓", "change row"],
+      ["enter", "select"],
+      ["esc", "close"],
+    );
   }
 
   private renderRunControl(): string {
@@ -1200,7 +1224,7 @@ export class ActorInspectorOverlay {
     );
     const border = (left: string, right: string, marker = "") =>
       this.theme.fg(
-        "border",
+        "borderAccent",
         `${omitLeftBorder ? "" : left}${marker}${"─".repeat(Math.max(0, contentWidth - visibleWidth(marker)))}${omitRightBorder ? "" : right}`,
       );
     return [
@@ -1215,7 +1239,7 @@ export class ActorInspectorOverlay {
         const styled = focused || index === parentIndex
           ? this.theme.bg("selectedBg", colored)
           : colored;
-        return `${omitLeftBorder ? "" : this.theme.fg("border", "│")}${styled}${omitRightBorder ? "" : this.theme.fg("border", "│")}`;
+        return `${omitLeftBorder ? "" : this.theme.fg("borderAccent", "│")}${styled}${omitRightBorder ? "" : this.theme.fg("borderAccent", "│")}`;
       }),
       border("╰", "╯", hiddenBelow ? "↓" : ""),
     ];
@@ -1285,10 +1309,27 @@ export class ActorInspectorOverlay {
     this.focus = "list";
   }
 
+  private footerBorder(hints: string, width: number): string {
+    const prefix = " ";
+    const suffix = " ─";
+    const content = truncateToWidth(
+      hints,
+      Math.max(0, width - visibleWidth(prefix) - visibleWidth(suffix)),
+      "",
+    );
+    const fill = "─".repeat(
+      Math.max(
+        0,
+        width - visibleWidth(prefix) - visibleWidth(suffix) - visibleWidth(content),
+      ),
+    );
+    return `${this.theme.fg("borderAccent", `╰${prefix}`)}${content}${this.theme.fg("borderAccent", `${suffix}${fill}╯`)}`;
+  }
+
   private border(left: string, title: string, right: string, width: number): string {
     const titleText = truncateToWidth(title, width, "");
     const fill = "─".repeat(Math.max(0, width - visibleWidth(titleText)));
-    return this.theme.fg("border", `${left}${titleText}${fill}${right}`);
+    return this.theme.fg("borderAccent", `${left}${titleText}${fill}${right}`);
   }
 
   private stripeBackground(content: string, index: number): string {
@@ -1311,7 +1352,7 @@ export class ActorInspectorOverlay {
 
   private row(content: string, width: number, fitted = false): string {
     const body = fitted ? content : this.fit(content, width);
-    return `${this.theme.fg("border", "│")}${body}${this.theme.fg("border", "│")}`;
+    return `${this.theme.fg("borderAccent", "│")}${body}${this.theme.fg("borderAccent", "│")}`;
   }
 
   private takeVisiblePrefix(content: string, width: number): string {

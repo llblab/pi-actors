@@ -33,10 +33,8 @@ import {
   shouldNotifyRunTransition,
   shouldSendRunOutboxFollowUp,
   shouldSendRunTransitionFollowUp,
-  shouldSuggestRecipePersistence,
   summarizeRuns,
 } from "../lib/observability.ts";
-import * as Paths from "../lib/paths.ts";
 import { readProcessIdentity } from "../lib/runs-process.ts";
 
 async function writeRun(
@@ -278,12 +276,32 @@ test("Run observability detects terminal transitions", () => {
   ]);
   assert.equal(
     formatRunTransitionMessage(transitions[0]),
-    "Run review completed successfully.\nArtifacts:\n- Base: `artifacts`\n- Files: `report.md`\nNext actions: inspect target=run:review view=status | inspect target=run:review view=artifacts | inspect target=run:review view=messages",
+    "Run: `review`\nStatus: `done`\nBase: `artifacts`\nArtifacts: `report.md`",
   );
   assert.equal(previous.get("review"), "done");
 });
 
-test("Successful reviews deliver one bounded correlated semantic result", async () => {
+test("Run observability bounds terminal artifact references", () => {
+  const message = formatRunTransitionMessage({
+    artifacts: {
+      one: "/reports/one.md",
+      two: "/reports/two.md",
+      three: "/reports/three.md",
+      four: "/reports/four.md",
+      five: "/reports/five.md",
+    },
+    from: "running",
+    run: "review",
+    to: "done",
+  });
+  assert.match(
+    message,
+    /Base: `\/reports`\nArtifacts: `one\.md`, `two\.md`, `three\.md`, `four\.md` \(\+1 more\)/,
+  );
+  assert.doesNotMatch(message, /five\.md/);
+});
+
+test("Successful reviews keep semantic output out of follow-up context", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-semantic-review-"));
   const stateDir = join(root, "review");
   try {
@@ -326,13 +344,20 @@ test("Successful reviews deliver one bounded correlated semantic result", async 
       sendFollowUp: (message) => delivered.push(message),
     });
     assert.equal(delivered.length, 1);
-    assert.match(delivered[0].content, /Semantic result: review\.completed/);
-    assert.match(delivered[0].content, /Correlation: task-42/);
-    assert.match(delivered[0].content, /Result:\nStatus: complete/);
+    assert.equal(
+      delivered[0].content,
+      `Run: \`review\`\nStatus: \`done\`\nBase: \`${stateDir}\``,
+    );
+    assert.doesNotMatch(delivered[0].content, /Status: complete|Finding:|x{100}/);
     assert.equal(
       (delivered[0].details as { semanticResult?: { correlationId?: string } })
         .semanticResult?.correlationId,
       "task-42",
+    );
+    assert.match(
+      (delivered[0].details as { semanticResult?: { body?: string } })
+        .semanticResult?.body ?? "",
+      /^Status: complete/,
     );
     assert.deepEqual(
       (delivered[0].details as {
@@ -381,12 +406,15 @@ test("Explicit advertised review completion wins over synthesis", async () => {
       synthesized: false,
       type: "review.completed",
     });
+    const content = formatRunTransitionMessage(transition);
+    assert.match(content, /Run: `review`\nStatus: `done`/);
+    assert.doesNotMatch(content, /review\.completed|Review accepted|verdict|ship/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Failed runs deliver the bounded terminal error as semantic output", async () => {
+test("Failed runs retain terminal errors outside follow-up context", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-semantic-failed-"));
   const stateDir = join(root, "review");
   try {
@@ -401,7 +429,9 @@ test("Failed runs deliver the bounded terminal error as semantic output", async 
     );
     assert.equal(transition.semanticResult?.type, "run.failed");
     assert.equal(transition.semanticResult?.body, "accepted review output missing");
-    assert.match(formatRunTransitionMessage(transition), /Result:\naccepted review output missing/);
+    const content = formatRunTransitionMessage(transition);
+    assert.match(content, /Run: `review`\nStatus: `failed`/);
+    assert.doesNotMatch(content, /accepted review output missing/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -428,7 +458,7 @@ test("Silent background runs emit no terminal transition", () => {
   assert.equal(previous.get("draft-sleep"), "done");
 });
 
-test("Run observability includes model policy in terminal follow-ups", () => {
+test("Run observability keeps model policy out of terminal follow-up context", () => {
   const message = formatRunTransitionMessage({
     from: "running",
     modelPolicy: {
@@ -438,9 +468,7 @@ test("Run observability includes model policy in terminal follow-ups", () => {
     run: "review",
     to: "done",
   });
-  assert.match(message, /Policy:/);
-  assert.match(message, /Model: inherited \(provider\/model\)/);
-  assert.match(message, /Thinking: explicit \(high\)/);
+  assert.doesNotMatch(message, /Policy:|provider\/model|high/);
 });
 
 test("Run observability keys transitions by state directory", () => {
@@ -476,55 +504,6 @@ test("Run observability keys transitions by state directory", () => {
   );
   assert.equal(previous.get("/tmp/parent/review"), "done");
   assert.equal(previous.get("/tmp/parent/child/review"), "failed");
-});
-
-test("Run observability suggests persistence for successful transient spawns", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
-  try {
-    await writeRun(root, "scratch", "running");
-    const previous = new Map([[join(root, "scratch"), "running" as const]]);
-    await writeRun(root, "scratch", "done", [], 0, undefined, undefined, "spawn");
-    const [transition] = detectRunTransitions(previous, summarizeRuns(root));
-    assert.equal(shouldSuggestRecipePersistence(transition), true);
-    const message = formatRunTransitionMessage(transition);
-    assert.match(
-      message,
-      /ask the operator whether to save it as a durable recipe\/tool/,
-    );
-    assert.match(message, /Next actions: inspect target=run:scratch view=status/);
-    assert.match(message, /inspect target=run:scratch view=messages/);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Run observability suggests persistence for successful external recipes", () => {
-  const transition = {
-    from: "running" as const,
-    launchSource: "tool" as const,
-    recipeFile: "/repo/recipes/pipeline-demo.json",
-    run: "demo",
-    to: "done" as const,
-    tool: "pipeline_demo",
-  };
-  assert.equal(shouldSuggestRecipePersistence(transition), true);
-  const message = formatRunTransitionMessage(transition);
-  assert.match(
-    message,
-    /copy or register it as a durable tool recipe under ~\/\.pi\/agent\/recipes/,
-  );
-  assert.match(message, /Next actions: inspect target=run:demo view=status/);
-});
-
-test("Run observability does not suggest persistence for saved user recipes", () => {
-  const transition = {
-    from: "running" as const,
-    launchSource: "spawn" as const,
-    recipeFile: join(Paths.getRecipeRoot(), "saved.json"),
-    run: "saved",
-    to: "done" as const,
-  };
-  assert.equal(shouldSuggestRecipePersistence(transition), false);
 });
 
 test("Run observability suppresses terminal follow-up after handled stop messages", () => {
@@ -915,7 +894,7 @@ test("Run observability reports cancelled terminal transitions clearly", () => {
   ]);
   assert.equal(
     formatRunTransitionMessage(transitions[0]),
-    "Run music was cancelled.\nNext actions: inspect target=run:music view=status | inspect target=run:music view=tail | inspect target=run:music view=messages",
+    "Run: `music`\nStatus: `cancelled`",
   );
   assert.equal(getRunTransitionNotificationType(transitions[0]), "info");
   assert.equal(shouldSendRunTransitionFollowUp(transitions[0]), false);

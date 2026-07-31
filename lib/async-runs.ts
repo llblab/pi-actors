@@ -573,6 +573,13 @@ export function startRun(
         ? { transport_context: transportContext } : {}),
     };
     writeJsonAtomic(join(stateDir, "run.json"), meta);
+    writeJsonAtomic(join(stateDir, "progress.json"), {
+      completed: 0,
+      failures: [],
+      model_policy: modelPolicy,
+      phase: "starting",
+      updatedAt: new Date().toISOString(),
+    });
     const child = spawn(process.execPath, argv, {
       cwd,
       detached: true,
@@ -589,13 +596,6 @@ export function startRun(
     );
     if (processIdentity) meta.process_identity = processIdentity;
     writeJsonAtomic(join(stateDir, "run.json"), meta);
-    writeJsonAtomic(join(stateDir, "progress.json"), {
-      completed: 0,
-      failures: [],
-      model_policy: modelPolicy,
-      phase: "starting",
-      updatedAt: new Date().toISOString(),
-    });
     writeFileSync(
       join(stateDir, "events.jsonl"),
       `${JSON.stringify({ event: "run.start", run, run_instance_id: meta.run_instance_id, pid: meta.pid, ts: new Date().toISOString() })}\n`,

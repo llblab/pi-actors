@@ -101,7 +101,7 @@ Use ordinary files under the extension temp directory so status tools stay simpl
 - `prompts/command-NNN.md`: state-owned prompt files that collapse child `pi -p` natural-language positional fragments and appended recipe context into one authoritative `@file` prompt while preserving intentional file/image arguments.
 - `captures/command-NNN/attempt-NNN/{stdout,stderr}.log`: complete byte-exact command streams, retained even below the bounded in-memory capture limit and separated across retries.
 - `review-evidence.json`: stable command/stage manifest linking prompts, repeated branches, capture attempts, byte counts, exit state, semantic marker acceptance, recipe context, and model/thinking policy; terminal status aligns with the run. Review pipelines inject prior-stage `ACTOR_EVIDENCE_REF` values into downstream prompts, record cited/missing report sources, and fail closed if a normalized report claims `complete` without every required reviewer, verifier, merger, and judge reference.
-- `result.json`: final code, killed flag, output selector, and optional full-output path.
+- `result.json`: final code, killed flag, output selector, and optional full-output path. It publishes only after terminal `progress.json` and `review-evidence.json`, so readers never observe a result before its terminal state.
 - `terminal-delivery-failure.json`: latest bounded failed follow-up attempt count, status, error, and timestamp; a later successful retry writes `terminal-handled.json`.
 - `terminal-handled.json`: durable proof that terminal follow-up delivery or an explicit terminal control completed; notification delivery writes it only after the follow-up send returns successfully.
 

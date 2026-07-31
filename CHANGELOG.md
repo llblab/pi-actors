@@ -5,7 +5,7 @@
 ## 0.42.2: Inspector Key Rail and Terminal Follow-up Context
 
 - `[Inspector Key Rail]` Moved every Inspector hotkey hint onto the bottom border, replacing the dedicated two-row footer with a border-connected rail. Blue key labels remain, while descriptions and `─` connectors use the border accent instead of bullet separators; the main viewport cap rises from 16 to 24 rows. Impact: the Inspector gains two content rows without losing keyboard discoverability, and the kill confirmation dialog now shares the same visual grammar.
-- `[Terminal Follow-up Context]` Kept terminal delivery on Pi's `followUp` queue but reduced LLM content to run id, status, one base path, and relative artifact names. Bounded semantic stdout/error payloads, correlation, and adapter transport metadata remain available only in non-LLM details and run state. Impact: completed background actors no longer inject raw output or unsolicited workflow prompts into coordinator context.
+- `[Terminal Follow-up Context]` Kept terminal delivery on Pi's `followUp` queue but reduced LLM content to run id, status, one base path, and relative artifact names. Bounded semantic stdout/error payloads, correlation, and adapter transport metadata remain available only in non-LLM details and run state; runners now write terminal progress and review evidence before the `result.json` completion marker. Impact: completed background actors no longer inject raw output or unsolicited workflow prompts into coordinator context, and result readers never see an incomplete terminal state.
 
 ## 0.42.1: Terminal Delivery and Cross-platform Validation
 

@@ -16,22 +16,22 @@ import {
   createRunStateWatcher,
   createRunTerminalReconciliationLoop,
   createRunUiObservationState,
-  detectRunOutboxEvents,
+  detectRunAttentionEvents,
   detectRunTransitions,
   deliverRunTransitionNotifications,
   executeRunRetirements,
   findRunRetirementCandidates,
   pruneRunObservationState,
   reconcileRunTerminalNotifications,
-  formatRunOutboxMessage,
+  formatRunAttentionMessage,
   formatRunTransitionMessage,
-  getRunOutboxNotificationType,
+  getRunAttentionNotificationType,
   getRunTransitionNotificationType,
   renderRunStatus,
   renderSubagentStatus,
-  shouldNotifyRunOutboxEvent,
+  shouldNotifyRunAttentionEvent,
   shouldNotifyRunTransition,
-  shouldSendRunOutboxFollowUp,
+  shouldSendRunAttentionFollowUp,
   shouldSendRunTransitionFollowUp,
   summarizeRuns,
 } from "../lib/observability.ts";
@@ -181,36 +181,36 @@ test("Run observability filters summaries by coordinator owner", async () => {
   }
 });
 
-test("Run observability detects script-authored outbox events", async () => {
+test("Run observability detects script-authored Trace attention", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-"));
   try {
     await writeRun(root, "music", "running", [], 0, "session-a");
     await writeFile(
-      join(root, "music", "outbox.jsonl"),
-      `${JSON.stringify({ event: "player.track", summary: "Now playing: track.flac", delivery: "followup", level: "info", body: { question: "Continue playback?" }, metadata: { source: "player" }, data: { index: 3, artifacts: { report: join(root, "music", "report.md") }, run_files: [join(root, "music", "stdout.log")] } })}\n`,
+      join(root, "music", "trace.jsonl"),
+      `${JSON.stringify({ id: "trace-1", kind: "player.track", summary: "Now playing: track.flac", attention: "followup", level: "info", data: { index: 3, question: "Continue playback?", artifacts: { report: join(root, "music", "report.md") }, run_files: [join(root, "music", "stdout.log")] }, ts: "2026-01-01T00:00:00.000Z" })}\n`,
     );
     const summary = summarizeRuns(root, "session-a");
     const previous = new Map<string, number>();
-    const events = detectRunOutboxEvents(previous, summary);
+    const events = detectRunAttentionEvents(previous, summary);
     assert.equal(events.length, 1);
-    assert.equal(events[0].event, "player.track");
+    assert.equal(events[0].kind, "player.track");
     assert.equal(events[0].summary, "Now playing: track.flac");
-    assert.deepEqual(events[0].body, { question: "Continue playback?" });
-    assert.deepEqual(events[0].metadata, { source: "player" });
+    assert.equal(events[0].body, undefined);
+    assert.equal(events[0].metadata, undefined);
     assert.equal(
-      formatRunOutboxMessage(events[0]),
-      `Run music: Now playing: track.flac\nBody: {"question":"Continue playback?"}\nArtifacts:\n- Base: \`${join(root, "music")}\`\n- Files: \`report.md\`\nRun files:\n- Base: \`${join(root, "music")}\`\n- Files: \`stdout.log\``,
+      formatRunAttentionMessage(events[0]),
+      `Run music: Now playing: track.flac\nArtifacts:\n- Base: \`${join(root, "music")}\`\n- Files: \`report.md\`\nRun files:\n- Base: \`${join(root, "music")}\`\n- Files: \`stdout.log\``,
     );
-    assert.equal(getRunOutboxNotificationType(events[0]), "info");
-    assert.equal(shouldNotifyRunOutboxEvent(events[0]), true);
-    assert.equal(shouldSendRunOutboxFollowUp(events[0]), true);
-    assert.deepEqual(detectRunOutboxEvents(previous, summary), []);
+    assert.equal(getRunAttentionNotificationType(events[0]), "info");
+    assert.equal(shouldNotifyRunAttentionEvent(events[0]), true);
+    assert.equal(shouldSendRunAttentionFollowUp(events[0]), true);
+    assert.deepEqual(detectRunAttentionEvents(previous, summary), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Run observability suppresses duplicate outbox events after line counter reset", async () => {
+test("Run observability suppresses duplicate legacy attention after line counter reset", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-dedupe-"));
   try {
     await writeRun(root, "music", "running", [], 0, "session-a");
@@ -221,15 +221,15 @@ test("Run observability suppresses duplicate outbox events after line counter re
     const summary = summarizeRuns(root, "session-a");
     const previous = new Map<string, number>();
     const seen = new Map<string, Set<string>>();
-    assert.equal(detectRunOutboxEvents(previous, summary, seen).length, 1);
+    assert.equal(detectRunAttentionEvents(previous, summary, seen).length, 1);
     previous.clear();
-    assert.equal(detectRunOutboxEvents(previous, summary, seen).length, 0);
+    assert.equal(detectRunAttentionEvents(previous, summary, seen).length, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Run observability skips malformed outbox records", async () => {
+test("Run observability skips malformed legacy attention records", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-corrupt-outbox-"));
   try {
     await writeRun(root, "music", "running", [], 0, "session-a");
@@ -239,7 +239,7 @@ test("Run observability skips malformed outbox records", async () => {
     );
     const summary = summarizeRuns(root, "session-a");
     const previous = new Map<string, number>();
-    const events = detectRunOutboxEvents(previous, summary);
+    const events = detectRunAttentionEvents(previous, summary);
     assert.equal(events.length, 1);
     assert.equal(events[0].id, "event-1");
   } finally {
@@ -320,7 +320,6 @@ test("Successful reviews keep semantic output out of follow-up context", async (
           chat_id: 123456,
           thread_id: 77,
         },
-        mailbox: { emits: ["review.completed", "run.done"] },
       }),
     );
     await writeFile(
@@ -332,7 +331,7 @@ test("Successful reviews keep semantic output out of follow-up context", async (
       previous,
       summarizeRuns(root, "session-a"),
     );
-    assert.equal(transition.semanticResult?.type, "review.completed");
+    assert.equal(transition.semanticResult?.type, "run.done");
     assert.equal(transition.semanticResult?.synthesized, true);
     assert.equal(transition.semanticResult?.correlationId, "task-42");
     assert.match(transition.semanticResult?.body ?? "", /^Status: complete/);
@@ -374,46 +373,6 @@ test("Successful reviews keep semantic output out of follow-up context", async (
         thread_id: 77,
       },
     );
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Explicit advertised review completion wins over synthesis", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-semantic-explicit-"));
-  const stateDir = join(root, "review");
-  try {
-    await writeRun(root, "review", "done", [], 0, "session-a");
-    const meta = JSON.parse(await readFile(join(stateDir, "run.json"), "utf8"));
-    await writeFile(
-      join(stateDir, "run.json"),
-      JSON.stringify({ ...meta, mailbox: { emits: ["review.completed"] } }),
-    );
-    await writeFile(
-      join(stateDir, "outbox.jsonl"),
-      `${JSON.stringify({
-        body: { verdict: "ship" },
-        correlation_id: "review-9",
-        delivery: "followup",
-        event: "review.completed",
-        summary: "Review accepted.",
-      })}\n`,
-    );
-    const [transition] = detectRunTransitions(
-      new Map([[stateDir, "running" as const]]),
-      summarizeRuns(root, "session-a"),
-    );
-    assert.deepEqual(transition.semanticResult, {
-      body: "{\"verdict\":\"ship\"}",
-      correlationId: "review-9",
-      metadata: { run: "review", status: "done" },
-      summary: "Review accepted.",
-      synthesized: false,
-      type: "review.completed",
-    });
-    const content = formatRunTransitionMessage(transition);
-    assert.match(content, /Run: `review`\nStatus: `done`/);
-    assert.doesNotMatch(content, /review\.completed|Review accepted|verdict|ship/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -527,15 +486,15 @@ test("Run observability keeps command done follow-ups compact", async () => {
   try {
     await writeRun(root, "review", "running", [], 0, "session-a");
     await writeFile(
-      join(root, "review", "outbox.jsonl"),
-      `${JSON.stringify({ event: "command.done", summary: "Command pi completed with code 0", delivery: "followup", level: "info", data: { artifacts: { report: join(root, "review", "report.md") }, run_files: [join(root, "review", "stdout.log")] } })}\n`,
+      join(root, "review", "trace.jsonl"),
+      `${JSON.stringify({ id: "command-done", kind: "command.done", summary: "Command pi completed with code 0", attention: "followup", level: "info", data: { artifacts: { report: join(root, "review", "report.md") }, run_files: [join(root, "review", "stdout.log")] }, ts: new Date().toISOString() })}\n`,
     );
-    const events = detectRunOutboxEvents(
+    const events = detectRunAttentionEvents(
       new Map<string, number>(),
       summarizeRuns(root, "session-a"),
     );
     assert.equal(
-      formatRunOutboxMessage(events[0]),
+      formatRunAttentionMessage(events[0]),
       "Run review: Command pi completed with code 0",
     );
   } finally {

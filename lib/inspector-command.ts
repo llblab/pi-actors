@@ -14,8 +14,8 @@ export function registerActorInspectorCommand(
   pi: Pi.ExtensionAPI,
   getRunOwnerId: (ctx: Pi.ExtensionContext) => string,
 ): void {
-  pi.registerCommand("actors-inspector", {
-    description: "Open the keyboard-driven actor inspector overlay",
+  pi.registerCommand("actor-inspector", {
+    description: "Open the keyboard-driven Actor Inspector",
     handler: async (_args, ctx) => {
       ctx.ui.setWidget("zz-pi-actors-comms", undefined);
       await ctx.ui.custom<void>(
@@ -23,7 +23,7 @@ export function registerActorInspectorCommand(
           new InspectorOverlay.ActorInspectorOverlay({
             done,
             killRun: (run, runInstanceId) =>
-              InspectorActions.killOwnedInspectorRun(
+              InspectorActions.killOwnedRunFromInspector(
                 getRunOwnerId(ctx),
                 run,
                 Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,

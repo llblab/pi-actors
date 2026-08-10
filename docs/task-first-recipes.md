@@ -13,7 +13,7 @@ For each high-level recipe candidate:
 3. Sketch the recipe pipeline at the highest useful abstraction.
 4. Identify missing component cells.
 5. Decide which cells are subagent components, local utilities, or helper-backed transforms.
-6. Keep domain policy knobs public: models, tools, paths, evidence/risk policy, output shape, mailbox contract, and validation gates.
+6. Keep domain policy knobs public: models, tools, paths, evidence/risk policy, output shape, actual Control actions, and validation gates.
 7. Add only the next smallest recipe/helper slice that validates the design.
 
 ## High-Level Recipe Cells
@@ -88,27 +88,26 @@ Purpose: inspect, summarize, and decide actions for local async runs.
 Pipeline:
 
 ```text
-run-state summary → actor-message tail → stale/active classification → recommended action → optional stop/control message
+Run summary → Trace tail → stale/active classification → recommended Inspect or Control action
 ```
 
 Likely needed cells:
 
 - Run summary helper
-- JSONL actor-message tailer
+- bounded Trace tail reader
 - Stale-run classifier
-- Control-message recommender
+- Inspect/Control action recommender
 - Run report artifact
 
 Existing seeds:
 
 - `utility-run-summary`
 - `utility-jsonl-tail`
-- `subagent-message`
 - `pipeline-artifact-report`
 
 Implemented seed:
 
-- `pipeline-async-run-ops`: structured run operations snapshot → normalized operations report → artifact report. The snapshot combines run summary, actor-message tail, and recommended inspect/control messages before the LLM normalization step.
+- `pipeline-async-run-ops`: structured run operations snapshot → normalized operations report → artifact report. The snapshot combines Run summary, Trace tail, and recommended Inspect/Control actions before the LLM normalization step.
 
 ### Research Brief Cell
 
@@ -147,19 +146,18 @@ Pipeline:
 mission → lens proposers in room → consensus transcript → named implementer writes artifact → QA reviewer checks artifact + transcript → finalizer applies fixes → artifact assertions
 ```
 
-Use this for creative demos, single-file artifacts, specs, docs, prompt packs, and product/UX deliverables where broad input matters but one owner should shape the final file. Proposers should have message/inspect tools only. The implementer should be the first role with write tools. QA should inspect/read but not mutate. The finalizer may write only after reading QA evidence.
+Use this for creative demos, single-file artifacts, specs, docs, prompt packs, and product/UX deliverables where broad input matters but one owner should shape the final file. Proposers remain read-only. The implementer becomes the first stage with write tools. QA inspects without mutation, and the finalizer writes only after reading immutable QA evidence.
 
 Required gates:
 
 - Artifact path, report path, and minimum acceptance checks are explicit inputs.
 - The workflow fails if the requested artifact is missing, too small, or not self-contained enough for the task.
-- `run.done` is emitted only after QA/finalizer passes, not merely after room discussion.
+- The Run completes only after QA/finalizer acceptance, not merely after proposal generation.
 
 Existing seeds:
 
-- `pipeline-room-swarm` for room-visible discussion and rosters.
-- `subagent-message` for explicit room handoffs.
-- `subagent-review` / `subagent-verify` for QA roles.
+- `subagent-review` / `subagent-verify` for QA stages.
+- `pipeline-quorum-review` for independent proposals and synthesis.
 - `pipeline-artifact-write` or a small helper script for deterministic artifact assertion.
 
 Next recipe direction:
@@ -257,7 +255,7 @@ Good next candidates for the standard library after the first task-first wave:
 
 1. Package/release metadata enrichment: implemented in `pipeline-release-readiness` by adding `utility-package-summary` and `utility-skill-summary` between changelog extraction and validation, making release-readiness reports more evidence-rich without adding publish automation.
 2. Evidence-only release summary: implemented as `pipeline-release-summary`, which composes changelog/package/skill/validation evidence into a release summary, risk checklist, and PR body draft artifact while leaving commit, PR, merge, tag, and publish actions to explicit release gates.
-3. Artifact packaging and manifesting: implemented as `pipeline-artifact-bundle`, which composes optional validation, `pipeline-artifact-write`, `utility-artifact-manifest`, deterministic manifest writing, and an actor-message handoff when the caller explicitly requests filesystem writes.
+3. Artifact packaging and manifesting: implemented as `pipeline-artifact-bundle`, which composes optional validation, `pipeline-artifact-write`, `utility-artifact-manifest`, deterministic manifest writing, and final artifact evidence when the caller explicitly requests filesystem writes.
 4. Async run cleanup planning: extend async-run operations with stale-run classification and recommended `message`, `cancel`, or `kill` controls, keeping actual control execution operator-gated.
 
 Each candidate should land with the minimum missing cells rather than a broad one-shot framework. Already implemented task-first seeds include `pipeline-release-readiness`, `pipeline-release-summary`, `pipeline-repo-health`, `pipeline-async-run-ops`, `pipeline-docs-maintenance`, `pipeline-media-library`, and `pipeline-artifact-bundle`.

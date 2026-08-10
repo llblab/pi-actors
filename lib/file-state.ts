@@ -235,11 +235,11 @@ export function withFileMutationLock<T>(
   }
 }
 
-export function writeJsonAtomic(path: string, value: unknown): void {
+export function writeTextAtomic(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const tempPath = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    writeFileSync(tempPath, content, "utf8");
     renameSync(tempPath, path);
   } catch (error) {
     try {
@@ -249,4 +249,8 @@ export function writeJsonAtomic(path: string, value: unknown): void {
     }
     throw error;
   }
+}
+
+export function writeJsonAtomic(path: string, value: unknown): void {
+  writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
 }

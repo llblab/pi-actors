@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * Packaged local music-player actor helper.
+ * Packaged local music-player controlled-service helper.
  *
  * This script backs the standard music-player recipe. It scans local music
  * sources, builds playback queues, launches an available backend player, and
- * consumes run-mailbox control messages such as play, pause, next, previous,
+ * consumes generation-bound Controls such as play, pause, next, previous,
  * stop, and status.
  *
- * Keep the helper focused on one maintained player actor implementation; recipe
+ * Keep the helper focused on one maintained controlled Run implementation; Recipe
  * metadata and invocation arguments choose source paths and backend behavior.
  */
 
@@ -26,6 +26,7 @@ import {
   watch,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { homedir } from "node:os";
 import {
   basename,
@@ -36,6 +37,21 @@ import {
   join,
   resolve,
 } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+function packageRoot() {
+  return dirname(dirname(fileURLToPath(import.meta.url)));
+}
+
+async function importRuntimeModule(name) {
+  const root = packageRoot();
+  const compiled = join(root, "dist", "lib", `${name}.js`);
+  const source = join(root, "lib", `${name}.ts`);
+  return await import(pathToFileURL(existsSync(compiled) ? compiled : source).href);
+}
+
+const { acquireFileMutationLock, writeTextAtomic } =
+  await importRuntimeModule("file-state");
 
 const AUDIO_EXTENSIONS = new Set([
   ".aac",
@@ -55,7 +71,6 @@ const CONTROL_COMMANDS = new Set([
   "toggle",
   "next",
   "previous",
-  "prev",
   "stop",
   "status",
 ]);
@@ -66,9 +81,9 @@ function usage() {
   music-player.mjs <pause|resume|toggle|next|previous|stop|status> <state-dir>
   music-player.mjs control <state-dir> <play|pause|toggle|next|previous|stop|status>
 
-Runs a small foreground music player so pi-actors can own it as an actor run.
-Actor message bodies are adapted to queued mailbox commands in <state-dir>/inbox.jsonl.
-Prefer message to=run:<run> type=player.<command> body=<command>, or use direct control commands below.
+Runs a foreground music player so pi-actors can own it as a controlled Run.
+Controls use canonical records in <state-dir>/controls.jsonl.
+Prefer message target=run:<run> action=<command>, or use direct control commands below.
 Supported players: auto, mpv, afplay, ffplay, cvlc, play, wmp.
 `);
 }
@@ -404,20 +419,16 @@ function readText(path) {
   }
 }
 
-function emitPlayerEvent(ctx, type, summary, body = {}) {
+function emitPlayerEvent(ctx, kind, summary, data = {}) {
   writeText(
     ctx.eventFile,
     `${JSON.stringify({
-      body,
-      data: body,
-      delivery: "log",
-      event: type,
-      from: `run:${basename(ctx.stateDir)}`,
+      data,
+      id: randomUUID(),
+      kind,
       level: "info",
       summary,
-      to: "coordinator",
       ts: new Date().toISOString(),
-      type,
     })}\n`,
     "a",
   );
@@ -563,45 +574,39 @@ function writeJsonFile(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function updateRunControlMetadata(ctx) {
-  const path = runJsonFile(ctx);
-  const run = readJsonFile(path, undefined);
-  if (!run || typeof run !== "object") return;
-  writeJsonFile(path, {
-    ...run,
-    control: { path: ctx.inboxFile, type: "mailbox" },
-  });
-}
-
-function acquireInboxLock(ctx) {
-  const lockDir = join(ctx.stateDir, ".inbox.lock");
-  const started = Date.now();
-  while (true) {
-    try {
-      mkdirSync(lockDir);
-      writeJsonFile(join(lockDir, "owner.json"), {
-        created_at: new Date().toISOString(),
-        pid: process.pid,
+async function startControlServer(ctx) {
+  if (!ctx.runInstanceId) return undefined;
+  const path = process.platform === "win32"
+    ? `\\\\.\\pipe\\pi-actors-music-${String(process.env.run_id ?? process.pid).replaceAll(/[^A-Za-z0-9_-]/g, "-")}`
+    : join(ctx.stateDir, "control.sock");
+  if (process.platform !== "win32") rmSync(path, { force: true });
+  const server = createServer((socket) => socket.resume());
+  await new Promise((resolveReady, rejectReady) => {
+    server.once("error", rejectReady);
+    server.listen(path, () => {
+      server.off("error", rejectReady);
+      writeJsonFile(join(ctx.stateDir, "control-endpoint.json"), {
+        path,
+        ready_at: new Date().toISOString(),
+        run_instance_id: ctx.runInstanceId,
+        type: "named-pipe",
       });
-      return () => rmSync(lockDir, { recursive: true, force: true });
-    } catch (error) {
-      try {
-        const stat = statSync(lockDir);
-        if (Date.now() - stat.mtimeMs > 5 * 60 * 1000) {
-          rmSync(lockDir, { recursive: true, force: true });
-          continue;
-        }
-      } catch {
-        continue;
-      }
-      if (Date.now() - started > 5000) throw error;
-    }
-  }
+      resolveReady();
+    });
+  });
+  return () => {
+    server.close();
+    if (process.platform !== "win32") rmSync(path, { force: true });
+  };
 }
 
-function readInboxMessages(ctx) {
-  if (!exists(ctx.inboxFile)) return [];
-  return readFileSync(ctx.inboxFile, "utf8")
+function acquireControlsLock(ctx) {
+  return acquireFileMutationLock(ctx.controlsFile);
+}
+
+function readControls(ctx) {
+  if (!exists(ctx.controlsFile)) return [];
+  return readFileSync(ctx.controlsFile, "utf8")
     .split("\n")
     .filter((line) => line.trim())
     .map((line) => {
@@ -614,45 +619,26 @@ function readInboxMessages(ctx) {
     .filter(Boolean);
 }
 
-function writeInboxMessages(ctx, messages) {
-  writeFileSync(
-    ctx.inboxFile,
-    messages.length
-      ? `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`
+function writeControls(ctx, controls) {
+  writeTextAtomic(
+    ctx.controlsFile,
+    controls.length
+      ? `${controls.map((control) => JSON.stringify(control)).join("\n")}\n`
       : "",
-    "utf8",
   );
 }
 
-function commandFromControlToken(token) {
-  if (CONTROL_COMMANDS.has(token)) return token;
-  if (token === "control.stop" || token === "control.cancel") return "stop";
-  const match = /^player\.(.+)$/.exec(token);
-  if (match && CONTROL_COMMANDS.has(match[1])) return match[1];
-  return undefined;
-}
-
-function commandFromInboxMessage(message) {
-  if (typeof message.type === "string") {
-    const command = commandFromControlToken(message.type.trim());
-    if (command) return command;
-  }
-  if (typeof message.body === "string") {
-    const command = message.body.trim();
-    if (CONTROL_COMMANDS.has(command)) return command;
-  }
-  if (message.body && typeof message.body === "object") {
-    const command = String(message.body.command ?? "").trim();
-    if (CONTROL_COMMANDS.has(command)) return command;
-  }
-  return undefined;
+function commandFromControl(control) {
+  if (typeof control.action !== "string") return undefined;
+  const action = control.action.trim();
+  return CONTROL_COMMANDS.has(action) ? action : undefined;
 }
 
 function runtimeWakeFile(ctx) {
   return join(ctx.stateDir, "wake.jsonl");
 }
 
-function notifyMailboxWake(ctx, reason = "run.message") {
+function notifyControlWake(ctx, reason = "control.queued") {
   try {
     writeText(
       runtimeWakeFile(ctx),
@@ -667,86 +653,85 @@ function notifyMailboxWake(ctx, reason = "run.message") {
       "a",
     );
   } catch {
-    // Wake records are advisory; the inbox remains the durable source of truth.
+    // Wake records are advisory; the Control journal remains authoritative.
   }
 }
 
-function appendInboxCommand(ctx, command) {
-  const release = acquireInboxLock(ctx);
+function appendControl(ctx, action) {
+  const release = acquireControlsLock(ctx);
   try {
-    const ts = new Date().toISOString();
-    const messages = readInboxMessages(ctx);
-    messages.push({
-      body: command,
-      from: "coordinator",
+    const run = readJsonFile(runJsonFile(ctx), {});
+    const controls = readControls(ctx);
+    controls.push({
+      action,
       id: randomUUID(),
-      queued_at: ts,
-      received_at: ts,
+      queued_at: new Date().toISOString(),
+      run_instance_id: run.run_instance_id,
       status: "queued",
-      to: `run:${basename(ctx.stateDir)}`,
-      type: `player.${command}`,
     });
-    writeInboxMessages(ctx, messages);
+    writeControls(ctx, controls);
   } finally {
     release();
   }
-  notifyMailboxWake(ctx);
+  notifyControlWake(ctx);
 }
 
-function claimInboxCommands(ctx) {
-  const release = acquireInboxLock(ctx);
+function claimControls(ctx) {
+  const release = acquireControlsLock(ctx);
   try {
-    const messages = readInboxMessages(ctx);
+    const controls = readControls(ctx);
     const commands = [];
     let changed = false;
     const claimedAt = new Date().toISOString();
-    for (const message of messages) {
-      if (message.status !== "queued") continue;
-      const command = commandFromInboxMessage(message);
+    for (const control of controls) {
+      if (control.status !== "queued" && control.status !== "delivered") continue;
+      const command =
+        control.run_instance_id === ctx.runInstanceId
+          ? commandFromControl(control)
+          : undefined;
       if (!command) {
-        message.failed_at = claimedAt;
-        message.status = "failed";
-        message.error = "Unsupported music-player command";
+        control.failed_at = claimedAt;
+        control.status = "failed";
+        control.error = "Unsupported or stale music-player Control";
         changed = true;
         continue;
       }
-      message.claimed_at = claimedAt;
-      message.claimed_by = `run:${basename(ctx.stateDir)}`;
-      message.status = "claimed";
-      commands.push({ command, id: message.id });
+      control.claimed_at = claimedAt;
+      control.status = "claimed";
+      commands.push({ command, id: control.id });
       changed = true;
     }
-    if (changed) writeInboxMessages(ctx, messages);
+    if (changed) writeControls(ctx, controls);
     return commands;
   } finally {
     release();
   }
 }
 
-function finalizeInboxCommand(ctx, id, status, error) {
+function finalizeControl(ctx, id, status, error) {
   if (!id) return;
-  const release = acquireInboxLock(ctx);
+  const release = acquireControlsLock(ctx);
   try {
-    const messages = readInboxMessages(ctx);
+    const controls = readControls(ctx);
     const timestamp = new Date().toISOString();
     let changed = false;
-    for (const message of messages) {
-      if (message.id !== id) continue;
-      message.status = status;
-      if (status === "handled") message.handled_at = timestamp;
-      else message.failed_at = timestamp;
-      if (error) message.error = error;
+    for (const control of controls) {
+      if (control.id !== id || control.status !== "claimed") continue;
+      control.status = status;
+      if (status === "handled") control.handled_at = timestamp;
+      else control.failed_at = timestamp;
+      if (error) control.error = error;
       changed = true;
     }
-    if (changed) writeInboxMessages(ctx, messages);
+    if (changed) writeControls(ctx, controls);
   } finally {
     release();
   }
 }
 
-function inboxSignature(ctx) {
+function controlsSignature(ctx) {
   try {
-    const stat = statSync(ctx.inboxFile);
+    const stat = statSync(ctx.controlsFile);
     return `${stat.size}:${stat.mtimeMs}`;
   } catch {
     return "missing";
@@ -762,14 +747,14 @@ function startControlLoop(ctx) {
       const name = file ? String(file) : "";
       if (
         !name ||
-        name === basename(ctx.inboxFile) ||
+        name === basename(ctx.controlsFile) ||
         name === basename(runtimeWakeFile(ctx))
       ) {
         dirty = true;
       }
     });
   } catch {
-    // fs.watch is advisory; the signature poll below is the portable fallback.
+    // fs.watch is advisory; signature checks remain the portable fallback.
   }
   const close = () => {
     closed = true;
@@ -778,18 +763,18 @@ function startControlLoop(ctx) {
   const promise = (async () => {
     let lastSignature = "";
     while (!ctx.stopping && !closed) {
-      const signature = inboxSignature(ctx);
+      const signature = controlsSignature(ctx);
       if (dirty || signature !== lastSignature) {
         dirty = false;
-        for (const { command, id } of claimInboxCommands(ctx)) {
+        for (const { command, id } of claimControls(ctx)) {
           try {
             handleControl(ctx, command);
-            finalizeInboxCommand(ctx, id, "handled");
+            finalizeControl(ctx, id, "handled");
           } catch (error) {
-            finalizeInboxCommand(ctx, id, "failed", error.message);
+            finalizeControl(ctx, id, "failed", error.message);
           }
         }
-        lastSignature = inboxSignature(ctx);
+        lastSignature = controlsSignature(ctx);
         continue;
       }
       await sleep(250);
@@ -851,13 +836,17 @@ async function playMain(args) {
       ),
   );
   mkdirSync(stateDir, { recursive: true });
+  const startupRun = readJsonFile(runJsonFile({ stateDir }), {});
   const ctx = {
     commandFile: join(stateDir, "command.txt"),
     current: undefined,
-    eventFile: join(stateDir, "outbox.jsonl"),
-    inboxFile: join(stateDir, "inbox.jsonl"),
+    eventFile: join(stateDir, "trace.jsonl"),
+    controlsFile: join(stateDir, "controls.jsonl"),
     pidFile: join(stateDir, "current.pid"),
     playerControlFile: join(stateDir, "player-control.txt"),
+    runInstanceId: typeof startupRun.run_instance_id === "string"
+      ? startupRun.run_instance_id
+      : undefined,
     stateDir,
     stateFile: join(stateDir, "player-state.txt"),
     statusFile: join(stateDir, "status.txt"),
@@ -872,6 +861,7 @@ async function playMain(args) {
   const player = selectPlayer(playerArg);
   const tracks = loadPlaylist(sourceArg);
   let controlLoop;
+  let closeControlServer;
   const cleanup = () => {
     ctx.stopping = true;
     writeText(ctx.stateFile, "stopped");
@@ -881,6 +871,7 @@ async function playMain(args) {
       } catch {}
     }
     controlLoop?.close();
+    closeControlServer?.();
     rmSync(ctx.pidFile, { force: true });
     rmSync(ctx.playerControlFile, { force: true });
   };
@@ -897,7 +888,7 @@ async function playMain(args) {
     process.exit(129);
   });
   try {
-    updateRunControlMetadata(ctx);
+    closeControlServer = await startControlServer(ctx);
     controlLoop = startControlLoop(ctx);
     setState(ctx, "playing");
     console.error(
@@ -952,8 +943,8 @@ function controlMain(args) {
     );
     return;
   }
-  appendInboxCommand(
-    { inboxFile: join(stateDir, "inbox.jsonl"), stateDir },
+  appendControl(
+    { controlsFile: join(stateDir, "controls.jsonl"), stateDir },
     command,
   );
   console.log(`music-player: command=${command} queued state_dir=${stateDir}`);
@@ -966,7 +957,6 @@ const directControlCommands = new Set([
   "toggle",
   "next",
   "previous",
-  "prev",
   "stop",
   "status",
 ]);

@@ -2,8 +2,7 @@
   "async": true,
   "imports": {
     "normalizer": "subagent-normalize.json",
-    "artifact": "subagent-artifact.json",
-    "message": "utility-actor-message.json"
+    "artifact": "subagent-artifact.json"
   },
   "args": [
     "input:string",
@@ -15,15 +14,6 @@
   "defaults": {
     "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
     "tools": ""
-  },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "artifact.prepared",
-      "artifact.blocked"
-    ]
   },
   "template": [
     {
@@ -43,13 +33,6 @@
         "artifact_format": "{artifact_format}",
         "model": "{model}",
         "tools": "{tools}"
-      }
-    },
-    {
-      "name": "message",
-      "values": {
-        "type": "artifact.prepared",
-        "summary": "Artifact prepared for path {artifact_path}."
       }
     }
   ]

@@ -1,7 +1,7 @@
 /**
  * Async run observability helpers
  * Zones: async runtime, ambient UI, diagnostics
- * Owns ambient summaries, terminal events, and run outbox delivery for detached command-template runs
+ * Owns ambient summaries, terminal events, and Trace-attention delivery for detached Runs
  */
 
 import {
@@ -34,8 +34,8 @@ export type RunObservedStatus =
   | "exited"
   | "cancelled"
   | "killed";
-export type RunOutboxDelivery = "log" | "notify" | "followup";
-export type RunOutboxLevel = "info" | "warning" | "error";
+export type RunTraceAttention = "log" | "notify" | "followup";
+export type RunTraceLevel = "info" | "warning" | "error";
 
 export interface RunObservation {
   activeSubagents?: number;
@@ -72,14 +72,14 @@ export interface RunSummary {
 }
 
 export interface RunUiObservationState {
+  attentionEventIds: Map<string, Set<string>>;
   eventLines: Map<string, number>;
   frame: number;
   observed: Map<string, RunObservedStatus>;
-  outboxEventIds: Map<string, Set<string>>;
 }
 
 export interface RunUiSnapshot {
-  outboxEvents: RunOutboxEvent[];
+  attentionEvents: RunAttentionEvent[];
   status: string | undefined;
   summary: RunSummary;
   transitions: RunTransition[];
@@ -97,28 +97,28 @@ export interface RunUiNotificationSink {
 
 export function createRunUiObservationState(): RunUiObservationState {
   return {
+    attentionEventIds: new Map<string, Set<string>>(),
     eventLines: new Map<string, number>(),
     frame: 0,
     observed: new Map<string, RunObservedStatus>(),
-    outboxEventIds: new Map<string, Set<string>>(),
   };
 }
 
 export function readRunUiSnapshot(
   state: RunUiObservationState,
   ownerId: string,
-  options: { includeOutbox?: boolean; stateRoot?: string } = {},
+  options: { includeAttention?: boolean; stateRoot?: string } = {},
 ): RunUiSnapshot {
   const summary = summarizeRuns(options.stateRoot, ownerId);
   const status = renderRunStatus(summary, state.frame++);
   return {
-    outboxEvents:
-      options.includeOutbox === false
+    attentionEvents:
+      options.includeAttention === false
         ? []
-        : detectRunOutboxEvents(
+        : detectRunAttentionEvents(
             state.eventLines,
             summary,
-            state.outboxEventIds,
+            state.attentionEventIds,
           ),
     status,
     summary,
@@ -137,7 +137,7 @@ export function pruneRunUiObservationState(
     snapshot.transitions.map(
       (transition) => transition.stateDir ?? transition.run,
     ),
-    state.outboxEventIds,
+    state.attentionEventIds,
   );
 }
 
@@ -194,7 +194,7 @@ export function reconcileRunTerminalNotifications(input: {
   stateRoot?: string;
 }): RunUiSnapshot {
   const snapshot = readRunUiSnapshot(input.state, input.ownerId, {
-    includeOutbox: false,
+    includeAttention: false,
     stateRoot: input.stateRoot,
   });
   deliverRunTransitionNotifications(
@@ -206,17 +206,17 @@ export function reconcileRunTerminalNotifications(input: {
   return snapshot;
 }
 
-export function deliverRunOutboxNotifications(
-  events: RunOutboxEvent[],
+export function deliverRunAttentionNotifications(
+  events: RunAttentionEvent[],
   sink: RunUiNotificationSink,
 ): void {
   for (const event of events) {
-    if (!shouldNotifyRunOutboxEvent(event)) continue;
-    const text = formatRunOutboxMessage(event);
-    sink.notify(text, getRunOutboxNotificationType(event));
-    if (!shouldSendRunOutboxFollowUp(event)) continue;
+    if (!shouldNotifyRunAttentionEvent(event)) continue;
+    const text = formatRunAttentionMessage(event);
+    sink.notify(text, getRunAttentionNotificationType(event));
+    if (!shouldSendRunAttentionFollowUp(event)) continue;
     sink.sendFollowUp({
-      customType: "pi-actors-run-message",
+      customType: "pi-actors-run-trace",
       content: text,
       display: false,
       details: event,
@@ -457,13 +457,13 @@ export interface RunTerminalSemanticResult {
   type: string;
 }
 
-export interface RunOutboxEvent {
+export interface RunAttentionEvent {
   body?: unknown;
   data?: unknown;
-  delivery: RunOutboxDelivery;
-  event: string;
+  attention: RunTraceAttention;
   id: string;
-  level: RunOutboxLevel;
+  kind: string;
+  level: RunTraceLevel;
   metadata?: Record<string, unknown>;
   run: string;
   stateDir: string;
@@ -575,48 +575,7 @@ function terminalSemanticResult(
       : typeof correlation.tool_call_id === "string"
         ? correlation.tool_call_id
         : undefined;
-  const mailbox = status.mailbox &&
-    typeof status.mailbox === "object" &&
-    !Array.isArray(status.mailbox)
-    ? status.mailbox as Record<string, unknown>
-    : {};
-  const emits = Array.isArray(mailbox.emits)
-    ? mailbox.emits.filter((item): item is string => typeof item === "string")
-    : [];
-  const outbox = readJsonlFileResilient<Record<string, unknown>>(
-    join(stateDir, "outbox.jsonl"),
-  ).records;
-  const explicit = outbox.findLast((record) => {
-    const type = String(record.type ?? record.event ?? "");
-    return emits.includes(type) && !["command.done", "run.done", "run.failed"].includes(type);
-  });
-  if (explicit) {
-    const type = String(explicit.type ?? explicit.event);
-    return {
-      ...(explicit.body === undefined
-        ? {} : { body: formatSemanticBody(explicit.body) }),
-      ...(typeof explicit.correlation_id === "string"
-        ? { correlationId: explicit.correlation_id } : correlationId ? { correlationId } : {}),
-      metadata: {
-        ...(explicit.metadata &&
-        typeof explicit.metadata === "object" &&
-        !Array.isArray(explicit.metadata)
-          ? explicit.metadata as Record<string, unknown> : {}),
-        ...(status.transport_context &&
-        typeof status.transport_context === "object" &&
-        !Array.isArray(status.transport_context)
-          ? {
-              transport_context: status.transport_context as Record<string, unknown>,
-            } : {}),
-        run: String(status.run ?? ""),
-        status: observedStatus,
-      },
-      summary: String(explicit.summary ?? type),
-      synthesized: false,
-      type,
-    };
-  }
-  const reviewCompleted = observedStatus === "done" && emits.includes("review.completed");
+  const reviewCompleted = false;
   const result = status.result &&
     typeof status.result === "object" &&
     !Array.isArray(status.result)
@@ -646,15 +605,6 @@ function terminalSemanticResult(
     synthesized: true,
     type,
   };
-}
-
-function formatSemanticBody(body: unknown): string {
-  const rendered = typeof body === "string" ? body : JSON.stringify(body);
-  const text = typeof rendered === "string" ? rendered : String(body);
-  const compact = text.trim();
-  return compact.length > TERMINAL_RESULT_CHARS
-    ? `${compact.slice(0, TERMINAL_RESULT_CHARS - 1)}…`
-    : compact;
 }
 
 function observeRun(stateDir: string): RunObservation | undefined {
@@ -1110,24 +1060,26 @@ export function detectRunTransitions(
   return transitions;
 }
 
-function normalizeOutboxDelivery(value: unknown): RunOutboxDelivery {
+function normalizeTraceAttention(value: unknown): RunTraceAttention {
   return value === "notify" || value === "followup" ? value : "log";
 }
 
-function normalizeOutboxLevel(value: unknown): RunOutboxLevel {
+function normalizeTraceLevel(value: unknown): RunTraceLevel {
   return value === "warning" || value === "error" ? value : "info";
 }
 
-function parseOutboxRecord(
+function parseAttentionRecord(
   raw: Record<string, unknown>,
   run: RunObservation,
   index: number,
-): RunOutboxEvent | undefined {
+): RunAttentionEvent | undefined {
   if (!run.stateDir) return undefined;
   const event =
-    typeof raw.event === "string" && raw.event.trim()
-      ? raw.event.trim()
-      : "run.event";
+    typeof raw.kind === "string" && raw.kind.trim()
+      ? raw.kind.trim()
+      : typeof raw.event === "string" && raw.event.trim()
+        ? raw.event.trim()
+        : "run.event";
   const summary =
     typeof raw.summary === "string" && raw.summary.trim()
       ? raw.summary.trim()
@@ -1143,10 +1095,13 @@ function parseOutboxRecord(
   return {
     ...(raw.body !== undefined ? { body: raw.body } : {}),
     ...(raw.data !== undefined ? { data: raw.data } : {}),
-    delivery: normalizeOutboxDelivery(raw.delivery),
-    event,
+    attention:
+      raw.attention === "notify" || raw.attention === "followup"
+        ? raw.attention
+        : normalizeTraceAttention(raw.delivery),
     id,
-    level: normalizeOutboxLevel(raw.level),
+    kind: event,
+    level: normalizeTraceLevel(raw.level),
     ...(raw.metadata &&
     typeof raw.metadata === "object" &&
     !Array.isArray(raw.metadata)
@@ -1159,8 +1114,12 @@ function parseOutboxRecord(
   };
 }
 
-function readOutboxRecords(run: RunObservation): Record<string, unknown>[] {
+function readTraceAttentionRecords(run: RunObservation): Record<string, unknown>[] {
   if (!run.stateDir) return [];
+  const tracePath = join(run.stateDir, "trace.jsonl");
+  if (existsSync(tracePath)) {
+    return readJsonlFileResilient<Record<string, unknown>>(tracePath).records;
+  }
   return readJsonlFileResilient<Record<string, unknown>>(
     join(run.stateDir, "outbox.jsonl"),
   ).records;
@@ -1199,15 +1158,15 @@ export function pruneRunObservationState(
   }
 }
 
-export function detectRunOutboxEvents(
+export function detectRunAttentionEvents(
   previousLineCounts: Map<string, number>,
   summary: RunSummary,
   seenEventIds: Map<string, Set<string>> = new Map(),
-): RunOutboxEvent[] {
-  const events: RunOutboxEvent[] = [];
+): RunAttentionEvent[] {
+  const events: RunAttentionEvent[] = [];
   for (const run of summary.runs) {
     const key = run.stateDir ?? run.run;
-    const records = readOutboxRecords(run);
+    const records = readTraceAttentionRecords(run);
     const previousCount = previousLineCounts.get(key) ?? 0;
     if (run.notificationPolicy === "silent") {
       previousLineCounts.set(key, records.length);
@@ -1217,7 +1176,7 @@ export function detectRunOutboxEvents(
     const start = Math.min(previousCount, records.length);
     const seen = seenEventIds.get(key) ?? new Set<string>();
     for (let index = start; index < records.length; index += 1) {
-      const event = parseOutboxRecord(records[index], run, index);
+      const event = parseAttentionRecord(records[index], run, index);
       if (!event || seen.has(event.id)) continue;
       events.push(event);
       seen.add(event.id);
@@ -1228,18 +1187,18 @@ export function detectRunOutboxEvents(
   return events;
 }
 
-export function getRunOutboxNotificationType(
-  event: RunOutboxEvent,
+export function getRunAttentionNotificationType(
+  event: RunAttentionEvent,
 ): RunTransitionNotificationType {
   return event.level;
 }
 
-export function shouldNotifyRunOutboxEvent(event: RunOutboxEvent): boolean {
-  return event.delivery === "notify" || event.delivery === "followup";
+export function shouldNotifyRunAttentionEvent(event: RunAttentionEvent): boolean {
+  return event.attention === "notify" || event.attention === "followup";
 }
 
-export function shouldSendRunOutboxFollowUp(event: RunOutboxEvent): boolean {
-  return event.delivery === "followup";
+export function shouldSendRunAttentionFollowUp(event: RunAttentionEvent): boolean {
+  return event.attention === "followup";
 }
 
 function commonDirectory(paths: string[]): string | undefined {
@@ -1297,7 +1256,7 @@ function formatNamedArtifacts(artifacts: unknown): string {
   );
 }
 
-function getOutboxField(event: RunOutboxEvent, key: string): unknown {
+function getAttentionDataField(event: RunAttentionEvent, key: string): unknown {
   return event.data &&
     typeof event.data === "object" &&
     !Array.isArray(event.data)
@@ -1313,10 +1272,10 @@ function formatBodyPreview(body: unknown): string {
   return `\nBody: ${compact.length > 500 ? `${compact.slice(0, 500)}…` : compact}`;
 }
 
-export function formatRunOutboxMessage(event: RunOutboxEvent): string {
-  if (event.event === "command.done")
+export function formatRunAttentionMessage(event: RunAttentionEvent): string {
+  if (event.kind === "command.done")
     return `Run ${event.run}: ${event.summary}`;
-  return `Run ${event.run}: ${event.summary}${formatBodyPreview(event.body)}${formatNamedArtifacts(getOutboxField(event, "artifacts"))}${formatRunFileList(getOutboxField(event, "run_files"))}`;
+  return `Run ${event.run}: ${event.summary}${formatBodyPreview(event.body)}${formatNamedArtifacts(getAttentionDataField(event, "artifacts"))}${formatRunFileList(getAttentionDataField(event, "run_files"))}`;
 }
 
 export function getRunTransitionNotificationType(

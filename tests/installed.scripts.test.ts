@@ -4,14 +4,14 @@
  */
 
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { appendBranchInboxMessage } from "../lib/rooms.ts";
+import { deliverRunControl } from "../lib/runs-control-delivery.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -70,13 +70,11 @@ test("build output mirrors JS runtime assets under dist", async () => {
     await readFile(join(process.cwd(), "dist", "pi-actors", "index.js"), "utf8"),
     'export { default } from "../index.js";\n',
   );
-  await access(join(process.cwd(), "dist", "scripts", "actor-worker.mjs"));
   await access(join(process.cwd(), "dist", "scripts", "async-runner.mjs"));
   await access(join(process.cwd(), "dist", "scripts", "build-dist.mjs"));
-  await access(join(process.cwd(), "dist", "recipes", "actor-worker.json"));
   await access(join(process.cwd(), "dist", "recipes", "utility-validate-recipe.json"));
-  await access(join(process.cwd(), "dist", "fixtures", "protocol", "actor-message-branch.json"));
-  await access(join(process.cwd(), "dist", "fixtures", "protocol", "mailbox-contract.json"));
+  await access(join(process.cwd(), "dist", "fixtures", "protocol", "control-record.json"));
+  await access(join(process.cwd(), "dist", "fixtures", "protocol", "trace-event.json"));
   await access(join(process.cwd(), "dist", "skills", "actors", "SKILL.md"));
   await access(join(process.cwd(), "dist", "skills", "swarm", "SKILL.md"));
 });
@@ -146,24 +144,70 @@ test("installed extension entrypoint imports compiled dist runtime", async () =>
   }
 });
 
-test("music-player direct control queues mailbox commands", async () => {
+test("music-player direct control queues canonical Controls", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-music-control-"));
   const stateDir = join(root, "music");
   try {
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(
+      join(stateDir, "run.json"),
+      JSON.stringify({ run: "music", run_instance_id: "generation-a" }),
+    );
     const { stdout } = await execFileAsync(process.execPath, [
       join(process.cwd(), "scripts", "music-player.mjs"),
       "next",
       stateDir,
     ]);
     assert.match(stdout, /command=next queued/);
-    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
-    assert.equal(inbox.body, "next");
-    assert.equal(inbox.status, "queued");
-    assert.equal(inbox.type, "player.next");
+    const control = JSON.parse(await readFile(join(stateDir, "controls.jsonl"), "utf8"));
+    assert.equal(control.action, "next");
+    assert.equal(control.run_instance_id, "generation-a");
+    assert.equal(control.status, "queued");
+    assert.equal(Object.hasOwn(control, "to"), false);
     const wake = JSON.parse(await readFile(join(stateDir, "wake.jsonl"), "utf8"));
     assert.equal(wake.actor, "run:music");
-    assert.equal(wake.reason, "run.message");
+    assert.equal(wake.reason, "control.queued");
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("music-player consumes publicly delivered Controls", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-music-delivery-"));
+  const stateDir = join(root, "music");
+  const source = join(root, "silence.wav");
+  const fakePlayer = join(root, "ffplay");
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(
+    join(stateDir, "run.json"),
+    JSON.stringify({ run: "music", run_instance_id: "generation-a" }),
+  );
+  await writeFile(source, "audio fixture", "utf8");
+  await writeFile(fakePlayer, "#!/bin/sh\nsleep 30\n", "utf8");
+  await chmod(fakePlayer, 0o755);
+  const child = spawn(
+    process.execPath,
+    [join(process.cwd(), "scripts", "music-player.mjs"), "play", source, "false", "70", "ffplay", stateDir],
+    { env: { ...process.env, PATH: `${root}:${process.env.PATH ?? ""}` }, stdio: "ignore" },
+  );
+  try {
+    await waitForText(join(stateDir, "control-endpoint.json"), /run_instance_id/);
+    await deliverRunControl("music", stateDir, {
+      action: "stop",
+      run_instance_id: "generation-a",
+    });
+    const code = await Promise.race([
+      new Promise<number | null>((resolve) => child.once("exit", resolve)),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("music-player did not stop")), 5000),
+      ),
+    ]);
+    assert.equal(code, 0);
+    const control = JSON.parse(await readFile(join(stateDir, "controls.jsonl"), "utf8"));
+    assert.equal(control.status, "handled");
+    assert.equal(typeof control.delivered_at, "string");
+  } finally {
+    child.kill("SIGKILL");
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -182,11 +226,9 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
         status: "running",
         template: `${process.execPath} -e "console.log('installed async ok')"`,
         values: {
-          actor_address: "run:installed-runner",
-          communication_file: join(stateDir, "communication.json"),
-          default_room: "room:installed-runner",
           run_id: "installed-runner",
           state_dir: stateDir,
+          trace_file: join(stateDir, "trace.jsonl"),
         },
       })}\n`,
     );
@@ -205,52 +247,6 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
     assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /installed async ok/);
     assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "async-runner.ts")), "");
     assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "execution.ts")), "");
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("installed actor-worker avoids importing TypeScript from node_modules", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-worker-"));
-  try {
-    const packageDir = await prepareInstalledPackage(root);
-    const stateDir = join(root, "worker-state");
-    await mkdir(stateDir, { recursive: true });
-
-    const worker = execFile(
-      process.execPath,
-      [
-        join(packageDir, "scripts", "actor-worker.mjs"),
-        "--state-dir",
-        stateDir,
-        "--run",
-        "installed-worker",
-        "--branch",
-        "worker",
-        "--poll-ms",
-        "50",
-      ],
-      { timeout: 2000 },
-    );
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    appendBranchInboxMessage(stateDir, "installed-worker", "branch:installed-worker/worker", {
-      body: { ok: true },
-      from: "run:installed-worker",
-      to: "branch:installed-worker/worker",
-      type: "task.assign",
-    });
-    const journal = await waitForText(join(stateDir, "worker-events.jsonl"), /task.handled/);
-    const statusText = await waitForText(join(stateDir, "worker-status.json"), /last_artifact/);
-    worker.kill("SIGTERM");
-
-    const status = JSON.parse(statusText);
-    assert.match(journal, /worker.started/);
-    assert.match(journal, /task.handled/);
-    assert.equal(status.handled, 1);
-    assert.equal(typeof status.last_artifact, "string");
-    assert.match(await readTextIfExists(status.last_artifact), /"ok":true|ok/);
-    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "actor-worker.ts")), "");
-    assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "mailbox-loop.ts")), "");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

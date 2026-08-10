@@ -4,7 +4,6 @@
  * Owns wrapping saved local capabilities as executable pi tools
  */
 
-import * as Rooms from "./rooms.ts";
 import * as AsyncRuns from "./async-runs.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import * as ModelContext from "./model-context.ts";
@@ -144,9 +143,6 @@ export function createRuntimeToolDefinition(
       "Optional run id override for this async template recipe invocation.",
     );
   if (isAsyncRecipe) {
-    paramSchema.correlation_id = Schema.stringSchema(
-      "Optional workflow correlation id preserved in terminal follow-up delivery.",
-    );
     paramSchema.transport_context = Schema.looseObjectSchema(
       "Optional originating transport route preserved for detached terminal follow-up.",
     );
@@ -180,7 +176,7 @@ export function createRuntimeToolDefinition(
         }
         if (isAsyncRecipe) {
           const input = params as Record<string, unknown>;
-          const { correlation_id, run_id, transport_context, ...values } = input;
+          const { run_id, transport_context, ...values } = input;
           const base = cfg.recipe ? cfg.recipe : { file: String(cfg.template) };
           const runId =
             typeof run_id === "string" && run_id.trim()
@@ -190,11 +186,7 @@ export function createRuntimeToolDefinition(
             {
               ...base,
               launch_source: "tool",
-              launch_correlation: {
-                ...(typeof correlation_id === "string"
-                  ? { correlation_id } : {}),
-                tool_call_id: toolCallId,
-              },
+              launch_correlation: { tool_call_id: toolCallId },
               ...(transport_context &&
               typeof transport_context === "object" &&
               !Array.isArray(transport_context)
@@ -218,8 +210,6 @@ export function createRuntimeToolDefinition(
             },
             ctx.cwd,
           );
-          Rooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
-          Rooms.writeCommunicationSnapshot(meta.state_dir, String(meta.run));
           return {
             content: [
               {

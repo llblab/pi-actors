@@ -20,17 +20,6 @@
     "constraints": "Bound the question, preserve contradictions, and avoid publication-style certainty when evidence is weak.",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "research.completed",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "name": "planner",

@@ -3,17 +3,52 @@
  * Owns: terminal-run archive and prune filesystem behavior.
  */
 
-import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFileSync, cpSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import { writeJsonAtomic } from "./file-state.ts";
+import { acquireFileMutationLock, writeJsonAtomic } from "./file-state.ts";
 import {
   resolveArtifactManifest,
   type RunArtifactDeclaration,
 } from "./runs-artifacts.ts";
 import { safeRunId } from "./runs-identity.ts";
 import { assertOwnedRunStateDirectory } from "./runs-ownership.ts";
+
+export type RunRetentionAction = "archive" | "prune";
+export type RunRetentionOutcome = "queued" | "handled" | "failed";
+
+export function appendRunRetentionEvidence(
+  status: Record<string, unknown>,
+  action: RunRetentionAction,
+  outcome: RunRetentionOutcome,
+  options: { error?: string; id?: string; result?: Record<string, unknown> } = {},
+): string {
+  const stateDir = String(status.state_dir);
+  const path = join(dirname(stateDir), "retention.jsonl");
+  const id = options.id ?? randomUUID();
+  const release = acquireFileMutationLock(path);
+  try {
+    appendFileSync(
+      path,
+      `${JSON.stringify({
+        action,
+        ...(options.error ? { error: options.error } : {}),
+        id,
+        outcome,
+        ...(options.result ? { result: options.result } : {}),
+        run: String(status.run ?? basename(stateDir)),
+        ...(typeof status.run_instance_id === "string"
+          ? { run_instance_id: status.run_instance_id }
+          : {}),
+        ts: new Date().toISOString(),
+      })}\n`,
+    );
+  } finally {
+    release();
+  }
+  return id;
+}
 
 function retainedArtifactFilename(name: string, path: string): string {
   const readableName = name.replace(/[^A-Za-z0-9_.-]+/g, "_") || "artifact";

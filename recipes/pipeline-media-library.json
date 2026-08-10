@@ -21,18 +21,6 @@
     "artifact_path": "./media-library.md",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "media.completed",
-      "artifact.prepared",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "name": "playlist",

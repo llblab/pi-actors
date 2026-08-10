@@ -22,14 +22,38 @@ test("validate-recipe validates one recipe file", async () => {
     const file = join(root, "recipe.json");
     await writeFile(
       file,
-      JSON.stringify({ name: "demo", args: ["name:string"], template: "echo {name}" }),
+      JSON.stringify({
+        name: "demo",
+        args: ["name:string"],
+        control: ["continue"],
+        template: "echo {name}",
+      }),
     );
     const { stdout } = await execFileAsync(process.execPath, [...nodeArgs, file]);
     const report = JSON.parse(stdout);
     assert.equal(report.ok, true);
     assert.equal(report.total, 1);
     assert.equal(report.results[0].name, "recipe");
+    assert.deepEqual(report.results[0].control, ["continue"]);
     assert.equal(report.results[0].template, "leaf");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validate-recipe rejects invalid Recipe Control declarations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-"));
+  try {
+    const file = join(root, "bad-control.json");
+    await writeFile(file, JSON.stringify({ control: ["kill"], template: "echo bad" }));
+    await assert.rejects(
+      execFileAsync(process.execPath, [...nodeArgs, file]),
+      (error: unknown) => {
+        const report = JSON.parse((error as { stdout?: string }).stdout ?? "");
+        assert.match(report.results[0].error, /runtime-reserved.*kill/);
+        return true;
+      },
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -82,7 +106,6 @@ test("validate-recipe qa accepts packaged-style async recipes", async () => {
       JSON.stringify({
         description: "Worker",
         async: true,
-        mailbox: { accepts: ["task.assign", "control.kill"], emits: ["run.done"] },
         artifacts: { report: "{state_dir}/report.md" },
         template: "{repo}/scripts/validate-recipe.mjs {target}",
       }),
@@ -109,7 +132,6 @@ test("validate-recipe qa fails exact packaged recipe diagnostics", async () => {
       join(root, "recipes", "bad-worker.json"),
       JSON.stringify({
         async: true,
-        mailbox: { accepts: ["control.stop"], emits: ["done"] },
         artifacts: { report: "/home/user/report.md" },
         template: "node scripts/missing.mjs",
       }),
@@ -127,8 +149,6 @@ test("validate-recipe qa fails exact packaged recipe diagnostics", async () => {
         const diagnostics = report.results[0].qa.diagnostics.join("\n");
         const warnings = report.results[0].qa.warnings.join("\n");
         assert.match(warnings, /description: missing or empty/);
-        assert.match(diagnostics, /mailbox.accepts: async recipes must include control.kill/);
-        assert.match(diagnostics, /mailbox.emits\[0\]: message type must use channel.action form/);
         assert.match(diagnostics, /artifacts.report: must not use a machine-local absolute path/);
         assert.match(diagnostics, /helper scripts must be referenced through \{repo\}\/scripts/);
         return true;

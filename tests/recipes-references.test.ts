@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -226,7 +226,7 @@ test("Template recipe direct delegation resolves by recipe priority", async () =
         async: true,
         args: ["message:string"],
         defaults: { message: "user" },
-        mailbox: { accepts: ["player.stop"] },
+        control: ["stop"],
         retire_when: "children_terminal",
         template: "echo {message}",
       }),
@@ -256,7 +256,7 @@ test("Template recipe direct delegation resolves by recipe priority", async () =
     assert.equal(config.async, true);
     assert.deepEqual(config.args, ["message:string"]);
     assert.deepEqual(config.defaults, { message: "parent" });
-    assert.deepEqual(config.mailbox, { accepts: ["player.stop"] });
+    assert.deepEqual(config.control, ["stop"]);
     assert.equal(config.retire_when, "children_terminal");
     assert.deepEqual(config.template, {
       args: ["message:string"],
@@ -344,9 +344,6 @@ args:
   - word:string
 defaults:
   suffix: "!"
-mailbox:
-  accepts:
-    - control.kill
 ---
 
 Human notes are advisory.
@@ -496,46 +493,18 @@ test("Template recipes reference imported defaults and explicit values", async (
   }
 });
 
-test("Template recipes preserve mailbox declarations", async () => {
+test("Template recipes reject removed mailbox declarations", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
-    const base = join(root, "base.json");
-    const recipe = join(root, "mailbox.json");
-    await writeFile(
-      base,
-      JSON.stringify({
-        defaults: { message_type: "checkpoint.ready" },
-        template: "echo base",
-      }),
-    );
+    const recipe = join(root, "removed-mailbox.json");
     await writeFile(
       recipe,
-      JSON.stringify({
-        imports: { base: "base.json" },
-        mailbox: {
-          accepts: [
-            "control.approve",
-            { type: "control.revise", requires_response: true },
-            7,
-          ],
-          emits: [
-            "{base.defaults.message_type}",
-            { type: "run.done", level: "info" },
-            false,
-          ],
-        },
-        template: "echo mailbox",
-      }),
+      JSON.stringify({ mailbox: { accepts: ["control.approve"] }, template: "echo removed" }),
     );
-
-    const config = readResolvedRecipeConfig(recipe)!;
-    assert.deepEqual(config.mailbox, {
-      accepts: [
-        "control.approve",
-        { type: "control.revise", requires_response: true },
-      ],
-      emits: ["checkpoint.ready", { type: "run.done", level: "info" }],
-    });
+    assert.throws(
+      () => readResolvedRecipeConfig(recipe),
+      /recipe\.mailbox was removed/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -577,37 +546,12 @@ test("Packaged async-run operations recipes expose actor run args", () => {
   }
 });
 
-test("Packaged actor message recipes expose envelope-aligned type args", () => {
+test("Packaged recipes contain no removed mailbox declarations", async () => {
   const recipeDir = join(__dirname, "..", "recipes");
-  for (const file of ["subagent-message.json", "utility-actor-message.json"]) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
-    assert.ok(
-      config?.args?.includes("type:string"),
-      `${file} should expose type:string`,
-    );
-    assert.ok(
-      !config?.args?.some((arg) => arg.startsWith("event_type")),
-      `${file} should not expose event_type`,
-    );
-    assert.ok(
-      !config?.args?.some((arg) => arg.startsWith("event_policy")),
-      `${file} should not expose event_policy`,
-    );
-  }
-});
-
-test("Packaged async recipes declare mailbox metadata", async () => {
-  const recipeDir = join(__dirname, "..", "recipes");
-  const files = (await readdir(recipeDir)).filter((file) =>
-    file.endsWith(".json"),
-  );
-
-  const missing: string[] = [];
+  const files = (await readdir(recipeDir)).filter((file) => file.endsWith(".json"));
   for (const file of files) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
-    if (config?.async === true && !config.mailbox) missing.push(file);
+    assert.doesNotMatch(await readFile(join(recipeDir, file), "utf8"), /\"mailbox\"\s*:/);
   }
-  assert.deepEqual(missing, []);
 });
 
 test("Packaged recipes do not ship concrete model-version defaults", async () => {
@@ -719,65 +663,14 @@ test("Packaged review coordinator preflights stage models before reviewer fanout
   assert.match(JSON.stringify(steps[1]), /repeat.*lenses|reviewer/);
 });
 
-test("Packaged actor worker recipe stays mailbox-only and cross-platform", () => {
-  const config = readResolvedRecipeConfig(
-    join(getPackagedRecipeRoot(), "actor-worker.json"),
-  )!;
-  assert.deepEqual(config.mailbox?.accepts, ["task.assign", "control.kill"]);
-  const template = JSON.stringify(config.template);
-  assert.match(template, /actor-worker\.mjs/);
-  assert.match(template, /--stale-claim-ms/);
-  assert.match(template, /--write-artifacts/);
-  assert.deepEqual(Object.keys(config.artifacts ?? {}).sort(), [
-    "journal",
-    "results",
-    "status",
+test("Packaged controlled services declare only actor-local actions", () => {
+  const recipeRoot = getPackagedRecipeRoot();
+  assert.deepEqual(readResolvedRecipeConfig(join(recipeRoot, "resource-locker.json"))?.control, [
+    "enqueue", "claim", "complete", "fail", "acquire", "renew", "release", "stop",
   ]);
-  assert.doesNotMatch(template, /control\.fifo|mkfifo|named-pipe/);
-});
-
-test("Packaged async recipes declare stop and cancel only for actor-domain handlers", async () => {
-  const allowed = new Set([
-    "coordinator-locker.json",
-    "locker.json",
-    "music-player.json",
+  assert.deepEqual(readResolvedRecipeConfig(join(recipeRoot, "music-player.json"))?.control, [
+    "play", "pause", "resume", "toggle", "next", "previous", "stop", "status",
   ]);
-  const recipeDir = join(__dirname, "..", "recipes");
-  const asyncFiles = (await readdir(recipeDir)).filter((file) => {
-    if (!file.endsWith(".json")) return false;
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
-    return config?.async === true;
-  });
-
-  for (const file of asyncFiles) {
-    const accepts =
-      readResolvedRecipeConfig(join(recipeDir, file))?.mailbox?.accepts ?? [];
-    const hasDomainStop =
-      accepts.includes("control.stop") || accepts.includes("control.cancel");
-    assert.equal(
-      hasDomainStop,
-      allowed.has(file),
-      `${file} should declare stop/cancel only when actor-domain handling is meaningful`,
-    );
-  }
-});
-
-test("Packaged async recipes expose actor-native kill control", async () => {
-  const recipeDir = join(__dirname, "..", "recipes");
-  const asyncFiles = (await readdir(recipeDir)).filter((file) => {
-    if (!file.endsWith(".json")) return false;
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
-    return config?.async === true;
-  });
-
-  for (const file of asyncFiles) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
-    const accepts = config?.mailbox?.accepts ?? [];
-    assert.ok(
-      accepts.includes("control.kill"),
-      `${file} should expose actor-native kill control`,
-    );
-  }
 });
 
 test("Template recipe rejects oversized files before parsing", async () => {

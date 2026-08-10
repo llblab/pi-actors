@@ -2,7 +2,7 @@
 name: swarm
 description: Subagent and actor orchestration with scoped locks, fanout, and quorum consensus. Use before launching multiple parallel actors or subagents for independent implementation, artifact generation, review, delegated audit, coordinated execution, or any workflow that needs autonomous coordinator decomposition and integration.
 metadata:
-  version: 0.42.3
+  version: 0.43.0
 ---
 
 # Swarm
@@ -263,48 +263,26 @@ Use the local review protocol if available.
 Report white spots, contradictions, evidence, and risks.
 ```
 
-## Async Run Adapter
+## Run Adapter
 
-Async run management is an adapter concern, not a portable Swarm script requirement. For non-trivial asynchronous agentic work, use an async-run flow when the local runtime supports it: command-template execution plus a thin detached lifecycle envelope.
+Detached execution is an adapter concern, not a portable Swarm-script requirement. When the host offers Runs, launch the composed Recipe, return its id, and rely on terminal follow-up rather than blocking or polling.
 
-- `start`: Launch a swarm run in the background and return run metadata.
-- `status`: Report whether the run is running, done, degraded, or failed.
-- `tail`: Show recent structured run events or raw logs.
-- `list`: Show known runs.
-- `cancel`: Stop an owned active run when the adapter can prove pid ownership.
+`Progress contract`: expose bounded structured Trace, logs, artifacts, status, timestamps, and final result evidence. Read these through Run inspection rather than scraping process output.
 
-`Purpose`: Keep the user interface responsive while reviewers, merger, and post-merge reviewer run. Generic run state belongs to a local async lifecycle runtime; swarm-specific execution stays in atomic utilities or command-template composition. The orchestrator should start the run, return metadata, then inspect status/tail after terminal events instead of blocking on sleeps or foreground waits.
+`Resumable checkpoint goal`: a controlled agent-backed Run may preserve context and accept a declared Control. When the host cannot preserve context, write a handoff artifact and launch a clean-context Run while marking the context loss explicitly.
 
-`Resumable checkpoint goal`: Advanced adapters should strive to support a paused subagent that can ask the orchestrator for input and then resume in the same subagent context. The portable contract is a structured coordinator checkpoint plus a coordinator reply; the mechanism may be a TTY session, persistent model session, message queue, or runtime-specific resume token. If the runtime cannot preserve context, degrade to a handoff artifact and a new subagent, and mark the context loss explicitly.
-
-`Progress contract`: async runs should expose structured state such as `progress.json`, `events.jsonl`, logs, and final result metadata. Local tools should read these files through async-run verbs instead of scraping process output.
-
-`Minimum state`: an adapter should expose `run_id`, `status`, timestamps, state directory or output directory, recent events, stdout/stderr logs, and final result metadata.
-
-`Terminal statuses`: `done`, `failed`, `timeout`, and `cancelled` are terminal. `running` and `degraded` are observable non-terminal states.
-
-`Cancellation boundary`: cancel only an owned active run when pid ownership or runtime ownership can be verified. Stale pid reuse must fail closed.
-
-`Reference binding`: Use a local generic async-run runtime or tool registry adapter. If the local runtime exposes a single action tool, bind these verbs as actions rather than adding more Swarm scripts. Swarm scripts themselves should stay atomic and narrowly specialized.
+`Cancellation boundary`: terminate only an owned active generation whose process identity the runtime can prove. Stale pid reuse must fail closed.
 
 ## Stable Multi-Agent Review Rules
 
-- Prefer independent read-only reviewers for review swarms. Use shared room messages for coordination signals and observability, not for letting reviewers converge early, unless the task explicitly asks for collaborative discussion.
-- Treat communication logs as recipe-quality evidence. Timelines show whether agents coordinate clearly, emit useful summaries, over-chat, miss handoffs, choose poor message types, or need better mailbox/artifact conventions.
-- Smoke-test provider/model availability before launching expensive fanout, or choose a provider known to be configured in the environment. A failed provider fanout creates noisy run transitions without useful review signal.
-- Keep methodology and runtime split: Swarm chooses decomposition, quorum, lenses, lock discipline, and merge shape; the local runtime supplies actors, messages, files, locks, artifacts, and cancellation.
+- Prefer independent read-only reviewers so they do not converge before synthesis.
+- Treat Trace, artifacts, and immutable reviewer results as methodology evidence.
+- Smoke-test provider/model availability before expensive fanout.
+- Keep methodology and runtime split: Swarm chooses decomposition, quorum, lenses, lock discipline, and merge shape; the Run kernel supplies execution, Trace, Control, artifacts, and lifecycle safety.
 
 ## Persistent Implementer Pattern
 
-Use this pattern only when the work benefits from long-lived workers rather than one-shot subagents. Keep task selection with the coordinator and use reusable adapter cells for queues, locks, messages, and mailbox loops.
-
-1. Coordinator assigns a concrete task with `task.assign` or an adapter-equivalent envelope.
-2. Actor claims before editing or mutating shared state.
-3. Actor executes and validates the slice.
-4. Actor posts a result plus an explicit availability/blocked status.
-5. Actor stays alive until another assignment or an explicit runtime/domain stop.
-
-Use opposite-end or lens-specific implementers only to reduce overlap, not as a default. If a host adapter cannot express this scenario from reusable cells, add missing generic cells before packaging a broad workflow.
+Use long-lived controlled services only when repeated assignments justify them. Keep task selection with the orchestrator and use explicit artifacts or task cards for claims/results. Resource exclusion may use the optional `resource-locker`; it does not become swarm authority. Prefer multiple scoped Runs over a peer protocol.
 
 ## `swarm_quorum`
 

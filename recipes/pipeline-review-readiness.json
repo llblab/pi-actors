@@ -37,18 +37,6 @@
     "min_successful_reviewers": 1,
     "merge_policy": "Preserve partial reviewer reports, branch status, and degraded confidence markers. If reviewer evidence is below threshold, do not invent consensus."
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "review.completed",
-      "pipeline.completed",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": {
     "name": "coordinator",
     "values": {

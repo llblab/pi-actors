@@ -63,13 +63,6 @@ function recipeFiles(target, all) {
     .map((file) => resolve(target, file));
 }
 
-function mailboxType(value) {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object" && typeof value.type === "string")
-    return value.type;
-  return undefined;
-}
-
 function collectTemplateStrings(value, out = []) {
   if (typeof value === "string") out.push(value);
   else if (Array.isArray(value)) value.forEach((item) => collectTemplateStrings(item, out));
@@ -124,46 +117,13 @@ function validateHelperPaths(file, config) {
   return diagnostics;
 }
 
-function validateMailboxContract(file, config) {
-  const diagnostics = [];
-  const mailbox = config.mailbox;
-  const accepts = Array.isArray(mailbox?.accepts) ? mailbox.accepts : [];
-  const emits = Array.isArray(mailbox?.emits) ? mailbox.emits : [];
-  if (config.async === true && !mailbox)
-    diagnostics.push("mailbox: async recipes must declare mailbox metadata");
-  if (config.async === true && !accepts.map(mailboxType).includes("control.kill"))
-    diagnostics.push("mailbox.accepts: async recipes must include control.kill");
-  const allowedLegacyTypes = new Set(["awaiting_assignment"]);
-  for (const [key, entries] of Object.entries({ accepts, emits })) {
-    entries.forEach((entry, index) => {
-      const type = mailboxType(entry);
-      if (!type) diagnostics.push(`mailbox.${key}[${index}]: must be a string or object with type`);
-      else if (
-        !allowedLegacyTypes.has(type) &&
-        !/^[a-z][a-z0-9_-]*\.(?:[a-z][a-z0-9_-]*|\*)$/.test(type)
-      )
-        diagnostics.push(`mailbox.${key}[${index}]: message type must use channel.action form`);
-    });
-  }
-  const allowedDomainTermination = new Set([
-    "coordinator-locker.json",
-    "locker.json",
-    "music-player.json",
-  ]);
-  const hasDomainTermination = accepts
-    .map(mailboxType)
-    .some((type) => type === "control.stop" || type === "control.cancel");
-  if (hasDomainTermination && !allowedDomainTermination.has(file.split(/[\\/]/).pop()))
-    diagnostics.push("mailbox.accepts: control.stop/control.cancel are reserved for actor-domain handlers");
-  return diagnostics;
-}
-
 function qaDiagnostics(file, config) {
   const diagnostics = [];
   const warnings = [];
   if (typeof config.description !== "string" || !config.description.trim())
     warnings.push("description: missing or empty");
-  diagnostics.push(...validateMailboxContract(file, config));
+  if (config.mailbox !== undefined)
+    diagnostics.push("recipe.mailbox was removed; use control actions and Trace events");
   diagnostics.push(...validateArtifactDeclarations(config));
   diagnostics.push(...validateHelperPaths(file, config));
   const platformSpecificTemplate = collectTemplateStrings(config.template).some(
@@ -201,17 +161,7 @@ function validateFile(file, qa = false) {
         config.imports && typeof config.imports === "object"
           ? Object.keys(config.imports).sort()
           : [],
-      mailbox:
-        config.mailbox && typeof config.mailbox === "object"
-          ? {
-              accepts: Array.isArray(config.mailbox.accepts)
-                ? config.mailbox.accepts
-                : [],
-              emits: Array.isArray(config.mailbox.emits)
-                ? config.mailbox.emits
-                : [],
-            }
-          : undefined,
+      control: Array.isArray(config.control) ? config.control : undefined,
       ...(qa
         ? {
             qa: {

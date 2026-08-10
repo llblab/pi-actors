@@ -23,16 +23,6 @@
     "report": "{report_path}",
     "summary": "{summary_path}"
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "repeat": "{prompts.length}",
   "parallel": true,
   "failure": "branch",

@@ -87,17 +87,13 @@ function templateShape(value: unknown): Record<string, unknown> {
 
 function contractShape(recipe: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!recipe) return undefined;
-  const mailbox = recipe.mailbox && typeof recipe.mailbox === "object" && !Array.isArray(recipe.mailbox)
-    ? recipe.mailbox as Record<string, unknown>
-    : {};
   return {
     argument_count: countArray(recipe.args),
     artifact_count: countRecord(recipe.artifacts),
     async: recipe.async === true,
     default_count: countRecord(recipe.defaults),
     import_count: countRecord(recipe.imports),
-    mailbox_accepts_count: countArray(mailbox.accepts),
-    mailbox_emits_count: countArray(mailbox.emits),
+    control_action_count: countArray(recipe.control),
     template_shape: templateShape(recipe.template),
   };
 }

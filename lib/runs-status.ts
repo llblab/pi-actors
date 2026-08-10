@@ -25,10 +25,17 @@ type RunJsonReader = (path: string) => Record<string, unknown> | undefined;
 function getInterruptedRunStatus(
   stateDir: string,
 ): "cancelled" | "killed" | undefined {
-  const events = readJsonlFileResilient<Record<string, unknown>>(
+  const trace = readJsonlFileResilient<Record<string, unknown>>(
+    join(stateDir, "trace.jsonl"),
+  ).records.slice(-200);
+  for (const event of trace.reverse()) {
+    if (event.kind === "run.kill") return "killed";
+    if (event.kind === "run.cancel") return "cancelled";
+  }
+  const legacyEvents = readJsonlFileResilient<Record<string, unknown>>(
     join(stateDir, "events.jsonl"),
   ).records.slice(-200);
-  for (const event of events.reverse()) {
+  for (const event of legacyEvents.reverse()) {
     if (event.event === "run.kill") return "killed";
     if (event.event === "run.cancel") return "cancelled";
   }
@@ -66,10 +73,8 @@ export function buildRunStatus(
   );
   return {
     ...meta,
-    eventsFile: join(stateDir, "events.jsonl"),
-    evidenceFile: join(stateDir, "review-evidence.json"),
-    inboxFile: join(stateDir, "inbox.jsonl"),
-    outboxFile: join(stateDir, "outbox.jsonl"),
+    traceFile: join(stateDir, "trace.jsonl"),
+    executionFile: join(stateDir, "execution.json"),
     process_identity_status: processIdentity.status,
     progress: readJson(join(stateDir, "progress.json")) || null,
     result: result || null,

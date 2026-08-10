@@ -16,24 +16,15 @@
     "volume": "70",
     "player": "auto"
   },
-  "mailbox": {
-    "accepts": [
-      "control.stop",
-      "control.cancel",
-      "control.kill",
-      "player.play",
-      "player.pause",
-      "player.resume",
-      "player.toggle",
-      "player.next",
-      "player.previous",
-      "player.stop",
-      "player.status"
-    ],
-    "emits": [
-      "player.track",
-      "player.stopped"
-    ]
-  },
+  "control": [
+    "play",
+    "pause",
+    "resume",
+    "toggle",
+    "next",
+    "previous",
+    "stop",
+    "status"
+  ],
   "template": "{repo}/scripts/music-player.mjs {command} {source} {loop} {volume} {player} {state_dir}"
 }

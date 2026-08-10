@@ -14,6 +14,7 @@ import type {
 } from "./command-templates.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import * as Paths from "./paths.ts";
+import * as RecipeControl from "./recipe-control.ts";
 
 const MAX_RECIPE_FILE_BYTES = 1024 * 1024;
 const MAX_RECIPE_IMPORT_DEPTH = 32;
@@ -25,23 +26,6 @@ export interface TemplateRecipeImportBinding {
 }
 
 export type TemplateRecipeImport = string | TemplateRecipeImportBinding;
-
-export type TemplateRecipeMailboxEntry =
-  | string
-  | {
-      type: string;
-      body_schema?: unknown;
-      ack?: boolean | string;
-      idempotency?: string;
-      requires_response?: boolean;
-      level?: string;
-      summary?: string;
-    };
-
-export interface TemplateRecipeMailbox {
-  accepts?: TemplateRecipeMailboxEntry[];
-  emits?: TemplateRecipeMailboxEntry[];
-}
 
 export interface TemplateRecipeDefinition {
   name?: string;
@@ -61,7 +45,7 @@ export interface TemplateRecipeDefinition {
   accept_output?: "review_evidence";
   output?: string;
   artifacts?: Record<string, string>;
-  mailbox?: TemplateRecipeMailbox;
+  control?: string[];
   retire_when?: "children_terminal";
   retry?: number | string;
   failure?: CommandTemplates.CommandTemplateFailureScope;
@@ -912,6 +896,7 @@ export function readResolvedRecipeConfig(
   }
   const raw = readRawRecipeConfig(path);
   if (!raw || !Object.hasOwn(raw, "template")) return undefined;
+  RecipeControl.assertRecipeHasNoMailbox(raw);
   const imports: Record<string, ImportedRecipe> = {};
   for (const [alias, binding] of Object.entries(getRecipeImports(raw))) {
     const importPath = resolveRecipeImportPath(
@@ -975,9 +960,11 @@ export function readResolvedRecipeConfig(
   const artifactSource = isRecord(substituted.artifacts)
     ? substituted.artifacts
     : delegated?.artifacts;
-  const mailboxSource = isRecord(substituted.mailbox)
-    ? substituted.mailbox
-    : delegated?.mailbox;
+  const control = RecipeControl.normalizeRecipeControl(
+    Object.hasOwn(substituted, "control")
+      ? substituted.control
+      : delegated?.control,
+  );
   return {
     name: recipeName,
     ...(typeof substituted.description === "string" &&
@@ -1052,30 +1039,7 @@ export function readResolvedRecipeConfig(
           ),
         }
       : {}),
-    ...(isRecord(mailboxSource)
-      ? {
-          mailbox: {
-            ...(Array.isArray(mailboxSource.accepts)
-              ? {
-                  accepts: mailboxSource.accepts.filter(
-                    (value): value is TemplateRecipeMailboxEntry =>
-                      typeof value === "string" ||
-                      (isRecord(value) && typeof value.type === "string"),
-                  ),
-                }
-              : {}),
-            ...(Array.isArray(mailboxSource.emits)
-              ? {
-                  emits: mailboxSource.emits.filter(
-                    (value): value is TemplateRecipeMailboxEntry =>
-                      typeof value === "string" ||
-                      (isRecord(value) && typeof value.type === "string"),
-                  ),
-                }
-              : {}),
-          },
-        }
-      : {}),
+    ...(control !== undefined ? { control } : {}),
     ...(substituted.retire_when === "children_terminal" ||
     delegated?.retire_when === "children_terminal"
       ? { retire_when: "children_terminal" as const }

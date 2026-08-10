@@ -98,7 +98,7 @@ function fakePiScript(): string {
     "}",
     "",
     'if (task.includes("Normalize this subagent output")) {',
-    '  const refs = [...new Set(full.match(/ACTOR_EVIDENCE_REF: review-evidence\\.json#command-\\d{3}/g) || [])];',
+    '  const refs = [...new Set(full.match(/ACTOR_EVIDENCE_REF: execution\\.json#command-\\d{3}/g) || [])];',
     '  console.log(`ACTOR_REVIEW_RESULT\\nStatus: degraded\\nSummary: deterministic dogfood fixture completed\\n${refs.join("\\n")}`);',
     "  process.exit(0);",
     "}",
@@ -141,16 +141,15 @@ test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
       process.cwd(),
     );
 
-    await waitForFile(join(stateDir, "result.json"), 8000);
+    await waitForFile(join(stateDir, "result.json"), 20000);
     const status = getRunStatus(stateDir);
     const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8"));
     const progress = JSON.parse(await readFile(join(stateDir, "progress.json"), "utf8"));
     const stdout = await readFile(join(stateDir, "stdout.log"), "utf8");
     const stderr = await readFile(join(stateDir, "stderr.log"), "utf8");
-    const events = await readFile(join(stateDir, "events.jsonl"), "utf8");
-    const outbox = await readFile(join(stateDir, "outbox.jsonl"), "utf8");
+    const trace = await readFile(join(stateDir, "trace.jsonl"), "utf8");
     const evidence = JSON.parse(
-      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+      await readFile(join(stateDir, "execution.json"), "utf8"),
     );
 
     assert.equal(meta.model_policy?.model.source, "inherited");
@@ -162,8 +161,8 @@ test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
     assert.match(stdout, /Status: degraded/);
     assert.doesNotMatch(stdout, /insufficient_data/);
     assert.equal(stderr.trim(), "");
-    assert.match(events, /"prompt_file"/);
-    assert.match(outbox, /"run_files"/);
+    assert.match(trace, /"prompt_file"/);
+    assert.match(trace, /"run_files"/);
     assert.equal(evidence.status, "done");
     assert.equal(evidence.model_policy.model.source, "inherited");
     assert.equal(evidence.report_evidence.claims_complete, false);

@@ -47,20 +47,6 @@
     "merger_model": "{current_model}",
     "judge_model": "{current_model}"
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "review.completed",
-      "verification.completed",
-      "merge.completed",
-      "judge.completed",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "parallel": true,

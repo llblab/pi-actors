@@ -54,7 +54,7 @@ export function acquireStateStartLock(
   stateDir: string,
   options: FileMutationLockOptions = {},
 ): () => void {
-  return acquireFileMutationLock(join(stateDir, ".lifecycle"), options);
+  return acquireFileMutationLock(`${stateDir}.lifecycle`, options);
 }
 
 export function prepareStateDirForStart(
@@ -86,15 +86,17 @@ export function prepareStateDirForStart(
     }
   }
   for (const file of [
+    "control-endpoint.json",
+    "controls.jsonl",
     "events.jsonl",
-    "inbox.jsonl",
-    "outbox.jsonl",
+    "execution.json",
     "progress.json",
     "result.json",
     "stderr.log",
     "stdout.log",
     "terminal-delivery-failure.json",
     "terminal-handled.json",
+    "trace.jsonl",
   ]) {
     rmSync(join(stateDir, file), { force: true });
   }

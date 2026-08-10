@@ -43,6 +43,7 @@ const { execCommandTemplate } = await importRuntimeModule("command-templates");
 const { applyOutputAcceptancePolicy, executeRegisteredTool } =
   await importRuntimeModule("execution");
 const { writeJsonAtomic } = await importRuntimeModule("file-state");
+const { appendRunTraceEvent } = await importRuntimeModule("runs-trace");
 
 function quoteCommandDetailPart(value) {
   if (value === "") return "''";
@@ -77,25 +78,24 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
   const runPath = join(stateDir, "run.json");
   const progressPath = join(stateDir, "progress.json");
   const resultPath = join(stateDir, "result.json");
-  const eventsPath = join(stateDir, "events.jsonl");
-  const outboxPath = join(stateDir, "outbox.jsonl");
+  const tracePath = join(stateDir, "trace.jsonl");
   const stdoutPath = join(stateDir, "stdout.log");
   const stderrPath = join(stateDir, "stderr.log");
-  const evidencePath = join(stateDir, "review-evidence.json");
+  const executionPath = join(stateDir, "execution.json");
   const meta = JSON.parse(readFileSync(runPath, "utf8"));
 
-  function event(name, data = {}) {
-    appendFileSync(
-      eventsPath,
-      `${JSON.stringify({ event: name, ts: new Date().toISOString(), ...data })}\n`,
-    );
+  function event(kind, data = {}) {
+    appendRunTraceEvent(stateDir, { kind, data });
   }
 
-  function outbox(name, summary, data = {}, delivery = "log", level = "info") {
-    appendFileSync(
-      outboxPath,
-      `${JSON.stringify({ body: data, data, delivery, event: name, from: `run:${meta.run}`, level, summary, to: "coordinator", ts: new Date().toISOString(), type: name })}\n`,
-    );
+  function observation(kind, summary, data = {}, delivery = "log", level = "info") {
+    appendRunTraceEvent(stateDir, {
+      kind,
+      summary,
+      data,
+      ...(delivery === "followup" ? { attention: "followup" } : {}),
+      ...(level === "error" ? { level: "error" } : {}),
+    });
   }
 
   function progress(phase, extra = {}) {
@@ -116,8 +116,8 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
   const stageOccurrences = new Map();
   let reportEvidence;
 
-  function writeEvidenceManifest(status) {
-    writeJsonAtomic(evidencePath, {
+  function writeExecutionManifest(status) {
+    writeJsonAtomic(executionPath, {
       version: 1,
       run: meta.run,
       status,
@@ -279,10 +279,10 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       .filter((record) =>
         ["reviewer", "verifier", "merger", "judge"].includes(record.stage)
       )
-      .map((record) => `review-evidence.json#${record.id}`);
+      .map((record) => `execution.json#${record.id}`);
     if (required.length === 0) return undefined;
     const cited = [...new Set(
-      text.match(/review-evidence\.json#command-\d{3}/g) || [],
+      text.match(/execution\.json#command-\d{3}/g) || [],
     )].sort();
     const missing = required.filter((reference) => !cited.includes(reference));
     const claimsComplete = /\bStatus\b[\s:*#_-]{0,40}\bcomplete\b/i.test(text);
@@ -358,7 +358,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
         .filter((record) =>
           ["reviewer", "verifier", "merger", "judge"].includes(record.stage)
         )
-        .map((record) => `ACTOR_EVIDENCE_REF: review-evidence.json#${record.id}`);
+        .map((record) => `ACTOR_EVIDENCE_REF: execution.json#${record.id}`);
       if (references.length > 0) {
         appendFileSync(
           materialized.promptFile,
@@ -379,7 +379,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       occurrence,
     });
     evidenceRecords.push(startedEvidence);
-    writeEvidenceManifest("running");
+    writeExecutionManifest("running");
     event("command.start", {
       activeSubagents,
       command_id: commandId,
@@ -400,7 +400,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     );
     result = {
       ...result,
-      evidenceRef: `review-evidence.json#${commandId}`,
+      evidenceRef: `execution.json#${commandId}`,
     };
     const preflightDiagnostic = result.code !== 0
       ? buildReviewPreflightDiagnostic({
@@ -435,7 +435,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       occurrence,
       startedAt: startedEvidence.started_at,
     });
-    writeEvidenceManifest("running");
+    writeExecutionManifest("running");
     activeSubagents = Math.max(0, activeSubagents - 1);
     completedSubagents += 1;
     if (result.code !== 0) {
@@ -463,13 +463,13 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
         : {}),
       ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
     });
-    outbox(
+    observation(
       "command.done",
       `Command ${summarizeCommandDetail(commandDetail)} completed with code ${result.code}`,
       {
         activeSubagents,
         ...(meta.artifacts ? { artifacts: meta.artifacts } : {}),
-        run_files: [stdoutPath, stderrPath, resultPath, eventsPath, outboxPath, evidencePath],
+        run_files: [stdoutPath, stderrPath, resultPath, tracePath, executionPath],
         command_id: commandId,
         code: result.code,
         command: commandDetail,
@@ -517,7 +517,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       };
       throw error;
     }
-    writeEvidenceManifest("done");
+    writeExecutionManifest("done");
     progress("done", {
       completed: 1,
       failures: result.details.nonCriticalFailures || [],
@@ -535,7 +535,7 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     const message = error instanceof Error ? error.message : String(error);
     const details = error && typeof error === "object" ? error.details : undefined;
     appendFileSync(stderrPath, `${message}\n`);
-    writeEvidenceManifest("failed");
+    writeExecutionManifest("failed");
     progress("failed", {
       completed: 0,
       failures: Array.isArray(details?.branches) && details.branches.length > 0

@@ -4,11 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import {
-  readActorInspectorPreviews,
-  readActorInspectorRuns,
-  readActorInspectorTurns,
-} from "../lib/inspector.ts";
+import { readExecutionTurns } from "../lib/execution-sessions.ts";
+import { readActorInspectorRuns } from "../lib/inspector.ts";
 
 async function writeRun(
   root: string,
@@ -55,7 +52,7 @@ test("inspector contains manifest session paths beneath owned run sessions", asy
       ].join("\n"),
     );
     await writeFile(
-      join(owned, "review-evidence.json"),
+      join(owned, "execution.json"),
       JSON.stringify({
         commands: [
           {
@@ -65,37 +62,9 @@ test("inspector contains manifest session paths beneath owned run sessions", asy
         ],
       }),
     );
-    const output = JSON.stringify(readActorInspectorTurns(owned));
+    const output = JSON.stringify(readExecutionTurns(owned));
     assert.equal(output, "[]");
     assert.doesNotMatch(output, /FOREIGN_SECRET/);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("communication previews redact secret-bearing bodies", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-redact-"));
-  try {
-    const stateDir = await writeRun(root, "owned", "owner");
-    await writeFile(
-      join(stateDir, "inbox.jsonl"),
-      `${JSON.stringify({
-        body: {
-          clientSecret: "hidden-client",
-          note: '{"private_key":"hidden-key"}',
-          token: "hidden-token",
-        },
-        from: "coordinator",
-        received_at: "2026-01-01T00:00:00.000Z",
-        to: "run:owned",
-        type: "task.assign",
-      })}\n`,
-    );
-    const output = JSON.stringify(
-      readActorInspectorPreviews(root, 10, { ownerId: "owner" }),
-    );
-    assert.doesNotMatch(output, /hidden-client|hidden-key|hidden-token/);
-    assert.match(output, /REDACTED/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -1,5 +1,5 @@
 /**
- * Actor Inspector run actions.
+ * Actor Inspector actions for concrete Run instances.
  * Owns: exact-session run-action authorization, canonical kill routing, and bounded operator feedback.
  */
 
@@ -29,7 +29,7 @@ function bounded(value: unknown): string {
     : `${text.slice(0, FEEDBACK_LIMIT - 1)}…`;
 }
 
-export function killOwnedInspectorRun(
+export function killOwnedRunFromInspector(
   ownerId: string,
   run: string,
   stateRoot: string,

@@ -37,20 +37,6 @@
     "risk_policy": "Preserve minority high-impact risks and ideas; separate confirmed issues from hypotheses.",
     "output_format": "Markdown sections: Status (complete/degraded/insufficient_data), Summary, Consensus Findings, Minority Findings, Verification, Judge Notes, Risks, Next Actions."
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "review.completed",
-      "verification.completed",
-      "merge.completed",
-      "judge.completed",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "name": "coordinator",

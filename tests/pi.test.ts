@@ -18,7 +18,7 @@ test("Actor notifications queue follow-ups for busy agents and trigger an idle t
   const message = {
     customType: "pi-actors-run",
     content: "Run review completed.",
-    display: true as const,
+    display: false as const,
     details: { run: "review" },
   };
   sink.sendFollowUp(message);

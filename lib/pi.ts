@@ -16,7 +16,7 @@ export interface PiNotificationSink {
   sendFollowUp(message: {
     customType: string;
     content: string;
-    display: true;
+    display: false;
     details: unknown;
   }): void;
 }

@@ -90,7 +90,7 @@ export interface RunUiNotificationSink {
   sendFollowUp(message: {
     customType: string;
     content: string;
-    display: true;
+    display: false;
     details: unknown;
   }): void;
 }
@@ -158,7 +158,7 @@ export function deliverRunTransitionNotifications(
       sink.sendFollowUp({
         customType: "pi-actors-run",
         content: text,
-        display: true,
+        display: false,
         details: transition,
       });
       if (transition.stateDir) {
@@ -218,7 +218,7 @@ export function deliverRunOutboxNotifications(
     sink.sendFollowUp({
       customType: "pi-actors-run-message",
       content: text,
-      display: true,
+      display: false,
       details: event,
     });
   }

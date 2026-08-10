@@ -338,12 +338,17 @@ test("Successful reviews keep semantic output out of follow-up context", async (
     assert.match(transition.semanticResult?.body ?? "", /^Status: complete/);
     assert.equal((transition.semanticResult?.body?.length ?? 0) <= 4_000, true);
 
-    const delivered: Array<{ content: string; details: unknown }> = [];
+    const delivered: Array<{
+      content: string;
+      details: unknown;
+      display: false;
+    }> = [];
     deliverRunTransitionNotifications([transition], {
       notify: () => {},
       sendFollowUp: (message) => delivered.push(message),
     });
     assert.equal(delivered.length, 1);
+    assert.equal(delivered[0].display, false);
     assert.equal(
       delivered[0].content,
       `Run: \`review\`\nStatus: \`done\`\nBase: \`${stateDir}\``,

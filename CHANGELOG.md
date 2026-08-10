@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.42.3: Follow-up Display Hotfix
+
+- `[Follow-up Display]` Made actor terminal and outbox follow-up messages invisible as injected LLM context while retaining queued delivery and idle-turn wakeups. Impact: the transcript no longer shows both the coordinator response and a duplicate custom-message card with the same follow-up text.
+
 ## 0.42.2: Inspector Key Rail and Terminal Follow-up Context
 
 - `[Inspector Key Rail]` Moved every Inspector hotkey hint onto the bottom border, replacing the dedicated two-row footer with a border-connected rail. Blue key labels remain, while descriptions and `─` connectors use the border accent instead of bullet separators; the main viewport cap rises from 16 to 24 rows. Impact: the Inspector gains two content rows without losing keyboard discoverability, and the kill confirmation dialog now shares the same visual grammar.

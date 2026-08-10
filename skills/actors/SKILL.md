@@ -2,7 +2,7 @@
 name: actors
 description: Required practical guide for non-trivial pi-actors use, including parallel actor launches, subagent fanout, and autonomous coordinator workflows. Read before using or changing spawn, message, inspect, actor runs, tools, recipes, command templates, async lifecycle, mailboxes, artifacts, and local orchestration mechanics.
 metadata:
-  version: 0.42.2
+  version: 0.42.3
 ---
 
 # Actors (pi-actors)
@@ -126,7 +126,7 @@ Views:
 - `artifacts`: declared artifact paths/status plus the same bounded owned review-evidence manifest when present.
 - `recipes` target: registry summary for active, shadowed, invalid, disabled, and diagnostic recipe entries.
 
-Let terminal notifications arrive. They queue through Pi's follow-up delivery mode, so a busy coordinator finishes its current work before receiving concurrently completed actor results; the host's `followUpMode` controls whether queued results arrive together or one at a time. Their LLM context content stays limited to run id, status, one base path, and relative artifact names; inspect state for raw output while correlation and semantic details remain outside LLM context. File watching accelerates delivery, while a bounded ten-second terminal-only reconciliation pass recovers missed or failed watcher activity without replaying outbox traffic; watcher degradation and rearm remain visible diagnostics. When a deferred actor result gates the next step, wait for that terminal follow-up instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Idle coordinators still start a normal turn through `triggerTurn: true`. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
+Let terminal notifications arrive. They queue through Pi's follow-up delivery mode, so a busy coordinator finishes its current work before receiving concurrently completed actor results; the host's `followUpMode` controls whether queued results arrive together or one at a time. Pi injects these notifications invisibly into LLM context while waking an idle coordinator, avoiding a duplicate custom-message copy in the transcript. Their LLM context content stays limited to run id, status, one base path, and relative artifact names; inspect state for raw output while correlation and semantic details remain outside LLM context. File watching accelerates delivery, while a bounded ten-second terminal-only reconciliation pass recovers missed or failed watcher activity without replaying outbox traffic; watcher degradation and rearm remain visible diagnostics. When a deferred actor result gates the next step, wait for that terminal follow-up instead of scheduling continuation loops, repeatedly inspecting, or mutating the actor's reviewed scope. Idle coordinators still start a normal turn through `triggerTurn: true`. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue or stuck run.
 
 ## Runtime Communication Rules
 

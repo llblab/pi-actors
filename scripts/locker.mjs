@@ -9,18 +9,32 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import readline from "node:readline";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+function packageRoot() {
+  return dirname(dirname(fileURLToPath(import.meta.url)));
+}
+
+async function importRuntimeModule(name) {
+  const root = packageRoot();
+  const compiled = join(root, "dist", "lib", `${name}.js`);
+  const source = join(root, "lib", `${name}.ts`);
+  return await import(pathToFileURL(existsSync(compiled) ? compiled : source).href);
+}
+
+const { acquireFileMutationLock, writeJsonAtomic, writeTextAtomic } =
+  await importRuntimeModule("file-state");
 
 function parseArgs(argv) {
   const args = { mode: "serve", stateDir: "", leaseMs: 600000, lines: 20 };
@@ -45,8 +59,10 @@ async function runLocker(argv = process.argv.slice(2)) {
   const queuePath = join(stateDir, "queue.json");
   const locksPath = join(stateDir, "locks.json");
   const journalPath = join(stateDir, "journal.jsonl");
-  const outboxPath = join(stateDir, "outbox.jsonl");
+  const tracePath = join(stateDir, "trace.jsonl");
+  const controlsPath = join(stateDir, "controls.jsonl");
   const controlPath = join(stateDir, "control.fifo");
+  let runInstanceId;
   mkdirSync(stateDir, { recursive: true });
 
   function readJson(path, fallback) {
@@ -59,8 +75,7 @@ async function runLocker(argv = process.argv.slice(2)) {
   }
 
   function writeJson(path, value) {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    writeJsonAtomic(path, value);
   }
 
   function getControlEndpoint() {
@@ -73,11 +88,12 @@ async function runLocker(argv = process.argv.slice(2)) {
   }
 
   function writeControlEndpoint(endpoint) {
-    writeJson(join(stateDir, "control.json"), endpoint);
-    const runPath = join(stateDir, "run.json");
-    const run = readJson(runPath, undefined);
-    if (run && typeof run === "object")
-      writeJson(runPath, { ...run, control: endpoint });
+    if (!runInstanceId) throw new Error("Run generation unavailable for Control endpoint");
+    writeJson(join(stateDir, "control-endpoint.json"), {
+      ...endpoint,
+      ready_at: new Date().toISOString(),
+      run_instance_id: runInstanceId,
+    });
   }
 
   function journal(event, data = {}) {
@@ -87,10 +103,18 @@ async function runLocker(argv = process.argv.slice(2)) {
     );
   }
 
-  function outbox(type, summary, body = {}, level = "info") {
+  function emitTrace(kind, summary, data = {}, level = "info") {
     appendFileSync(
-      outboxPath,
-      `${JSON.stringify({ to: "coordinator", from: `run:${process.env.run_id ?? "locker"}`, type, event: type, summary, body, data: body, delivery: "followup", level, ts: new Date().toISOString() })}\n`,
+      tracePath,
+      `${JSON.stringify({
+        attention: "followup",
+        data,
+        id: randomUUID(),
+        kind,
+        level,
+        summary,
+        ts: new Date().toISOString(),
+      })}\n`,
     );
   }
 
@@ -108,16 +132,88 @@ async function runLocker(argv = process.argv.slice(2)) {
     return kept;
   }
 
-  function normalizeMessage(line) {
+  function normalizeControl(line) {
     const trimmed = line.trim();
     if (!trimmed) return undefined;
-    if (["stop", "quit", "exit", "cancel"].includes(trimmed.toLowerCase())) {
-      return { type: "control.stop", body: {} };
-    }
     try {
-      return JSON.parse(trimmed);
-    } catch {
-      return { type: "lock.enqueue", body: { task: trimmed } };
+      const control = JSON.parse(trimmed);
+      if (
+        !control ||
+        typeof control !== "object" ||
+        typeof control.id !== "string" ||
+        typeof control.action !== "string"
+      ) {
+        throw new Error("invalid Control envelope");
+      }
+      return control;
+    } catch (error) {
+      throw new Error(
+        `Invalid Control envelope: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  function acquireControlsLock() {
+    return acquireFileMutationLock(controlsPath);
+  }
+
+  function readControls() {
+    if (!existsSync(controlsPath)) return [];
+    return readFileSync(controlsPath, "utf8")
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(Boolean);
+  }
+
+  function writeControls(controls) {
+    writeTextAtomic(
+      controlsPath,
+      controls.length
+        ? `${controls.map((control) => JSON.stringify(control)).join("\n")}\n`
+        : "",
+    );
+  }
+
+  function claimControl(id) {
+    const release = acquireControlsLock();
+    try {
+      const controls = readControls();
+      const control = controls.find((item) => item.id === id);
+      if (
+        !control ||
+        control.run_instance_id !== runInstanceId ||
+        (control.status !== "queued" && control.status !== "delivered")
+      ) {
+        return undefined;
+      }
+      control.claimed_at = new Date().toISOString();
+      control.status = "claimed";
+      writeControls(controls);
+      return { ...control };
+    } finally {
+      release();
+    }
+  }
+
+  function finalizeControl(id, status, error) {
+    const release = acquireControlsLock();
+    try {
+      const controls = readControls();
+      const control = controls.find((item) => item.id === id);
+      if (!control || control.status !== "claimed") return;
+      control.status = status;
+      control[`${status}_at`] = new Date().toISOString();
+      if (error) control.error = error;
+      writeControls(controls);
+    } finally {
+      release();
     }
   }
 
@@ -165,21 +261,21 @@ async function runLocker(argv = process.argv.slice(2)) {
     return items.splice(index, 1)[0];
   }
 
-  function handle(message) {
-    const type = message.type || message.event || "lock.enqueue";
+  function handle(control) {
+    const action = control.action;
     const body =
-      message.body && typeof message.body === "object" ? message.body : message;
+      control.input && typeof control.input === "object" ? control.input : {};
     let queue = readJson(queuePath, { items: [] });
     let locks = cleanExpiredLocks(readJson(locksPath, {}));
-    if (type === "control.stop" || type === "control.cancel") {
+    if (action === "stop") {
       writeJson(locksPath, locks);
-      journal("control.stop", {});
-      outbox("lock.stopped", "Locker stopped", {
+      journal("lock.stopped", {});
+      emitTrace("lock.stopped", "Locker stopped", {
         queueDepth: queue.items?.length ?? 0,
       });
-      process.exit(0);
+      return true;
     }
-    if (type === "lock.enqueue" || type === "coord.enqueue") {
+    if (action === "enqueue") {
       const item = {
         id: body.id || `task-${Date.now()}`,
         task: body.task ?? body,
@@ -190,19 +286,20 @@ async function runLocker(argv = process.argv.slice(2)) {
       writeJson(queuePath, queue);
       writeJson(locksPath, locks);
       journal("lock.enqueued", { id: item.id, resources: item.resources });
-      outbox("lock.enqueued", `Queued task ${item.id}`, {
+      emitTrace("lock.enqueued", `Queued task ${item.id}`, {
         id: item.id,
         queueDepth: queue.items.length,
       });
       return;
     }
-    if (type === "lock.claim" || type === "coord.claim") {
-      const owner = body.owner || message.from || "worker";
+    if (action === "claim") {
+      const owner = body.owner;
+      if (!owner) throw new Error("claim input.owner is required");
       const item = nextTask(queue, locks);
       if (!item) {
         writeJson(queuePath, queue);
         writeJson(locksPath, locks);
-        outbox("lock.empty", "No claimable task", {
+        emitTrace("lock.empty", "No claimable task", {
           owner,
           queueDepth: queue.items?.length ?? 0,
         });
@@ -217,15 +314,16 @@ async function runLocker(argv = process.argv.slice(2)) {
         owner,
         resources: item.resources,
       });
-      outbox("lock.assigned", `Assigned task ${item.id}`, { owner, task: item });
+      emitTrace("lock.assigned", `Assigned task ${item.id}`, { owner, task: item });
       return;
     }
-    if (type === "lock.acquire") {
+    if (action === "acquire") {
       const resource = body.resource;
-      const owner = body.owner || message.from || "worker";
-      if (!resource) throw new Error("lock.acquire body.resource is required");
+      const owner = body.owner;
+      if (!resource || !owner)
+        throw new Error("acquire input.resource and input.owner are required");
       if (locks[resource])
-        outbox(
+        emitTrace(
           "lock.denied",
           `Lock denied ${resource}`,
           { resource, owner, current: locks[resource] },
@@ -233,25 +331,26 @@ async function runLocker(argv = process.argv.slice(2)) {
         );
       else {
         locks[resource] = { owner, expiresAt: now() + leaseMs };
-        outbox("lock.granted", `Lock granted ${resource}`, { resource, owner });
+        emitTrace("lock.granted", `Lock granted ${resource}`, { resource, owner });
       }
       writeJson(locksPath, locks);
       return;
     }
-    if (type === "lock.renew") {
+    if (action === "renew") {
       const resource = body.resource;
-      const owner = body.owner || message.from || "worker";
-      if (!resource) throw new Error("lock.renew body.resource is required");
+      const owner = body.owner;
+      if (!resource || !owner)
+        throw new Error("renew input.resource and input.owner are required");
       const current = locks[resource];
       if (!current) {
-        outbox(
+        emitTrace(
           "lock.denied",
           `Lock renew denied ${resource}`,
           { resource, owner, reason: "missing" },
           "warning",
         );
       } else if (current.owner !== owner) {
-        outbox(
+        emitTrace(
           "lock.denied",
           `Lock renew denied ${resource}`,
           { resource, owner, current },
@@ -259,29 +358,24 @@ async function runLocker(argv = process.argv.slice(2)) {
         );
       } else {
         locks[resource] = { ...current, expiresAt: now() + leaseMs };
-        outbox("lock.renewed", `Lock renewed ${resource}`, { resource, owner });
+        emitTrace("lock.renewed", `Lock renewed ${resource}`, { resource, owner });
       }
       writeJson(locksPath, locks);
       return;
     }
-    if (type === "lock.release") {
+    if (action === "release") {
       const resource = body.resource;
       if (resource) delete locks[resource];
       writeJson(locksPath, locks);
-      outbox("lock.released", `Lock released ${resource}`, { resource });
+      emitTrace("lock.released", `Lock released ${resource}`, { resource });
       return;
     }
     if (
-      type === "lock.complete" ||
-      type === "lock.fail" ||
-      type === "coord.complete" ||
-      type === "coord.fail"
+      action === "complete" || action === "fail"
     ) {
-      const eventType = type.startsWith("coord.")
-        ? type.replace("coord.", "lock.")
-        : type;
+      const eventType = `lock.${action}`;
       journal(eventType, body);
-      outbox(
+      emitTrace(
         eventType,
         `${eventType} ${body.id ?? ""}`.trim(),
         body,
@@ -291,8 +385,8 @@ async function runLocker(argv = process.argv.slice(2)) {
       writeJson(queuePath, queue);
       return;
     }
-    journal("lock.unknown", { type, body });
-    outbox("lock.unknown", `Unknown message ${type}`, { type, body }, "warning");
+    journal("lock.unknown", { action, input: body });
+    emitTrace("lock.unknown", `Unknown Control ${action}`, { action, input: body }, "warning");
   }
 
   if (mode === "snapshot") {
@@ -300,15 +394,35 @@ async function runLocker(argv = process.argv.slice(2)) {
     process.exit(0);
   }
 
+  const startupRun = readJson(join(stateDir, "run.json"), undefined);
+  if (!startupRun || typeof startupRun.run_instance_id !== "string") {
+    throw new Error("Run generation unavailable for Control service");
+  }
+  runInstanceId = startupRun.run_instance_id;
+
   function handleLine(line) {
-    const message = normalizeMessage(line);
-    if (!message) return;
+    const control = normalizeControl(line);
+    if (!control) return false;
+    const claimed = claimControl(control.id);
+    if (!claimed) {
+      emitTrace(
+        "lock.control_rejected",
+        "Rejected stale or unjournaled Control",
+        { id: control.id },
+        "warning",
+      );
+      return false;
+    }
     try {
-      handle(message);
+      const stopping = handle(claimed) === true;
+      finalizeControl(claimed.id, "handled");
+      return stopping;
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
+      finalizeControl(claimed.id, "failed", text);
       journal("lock.error", { error: text });
-      outbox("lock.error", text, { error: text }, "error");
+      emitTrace("lock.error", text, { error: text }, "error");
+      return false;
     }
   }
 
@@ -320,19 +434,39 @@ async function runLocker(argv = process.argv.slice(2)) {
     }
     writeControlEndpoint(endpoint);
     while (true) {
-      const stream = await import("node:fs").then((fs) =>
-        fs.createReadStream(endpoint.path, { encoding: "utf8" }),
-      );
+      const fs = await import("node:fs");
+      const fd = fs.openSync(endpoint.path, fs.constants.O_RDWR);
+      const stream = fs.createReadStream(undefined, {
+        autoClose: false,
+        encoding: "utf8",
+        fd,
+      });
       const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-      for await (const line of rl) handleLine(line);
+      for await (const line of rl) {
+        if (handleLine(line)) {
+          fs.writeSync(fd, "\n");
+          stream.destroy();
+          return;
+        }
+      }
+      fs.closeSync(fd);
     }
   }
 
   async function serveNamedPipe(endpoint) {
     rmSync(endpoint.path, { force: true });
+    let resolveStopped;
+    const stopped = new Promise((resolve) => {
+      resolveStopped = resolve;
+    });
     const server = createServer((socket) => {
       const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
-      rl.on("line", handleLine);
+      rl.on("line", (line) => {
+        if (!handleLine(line)) return;
+        rl.close();
+        socket.destroy();
+        server.close(() => resolveStopped());
+      });
     });
     await new Promise((resolveReady, rejectReady) => {
       server.once("error", rejectReady);
@@ -342,14 +476,14 @@ async function runLocker(argv = process.argv.slice(2)) {
         resolveReady();
       });
     });
-    await new Promise(() => {});
+    await stopped;
   }
 
   const endpoint = getControlEndpoint();
   writeJson(queuePath, readJson(queuePath, { items: [] }));
   writeJson(locksPath, cleanExpiredLocks(readJson(locksPath, {})));
   journal("lock.started", { leaseMs, control: endpoint.type });
-  outbox("lock.started", "Locker ready", { leaseMs, control: endpoint.type });
+  emitTrace("lock.started", "Locker ready", { leaseMs, control: endpoint.type });
   if (endpoint.type === "named-pipe") await serveNamedPipe(endpoint);
   else await serveFifo(endpoint);
 }

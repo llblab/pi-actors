@@ -22,6 +22,7 @@ import type {
 } from "../lib/tool-review.ts";
 
 const secretRecipe = {
+  control: ["continue", "revise"],
   defaults: {
     accessToken: "ghp_abcdefghijklmnopqrstuvwxyz",
     clientSecret: "-----BEGIN OPENSSH PRIVATE KEY-----\nabc",
@@ -81,6 +82,8 @@ test("Draft review projection exposes only value-free contract shape", () => {
     sha256: "content_group_01",
   }]);
   assert.equal((draft.contract as Record<string, unknown>).default_count, 3);
+  assert.equal((draft.contract as Record<string, unknown>).control_action_count, 2);
+  assert.equal(Object.hasOwn(draft.contract as object, "mailbox_accepts_count"), false);
 
   const restored = restoreDraftReviewResult(input, {
     batchId: input.batchId,

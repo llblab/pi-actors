@@ -47,40 +47,34 @@ import {
   signalOwnedRunProcess,
   type RunProcessSignalPlan,
 } from "./runs-control.ts";
-import {
-  buildRunOutboxEventPayload,
-  parseRunOutboxEventLine,
-  type RunOutboxEvent,
-} from "./runs-outbox.ts";
 import { claimRunStateDirectory } from "./runs-ownership.ts";
-import { archiveTerminalRun, pruneTerminalRun } from "./runs-retention.ts";
+import {
+  appendRunRetentionEvidence,
+  archiveTerminalRun,
+  pruneTerminalRun,
+  type RunRetentionAction,
+} from "./runs-retention.ts";
 import {
   captureRunProcessIdentity,
   verifyRunProcessIdentity,
   type RunProcessIdentity,
 } from "./runs-process.ts";
 import * as RunsStart from "./runs-start.ts";
+import { appendRunTraceEvent } from "./runs-trace.ts";
 import * as RunsIndex from "./runs-index.ts";
 import * as RunsParentTeardown from "./runs-parent-teardown.ts";
 import {
-  claimRunInboxMessageInStateDir,
-  parseRunInboxLine,
-  processRunInboxMessagesInStateDir,
-  readRunInboxMessagesFromStateDir,
-  runInboxFile,
-  type ProcessRunInboxResult,
-  type RunInboxMessage,
-  type RunInboxStatus,
-  updateRunInboxMessageStatusInStateDir,
-} from "./runs-mailbox.ts";
+  appendRunControlInStateDir,
+  updateRunControlStatusInStateDir,
+} from "./runs-controls.ts";
 import {
-  deliverRunMessage,
-  type SendRunMessageOptions,
-} from "./runs-messages.ts";
+  deliverRunControl,
+  type DeliverRunControlOptions,
+  type DeliverRunControlRequest,
+} from "./runs-control-delivery.ts";
 import {
   buildRunStatus,
   tailFile,
-  tailLines,
   type AsyncRunStatus,
 } from "./runs-status.ts";
 import { readJsonFileResilient } from "./state-readers.ts";
@@ -91,7 +85,7 @@ export type AsyncRunLaunchSource = "spawn" | "tool";
 
 export interface AsyncRunControlEndpoint {
   path: string;
-  type: "fifo" | "mailbox" | "named-pipe";
+  type: "fifo" | "named-pipe";
 }
 
 export function normalizeRunTransportContext(
@@ -119,7 +113,7 @@ export function normalizeRunTransportContext(
 
 export interface AsyncRunStartParams {
   async?: boolean;
-  control?: AsyncRunControlEndpoint;
+  control_endpoint?: AsyncRunControlEndpoint;
   file?: string;
   launch_source?: AsyncRunLaunchSource;
   lifecycleHooks?: {
@@ -147,7 +141,7 @@ export interface AsyncRunStartParams {
   accept_output?: "review_evidence";
   output?: string;
   artifacts?: Record<string, RunArtifactDeclaration>;
-  mailbox?: RecipesReferences.TemplateRecipeMailbox;
+  control?: string[];
   notification_policy?: "normal" | "silent";
   retire_when?: "children_terminal";
   retry?: number | string;
@@ -179,13 +173,14 @@ export interface AsyncRunMeta {
   run: string;
   run_instance_id: string;
   state_dir: string;
+  state_schema: "run-kernel-v1";
   status: AsyncRunStatus;
   tool?: string;
   template: CommandTemplateValue;
   values: Record<string, unknown>;
   artifacts?: Record<string, RunArtifactDeclaration>;
-  control?: AsyncRunControlEndpoint;
-  mailbox?: RecipesReferences.TemplateRecipeMailbox;
+  control?: string[];
+  control_endpoint?: AsyncRunControlEndpoint;
   model_policy?: CurrentPolicyProvenance;
   notification_policy?: "normal" | "silent";
   process_identity?: RunProcessIdentity;
@@ -473,11 +468,9 @@ export function startRun(
   const stateDir = resolveStateDir(startParams, run);
   const values = {
     ...(startParams.values || {}),
-    actor_address: `run:${run}`,
-    communication_file: join(stateDir, "communication.json"),
-    default_room: `room:${run}`,
     run_id: run,
     state_dir: stateDir,
+    trace_file: join(stateDir, "trace.jsonl"),
   };
   const modelPolicy = describeCurrentPolicyProvenance({
     defaults: startParams.defaults,
@@ -552,6 +545,7 @@ export function startRun(
       run,
       run_instance_id: randomUUID(),
       state_dir: stateDir,
+      state_schema: "run-kernel-v1",
       status: "running",
       ...(startParams.tool ? { tool: startParams.tool } : {}),
       template: resolved.template,
@@ -559,7 +553,9 @@ export function startRun(
       model_policy: modelPolicy,
       ...(artifacts ? { artifacts } : {}),
       ...(startParams.control ? { control: startParams.control } : {}),
-      ...(startParams.mailbox ? { mailbox: startParams.mailbox } : {}),
+      ...(startParams.control_endpoint
+        ? { control_endpoint: startParams.control_endpoint }
+        : {}),
       ...(startParams.notification_policy === "silent"
         ? { notification_policy: "silent" as const }
         : {}),
@@ -596,24 +592,20 @@ export function startRun(
     );
     if (processIdentity) meta.process_identity = processIdentity;
     writeJsonAtomic(join(stateDir, "run.json"), meta);
-    writeFileSync(
-      join(stateDir, "events.jsonl"),
-      `${JSON.stringify({ event: "run.start", run, run_instance_id: meta.run_instance_id, pid: meta.pid, ts: new Date().toISOString() })}\n`,
-      { flag: "a" },
-    );
+    appendRunTraceEvent(stateDir, {
+      kind: "run.start",
+      summary: `Run ${run} started`,
+      data: {
+        pid: meta.pid,
+        run_instance_id: meta.run_instance_id,
+      },
+    });
     child.unref();
     return meta;
   } finally {
     releaseStartLock();
   }
 }
-
-export { parseRunOutboxEventLine } from "./runs-outbox.ts";
-export type {
-  RunOutboxDelivery,
-  RunOutboxEvent,
-  RunOutboxLevel,
-} from "./runs-outbox.ts";
 
 function resolveRunStateDir(runOrDir: string): string {
   return resolve(
@@ -714,21 +706,19 @@ export function teardownRunsOwnedByParent(
       ) {
         throw new Error("run generation changed before teardown evidence");
       }
-      writeFileSync(
-        join(attempt.stateDir, "events.jsonl"),
-        `${JSON.stringify({
-          event: "run.parent_teardown",
-          ownerId: attempt.ownerId,
+      appendRunTraceEvent(attempt.stateDir, {
+        kind: "run.parent_teardown",
+        summary: `Parent teardown ${attempt.outcome}`,
+        data: {
           outcome: attempt.outcome,
+          owner_id: attempt.ownerId,
           reason: attempt.reason,
           run: attempt.run,
           run_instance_id: attempt.runInstanceId,
-          type: "control.kill",
           trigger: options.trigger ?? "parent_shutdown",
-          ts: new Date().toISOString(),
-        })}\n`,
-        { flag: "a" },
-      );
+        },
+        ...(attempt.outcome === "failed" ? { level: "error" as const } : {}),
+      });
     },
   });
   const summaryPath = join(
@@ -764,139 +754,63 @@ export function teardownRunsOwnedByParent(
 export function tailRun(runOrDir: string, lines = 40): string {
   const status = getRunStatus(runOrDir);
   const stateDir = String(status.state_dir);
-  const events = tailFile(join(stateDir, "events.jsonl"), lines);
-  if (events) return events;
+  const trace = tailFile(join(stateDir, "trace.jsonl"), lines);
+  if (trace) return trace;
   return (
     tailFile(join(stateDir, "stdout.log"), lines) ||
     tailFile(join(stateDir, "stderr.log"), lines)
   );
 }
 
-export function readRunEvents(runOrDir: string, lines = 40): RunOutboxEvent[] {
-  const status = getRunStatus(runOrDir);
-  const stateDir = String(status.state_dir);
-  const run = String(status.run ?? runOrDir);
-  return tailLines(join(stateDir, "outbox.jsonl"), lines)
-    .map((line, index) => parseRunOutboxEventLine(line, run, stateDir, index))
-    .filter((event): event is RunOutboxEvent => Boolean(event));
-}
-
 export type {
-  ProcessRunInboxResult,
-  RunInboxMessage,
-  RunInboxStatus,
-} from "./runs-mailbox.ts";
+  DeliverRunControlOptions,
+  DeliverRunControlRequest,
+} from "./runs-control-delivery.ts";
 
-export function readRunInboxMessages(
-  runOrDir: string,
-  lines = 40,
-): RunInboxMessage[] {
-  const status = getRunStatus(runOrDir);
-  const stateDir = String(status.state_dir);
-  return tailLines(runInboxFile(stateDir), lines)
-    .map(parseRunInboxLine)
-    .filter((message): message is RunInboxMessage => Boolean(message));
+export interface SendRunControlOptions extends DeliverRunControlOptions {
+  ownerId?: string;
 }
 
-export function updateRunInboxMessageStatus(
+export async function sendRunControl(
   runOrDir: string,
-  id: string,
-  nextStatus: RunInboxStatus,
-  metadata: Record<string, unknown> = {},
-): boolean {
-  const status = getRunStatus(runOrDir);
-  const stateDir = String(status.state_dir);
-  return updateRunInboxMessageStatusInStateDir(
-    stateDir,
-    id,
-    nextStatus,
-    metadata,
-  );
-}
-
-export function claimRunInboxMessage(
-  runOrDir: string,
-  owner = "runtime",
-  statuses: string[] = ["queued"],
-): RunInboxMessage | undefined {
-  const status = getRunStatus(runOrDir);
-  const stateDir = String(status.state_dir);
-  return claimRunInboxMessageInStateDir(stateDir, owner, statuses);
-}
-
-export async function processRunInboxMessages(
-  runOrDir: string,
-  handler: (message: RunInboxMessage) => Promise<void> | void,
-  options: { limit?: number; owner?: string; statuses?: string[] } = {},
-): Promise<ProcessRunInboxResult> {
-  const status = getRunStatus(runOrDir);
-  return processRunInboxMessagesInStateDir(
-    String(status.state_dir),
-    handler,
-    options,
-  );
-}
-
-export function appendRunOutboxEvent(
-  runOrDir: string,
-  event: {
-    body?: unknown;
-    correlation_id?: string;
-    data?: unknown;
-    delivery?: string;
-    event?: string;
-    from?: string;
-    level?: string;
-    metadata?: Record<string, unknown>;
-    reply_to?: string;
-    summary?: string;
-    to?: string;
-    type?: string;
-  },
-): Record<string, unknown> {
-  const status = getRunStatus(runOrDir);
-  const stateDir = String(status.state_dir);
-  const run = String(status.run ?? runOrDir);
-  const payload = buildRunOutboxEventPayload(run, event);
-  const line = `${JSON.stringify(payload)}\n`;
-  writeFileSync(join(stateDir, "outbox.jsonl"), line, { flag: "a" });
-  return {
-    bytes: Buffer.byteLength(line),
-    outbox: "outbox.jsonl",
-    run,
-    sent: true,
-    state_dir: stateDir,
-  };
-}
-
-export type { SendRunMessageOptions } from "./runs-messages.ts";
-
-export async function sendRunMessage(
-  runOrDir: string,
-  message: string,
-  options: SendRunMessageOptions = {},
+  request: DeliverRunControlRequest,
+  options: SendRunControlOptions = {},
 ): Promise<Record<string, unknown>> {
-  const status = getRunStatus(runOrDir);
-  const stateDir = String(status.state_dir);
-  const run = String(status.run ?? runOrDir);
-  const pid = Number(status.pid || 0);
-  const identity = verifyRunProcessIdentity(
-    pid,
-    status.process_identity as RunProcessIdentity | undefined,
-  );
-  if (status.status !== "running") {
-    if (
-      identity.status === "owner_mismatch" ||
-      identity.status === "unsupported_proof"
-    ) {
-      throw new Error(`Run process identity ${identity.status}: ${run}`);
+  const stateDir = resolveRunStateDir(runOrDir);
+  const releaseControlLock = RunsStart.acquireStateStartLock(stateDir);
+  try {
+    const status = getRunStatus(stateDir);
+    const run = String(status.run ?? runOrDir);
+    if (options.ownerId !== undefined && status.ownerId !== options.ownerId) {
+      throw Object.assign(new Error(`Run ownership changed: ${run}`), {
+        reason: "owner_mismatch",
+      });
     }
-    throw new Error(`Run is not running: ${run}`);
+    if (status.run_instance_id !== request.run_instance_id) {
+      throw Object.assign(new Error(`Run generation changed: ${run}`), {
+        reason: "generation_mismatch",
+      });
+    }
+    if (status.status !== "running") {
+      throw Object.assign(new Error(`Run is not running: ${run}`), {
+        reason: "terminal_state",
+      });
+    }
+    const pid = Number(status.pid || 0);
+    const identity = verifyRunProcessIdentity(
+      pid,
+      status.process_identity as RunProcessIdentity | undefined,
+    );
+    if (!identity.valid) {
+      throw Object.assign(
+        new Error(`Run process identity ${identity.status}: ${run}`),
+        { reason: `process_identity_${identity.status}` },
+      );
+    }
+    return await deliverRunControl(run, stateDir, request, options);
+  } finally {
+    releaseControlLock();
   }
-  if (!identity.valid) {
-    throw new Error(`Run process identity ${identity.status}: ${run}`);
-  }
-  return deliverRunMessage(status, run, stateDir, message, options);
 }
 
 export { getRunProcessSignalPlan } from "./runs-control.ts";
@@ -917,13 +831,13 @@ function markTerminalProgress(
   );
 }
 
-function finalizeInterruptedReviewEvidence(
+function finalizeInterruptedExecution(
   stateDir: string,
   phase: "cancelled" | "killed",
   signal: NodeJS.Signals,
 ): void {
-  const evidencePath = join(stateDir, "review-evidence.json");
-  const manifest = readJson(evidencePath);
+  const executionPath = join(stateDir, "execution.json");
+  const manifest = readJson(executionPath);
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return;
   const record = manifest as Record<string, unknown>;
   if (!Array.isArray(record.commands)) return;
@@ -969,7 +883,7 @@ function finalizeInterruptedReviewEvidence(
         : {}),
     };
   });
-  writeJsonAtomic(evidencePath, {
+  writeJsonAtomic(executionPath, {
     ...record,
     status: phase,
     commands,
@@ -1006,9 +920,37 @@ function stopRun(
     ) {
       return { stopped: false, reason: "run generation changed", status };
     }
+    const control =
+      event === "run.kill" && typeof status.run_instance_id === "string"
+        ? appendRunControlInStateDir(stateDir, {
+            action: "kill",
+            run_instance_id: status.run_instance_id,
+          })
+        : undefined;
+    if (control) {
+      updateRunControlStatusInStateDir(
+        stateDir,
+        control.id,
+        "claimed",
+        {},
+        ["queued"],
+      );
+    }
+    const finish = (result: Record<string, unknown>): Record<string, unknown> => {
+      if (!control) return result;
+      const handled = result.stopped === true;
+      updateRunControlStatusInStateDir(
+        stateDir,
+        control.id,
+        handled ? "handled" : "failed",
+        handled ? {} : { error: String(result.reason ?? "kill rejected") },
+        ["claimed"],
+      );
+      return { ...result, control_id: control.id };
+    };
     const pid = Number(status.pid || 0);
     if (status.status !== "running" && status.status !== "exited") {
-      return { stopped: false, reason: "not running", status };
+      return finish({ stopped: false, reason: "not running", status });
     }
     const identity = verifyRunProcessIdentity(
       pid,
@@ -1019,43 +961,59 @@ function stopRun(
         identity.status === "owner_mismatch" ||
         identity.status === "unsupported_proof"
       ) {
-        return {
+        return finish({
           stopped: false,
           reason: identity.status.replaceAll("_", " "),
           process_identity_status: identity.status,
           status,
-        };
+        });
       }
-      return { stopped: false, reason: "not running", status };
+      return finish({ stopped: false, reason: "not running", status });
     }
     if (!identity.valid) {
-      return {
+      return finish({
         stopped: false,
         reason: identity.status.replaceAll("_", " "),
         process_identity_status: identity.status,
         status,
-      };
+      });
     }
-    const signalResult = signalOwnedRunProcess(
-      pid,
-      signal,
-      status.process_identity as RunProcessIdentity,
-    );
-    writeFileSync(
-      join(stateDir, "events.jsonl"),
-      `${JSON.stringify({ event, pid, signal, ...signalResult, ts: new Date().toISOString() })}\n`,
-      { flag: "a" },
-    );
+    let signalResult: RunProcessSignalPlan;
+    try {
+      signalResult = signalOwnedRunProcess(
+        pid,
+        signal,
+        status.process_identity as RunProcessIdentity,
+      );
+    } catch (error) {
+      if (control) {
+        updateRunControlStatusInStateDir(stateDir, control.id, "failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw error;
+    }
+    appendRunTraceEvent(stateDir, {
+      kind: event,
+      summary: `${event === "run.kill" ? "Killed" : "Cancelled"} Run process`,
+      data: { pid, signal, ...signalResult },
+    });
     markTerminalHandled(stateDir, { event, signal });
     if (event === "run.kill") {
-      finalizeInterruptedReviewEvidence(stateDir, "killed", signal);
+      finalizeInterruptedExecution(stateDir, "killed", signal);
       markTerminalProgress(stateDir, "killed");
     }
     if (event === "run.cancel") {
-      finalizeInterruptedReviewEvidence(stateDir, "cancelled", signal);
+      finalizeInterruptedExecution(stateDir, "cancelled", signal);
       markTerminalProgress(stateDir, "cancelled");
     }
-    return { stopped: true, pid, signal, ...signalResult, state_dir: stateDir };
+    return finish({
+      stopped: true,
+      pid,
+      signal,
+      ...signalResult,
+      state_dir: stateDir,
+    });
   } finally {
     releaseControlLock();
   }
@@ -1100,23 +1058,66 @@ export function cancelRun(
     : result;
 }
 
-function assertTerminalRun(runOrDir: string): Record<string, unknown> {
-  const status = getRunStatus(runOrDir);
-  if (status.status === "running") {
-    throw new Error("Only terminal runs can be archived or pruned.");
+function retainRun(
+  runOrDir: string,
+  action: RunRetentionAction,
+  expected: RunControlExpectation,
+  options: { preserveArtifacts?: boolean } = {},
+): Record<string, unknown> {
+  const stateDir = resolveRunStateDir(runOrDir);
+  const releaseControlLock = RunsStart.acquireStateStartLock(stateDir);
+  let status: Record<string, unknown> | undefined;
+  let evidenceId: string | undefined;
+  try {
+    expected.onLocked?.();
+    status = getRunStatus(stateDir);
+    if (expected.ownerId !== undefined && status.ownerId !== expected.ownerId) {
+      return { [`${action}d`]: false, reason: "ownership changed", status };
+    }
+    if (
+      expected.runInstanceId !== undefined &&
+      status.run_instance_id !== expected.runInstanceId
+    ) {
+      return { [`${action}d`]: false, reason: "run generation changed", status };
+    }
+    if (status.status === "running") {
+      throw new Error("Only terminal runs can be archived or pruned.");
+    }
+    evidenceId = appendRunRetentionEvidence(status, action, "queued");
+    const result = action === "archive"
+      ? archiveTerminalRun(status)
+      : pruneTerminalRun(status, options);
+    appendRunRetentionEvidence(status, action, "handled", {
+      id: evidenceId,
+      result,
+    });
+    return { ...result, retention_id: evidenceId };
+  } catch (error) {
+    if (status && evidenceId) {
+      appendRunRetentionEvidence(status, action, "failed", {
+        error: error instanceof Error ? error.message : String(error),
+        id: evidenceId,
+      });
+    }
+    throw error;
+  } finally {
+    releaseControlLock();
   }
-  return status;
 }
 
-export function archiveRun(runOrDir: string): Record<string, unknown> {
-  return archiveTerminalRun(assertTerminalRun(runOrDir));
+export function archiveRun(
+  runOrDir: string,
+  expected: RunControlExpectation = {},
+): Record<string, unknown> {
+  return retainRun(runOrDir, "archive", expected);
 }
 
 export function pruneRun(
   runOrDir: string,
   options: { preserveArtifacts?: boolean } = {},
+  expected: RunControlExpectation = {},
 ): Record<string, unknown> {
-  return pruneTerminalRun(assertTerminalRun(runOrDir), options);
+  return retainRun(runOrDir, "prune", expected, options);
 }
 
 export function killRun(

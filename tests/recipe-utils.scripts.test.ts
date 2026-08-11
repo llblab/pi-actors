@@ -131,50 +131,23 @@ test("recipe-utils artifact-write writes stdin with explicit mode", async () => 
   }
 });
 
-test("recipe-utils actor-message emits deterministic envelopes", () => {
-  const result = runScript(
-    ["actor-message", "artifact.written", "coordinator", "run:writer", "Done", '{"path":"report.md"}', "task-1", "msg-0"],
-    { encoding: "utf8", input: '{"written":true}' },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  const envelope = JSON.parse(result.stdout);
-  assert.equal(envelope.to, "coordinator");
-  assert.equal(envelope.from, "run:writer");
-  assert.equal(envelope.type, "artifact.written");
-  assert.equal(envelope.summary, "Done");
-  assert.deepEqual(envelope.body, { written: true });
-  assert.equal(envelope.correlation_id, "task-1");
-  assert.equal(envelope.reply_to, "msg-0");
-  assert.deepEqual(envelope.metadata, { path: "report.md" });
-});
-
-test("recipe-utils actor-message rejects invalid envelopes", () => {
-  const result = runScript(
-    ["actor-message", "bad type", "coordinator", "run:writer"],
-    { encoding: "utf8", input: "body" },
-  );
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Invalid actor message type/);
-});
-
-test("recipe-utils run-ops-snapshot combines runs, messages, and recommendations", async () => {
+test("recipe-utils run-ops-snapshot combines Runs, Trace, and recommendations", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     await writeRun(root, "active", "running");
     await writeRun(root, "failed", "failed");
-    const eventFile = join(root, "active", "outbox.jsonl");
-    await writeFile(eventFile, `${JSON.stringify({ event: "demo", summary: "Demo" })}\n`);
+    const traceFile = join(root, "active", "trace.jsonl");
+    await writeFile(traceFile, `${JSON.stringify({ id: "trace-1", kind: "demo", summary: "Demo", ts: new Date().toISOString() })}\n`);
     const { stdout } = await runScriptAsync(["run-ops-snapshot", root, "active", "5", "1"]);
     const snapshot = JSON.parse(stdout);
     assert.equal(snapshot.runs.length, 2);
     assert.equal(snapshot.inspectedRun, "active");
-    assert.equal(snapshot.messages[0].event, "demo");
+    assert.equal(snapshot.trace[0].kind, "demo");
     assert.equal(
       snapshot.recommendations.some(
-        (item: { suggested_message?: Record<string, unknown> }) =>
-          item.suggested_message?.to === "run:active" &&
-          item.suggested_message?.type === "control.stop" &&
-          item.suggested_message?.body === "stop",
+        (item: { suggested_inspect?: Record<string, unknown> }) =>
+          item.suggested_inspect?.target === "run:active" &&
+          item.suggested_inspect?.view === "control",
       ),
       true,
     );
@@ -182,7 +155,7 @@ test("recipe-utils run-ops-snapshot combines runs, messages, and recommendations
       snapshot.recommendations.some(
         (item: { suggested_inspect?: Record<string, unknown> }) =>
           item.suggested_inspect?.target === "run:failed" &&
-          item.suggested_inspect?.view === "tail",
+          item.suggested_inspect?.view === "trace",
       ),
       true,
     );

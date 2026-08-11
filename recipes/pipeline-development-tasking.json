@@ -22,18 +22,6 @@
     "constraints": "Split into bounded mutation zones and preserve integrator ownership of shared contracts.",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "task_card.completed",
-      "pipeline.completed",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "name": "planner",

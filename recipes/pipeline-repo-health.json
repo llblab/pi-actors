@@ -23,18 +23,6 @@
     "artifact_path": "./repo-health.md",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "repo_health.completed",
-      "artifact.prepared",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "name": "git_status",

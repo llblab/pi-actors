@@ -86,15 +86,17 @@ export function prepareStateDirForStart(
     }
   }
   for (const file of [
+    "control-endpoint.json",
+    "controls.jsonl",
     "events.jsonl",
-    "inbox.jsonl",
-    "outbox.jsonl",
+    "execution.json",
     "progress.json",
     "result.json",
     "stderr.log",
     "stdout.log",
     "terminal-delivery-failure.json",
     "terminal-handled.json",
+    "trace.jsonl",
   ]) {
     rmSync(join(stateDir, file), { force: true });
   }

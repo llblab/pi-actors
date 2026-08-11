@@ -1,11 +1,11 @@
 /**
- * Keyboard-driven actor inspector overlay.
- * Zones: overlay shell, tabs, owned-run/subagent selection, compact striped rows
- * Owns interactive TUI navigation; evidence parsing remains in inspector/session domains.
+ * Keyboard-driven Actor Inspector overlay for concrete Run instances.
+ * Zones: owned actor selection, Recipe/Trace/Control tabs, safe Run Kill confirmation
+ * Owns manual kernel navigation; evidence parsing and lifecycle mutation stay in ports.
  */
 
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import { stripVTControlCharacters } from "node:util";
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
@@ -15,169 +15,150 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 
-import * as Inspector from "./inspector.ts";
+import * as ActorInspector from "./inspector.ts";
+import * as RunsControls from "./runs-controls.ts";
+import * as RunControlDelivery from "./runs-control-delivery.ts";
+import * as TraceProjection from "./trace-projection.ts";
 
-export type ActorInspectorOverlayTab = "recipe" | "communications" | "turns";
+export type ActorInspectorTab = "recipe" | "trace" | "control";
 
-const INSPECTOR_TABS: ActorInspectorOverlayTab[] = [
-  "recipe",
-  "communications",
-  "turns",
-];
+type InspectorFocus = "runs" | "tabs" | "document" | "list" | "detail" | "select";
+type SelectorMode = "run" | "source";
 
-type DetailLogicalLine = string | { sectionBreak: true };
-
-const DETAIL_SECTION_BREAK: DetailLogicalLine = { sectionBreak: true };
-
-export interface ActorInspectorOverlayActionResult {
+export interface ActorInspectorActionResult {
   ok: boolean;
   message: string;
 }
 
 export interface ActorInspectorOverlayOptions {
   done: () => void;
-  killRun?: (
-    run: string,
-    runInstanceId: string,
-  ) => ActorInspectorOverlayActionResult;
+  killRun?: (run: string, runInstanceId: string) => ActorInspectorActionResult;
   ownerId: string;
-  readTurns?: (stateDir: string) => Inspector.ActorInspectorTurnItem[];
+  readRuns?: typeof ActorInspector.readActorInspectorRuns;
+  readTrace?: typeof TraceProjection.projectRunTrace;
   stateRoot: string;
   theme: Theme;
   tui: TUI;
 }
 
+interface KillConfirmation {
+  run: string;
+  runInstanceId: string;
+  status: string;
+}
+
+const TABS: ActorInspectorTab[] = ["recipe", "trace", "control"];
+const TRACE_SOURCES: TraceProjection.TraceSourceFilter[] = [
+  "all",
+  "lifecycle",
+  "control",
+  "process",
+  "agent",
+  "artifact",
+  "runtime",
+];
+
 export class ActorInspectorOverlay {
   private readonly done: () => void;
-  private readonly killRun?: (
-    run: string,
-    runInstanceId: string,
-  ) => ActorInspectorOverlayActionResult;
+  private readonly killRun?: (run: string, runInstanceId: string) => ActorInspectorActionResult;
   private readonly ownerId: string;
-  private readonly readTurns: (stateDir: string) => Inspector.ActorInspectorTurnItem[];
+  private readonly readRuns: typeof ActorInspector.readActorInspectorRuns;
+  private readonly readTrace: typeof TraceProjection.projectRunTrace;
   private readonly stateRoot: string;
   private readonly theme: Theme;
   private readonly tui: TUI;
   private readonly refreshTimer: NodeJS.Timeout;
-  private runIndex = 0;
-  private communicationChannel: "all" | "broadcast" | "direct" | "room" = "all";
-  private communicationFrom = "all";
-  private communicationUnread = false;
   private contentStripeIndices: number[] = [];
-  private detailCommunication?: Inspector.ActorInspectorPreview;
-  private detailOpen = false;
+  private documentScroll = 0;
   private detailScroll = 0;
-  private detailTurn?: Inspector.ActorInspectorTurnItem;
-  private feedback?: ActorInspectorOverlayActionResult;
-  private killConfirmation?: { run: string; runInstanceId: string; status: string };
+  private feedback?: ActorInspectorActionResult;
+  private focus: InspectorFocus = "runs";
+  private killConfirmation?: KillConfirmation;
   private killDialogChoice: "cancel" | "kill" = "cancel";
-  private readonly readKeys = new Set<string>();
-  private focus: "runs" | "tabs" | "recipe" | "list" | "detail" | "select" = "tabs";
-  private filterControlIndex = 0;
-  private menuLevel: "run" | "filter" | "value" = "filter";
-  private selectorIndex = 0;
-  private recipeScroll = 0;
   private rowIndex = 0;
-  private selectedRun?: string;
-  private subagentIndex = 0;
-  private tab: ActorInspectorOverlayTab = "recipe";
-  private turnCache?: { run: string; turns: Inspector.ActorInspectorTurnItem[] };
+  private runCache?: ActorInspector.ActorInspectorRunItem[];
+  private runIndex = 0;
+  private selectorIndex = 0;
+  private selectorMode?: SelectorMode;
+  private tabIndex = 0;
+  private traceCache?: {
+    run: string;
+    runInstanceId?: string;
+    items: TraceProjection.TraceItem[];
+  };
+  private traceDetail?: TraceProjection.TraceItem;
+  private traceSourceIndex = 0;
 
   constructor(options: ActorInspectorOverlayOptions) {
     this.done = options.done;
     this.killRun = options.killRun;
     this.ownerId = options.ownerId;
-    this.readTurns = options.readTurns ?? Inspector.readActorInspectorTurns;
+    this.readRuns = options.readRuns ?? ActorInspector.readActorInspectorRuns;
+    this.readTrace = options.readTrace ?? TraceProjection.projectRunTrace;
     this.stateRoot = options.stateRoot;
     this.theme = options.theme;
     this.tui = options.tui;
     this.refreshTimer = setInterval(() => {
-      if (this.focus !== "list" && this.focus !== "detail") this.turnCache = undefined;
+      this.runCache = undefined;
+      if (this.focus !== "list" && this.focus !== "detail") this.traceCache = undefined;
       this.tui.requestRender();
-    }, 1000);
+    }, 1_000);
     this.refreshTimer.unref?.();
   }
 
+  dispose(): void {
+    clearInterval(this.refreshTimer);
+  }
+
+  invalidate(): void {}
+
   handleInput(data: string): void {
     const runs = this.runs();
-    this.ensureSelectedRun(runs);
+    this.runIndex = Math.min(this.runIndex, Math.max(0, runs.length - 1));
     if (matchesKey(data, "ctrl+c")) {
       this.done();
       return;
     }
     if (this.killConfirmation) {
-      const key = data.toLowerCase();
-      if (matchesKey(data, "escape") || key === "n") {
-        this.cancelKill();
-      } else if (
-        matchesKey(data, "left") ||
-        matchesKey(data, "right") ||
-        matchesKey(data, "tab")
-      ) {
-        this.killDialogChoice =
-          this.killDialogChoice === "cancel" ? "kill" : "cancel";
-      } else if (key === "y") {
-        this.confirmKill();
-      } else if (matchesKey(data, "return")) {
-        if (this.killDialogChoice === "kill") this.confirmKill();
-        else this.cancelKill();
-      }
+      this.handleKillInput(data);
       this.tui.requestRender();
       return;
     }
     if (data.toLowerCase() === "k") {
-      this.requestKill(runs);
+      this.requestKill(runs[this.runIndex]);
       this.tui.requestRender();
       return;
     }
     if (matchesKey(data, "escape")) {
       if (this.focus === "select") {
-        if (this.menuLevel === "value") {
-          this.menuLevel = "filter";
-          this.selectorIndex = this.filterControlIndex;
-        } else this.focus = this.menuLevel === "run" ? "runs" : "tabs";
-      } else if (this.focus === "detail") this.backDetail();
-      else if (this.focus === "recipe") this.focus = "tabs";
-      else this.done();
+        this.selectorMode = undefined;
+        this.focus = this.tab === "trace" ? "tabs" : "runs";
+      } else if (this.focus === "detail") {
+        this.traceDetail = undefined;
+        this.detailScroll = 0;
+        this.focus = "list";
+      } else if (this.focus === "document" || this.focus === "list") {
+        this.focus = "tabs";
+      } else {
+        this.done();
+      }
       this.tui.requestRender();
       return;
     }
     if (this.focus === "select") {
-      const options = this.menuOptions();
-      if (matchesKey(data, "up"))
-        this.selectorIndex = Math.max(0, this.selectorIndex - 1);
-      else if (matchesKey(data, "down"))
-        this.selectorIndex = Math.min(options.length - 1, this.selectorIndex + 1);
-      else if (matchesKey(data, "left")) this.backMenu();
-      else if (
-        matchesKey(data, "return") ||
-        (matchesKey(data, "right") && this.menuLevel !== "value")
-      )
-        this.applyMenuOption(options[this.selectorIndex]);
-      this.tui.requestRender();
-      return;
-    }
-    if (this.focus === "recipe") {
-      if (matchesKey(data, "up")) {
-        if (this.recipeScroll === 0) this.focus = "tabs";
-        else this.recipeScroll -= 1;
-      } else if (matchesKey(data, "down")) this.recipeScroll += 1;
-      else if (matchesKey(data, "pageUp"))
-        this.recipeScroll = Math.max(0, this.recipeScroll - this.contentViewportRows());
-      else if (matchesKey(data, "pageDown"))
-        this.recipeScroll += this.contentViewportRows();
-      else if (matchesKey(data, "left")) this.focus = "tabs";
+      this.handleSelectorInput(data, runs);
       this.tui.requestRender();
       return;
     }
     if (this.focus === "detail") {
-      if (matchesKey(data, "up")) this.detailScroll = Math.max(0, this.detailScroll - 1);
-      else if (matchesKey(data, "down")) this.detailScroll += 1;
-      else if (matchesKey(data, "pageUp"))
-        this.detailScroll = Math.max(0, this.detailScroll - this.contentViewportRows());
-      else if (matchesKey(data, "pageDown"))
-        this.detailScroll += this.contentViewportRows();
-      else if (matchesKey(data, "left")) this.backDetail();
+      this.handleScrollableInput(data, "detail");
+      this.tui.requestRender();
+      return;
+    }
+    if (this.focus === "document") {
+      if (matchesKey(data, "left")) this.focus = "tabs";
+      else if (matchesKey(data, "up") && this.documentScroll === 0) this.focus = "tabs";
+      else this.handleScrollableInput(data, "document");
       this.tui.requestRender();
       return;
     }
@@ -185,197 +166,183 @@ export class ActorInspectorOverlay {
       if (matchesKey(data, "left")) this.cycleRun(runs, -1);
       else if (matchesKey(data, "right")) this.cycleRun(runs, 1);
       else if (matchesKey(data, "down")) this.focus = "tabs";
-      else if (matchesKey(data, "return") && runs.length > 0) this.openRunMenu();
+      else if (matchesKey(data, "return") && runs.length > 0) {
+        this.selectorMode = "run";
+        this.selectorIndex = this.runIndex;
+        this.focus = "select";
+      }
     } else if (this.focus === "tabs") {
-      if (matchesKey(data, "left") || matchesKey(data, "right")) {
-        const current = INSPECTOR_TABS.indexOf(this.tab);
-        const direction = matchesKey(data, "right") ? 1 : -1;
-        this.tab = INSPECTOR_TABS[
-          (current + direction + INSPECTOR_TABS.length) % INSPECTOR_TABS.length
-        ]!;
-        this.filterControlIndex = 0;
-        this.recipeScroll = 0;
-        this.rowIndex = 0;
-      } else if (matchesKey(data, "up")) this.focus = "runs";
-      else if (
-        (matchesKey(data, "down") || matchesKey(data, "return")) &&
-        this.tab === "recipe"
-      ) this.focus = "recipe";
-      else if (matchesKey(data, "down") && this.listItemCount() > 0)
-        this.focus = "list";
-      else if (matchesKey(data, "return")) this.openFilterMenu();
+      if (matchesKey(data, "left") || matchesKey(data, "right") || matchesKey(data, "tab")) {
+        const direction = matchesKey(data, "left") ? -1 : 1;
+        this.tabIndex = (this.tabIndex + direction + TABS.length) % TABS.length;
+        this.resetContentPosition();
+      } else if (matchesKey(data, "up")) {
+        this.focus = "runs";
+      } else if (matchesKey(data, "down")) {
+        this.focus = this.tab === "trace" && this.traceItems(runs[this.runIndex]).length > 0
+          ? "list"
+          : "document";
+      } else if (matchesKey(data, "return")) {
+        if (this.tab === "trace") this.openSourceSelector(runs[this.runIndex]);
+        else this.focus = "document";
+      }
     } else if (this.focus === "list") {
-      const count = this.tab === "communications" ? this.communicationPreviews().length : this.turnItems().length;
+      const count = this.traceItems(runs[this.runIndex]).length;
       if (matchesKey(data, "left")) this.focus = "tabs";
-      else if (matchesKey(data, "pageUp"))
-        this.rowIndex = Math.max(0, this.rowIndex - this.contentViewportRows());
-      else if (matchesKey(data, "pageDown"))
-        this.rowIndex = Math.min(Math.max(0, count - 1), this.rowIndex + this.contentViewportRows());
       else if (matchesKey(data, "up")) {
         if (this.rowIndex === 0) this.focus = "tabs";
         else this.rowIndex -= 1;
-      } else if (matchesKey(data, "down"))
+      } else if (matchesKey(data, "down")) {
         this.rowIndex = Math.min(Math.max(0, count - 1), this.rowIndex + 1);
-      else if (matchesKey(data, "return") || matchesKey(data, "right"))
-        this.openDetail();
+      } else if (matchesKey(data, "pageUp")) {
+        this.rowIndex = Math.max(0, this.rowIndex - this.contentViewportRows());
+      } else if (matchesKey(data, "pageDown")) {
+        this.rowIndex = Math.min(
+          Math.max(0, count - 1),
+          this.rowIndex + this.contentViewportRows(),
+        );
+      } else if (matchesKey(data, "return") || matchesKey(data, "right")) {
+        const item = this.traceItems(runs[this.runIndex])[this.rowIndex];
+        if (item) {
+          this.traceDetail = item;
+          this.detailScroll = 0;
+          this.focus = "detail";
+        }
+      }
+    }
+    if (data.toLowerCase() === "f" && this.tab === "trace") {
+      this.cycleTraceSource(runs[this.runIndex]);
     }
     this.tui.requestRender();
   }
 
   render(width: number): string[] {
-    this.ensureSelectedRun(this.runs());
     const safeWidth = Math.max(24, width);
-    const innerWidth = Math.max(1, safeWidth - 2);
-    if (this.killConfirmation)
-      return this.renderKillDialog(safeWidth, innerWidth);
-    const lines: string[] = [];
-    lines.push(this.border("╭", " Actor Inspector ", "╮", innerWidth));
-    lines.push(this.row(this.renderRunControl(), innerWidth));
-    let selector = this.focus === "select"
-      ? this.menuLevel === "run"
-        ? this.renderMenuBox(
-            this.runs().map(
-              (run, index, runs) =>
-                `#${runs.length - index}  ${run.run}  ${run.status}`,
-            ),
-            this.selectorIndex,
-            undefined,
-            undefined,
-            false,
-            false,
-            this.contentViewportRows(),
-          )
-        : this.renderFilterMenus(innerWidth)
-      : [];
-    const selectorAnchor = this.selectorAnchor();
-    if (this.menuLevel === "run" && selector.length > 0) {
-      const popup = selector[0];
-      const popupWidth = visibleWidth(popup);
-      const leading = this.fit(
-        this.takeVisiblePrefix(this.renderTabs(), selectorAnchor),
-        selectorAnchor,
-      );
-      const trailingWidth = Math.max(0, innerWidth - selectorAnchor - popupWidth);
-      const trailing = this.fit(
-        this.dropVisiblePrefix(this.renderTabs(), selectorAnchor + popupWidth),
-        trailingWidth,
-      );
-      lines.push(this.row(`${leading}${popup}${trailing}`, innerWidth, true));
-      selector = selector.slice(1);
-    } else lines.push(this.row(this.renderTabs(), innerWidth));
-    const selectorTop = selector[0];
-    if (selectorTop) {
-      const leadingBorder = "─".repeat(selectorAnchor);
-      const remainingBorder = "─".repeat(
-        Math.max(0, innerWidth - visibleWidth(selectorTop) - selectorAnchor),
-      );
-      lines.push(
-        `${this.theme.fg("borderAccent", `├${leadingBorder}`)}${selectorTop}${this.theme.fg("borderAccent", `${remainingBorder}┤`)}`,
-      );
-    } else lines.push(this.border("├", "", "┤", innerWidth));
+    const innerWidth = safeWidth - 2;
+    const runs = this.runs();
+    this.runIndex = Math.min(this.runIndex, Math.max(0, runs.length - 1));
+    const run = runs[this.runIndex];
+    if (this.killConfirmation) return this.renderKillDialog(innerWidth);
+
+    const lines = [this.border("╭", " Actor Inspector ", "╮", innerWidth)];
+    lines.push(this.row(this.renderRunControl(run, runs.length - this.runIndex), innerWidth));
+    lines.push(this.row(this.renderTabs(run), innerWidth));
+    lines.push(this.border("├", "", "┤", innerWidth));
+
     this.contentStripeIndices = [];
-    const baseContent = this.detailOpen
-        ? this.renderDetail(innerWidth)
-        : this.selectedRun
-          ? this.renderTimeline(innerWidth)
-          : this.renderRunSelector(innerWidth);
-    const content = this.feedback && !this.killConfirmation
-      ? [
-          this.theme.fg(
-            this.feedback.ok
-              ? "success"
-              : /^Kill (failed|rejected):/.test(this.feedback.message)
-                ? "error"
-                : "warning",
-            ` ${this.feedback.message}`,
-          ),
-          ...baseContent.slice(0, Math.max(0, this.contentViewportRows() - 1)),
-        ]
-      : baseContent;
-    const contentViewportRows = this.contentViewportRows();
-    const selectorRows = selector.slice(1);
-    for (let index = 0; index < Math.max(content.length, contentViewportRows); index += 1) {
-      const base = content[index] ?? "";
-      const stripeIndex = index < content.length
-        ? this.contentStripeIndices[index] ?? index
-        : 0;
-      const popup = selectorRows[index];
-      if (!popup) {
-        lines.push(this.stripedRow(base, innerWidth, stripeIndex));
-        continue;
-      }
-      const transparentPrefix = popup.match(/^ +/)?.[0].length ?? 0;
-      const visiblePopup = popup.slice(transparentPrefix);
-      const popupWidth = visibleWidth(visiblePopup);
-      const popupAnchor = selectorAnchor + transparentPrefix;
-      const baseWidth = Math.max(0, innerWidth - popupWidth - popupAnchor);
-      const leadingBase = this.stripeBackground(
-        this.fit(this.takeVisiblePrefix(base, popupAnchor), popupAnchor),
-        stripeIndex,
-      );
-      const preservedBase = this.stripeBackground(
-        this.fit(
-          this.dropVisiblePrefix(base, popupWidth + popupAnchor),
-          baseWidth,
-        ),
-        stripeIndex,
-      );
-      lines.push(this.row(`${leadingBase}${visiblePopup}${preservedBase}`, innerWidth, true));
+    let content = this.renderContent(run, innerWidth);
+    if (this.feedback) {
+      const color = this.feedback.ok
+        ? "success"
+        : /^Kill (failed|rejected)/u.test(this.feedback.message)
+          ? "error"
+          : "warning";
+      content = [this.theme.fg(color, ` ${this.feedback.message}`), ...content];
+      this.contentStripeIndices = [0, ...this.contentStripeIndices];
+    }
+    const viewportRows = this.contentViewportRows();
+    content = content.slice(0, viewportRows);
+    for (let index = 0; index < viewportRows; index += 1) {
+      lines.push(this.stripedRow(
+        content[index] ?? "",
+        innerWidth,
+        this.contentStripeIndices[index] ?? index,
+      ));
     }
     lines.push(this.footerBorder(this.renderKeyHints(), innerWidth));
     return lines;
   }
 
-  invalidate(): void {}
-
-  dispose(): void {
-    clearInterval(this.refreshTimer);
+  private get tab(): ActorInspectorTab {
+    return TABS[this.tabIndex]!;
   }
 
-  private runs(): Inspector.ActorInspectorRunItem[] {
-    return Inspector.readActorInspectorRuns(this.stateRoot, this.ownerId);
-  }
-
-  private ensureSelectedRun(runs: Inspector.ActorInspectorRunItem[]): void {
-    if (!this.selectedRun) this.selectedRun = runs[0]?.run;
+  private runs(): ActorInspector.ActorInspectorRunItem[] {
+    if (this.runCache) return this.runCache;
+    this.runCache = this.readRuns(this.stateRoot, this.ownerId);
+    return this.runCache;
   }
 
   private contentViewportRows(): number {
-    const overlayRows = Math.floor(this.tui.terminal.rows * 0.94);
+    const rows = (this.tui as TUI & { terminal?: { rows?: number } }).terminal?.rows ?? 30;
+    const overlayRows = Math.floor(rows * 0.94);
     return Math.max(4, Math.min(24, overlayRows - 5));
   }
 
-  private selectRun(run: string, index: number): void {
-    this.selectedRun = run;
-    this.turnCache = undefined;
-    this.runIndex = index;
-    this.recipeScroll = 0;
+  private resetContentPosition(): void {
+    this.documentScroll = 0;
+    this.detailScroll = 0;
     this.rowIndex = 0;
-    this.subagentIndex = 0;
-    this.communicationFrom = "all";
+    this.traceDetail = undefined;
   }
 
-  private cycleRun(
-    runs: Inspector.ActorInspectorRunItem[],
-    direction: -1 | 1,
-  ): void {
+  private cycleRun(runs: ActorInspector.ActorInspectorRunItem[], direction: -1 | 1): void {
     if (runs.length === 0) return;
-    const currentIndex = Math.max(
-      0,
-      runs.findIndex((run) => run.run === this.selectedRun),
-    );
-    const nextIndex = (currentIndex + direction + runs.length) % runs.length;
-    const next = runs[nextIndex];
-    if (next) this.selectRun(next.run, nextIndex);
+    this.runIndex = (this.runIndex + direction + runs.length) % runs.length;
+    this.resetContentPosition();
   }
 
-  private requestKill(runs: Inspector.ActorInspectorRunItem[]): void {
+  private handleScrollableInput(data: string, target: "detail" | "document"): void {
+    const key = target === "detail" ? "detailScroll" : "documentScroll";
+    if (matchesKey(data, "up")) this[key] = Math.max(0, this[key] - 1);
+    else if (matchesKey(data, "down")) this[key] += 1;
+    else if (matchesKey(data, "pageUp")) {
+      this[key] = Math.max(0, this[key] - this.contentViewportRows());
+    } else if (matchesKey(data, "pageDown")) {
+      this[key] += this.contentViewportRows();
+    } else if (matchesKey(data, "left") && target === "detail") {
+      this.traceDetail = undefined;
+      this.detailScroll = 0;
+      this.focus = "list";
+    }
+  }
+
+  private handleSelectorInput(
+    data: string,
+    runs: ActorInspector.ActorInspectorRunItem[],
+  ): void {
+    const run = runs[this.runIndex];
+    const options = this.selectorMode === "run"
+      ? runs.map((item) => item.run)
+      : this.traceSources(run);
+    if (matchesKey(data, "up")) this.selectorIndex = Math.max(0, this.selectorIndex - 1);
+    else if (matchesKey(data, "down")) {
+      this.selectorIndex = Math.min(Math.max(0, options.length - 1), this.selectorIndex + 1);
+    } else if (matchesKey(data, "left")) {
+      this.focus = this.selectorMode === "run" ? "runs" : "tabs";
+      this.selectorMode = undefined;
+    } else if (matchesKey(data, "return") || matchesKey(data, "right")) {
+      if (this.selectorMode === "run") {
+        this.runIndex = this.selectorIndex;
+        this.focus = "runs";
+      } else {
+        this.traceSourceIndex = this.selectorIndex;
+        this.focus = "tabs";
+      }
+      this.selectorMode = undefined;
+      this.resetContentPosition();
+    }
+  }
+
+  private openSourceSelector(run?: ActorInspector.ActorInspectorRunItem): void {
+    const sources = this.traceSources(run);
+    this.selectorMode = "source";
+    this.selectorIndex = Math.min(this.traceSourceIndex, sources.length - 1);
+    this.focus = "select";
+  }
+
+  private cycleTraceSource(run?: ActorInspector.ActorInspectorRunItem): void {
+    const sources = this.traceSources(run);
+    this.traceSourceIndex = (this.traceSourceIndex + 1) % sources.length;
+    this.resetContentPosition();
+  }
+
+  private requestKill(run?: ActorInspector.ActorInspectorRunItem): void {
     this.feedback = undefined;
     if (this.focus !== "runs") {
       this.feedback = { ok: false, message: "Focus Run before using Kill." };
       return;
     }
-    const run = runs.find((item) => item.run === this.selectedRun);
     if (!run) {
       this.feedback = { ok: false, message: "Kill unavailable: no owned run." };
       return;
@@ -385,17 +352,11 @@ export class ActorInspectorOverlay {
       return;
     }
     if (run.status !== "running") {
-      this.feedback = {
-        ok: false,
-        message: `Kill unavailable: run is ${run.status}.`,
-      };
+      this.feedback = { ok: false, message: `Kill unavailable: run is ${run.status}.` };
       return;
     }
     if (!run.runInstanceId) {
-      this.feedback = {
-        ok: false,
-        message: "Kill unavailable: run generation unavailable.",
-      };
+      this.feedback = { ok: false, message: "Kill unavailable: run generation unavailable." };
       return;
     }
     this.killConfirmation = {
@@ -406,25 +367,32 @@ export class ActorInspectorOverlay {
     this.killDialogChoice = "cancel";
   }
 
-  private cancelKill(): void {
-    this.feedback = { ok: false, message: "Kill cancelled." };
-    this.killConfirmation = undefined;
-    this.killDialogChoice = "cancel";
+  private handleKillInput(data: string): void {
+    const key = data.toLowerCase();
+    if (matchesKey(data, "escape") || key === "n") {
+      this.feedback = { ok: false, message: "Kill cancelled." };
+      this.killConfirmation = undefined;
+      this.killDialogChoice = "cancel";
+    } else if (matchesKey(data, "left") || matchesKey(data, "right") || matchesKey(data, "tab")) {
+      this.killDialogChoice = this.killDialogChoice === "cancel" ? "kill" : "cancel";
+    } else if (key === "y") {
+      this.confirmKill();
+    } else if (matchesKey(data, "return")) {
+      if (this.killDialogChoice === "kill") this.confirmKill();
+      else {
+        this.feedback = { ok: false, message: "Kill cancelled." };
+        this.killConfirmation = undefined;
+      }
+    }
   }
 
   private confirmKill(): void {
     const confirmation = this.killConfirmation;
     this.killConfirmation = undefined;
     this.killDialogChoice = "cancel";
-    if (!confirmation || !this.killRun) {
-      this.feedback = { ok: false, message: "Kill unavailable in this Inspector." };
-      return;
-    }
+    if (!confirmation || !this.killRun) return;
     try {
-      this.feedback = this.killRun(
-        confirmation.run,
-        confirmation.runInstanceId,
-      );
+      this.feedback = this.killRun(confirmation.run, confirmation.runInstanceId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.feedback = {
@@ -434,14 +402,13 @@ export class ActorInspectorOverlay {
     }
   }
 
-  private renderKillDialog(_width: number, innerWidth: number): string[] {
+  private renderKillDialog(innerWidth: number): string[] {
     const confirmation = this.killConfirmation!;
-    const totalRows = this.contentViewportRows() + 5;
     const cancel = this.killDialogChoice === "cancel"
-      ? this.theme.bg("selectedBg", this.theme.fg("accent", "  Cancel  "))
+      ? this.theme.bg("customMessageBg", this.theme.fg("accent", "  Cancel  "))
       : this.theme.fg("muted", "  Cancel  ");
     const kill = this.killDialogChoice === "kill"
-      ? this.theme.bg("selectedBg", this.theme.fg("error", "  Kill actor  "))
+      ? this.theme.bg("customMessageBg", this.theme.fg("error", "  Kill actor  "))
       : this.theme.fg("error", "  Kill actor  ");
     const body = [
       "",
@@ -450,45 +417,354 @@ export class ActorInspectorOverlay {
       `${this.theme.fg("muted", "Run:")} ${this.theme.fg("accent", `run:${confirmation.run}`)}`,
       `${this.theme.fg("muted", "Current status:")} ${this.theme.fg("warning", confirmation.status)}`,
       "",
-      this.theme.fg("text", "This sends canonical control.kill."),
+      this.theme.fg("text", "This sends canonical kill Control."),
       this.theme.fg("error", "The action is destructive and cannot be undone."),
       "",
       `${cancel}    ${kill}`,
       "",
     ];
     const lines = [this.border("╭", " Confirm Actor Kill ", "╮", innerWidth)];
-    const availableRows = Math.max(1, totalRows - 2);
+    const availableRows = this.contentViewportRows() + 3;
     const topPadding = Math.max(0, Math.floor((availableRows - body.length) / 2));
-    const dialogRows = [
-      ...Array.from({ length: topPadding }, () => ""),
-      ...body,
-    ].slice(0, availableRows);
-    while (dialogRows.length < availableRows) dialogRows.push("");
-    for (const line of dialogRows)
-      lines.push(this.row(this.center(line, innerWidth), innerWidth));
+    const rows = [...Array.from({ length: topPadding }, () => ""), ...body].slice(0, availableRows);
+    while (rows.length < availableRows) rows.push("");
+    for (const line of rows) lines.push(this.row(this.center(line, innerWidth), innerWidth));
     lines.push(this.footerBorder(this.renderKeyHints(), innerWidth));
     return lines;
   }
 
-  private listItemCount(): number {
-    if (this.tab === "recipe") return 0;
-    return this.tab === "communications"
-      ? this.communicationPreviews().length
-      : this.turnItems().length;
+  private renderRunControl(
+    run: ActorInspector.ActorInspectorRunItem | undefined,
+    sequence: number,
+  ): string {
+    const active = this.focus === "runs" || (this.focus === "select" && this.selectorMode === "run");
+    const prefix = active ? this.theme.fg("accent", " ← ") : "   ";
+    const suffix = active ? this.theme.fg("accent", " → ") : "   ";
+    if (!run) {
+      const empty = this.theme.fg("muted", `${prefix}Run: none${suffix}`);
+      return this.focus === "runs" ? this.theme.bg("customMessageBg", empty) : empty;
+    }
+    const value = `${prefix}${this.theme.fg("muted", "Run: ")}${this.theme.fg("text", `#${sequence}`)}  ${this.theme.fg("accent", run.run)}  ${this.theme.fg(this.statusColor(run.status), run.status)}${suffix}`;
+    return this.focus === "runs" ? this.theme.bg("customMessageBg", value) : value;
   }
 
-  private selectorAnchor(): number {
-    if (this.menuLevel === "run") {
-      const runControl = stripVTControlCharacters(this.renderRunControl());
-      return Math.max(0, runControl.indexOf("Run:") - 2);
+  private renderTabs(run?: ActorInspector.ActorInspectorRunItem): string {
+    const source = this.traceSource(run);
+    return TABS.map((tab, index) => {
+      const base = `${tab[0]!.toUpperCase()}${tab.slice(1)}`;
+      const label = tab === "trace" && source !== "all" ? `${base} (${source})` : base;
+      const selected = index === this.tabIndex;
+      const display = selected && this.focus !== "runs" ? `[ ${label} ]` : `  ${label}  `;
+      const value = ` ${display} `;
+      if (!selected) return this.theme.fg("muted", value);
+      const colored = this.theme.fg("accent", value);
+      return this.focus === "tabs" ? this.theme.bg("customMessageBg", colored) : colored;
+    }).join(" ");
+  }
+
+  private renderContent(
+    run: ActorInspector.ActorInspectorRunItem | undefined,
+    width: number,
+  ): string[] {
+    if (!run) return [this.theme.fg("muted", " No owned actor runs")];
+    if (this.focus === "select") return this.renderSelector(run);
+    if (this.focus === "detail") return this.renderTraceDetail(width);
+    if (this.tab === "trace") return this.renderTraceList(run);
+    const stateDir = path.join(this.stateRoot, run.run);
+    const value = this.tab === "recipe"
+      ? ActorInspector.readActorInspectorRecipe(stateDir)
+      : this.controlDocument(run, stateDir);
+    const projection = this.documentProjection(value, width);
+    const maxStart = Math.max(0, projection.lines.length - this.contentViewportRows());
+    this.documentScroll = Math.min(this.documentScroll, maxStart);
+    this.contentStripeIndices = projection.stripes.slice(
+      this.documentScroll,
+      this.documentScroll + this.contentViewportRows(),
+    );
+    return projection.lines.slice(
+      this.documentScroll,
+      this.documentScroll + this.contentViewportRows(),
+    );
+  }
+
+  private renderSelector(run: ActorInspector.ActorInspectorRunItem): string[] {
+    const options = this.selectorMode === "run"
+      ? this.runs().map((item) => `run:${item.run}  ${item.status}`)
+      : this.traceSources(run).map((source) => `Trace source: ${source}`);
+    const lines = this.renderMenuBox(options, this.selectorIndex);
+    this.contentStripeIndices = lines.map(() => 0);
+    return lines;
+  }
+
+  private renderMenuBox(options: string[], focusedIndex: number): string[] {
+    if (options.length === 0) return [this.theme.fg("muted", " No options")];
+    const visibleLimit = Math.max(1, Math.min(this.contentViewportRows(), options.length));
+    const maxStart = Math.max(0, options.length - visibleLimit);
+    const start = Math.max(0, Math.min(focusedIndex - Math.floor(visibleLimit / 2), maxStart));
+    const visible = options.slice(start, start + visibleLimit);
+    const width = Math.max(8, ...options.map((option) => visibleWidth(option) + 4));
+    const border = (left: string, right: string, marker = "") =>
+      this.theme.fg("borderAccent", `${left}${marker}${"─".repeat(Math.max(0, width - visibleWidth(marker)))}${right}`);
+    return [
+      border("╭", "╮", start > 0 ? "↑" : ""),
+      ...visible.map((option, offset) => {
+        const index = start + offset;
+        const row = this.fit(`${index === focusedIndex ? " ▶ " : "   "}${option}`, width);
+        const colored = index === focusedIndex ? this.theme.fg("accent", row) : row;
+        const styled = index === focusedIndex ? this.theme.bg("customMessageBg", colored) : colored;
+        return `${this.theme.fg("borderAccent", "│")}${styled}${this.theme.fg("borderAccent", "│")}`;
+      }),
+      border("╰", "╯", start + visible.length < options.length ? "↓" : ""),
+    ];
+  }
+
+  private renderTraceList(run: ActorInspector.ActorInspectorRunItem): string[] {
+    const items = this.traceItems(run);
+    if (items.length === 0) return [this.theme.fg("muted", " No Trace evidence")];
+    this.rowIndex = Math.min(this.rowIndex, items.length - 1);
+    const viewportRows = this.contentViewportRows();
+    const maxStart = Math.max(0, items.length - viewportRows);
+    const start = Math.max(0, Math.min(this.rowIndex - Math.floor(viewportRows / 2), maxStart));
+    this.contentStripeIndices = items
+      .slice(start, start + viewportRows)
+      .map((_item, offset) => start + offset);
+    return items.slice(start, start + viewportRows).map((item, offset) => {
+      const index = start + offset;
+      const detail = item.detail && typeof item.detail === "object"
+        ? item.detail as Record<string, unknown>
+        : {};
+      const marker = item.level === "error"
+        ? this.theme.fg("error", "!")
+        : detail.attention
+          ? this.theme.fg("warning", "•")
+          : this.theme.fg("muted", "·");
+      const prefix = this.focus === "list" && index === this.rowIndex
+        ? this.theme.fg("accent", " ▶ ")
+        : "   ";
+      const row = `${prefix}${this.theme.fg("text", `#${index + 1}`)} ${marker} ${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
+      return this.focus === "list" && index === this.rowIndex
+        ? this.theme.fg("accent", row)
+        : row;
+    });
+  }
+
+  private renderTraceDetail(width: number): string[] {
+    if (!this.traceDetail) return [this.theme.fg("warning", " Trace row is no longer available")];
+    const projection = this.documentProjection(this.traceDetail, width);
+    const maxStart = Math.max(0, projection.lines.length - this.contentViewportRows());
+    this.detailScroll = Math.min(this.detailScroll, maxStart);
+    this.contentStripeIndices = projection.stripes.slice(
+      this.detailScroll,
+      this.detailScroll + this.contentViewportRows(),
+    );
+    return projection.lines.slice(
+      this.detailScroll,
+      this.detailScroll + this.contentViewportRows(),
+    );
+  }
+
+  private controlDocument(
+    run: ActorInspector.ActorInspectorRunItem,
+    stateDir: string,
+  ): Record<string, unknown> {
+    const endpoint = run.runInstanceId
+      ? RunControlDelivery.readRunControlEndpoint(stateDir, run.runInstanceId)
+      : undefined;
+    const meta = this.readRunMeta(stateDir);
+    return {
+      status: run.status,
+      run_instance_id: run.runInstanceId,
+      actor_actions: Array.isArray(meta.control) ? meta.control : [],
+      runtime_actions: run.status === "running" ? ["kill"] : ["archive", "prune"],
+      endpoint,
+      recent_controls: RunsControls.readRunControlsFromStateDir(stateDir).slice(-20).reverse(),
+    };
+  }
+
+  private allTraceItems(run?: ActorInspector.ActorInspectorRunItem): TraceProjection.TraceItem[] {
+    if (!run) return [];
+    if (
+      this.traceCache?.run === run.run &&
+      this.traceCache.runInstanceId === run.runInstanceId
+    ) {
+      return this.traceCache.items;
     }
-    const label = this.tab === "communications"
-      ? "Messages"
-      : this.tab === "turns"
-        ? "Turns"
-        : "Recipe";
-    const tabs = stripVTControlCharacters(this.renderTabs());
-    return Math.max(0, tabs.indexOf(label) - 2);
+    const items = this.readTrace(path.join(this.stateRoot, run.run), {
+      limit: 100,
+      source: "all",
+    });
+    this.traceCache = { run: run.run, runInstanceId: run.runInstanceId, items };
+    return items;
+  }
+
+  private traceSources(run?: ActorInspector.ActorInspectorRunItem): TraceProjection.TraceSourceFilter[] {
+    const present = new Set(this.allTraceItems(run).map((item) => item.source));
+    return TRACE_SOURCES.filter((source) => source === "all" || present.has(source));
+  }
+
+  private traceSource(run?: ActorInspector.ActorInspectorRunItem): TraceProjection.TraceSourceFilter {
+    const sources = this.traceSources(run);
+    this.traceSourceIndex %= sources.length;
+    return sources[this.traceSourceIndex] ?? "all";
+  }
+
+  private traceItems(run?: ActorInspector.ActorInspectorRunItem): TraceProjection.TraceItem[] {
+    const source = this.traceSource(run);
+    const items = this.allTraceItems(run);
+    return source === "all" ? items : items.filter((item) => item.source === source);
+  }
+
+  private readRunMeta(stateDir: string): Record<string, unknown> {
+    try {
+      return JSON.parse(readFileSync(path.join(stateDir, "run.json"), "utf8")) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  private documentProjection(
+    value: unknown,
+    width: number,
+  ): { lines: string[]; stripes: number[] } {
+    const sections = value && typeof value === "object" && !Array.isArray(value)
+      ? Object.entries(value as Record<string, unknown>).map(([key, item]) => {
+          const inline = this.inlineDocumentValue(item);
+          return inline !== undefined
+            ? [`${key}: ${inline}`]
+            : item && typeof item === "object"
+              ? [`${key}:`, ...this.document(item, 1)]
+              : this.labeledScalarLines(key, item);
+        })
+      : [this.document(value)];
+    const lines: string[] = [];
+    const stripes: number[] = [];
+    sections.forEach((section, sectionIndex) => {
+      const wrapped = this.wrapDocument(section, width);
+      lines.push(...wrapped.map((line) => this.styleDocumentLine(line)));
+      stripes.push(...wrapped.map(() => sectionIndex));
+    });
+    return { lines, stripes };
+  }
+
+  private inlineDocumentValue(value: unknown): string | undefined {
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "[]";
+      if (value.every((item) =>
+        (item === null || typeof item !== "object") &&
+        !(typeof item === "string" && /[\r\n]/u.test(item))
+      )) {
+        return `[${value.map((item) => String(item ?? "none")).join(", ")}]`;
+      }
+      return undefined;
+    }
+    if (value && typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length === 0) return "{}";
+      if (
+        entries.length <= 3 &&
+        entries.every(([, item]) =>
+          (item === null || typeof item !== "object") &&
+          !(typeof item === "string" && /[\r\n]/u.test(item))
+        )
+      ) {
+        return `{ ${entries
+          .map(([key, item]) => `${key}: ${String(item ?? "none")}`)
+          .join(", ")} }`;
+      }
+    }
+    return undefined;
+  }
+
+  private labeledScalarLines(key: string, value: unknown, depth = 0): string[] {
+    const indent = "  ".repeat(depth);
+    const [first = "", ...rest] = String(value ?? "none").split(/\r?\n/u);
+    return [
+      `${indent}${key}: ${first}`,
+      ...rest.map((line) => `${indent}  ${line}`),
+    ];
+  }
+
+  private document(value: unknown, depth = 0): string[] {
+    if (value === null || value === undefined) return [`${"  ".repeat(depth)}none`];
+    const inline = this.inlineDocumentValue(value);
+    if (inline !== undefined) return [`${"  ".repeat(depth)}${inline}`];
+    if (Array.isArray(value)) {
+      return value.flatMap((item, index) => {
+        const marker = `${"  ".repeat(depth)}- #${index + 1}`;
+        const itemInline = this.inlineDocumentValue(item);
+        return itemInline !== undefined
+          ? [`${marker}: ${itemInline}`]
+          : [marker, ...this.document(item, depth + 1)];
+      });
+    }
+    if (typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
+        const itemInline = this.inlineDocumentValue(item);
+        if (itemInline !== undefined) {
+          return [`${"  ".repeat(depth)}${key}: ${itemInline}`];
+        }
+        if (item && typeof item === "object") {
+          return [`${"  ".repeat(depth)}${key}:`, ...this.document(item, depth + 1)];
+        }
+        return this.labeledScalarLines(key, item, depth);
+      });
+    }
+    return String(value)
+      .split(/\r?\n/u)
+      .map((line) => `${"  ".repeat(depth)}${line}`);
+  }
+
+  private wrapDocument(lines: string[], width: number): string[] {
+    return lines.flatMap((line) => {
+      const normalized = line.replaceAll("\t", "  ");
+      if (visibleWidth(normalized) <= width) return [normalized];
+      const leading = normalized.match(/^ */u)?.[0] ?? "";
+      const continuation = `${leading}  `;
+      const wrapped: string[] = [];
+      let rest = normalized.slice(leading.length);
+      let prefix = leading;
+      while (rest && visibleWidth(`${prefix}${rest}`) > width) {
+        const available = Math.max(1, width - visibleWidth(prefix));
+        const candidate = this.visiblePrefix(rest, available);
+        const minimumBreak = Math.floor(candidate.length * 0.6);
+        const preferred = Math.max(
+          candidate.lastIndexOf(" "),
+          candidate.lastIndexOf("/"),
+          candidate.lastIndexOf(","),
+        );
+        const cut = preferred >= minimumBreak ? preferred + 1 : candidate.length;
+        wrapped.push(`${prefix}${rest.slice(0, cut).trimEnd()}`);
+        rest = rest.slice(cut).trimStart();
+        prefix = continuation;
+      }
+      if (rest) wrapped.push(`${prefix}${rest}`);
+      return wrapped;
+    });
+  }
+
+  private styleDocumentLine(line: string): string {
+    const indent = line.match(/^ */u)?.[0] ?? "";
+    const content = line.slice(indent.length);
+    if (/^- #\d+$/u.test(content) || content.endsWith(":")) {
+      return `${indent}${this.theme.fg("accent", content)}`;
+    }
+    const labeled = /^([^:]+:)(.*)$/u.exec(content);
+    if (labeled) {
+      return `${indent}${this.theme.fg("muted", labeled[1])}${this.theme.fg("text", labeled[2])}`;
+    }
+    return `${indent}${this.theme.fg(content === "none" || content === "[]" ? "muted" : "text", content)}`;
+  }
+
+  private visiblePrefix(value: string, width: number): string {
+    let consumed = 0;
+    let result = "";
+    for (const character of value) {
+      const characterWidth = visibleWidth(character);
+      if (consumed + characterWidth > width) break;
+      result += character;
+      consumed += characterWidth;
+    }
+    return result;
   }
 
   private renderKeyHints(): string {
@@ -497,816 +773,38 @@ export class ActorInspectorOverlay {
     const divider = this.theme.fg("borderAccent", " ─ ");
     const hints = (...items: Array<[string, string]>) =>
       items.map(([keys, description]) => hint(keys, description)).join(divider);
-    if (this.killConfirmation)
-      return hints(
-        ["←→/tab", "choose"],
-        ["enter/y", "confirm"],
-        ["esc/n", "cancel"],
-      );
-    if (this.focus === "select")
-      return this.menuLevel === "value"
-        ? hints(["↑↓", "option"], ["enter", "apply"], ["←/esc", "back"])
-        : hints(["↑↓", "option"], ["→/enter", "open"], ["←/esc", "back"]);
-    if (this.focus === "recipe")
-      return hints(
-        ["↑↓/pgup/pgdn", "scroll"],
-        ["↑ at top", "tabs"],
-        ["←/esc", "tabs"],
-      );
-    if (this.focus === "detail")
+    if (this.killConfirmation) {
+      return hints(["←→/tab", "choose"], ["enter/y", "confirm"], ["esc/n", "cancel"]);
+    }
+    if (this.focus === "select") {
+      return hints(["↑↓", "option"], ["enter/→", "apply"], ["←/esc", "back"]);
+    }
+    if (this.focus === "detail") {
       return hints(["↑↓/pgup/pgdn", "scroll"], ["←/esc", "back"]);
-    if (this.focus === "list")
-      return hints(
-        ["↑↓/pgup/pgdn", "row"],
-        ["→/enter", "open"],
-        ["←", "tabs"],
-        ["esc", "close"],
-      );
+    }
+    if (this.focus === "document") {
+      return hints(["↑↓/pgup/pgdn", "scroll"], ["↑ at top", "tabs"], ["←/esc", "tabs"]);
+    }
+    if (this.focus === "list") {
+      return hints(["↑↓/pgup/pgdn", "row"], ["→/enter", "open"], ["←", "tabs"], ["esc", "close"]);
+    }
     if (this.focus === "runs") {
-      const items: Array<[string, string]> = [
-        ["←→", "run"],
-        ["↓", "tabs"],
-        ["enter", "list"],
-      ];
-      const run = this.runs().find((item) => item.run === this.selectedRun);
-      if (this.killRun && run?.status === "running" && run.runInstanceId)
-        items.push(["k", "kill"]);
+      const items: Array<[string, string]> = [["←→", "run"], ["↓", "tabs"], ["enter", "list"]];
+      const run = this.runs()[this.runIndex];
+      if (this.killRun && run?.status === "running" && run.runInstanceId) items.push(["k", "kill"]);
       items.push(["esc", "close"]);
       return hints(...items);
     }
-    return hints(
-      ["←→", "navigate"],
-      ["↑↓", "change row"],
-      ["enter", "select"],
-      ["esc", "close"],
-    );
+    return this.tab === "trace"
+      ? hints(["←→", "tabs"], ["↑↓", "focus"], ["enter/f", "source"], ["esc", "close"])
+      : hints(["←→", "tabs"], ["↑↓", "focus"], ["enter", "open"], ["esc", "close"]);
   }
 
-  private renderRunControl(): string {
-    const runs = this.runs();
-    const runIndex = runs.findIndex((item) => item.run === this.selectedRun);
-    const run = runs[runIndex];
-    const focused = this.focus === "runs";
-    const active = focused || (this.focus === "select" && this.menuLevel === "run");
-    const prefix = active ? this.theme.fg("accent", " ← ") : "   ";
-    const suffix = active ? this.theme.fg("accent", " → ") : "   ";
-    if (!run) {
-      const empty = this.theme.fg("muted", `${prefix}Run: none${suffix}`);
-      return focused ? this.theme.bg("selectedBg", empty) : empty;
-    }
-    const statusColor = run.status === "failed"
-      ? "error"
-      : run.status === "running"
-        ? "warning"
-        : run.status === "done"
-          ? "success"
-          : "muted";
-    const sequence = runs.length - runIndex;
-    const value = `${prefix}${this.theme.fg("muted", "Run: ")}${this.theme.fg("text", `#${sequence}`)}  ${this.theme.fg("accent", run.run)}  ${this.theme.fg(statusColor, run.status)}${suffix}`;
-    return focused ? this.theme.bg("selectedBg", value) : value;
-  }
-
-  private activeMessageFilters(): string[] {
-    return [
-      ...(this.communicationChannel === "all" ? [] : [this.communicationChannel]),
-      ...(this.communicationUnread ? ["unread"] : []),
-      ...(this.communicationFrom === "all" ? [] : [this.communicationFrom]),
-    ];
-  }
-
-  private renderTabs(): string {
-    const tab = (id: ActorInspectorOverlayTab, label: string) => {
-      const selected = this.tab === id;
-      const focused = selected && this.focus === "tabs";
-      const runActive =
-        this.focus === "runs" ||
-        (this.focus === "select" && this.menuLevel === "run");
-      const display = selected && !runActive ? `[ ${label} ]` : `  ${label}  `;
-      const value = ` ${display} `;
-      if (!selected) return this.theme.fg("muted", value);
-      const colored = this.theme.fg("accent", value);
-      return focused ? this.theme.bg("selectedBg", colored) : colored;
-    };
-    const messageFilters = this.activeMessageFilters();
-    const subagent = this.subagents()[this.subagentIndex] ?? "all";
-    const messagesLabel = `Messages${messageFilters.length > 0 ? ` (${messageFilters.join(", ")})` : ""}`;
-    const turnsLabel = `Turns${subagent === "all" ? "" : ` (${subagent})`}`;
-    return `${tab("recipe", "Recipe")} ${tab("communications", messagesLabel)} ${tab("turns", turnsLabel)}`;
-  }
-
-  private renderRunSelector(width: number): string[] {
-    const runs = this.runs();
-    if (runs.length === 0) return [this.theme.fg("muted", " No owned actor runs")];
-    this.runIndex = Math.min(this.runIndex, runs.length - 1);
-    return runs.slice(0, this.contentViewportRows()).map((run, index) => {
-      const selected = index === this.runIndex;
-      const prefix = selected ? this.theme.fg("accent", " ▶ ") : "   ";
-      const label = `${prefix}#${runs.length - index}  run:${run.run}`;
-      const status = ` ${run.status}`;
-      return selected
-        ? this.theme.fg("accent", `${label}${status}`)
-        : `${label}${this.theme.fg("muted", status)}`;
-    });
-  }
-
-  private renderTimeline(width: number): string[] {
-    if (!this.selectedRun) return [];
-    const run = this.runs().find((item) => item.run === this.selectedRun);
-    if (!run) {
-      this.selectedRun = undefined;
-      return [this.theme.fg("warning", " Selected run is no longer owned by this session")];
-    }
-    if (this.tab === "recipe") return this.renderRecipe(width);
-    const rows =
-      this.tab === "communications"
-        ? this.communicationRows()
-        : this.turnRows();
-    if (rows.length === 0) {
-      this.contentStripeIndices = [0];
-      const filtered = this.tab === "communications"
-        ? this.activeMessageFilters().length > 0
-        : (this.subagents()[this.subagentIndex] ?? "all") !== "all";
-      return [
-        this.theme.fg(
-          "muted",
-          filtered
-            ? " No results for the active filters. Enter on the tab to adjust."
-            : this.tab === "communications"
-              ? " No messages in this run"
-              : " No persisted turns in this run",
-        ),
-      ];
-    }
-    this.rowIndex = Math.min(this.rowIndex, rows.length - 1);
-    const viewportRows = this.contentViewportRows();
-    const start = Math.max(
-      0,
-      Math.min(
-        this.rowIndex - Math.floor(viewportRows / 2),
-        Math.max(0, rows.length - viewportRows),
-      ),
-    );
-    const stripeIndices = this.tab === "communications"
-      ? this.communicationPreviews().map((preview, index) =>
-          Math.max(0, (preview.sequence ?? index + 1) - 1),
-        )
-      : this.turnItems().map((turn) => Math.max(0, turn.index - 1));
-    const visibleRows = rows.slice(start, start + viewportRows);
-    this.contentStripeIndices = visibleRows.map(
-      (_, offset) => stripeIndices[start + offset] ?? start + offset,
-    );
-    return visibleRows.map((row, offset) => {
-        const index = start + offset;
-        const selected = this.focus === "list" && index === this.rowIndex;
-        return selected
-          ? this.theme.fg("accent", ` ▶ ${row}`)
-          : `   ${row}`;
-      });
-  }
-
-  private renderRecipe(width: number): string[] {
-    if (!this.selectedRun) return [];
-    const recipe = Inspector.readActorInspectorRecipe(
-      path.join(this.stateRoot, this.selectedRun),
-    );
-    const logicalLines: DetailLogicalLine[] = [
-      ...this.detailSection(
-        "Identity",
-        this.readableValueLines(recipe.identity, "  "),
-      ),
-      ...(recipe.definition
-        ? this.detailSection(
-            "Recipe",
-            this.readableValueLines(recipe.definition, "  "),
-          )
-        : []),
-      ...this.detailSection(
-        "Launch",
-        this.readableValueLines(recipe.launch, "  "),
-      ),
-      ...(recipe.composition.length > 0
-        ? this.detailSection(
-            "Composition",
-            this.readableValueLines(recipe.composition, "  "),
-          )
-        : []),
-      ...this.detailSection("Diagnostics", recipe.diagnostics),
-    ];
-    const wrapped = this.wrapDetailLines(
-      logicalLines.length > 0 ? logicalLines : [" No persisted recipe evidence"],
-      width,
-    );
-    const viewportRows = this.contentViewportRows();
-    const maxStart = Math.max(0, wrapped.lines.length - viewportRows);
-    this.recipeScroll = Math.min(this.recipeScroll, maxStart);
-    this.contentStripeIndices = wrapped.stripeIndices.slice(
-      this.recipeScroll,
-      this.recipeScroll + viewportRows,
-    );
-    return wrapped.lines.slice(
-      this.recipeScroll,
-      this.recipeScroll + viewportRows,
-    );
-  }
-
-  private communicationPreviews(): Inspector.ActorInspectorPreview[] {
-    if (!this.selectedRun) return [];
-    const channels =
-      this.communicationChannel === "all"
-        ? undefined
-        : [this.communicationChannel];
-    return Inspector.readActorInspectorPreviews(this.stateRoot, 100, {
-      channels,
-      currentRunOnly: false,
-      ownerId: this.ownerId,
-      readKeys: this.readKeys,
-      run: this.selectedRun,
-      unreadOnly: this.communicationUnread,
-    })
-      .filter(
-        (preview) =>
-          this.communicationFrom === "all" ||
-          this.communicationActorLabel(preview.from_display ?? preview.from) ===
-            this.communicationFrom,
-      )
-      .reverse();
-  }
-
-  private communicationActorLabel(actor?: string): string {
-    const value = actor ?? "unknown";
-    if (value.startsWith("run:")) return value.slice("run:".length);
-    return value.replace(/^branch:[^/]+\//, "");
-  }
-
-  private communicationFromOptions(): string[] {
-    if (!this.selectedRun) return ["all"];
-    const actors = Inspector.readActorInspectorRoster(
-      this.stateRoot,
-      this.selectedRun,
-    ).map((member) =>
-      this.communicationActorLabel(member.display ?? member.address),
-    );
-    return ["all", ...new Set(actors)];
-  }
-
-  private communicationRows(): string[] {
-    return this.communicationPreviews().map((preview) => {
-      const actor = preview.from_display ?? preview.from ?? "unknown";
-      const target = preview.channel === "room" ? "#all" : preview.to;
-      const text = preview.summary ?? preview.body_preview ?? "(no body)";
-      return `#${preview.sequence ?? "?"}  ${preview.needs_response ? "! " : ""}${actor} → ${target}  ${preview.type}  ${text}`;
-    });
-  }
-
-  private renderDetail(width: number): string[] {
-    if (this.tab === "communications") {
-      const preview = this.detailCommunication;
-      if (!preview) return [this.theme.fg("warning", " Communication row is no longer available")];
-      const fields: Array<[string, unknown]> = [
-        ["channel", preview.channel],
-        ["run", preview.run],
-        ["from", preview.from_display ?? preview.from],
-        ["to", preview.to],
-        ["type", preview.type],
-        ["summary", preview.summary],
-        ["body", preview.body_preview],
-        ["attention", preview.needs_response],
-        ["inbox", preview.inbox_status],
-        ["timestamp", preview.timestamp],
-      ];
-      const lines = fields
-        .filter(([, value]) => value !== undefined)
-        .map(([label, value]) =>
-          truncateToWidth(
-            ` ${label.padEnd(12, " ")} ${typeof value === "string" ? value : JSON.stringify(value)}`,
-            width,
-            "…",
-          ),
-        );
-      const viewportRows = this.contentViewportRows();
-      const maxStart = Math.max(0, lines.length - viewportRows);
-      this.detailScroll = Math.min(this.detailScroll, maxStart);
-      return lines.slice(this.detailScroll, this.detailScroll + viewportRows);
-    }
-    const turn = this.detailTurn;
-    if (!turn) return [this.theme.fg("warning", " Turn row is no longer available")];
-    const logicalLines = this.turnEvidenceLines(turn);
-    const wrapped = this.wrapDetailLines(logicalLines, width);
-    const viewportRows = this.contentViewportRows();
-    const maxStart = Math.max(0, wrapped.lines.length - viewportRows);
-    this.detailScroll = Math.min(this.detailScroll, maxStart);
-    this.contentStripeIndices = wrapped.stripeIndices.slice(
-      this.detailScroll,
-      this.detailScroll + viewportRows,
-    );
-    return wrapped.lines.slice(
-      this.detailScroll,
-      this.detailScroll + viewportRows,
-    );
-  }
-
-  private wrapDetailLines(
-    lines: DetailLogicalLine[],
-    width: number,
-  ): { lines: string[]; stripeIndices: number[] } {
-    const wrappedLines: string[] = [];
-    const stripeIndices: number[] = [];
-    let sectionIndex = 0;
-    for (const line of lines) {
-      if (typeof line !== "string") {
-        sectionIndex += 1;
-        continue;
-      }
-      const physicalLines = line.replaceAll("\t", "  ").split(/\r?\n/);
-      for (const physicalLine of physicalLines) {
-        if (!physicalLine.trim()) continue;
-        const leading = physicalLine.match(/^ */)?.[0] ?? "";
-        const content = physicalLine.slice(leading.length);
-        const contentWidth = Math.max(1, width - visibleWidth(leading));
-        const labeled = /^(\s*(?:-\s+)?[^:]+:\s+)(\S.*)$/u.exec(physicalLine);
-        let wrapped: string[];
-        if (
-          visibleWidth(physicalLine) > width &&
-          labeled &&
-          visibleWidth(labeled[1]) < width
-        ) {
-          const prefix = labeled[1];
-          const value = labeled[2];
-          const firstWidth = Math.max(1, width - visibleWidth(prefix));
-          const first = this.wrapPreferred(value, firstWidth)[0] ??
-            this.takeVisiblePrefix(value, firstWidth);
-          const remainder = value.slice(first.length).trimStart();
-          const continuation = `${leading}  `;
-          const continuationWidth = Math.max(
-            1,
-            width - visibleWidth(continuation),
-          );
-          wrapped = [
-            `${prefix}${first}`,
-            ...(remainder
-              ? this.wrapPreferred(remainder, continuationWidth).map(
-                  (visualLine) => `${continuation}${visualLine}`,
-                )
-              : []),
-          ];
-        } else {
-          wrapped = visibleWidth(physicalLine) <= width
-            ? [physicalLine]
-            : this.wrapPreferred(content, contentWidth).map(
-                (visualLine) => `${leading}${visualLine}`,
-              );
-        }
-        for (const visualLine of wrapped) {
-          if (!visualLine.trim()) continue;
-          wrappedLines.push(visualLine);
-          stripeIndices.push(sectionIndex);
-        }
-      }
-    }
-    return { lines: wrappedLines, stripeIndices };
-  }
-
-  private wrapPreferred(content: string, width: number): string[] {
-    const lines: string[] = [];
-    let remaining = stripVTControlCharacters(content).trimEnd();
-    while (remaining && visibleWidth(remaining) > width) {
-      const candidate = this.takeVisiblePrefix(remaining, width);
-      let splitAt = -1;
-      let trimBoundary = false;
-      for (let index = 1; index < candidate.length; index += 1) {
-        if (/\s/u.test(candidate[index]!)) {
-          splitAt = index + 1;
-          trimBoundary = true;
-        } else if (/[-+=/_,.:]/u.test(candidate[index]!)) {
-          splitAt = index;
-          trimBoundary = false;
-        }
-      }
-      if (splitAt <= 0) splitAt = candidate.length;
-      const head = remaining.slice(0, splitAt).trimEnd();
-      if (!head) {
-        lines.push(candidate);
-        remaining = remaining.slice(candidate.length);
-        continue;
-      }
-      lines.push(head);
-      remaining = remaining.slice(splitAt);
-      if (trimBoundary) remaining = remaining.trimStart();
-    }
-    if (remaining) lines.push(remaining);
-    return lines;
-  }
-
-  private detailSection(
-    title: string,
-    content: string[],
-  ): DetailLogicalLine[] {
-    if (content.length === 0) return [];
-    return [
-      ` ${title}`,
-      ...content.flatMap((line) =>
-        line
-          .split(/\r?\n/)
-          .filter((physicalLine) => physicalLine.trim().length > 0)
-          .map((physicalLine) => `   ${physicalLine}`),
-      ),
-      DETAIL_SECTION_BREAK,
-    ];
-  }
-
-  private readableValueLines(
-    value: unknown,
-    indent = "",
-    depth = 0,
-  ): string[] {
-    if (depth > 8) return [`${indent}[nested value]`];
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (/^[{[]/.test(trimmed)) {
-        try {
-          return this.readableValueLines(JSON.parse(trimmed), indent, depth + 1);
-        } catch {
-          // Keep non-JSON text as written.
-        }
-      }
-      return value.split(/\r?\n/).map((line) => `${indent}${line}`);
-    }
-    if (value === null || value === undefined)
-      return [`${indent}${String(value)}`];
-    if (typeof value !== "object") return [`${indent}${String(value)}`];
-    if (Array.isArray(value)) {
-      if (value.length === 0) return [`${indent}(empty)`];
-      return value.flatMap((item) => {
-        if (
-          item &&
-          typeof item === "object" &&
-          (item as { type?: unknown }).type === "text" &&
-          typeof (item as { text?: unknown }).text === "string"
-        ) {
-          return this.readableValueLines(
-            (item as { text: string }).text,
-            indent,
-            depth + 1,
-          );
-        }
-        if (!item || typeof item !== "object")
-          return [`${indent}- ${String(item)}`];
-        const [first = "", ...rest] = this.readableValueLines(
-          item,
-          `${indent}  `,
-          depth + 1,
-        );
-        return [
-          `${indent}- ${first.trimStart()}`,
-          ...rest,
-        ];
-      });
-    }
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) return [`${indent}(empty)`];
-    return entries.flatMap(([key, item]) => {
-      if (!item || typeof item !== "object") {
-        const scalar = typeof item === "string" ? item : String(item);
-        const [first = "", ...rest] = scalar.split(/\r?\n/);
-        return [
-          `${indent}${key}: ${first}`,
-          ...rest.map((line) => `${indent}  ${line}`),
-        ];
-      }
-      return [
-        `${indent}${key}:`,
-        ...this.readableValueLines(item, `${indent}  `, depth + 1),
-      ];
-    });
-  }
-
-  private turnEvidenceLines(
-    turn: Inspector.ActorInspectorTurnItem,
-  ): DetailLogicalLine[] {
-    const lines: DetailLogicalLine[] = [];
-    const commandNumber = /^command-(\d+)$/.exec(turn.commandId)?.[1];
-    const subagent = commandNumber
-      ? String(Number.parseInt(commandNumber, 10))
-      : turn.commandId;
-    const stage =
-      turn.stage && turn.stage !== "subagent" && turn.stage !== "command"
-        ? ` (${turn.stage})`
-        : "";
-    lines.push(` Subagent ${subagent}${stage}`, DETAIL_SECTION_BREAK);
-    if (turn.userText)
-      lines.push(
-        ...this.detailSection("User", [this.readablePromptText(turn.userText)]),
-      );
-    if (turn.thinking)
-      lines.push(...this.detailSection("Thinking", [turn.thinking]));
-    if (turn.assistantText)
-      lines.push(...this.detailSection("Assistant", [turn.assistantText]));
-    for (const [index, tool] of turn.toolCalls.entries()) {
-      const content = [
-        ...(tool.arguments === undefined
-          ? []
-          : ["Input", ...this.readableValueLines(tool.arguments, "  ")]),
-        ...(tool.result === undefined
-          ? []
-          : ["Result", ...this.readableValueLines(tool.result, "  ")]),
-        `call id: ${tool.id}`,
-      ];
-      lines.push(
-        ...this.detailSection(
-          `Tool ${index + 1} (${tool.name}${tool.resultError ? ", Error" : ""})`,
-          content,
-        ),
-      );
-    }
-    const execution = [
-      ...(!turn.thinking ? ["thinking: not persisted"] : []),
-      ...(turn.model ? [`model: ${turn.model}`] : []),
-      ...(turn.stopReason ? [`stop reason: ${turn.stopReason}`] : []),
-      ...(turn.error ? [`error: ${turn.error}`] : []),
-      ...(turn.usage === undefined
-        ? []
-        : ["Usage", ...this.readableValueLines(turn.usage, "  ")]),
-      ...(turn.unmatchedToolResults > 0
-        ? [`unmatched tool results: ${turn.unmatchedToolResults}`]
-        : []),
-    ];
-    if (execution.length > 0)
-      lines.push(...this.detailSection("Execution", execution));
-    if (turn.diagnostics.length > 0)
-      lines.push(...this.detailSection("Diagnostics", turn.diagnostics));
-    const provenance = [
-      "Session",
-      `  ${turn.sessionFile}`,
-      ...(turn.sessionTruncated ? ["  turn list truncated"] : []),
-      ...(turn.promptFile
-        ? [
-            "Prompt",
-            `  ${turn.promptFile}${turn.promptBytes ? ` (${turn.promptBytes} bytes)` : ""}`,
-          ]
-        : []),
-    ];
-    lines.push(...this.detailSection("Provenance", provenance));
-    return lines.length > 0 ? lines : [" No persisted turn evidence"];
-  }
-
-  private readablePromptText(text: string): string {
-    const wrapped = /^\s*<file\b[^>]*>\s*([\s\S]*?)\s*<\/file>\s*$/i.exec(text);
-    return wrapped?.[1]?.trim() || text;
-  }
-
-  private allTurnItems(): Inspector.ActorInspectorTurnItem[] {
-    if (!this.selectedRun) return [];
-    if (this.turnCache?.run === this.selectedRun) return this.turnCache.turns;
-    const turns = this.readTurns(path.join(this.stateRoot, this.selectedRun));
-    this.turnCache = { run: this.selectedRun, turns };
-    return turns;
-  }
-
-  private turnItems(): Inspector.ActorInspectorTurnItem[] {
-    const selectedSubagent = this.subagents()[this.subagentIndex];
-    return this.allTurnItems()
-      .filter(
-        (turn) =>
-          !selectedSubagent ||
-          selectedSubagent === "all" ||
-          turn.commandId === selectedSubagent,
-      )
-      .reverse();
-  }
-
-  private turnRows(): string[] {
-    return this.turnItems().map((turn) => {
-      const commandNumber = /^command-(\d+)$/.exec(turn.commandId)?.[1];
-      const subagent = commandNumber
-        ? `Subagent ${Number.parseInt(commandNumber, 10)}`
-        : `Subagent ${turn.commandId}`;
-      const stage =
-        turn.stage && turn.stage !== "subagent" && turn.stage !== "command"
-          ? ` (${turn.stage})`
-          : "";
-      const toolNames = [...new Set(turn.toolCalls.map((tool) => tool.name))];
-      const action = turn.toolCalls.length === 0
-        ? ""
-        : turn.toolCalls.length === 1
-          ? `  (${toolNames[0]})`
-          : toolNames.length === 1
-            ? `  (${toolNames[0]}, ${turn.toolCalls.length} calls)`
-            : turn.toolCalls.length <= 2
-              ? `  (${toolNames.join(", ")})`
-              : `  (${turn.toolCalls.length} tools)`;
-      const failed = turn.error || turn.toolCalls.some((tool) => tool.resultError)
-        ? "  (error)"
-        : "";
-      const preview = this.readablePromptText(
-        turn.assistantText ?? turn.userText ?? "(no text)",
-      ).replaceAll(/\s+/g, " ").trim();
-      return `#${turn.index}  ${subagent}${stage}  ${turn.model ?? "unknown model"}${action}${failed}  ${preview}`;
-    });
-  }
-
-  private subagents(): string[] {
-    if (!this.selectedRun || this.tab !== "turns") return ["all"];
-    const ids = this.allTurnItems().map((turn) => turn.commandId);
-    return ["all", ...new Set(ids)];
-  }
-
-  private valueOptions(): string[] {
-    if (this.tab === "turns") return this.subagents();
-    if (this.filterControlIndex === 0)
-      return ["all", "room", "direct", "broadcast"];
-    if (this.filterControlIndex === 1) return ["all", "unread"];
-    return this.communicationFromOptions();
-  }
-
-  private filterOptions(): string[] {
-    return this.tab === "communications"
-      ? ["Channel", "State", "From"]
-      : ["Subagent"];
-  }
-
-  private menuOptions(): string[] {
-    if (this.menuLevel === "run") return this.runs().map((run) => run.run);
-    if (this.menuLevel === "filter") return this.filterOptions();
-    return this.valueOptions();
-  }
-
-  private backMenu(): void {
-    if (this.menuLevel === "value") {
-      this.menuLevel = "filter";
-      this.selectorIndex = this.filterControlIndex;
-      return;
-    }
-    this.focus = this.menuLevel === "run" ? "runs" : "tabs";
-  }
-
-  private openRunMenu(): void {
-    const options = this.runs();
-    this.selectorIndex = Math.max(0, options.findIndex((run) => run.run === this.selectedRun));
-    this.menuLevel = "run";
-    this.focus = "select";
-  }
-
-  private openFilterMenu(): void {
-    this.selectorIndex = this.filterControlIndex;
-    this.menuLevel = "filter";
-    this.focus = "select";
-  }
-
-  private applyMenuOption(value?: string): void {
-    if (!value) return;
-    if (this.menuLevel === "run") {
-      this.selectRun(
-        value,
-        Math.max(0, this.runs().findIndex((run) => run.run === value)),
-      );
-      this.focus = "runs";
-      return;
-    }
-    if (this.menuLevel === "filter") {
-      this.filterControlIndex = this.selectorIndex;
-      const options = this.valueOptions();
-      const current = this.currentFilterValue();
-      this.selectorIndex = Math.max(0, options.indexOf(current));
-      this.menuLevel = "value";
-      return;
-    }
-    if (this.tab === "turns")
-      this.subagentIndex = Math.max(0, this.subagents().indexOf(value));
-    else if (this.filterControlIndex === 0)
-      this.communicationChannel = value as typeof this.communicationChannel;
-    else if (this.filterControlIndex === 1)
-      this.communicationUnread = value === "unread";
-    else this.communicationFrom = value;
-    this.rowIndex = 0;
-    this.menuLevel = "filter";
-    this.selectorIndex = this.filterControlIndex;
-  }
-
-  private filterValue(index: number): string {
-    if (this.tab === "turns") return this.subagents()[this.subagentIndex] ?? "all";
-    if (index === 0) return this.communicationChannel;
-    if (index === 1) return this.communicationUnread ? "unread" : "all";
-    return this.communicationFrom;
-  }
-
-  private currentFilterValue(): string {
-    return this.filterValue(this.filterControlIndex);
-  }
-
-  private renderMenuBox(
-    options: string[],
-    focusedIndex: number,
-    current?: string,
-    parentIndex?: number,
-    omitLeftBorder = false,
-    omitRightBorder = false,
-    maxVisibleOptions = options.length,
-  ): string[] {
-    const visibleLimit = Math.max(1, Math.min(maxVisibleOptions, options.length));
-    const anchorIndex = Math.max(
-      0,
-      Math.min(
-        options.length - 1,
-        focusedIndex >= 0 ? focusedIndex : (parentIndex ?? 0),
-      ),
-    );
-    const maxStart = Math.max(0, options.length - visibleLimit);
-    const start = Math.max(
-      0,
-      Math.min(anchorIndex - Math.floor(visibleLimit / 2), maxStart),
-    );
-    const visibleOptions = options.slice(start, start + visibleLimit);
-    const hiddenAbove = start > 0;
-    const hiddenBelow = start + visibleOptions.length < options.length;
-    const contentWidth = Math.max(
-      4,
-      ...options.map((option) => visibleWidth(option) + 4),
-    );
-    const border = (left: string, right: string, marker = "") =>
-      this.theme.fg(
-        "borderAccent",
-        `${omitLeftBorder ? "" : left}${marker}${"─".repeat(Math.max(0, contentWidth - visibleWidth(marker)))}${omitRightBorder ? "" : right}`,
-      );
-    return [
-      border("╭", "╮", hiddenAbove ? "↑" : ""),
-      ...visibleOptions.map((option, localIndex) => {
-        const index = start + localIndex;
-        const focused = index === focusedIndex;
-        const row = this.fit(`${focused ? " ▶ " : "   "}${option}`, contentWidth);
-        const colored = focused || option === current || index === parentIndex
-          ? this.theme.fg("accent", row)
-          : row;
-        const styled = focused || index === parentIndex
-          ? this.theme.bg("selectedBg", colored)
-          : colored;
-        return `${omitLeftBorder ? "" : this.theme.fg("borderAccent", "│")}${styled}${omitRightBorder ? "" : this.theme.fg("borderAccent", "│")}`;
-      }),
-      border("╰", "╯", hiddenBelow ? "↓" : ""),
-    ];
-  }
-
-  private renderFilterMenus(_width: number): string[] {
-    const filters = this.filterOptions().map(
-      (filter, index) => `${filter}: ${this.filterValue(index)}`,
-    );
-    const maxVisibleOptions = Math.max(1, this.contentViewportRows() - 1);
-    const parentFocus = this.menuLevel === "filter" ? this.selectorIndex : -1;
-    const parent = this.renderMenuBox(
-      filters,
-      parentFocus,
-      undefined,
-      this.menuLevel === "value" ? this.filterControlIndex : undefined,
-      false,
-      false,
-      maxVisibleOptions,
-    );
-    if (this.menuLevel !== "value") return parent;
-    const parentShared = this.renderMenuBox(
-      filters,
-      parentFocus,
-      undefined,
-      this.filterControlIndex,
-      false,
-      true,
-      maxVisibleOptions,
-    );
-    const child = this.renderMenuBox(
-      this.valueOptions(),
-      this.selectorIndex,
-      this.currentFilterValue(),
-      undefined,
-      false,
-      false,
-      maxVisibleOptions,
-    );
-    return Array.from({ length: Math.max(parent.length, child.length) }, (_, index) =>
-      child[index]
-        ? `${parentShared[index] ?? " ".repeat(visibleWidth(parentShared[0]))}${child[index]}`
-        : (parent[index] ?? ""),
-    );
-  }
-
-  private openDetail(): void {
-    if (this.tab === "communications") {
-      const preview = this.communicationPreviews()[this.rowIndex];
-      this.detailCommunication = preview;
-      if (preview) this.readKeys.add(Inspector.inspectorPreviewReadKey(preview));
-    } else this.detailTurn = this.turnItems()[this.rowIndex];
-    this.detailScroll = 0;
-    this.detailOpen = Boolean(this.detailCommunication || this.detailTurn);
-    if (this.detailOpen) this.focus = "detail";
-  }
-
-  private backDetail(): void {
-    this.closeDetail();
-  }
-
-  private closeDetail(): void {
-    this.detailOpen = false;
-    this.detailCommunication = undefined;
-    this.detailTurn = undefined;
-    this.detailScroll = 0;
-    this.focus = "list";
+  private statusColor(status: string): "error" | "warning" | "success" | "muted" {
+    if (status === "failed") return "error";
+    if (status === "running") return "warning";
+    if (status === "done" || status === "terminal") return "success";
+    return "muted";
   }
 
   private footerBorder(hints: string, width: number): string {
@@ -1318,81 +816,39 @@ export class ActorInspectorOverlay {
       "",
     );
     const fill = "─".repeat(
-      Math.max(
-        0,
-        width - visibleWidth(prefix) - visibleWidth(suffix) - visibleWidth(content),
-      ),
+      Math.max(0, width - visibleWidth(prefix) - visibleWidth(suffix) - visibleWidth(content)),
     );
     return `${this.theme.fg("borderAccent", `╰${prefix}`)}${content}${this.theme.fg("borderAccent", `${suffix}${fill}╯`)}`;
   }
 
-  private border(left: string, title: string, right: string, width: number): string {
-    const titleText = truncateToWidth(title, width, "");
-    const fill = "─".repeat(Math.max(0, width - visibleWidth(titleText)));
-    return this.theme.fg("borderAccent", `${left}${titleText}${fill}${right}`);
-  }
-
   private stripeBackground(content: string, index: number): string {
-    if (index % 2 === 0) return content;
-    const segments = content.split("…");
-    return segments
-      .map((segment, segmentIndex) =>
-        `${this.theme.bg("customMessageBg", segment)}${segmentIndex < segments.length - 1 ? this.theme.bg("customMessageBg", "…") : ""}`,
-      )
-      .join("");
+    return index % 2 === 0 ? content : this.theme.bg("customMessageBg", content);
   }
 
   private stripedRow(content: string, width: number, index: number): string {
-    return this.row(
-      this.stripeBackground(this.fit(content, width), index),
-      width,
-      true,
+    const fitted = this.fit(content, width);
+    return `${this.theme.fg("borderAccent", "│")}${this.stripeBackground(fitted, index)}${this.theme.fg("borderAccent", "│")}`;
+  }
+
+  private row(content: string, width: number): string {
+    return `${this.theme.fg("borderAccent", "│")}${this.fit(content, width)}${this.theme.fg("borderAccent", "│")}`;
+  }
+
+  private border(left: string, label: string, right: string, width: number): string {
+    const bounded = truncateToWidth(label, width, "");
+    return this.theme.fg(
+      "borderAccent",
+      `${left}${bounded}${"─".repeat(Math.max(0, width - visibleWidth(bounded)))}${right}`,
     );
   }
 
-  private row(content: string, width: number, fitted = false): string {
-    const body = fitted ? content : this.fit(content, width);
-    return `${this.theme.fg("borderAccent", "│")}${body}${this.theme.fg("borderAccent", "│")}`;
-  }
-
-  private takeVisiblePrefix(content: string, width: number): string {
-    const plain = stripVTControlCharacters(content);
-    let consumed = 0;
-    let result = "";
-    for (const character of plain) {
-      const characterWidth = visibleWidth(character);
-      if (consumed + characterWidth > width) break;
-      result += character;
-      consumed += characterWidth;
-    }
-    return result;
-  }
-
-  private dropVisiblePrefix(content: string, width: number): string {
-    const plain = stripVTControlCharacters(content);
-    let consumed = 0;
-    let index = 0;
-    for (const character of plain) {
-      if (consumed >= width) break;
-      consumed += visibleWidth(character);
-      index += character.length;
-    }
-    return plain.slice(index);
+  private fit(content: string, width: number): string {
+    const bounded = truncateToWidth(content, width, "");
+    return `${bounded}${" ".repeat(Math.max(0, width - visibleWidth(bounded)))}`;
   }
 
   private center(content: string, width: number): string {
-    const contentWidth = visibleWidth(content);
-    const leading = Math.max(0, Math.floor((width - contentWidth) / 2));
-    return `${" ".repeat(leading)}${content}`;
-  }
-
-  private fit(content: string, width: number): string {
-    // A Component render entry must remain exactly one terminal row. Persisted
-    // prompts, messages, and tool results may contain line breaks or tabs;
-    // passing those through lets them escape the overlay compositor and corrupt
-    // the underlying TUI during tab changes.
-    const singleLine = content.replace(/[\r\n\t]/g, " ");
-    const bounded = truncateToWidth(singleLine, width, "…");
-    return `${bounded}${" ".repeat(Math.max(0, width - visibleWidth(bounded)))}`;
+    const padding = Math.max(0, Math.floor((width - visibleWidth(content)) / 2));
+    return `${" ".repeat(padding)}${content}`;
   }
 }

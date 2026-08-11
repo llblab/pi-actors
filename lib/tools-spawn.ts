@@ -9,12 +9,10 @@ import { join } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import { withFileMutationLock } from "./file-state.ts";
-import * as Messages from "./messages.ts";
 import * as ModelContext from "./model-context.ts";
 import * as Paths from "./paths.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
-import * as Rooms from "./rooms.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsResponse from "./tools-response.ts";
 
@@ -53,13 +51,7 @@ function draftRecipeName(run: string): string {
 function draftRecipeDefaults(
   values: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
-  const ignored = new Set([
-    "actor_address",
-    "communication_file",
-    "default_room",
-    "run_id",
-    "state_dir",
-  ]);
+  const ignored = new Set(["run_id", "state_dir", "trace_file"]);
   const defaults = Object.fromEntries(
     Object.entries(values).filter(([key]) => !ignored.has(key)),
   );
@@ -117,15 +109,16 @@ function enhanceSpawnRecipeError(error: unknown, recipe: unknown): Error {
   );
 }
 
-function runIdFromActorAddress(
-  address: string | undefined,
-): string | undefined {
-  if (!address) return undefined;
-  const parsed = Messages.parseActorAddress(address);
-  if (parsed.kind !== "run" || !parsed.value) {
-    throw new Error(`Expected run:<id> actor address, received: ${address}`);
+function runIdFromTarget(target: string | undefined): string | undefined {
+  if (!target) return undefined;
+  if (!target.startsWith("run:")) {
+    throw new Error(`spawn.as accepts only run:<id>; received: ${target}`);
   }
-  return parsed.value;
+  const run = target.slice(4);
+  if (!run || !/^[A-Za-z0-9_.-]+$/.test(run)) {
+    throw new Error(`invalid spawn Run target: ${target}`);
+  }
+  return run;
 }
 
 export function createSpawnToolDefinition<
@@ -135,17 +128,14 @@ export function createSpawnToolDefinition<
     name: "spawn",
     label: "Spawn",
     description:
-      "Create an addressable actor from a recipe file or inline command template. Use instead of ad hoc shell backgrounding for work that may outlive this turn, needs steering/follow-up/artifacts, runs as a service, fans out, or should be inspected later. Currently spawns run:<id> actors backed by async runs.",
+      "Create one controllable Run from a Recipe file or inline command template.",
     parameters: Schema.objectSchema(
       {
         artifacts: Schema.looseObjectSchema(
-          "Optional named artifact paths for the spawned actor.",
+          "Optional named artifact paths for the spawned Run.",
         ),
         as: Schema.stringSchema(
-          "Optional actor address for the spawned run, e.g. run:<id>.",
-        ),
-        correlation_id: Schema.stringSchema(
-          "Optional workflow correlation id preserved in terminal follow-up delivery.",
+          "Optional Run identity in exact run:<id> form.",
         ),
         file: Schema.stringSchema(
           "Optional template recipe JSON file. Bare names resolve under ~/.pi/agent/recipes.",
@@ -187,7 +177,7 @@ export function createSpawnToolDefinition<
           "spawn.state_dir is not supported; run state is runtime-owned so run:<id> remains addressable and retention-safe.",
         );
       }
-      const runId = runIdFromActorAddress(
+      const runId = runIdFromTarget(
         typeof input.as === "string" ? input.as : undefined,
       );
       const recipe =
@@ -202,11 +192,7 @@ export function createSpawnToolDefinition<
           {
             file: recipe,
             launch_source: "spawn",
-            launch_correlation: {
-              ...(typeof input.correlation_id === "string"
-                ? { correlation_id: input.correlation_id } : {}),
-              tool_call_id: toolCallId,
-            },
+            launch_correlation: { tool_call_id: toolCallId },
             ownerId: getRunOwnerId(ctx),
             ...(input.transport_context
               ? { transport_context: asRecord(input.transport_context) } : {}),
@@ -238,14 +224,12 @@ export function createSpawnToolDefinition<
         throw enhanceSpawnRecipeError(error, recipe);
       }
       const draftRecipe = writeSpawnDraftRecipe(input, meta);
-      const nextActions = ToolsResponse.actorRunNextActions(meta.run);
+      const nextActions = ToolsResponse.runNextActions(meta.run);
       const details = {
         ...meta,
         ...(draftRecipe ? { draft_recipe: draftRecipe } : {}),
         next_actions: nextActions,
       };
-      Rooms.ensureDefaultRoom(meta.state_dir, String(meta.run));
-      Rooms.writeCommunicationSnapshot(meta.state_dir, String(meta.run));
       return {
         content: [
           {

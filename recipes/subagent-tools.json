@@ -11,15 +11,5 @@
     "thinking": "off",
     "output_format": "Concise Markdown with assumptions and next actions."
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": "pi -p --model {model} --thinking {thinking} --tools {tools} {prompt}. Output format: {output_format}"
 }

@@ -18,18 +18,6 @@
     "merge_mode": "consensus-first",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "quorum.completed",
-      "review.completed",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "parallel": true,

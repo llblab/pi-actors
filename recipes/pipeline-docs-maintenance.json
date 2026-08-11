@@ -21,18 +21,6 @@
     "artifact_path": "./docs-maintenance.md",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "docs.completed",
-      "artifact.prepared",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "name": "docs_index",

@@ -38,7 +38,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
       attempted: retirementAttempts,
       cancelRun: (candidate) => AsyncRuns.cancelRun(candidate.stateDir),
       notify: (message, level) => ctx.ui.notify(message, level),
-      sendStop: (candidate) => AsyncRuns.sendRunMessage(candidate.stateDir, "stop"),
+      sendStop: async (candidate) => AsyncRuns.cancelRun(candidate.stateDir),
     });
   };
   const update = (
@@ -62,7 +62,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     );
     Observability.pruneRunUiObservationState(observation, snapshot);
     if (!terminalOnly) {
-      Observability.deliverRunOutboxNotifications(snapshot.outboxEvents, sink);
+      Observability.deliverRunAttentionNotifications(snapshot.attentionEvents, sink);
     }
   };
   const reportDiagnostics = (ctx: Pi.ExtensionContext): void => {

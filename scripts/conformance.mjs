@@ -12,13 +12,15 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const conformanceSuites = [
-  "tests/protocol-examples.test.ts",
+  "tests/control.test.ts",
+  "tests/runs-controls.test.ts",
+  "tests/runs-trace.test.ts",
+  "tests/tools-inspect-kernel.test.ts",
   "tests/recipes-discovery.test.ts",
   "tests/review-swarm-dogfood.test.ts",
   "tests/registry.test.ts",
   "tests/runtime.test.ts",
   "tests/async-runs.test.ts",
-  "tests/rooms.test.ts",
   "tests/tools.test.ts",
 ];
 

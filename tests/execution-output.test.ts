@@ -43,5 +43,5 @@ test("Tail truncation reports byte truncation", () => {
 test("Output and inspect limits are centralized", () => {
   assert.equal(Limits.DEFAULT_INSPECT_LINES, 40);
   assert.equal(Limits.TOOL_OUTPUT_MAX_LINES, 2_000);
-  assert.equal(Limits.INSPECTOR_BODY_PREVIEW_CHARS, Limits.ROOM_MESSAGE_PREVIEW_CHARS);
+  assert.equal(Limits.INSPECTOR_BODY_PREVIEW_CHARS, 320);
 });

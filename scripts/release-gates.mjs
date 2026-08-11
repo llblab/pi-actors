@@ -93,6 +93,66 @@ try {
   }
   console.log("[release] bounded secret and public-path hygiene checked");
 
+  const removedPaths = [
+    "lib/messages.ts",
+    "lib/rooms.ts",
+    "lib/mailbox-loop.ts",
+    "lib/runs-mailbox.ts",
+    "lib/runs-messages.ts",
+    "lib/runs-outbox.ts",
+    "lib/tools-mailbox.ts",
+    "scripts/actor-worker.mjs",
+    "scripts/coordinator.mjs",
+    "recipes/actor-worker.json",
+    "recipes/pipeline-room-swarm.json",
+    "recipes/subagent-message.json",
+    "recipes/utility-actor-message.json",
+    "docs/actor-messages.md",
+    "docs/run-inspector.md",
+    "lib/run-inspector.ts",
+    "lib/run-inspector-overlay.ts",
+  ];
+  for (const path of removedPaths) check(!fileSet.has(path), `removed surface returned: ${path}`);
+
+  const currentSurface = /^(?:lib\/|scripts\/|recipes\/|fixtures\/|skills\/|docs\/|README\.md|AGENTS\.md)/u;
+  const forbiddenPatterns = [
+    [/room:</u, "room address"],
+    [/branch:</u, "branch address"],
+    [/communication\.json/u, "communication snapshot"],
+    [/\bActor(?:Address|Message)\b/u, "legacy actor type"],
+    [/\b(?:actor_address|default_room)\b/u, "legacy spawn placeholder"],
+    [/inbox\.jsonl/u, "legacy inbox state"],
+  ];
+  for (const path of files.filter((candidate) => currentSurface.test(candidate))) {
+    if (path === "BACKLOG.md" || path === "CHANGELOG.md" || path === "scripts/release-gates.mjs") continue;
+    const text = stagedText(path) ?? "";
+    for (const [pattern, label] of forbiddenPatterns) {
+      check(!pattern.test(text), `${label} in current surface: ${path}`);
+    }
+  }
+  const legacyFallbacks = new Map([
+    ["lib/observability.ts", "outbox.jsonl"],
+    ["lib/runs-status.ts", "events.jsonl"],
+    ["lib/runs-start.ts", "events.jsonl"],
+  ]);
+  for (const path of files.filter((candidate) => currentSurface.test(candidate))) {
+    if (path === "BACKLOG.md" || path === "CHANGELOG.md" || path === "scripts/release-gates.mjs") continue;
+    const text = stagedText(path) ?? "";
+    for (const term of ["outbox.jsonl", "events.jsonl"]) {
+      if (!text.includes(term)) continue;
+      check(legacyFallbacks.get(path) === term, `legacy state reference outside read-only fallback: ${path} (${term})`);
+    }
+  }
+  console.log("[release] removed-surface and legacy-fallback allowlists checked");
+
+  const baselineShippedLines = 35_077;
+  const shippedPath = /^(?:lib\/|scripts\/|recipes\/|docs\/|skills\/)/u;
+  const shippedLines = files
+    .filter((path) => shippedPath.test(path))
+    .reduce((total, path) => total + (((stagedText(path) ?? "").match(/\n/gu) ?? []).length + 1), 0);
+  check(shippedLines < baselineShippedLines, `shipped lines ${shippedLines} are not below baseline ${baselineShippedLines}`);
+  console.log(`[release] shipped lines ${shippedLines} < frozen baseline ${baselineShippedLines}`);
+
   const sources = files.filter((path) => path === "index.ts" || (path.startsWith("lib/") && path.endsWith(".ts")));
   const sourceSet = new Set(sources);
   const graph = new Map();

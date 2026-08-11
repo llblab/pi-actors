@@ -5,7 +5,6 @@
  */
 
 import * as Limits from "./limits.ts";
-import * as ToolsMailbox from "./tools-mailbox.ts";
 
 export function withLeadingLineBreak(text: string): string {
   return `\n${text.replace(/^\n+/, "")}`;
@@ -91,13 +90,13 @@ function compactModelPolicy(value: unknown): string[] {
   ].filter((token): token is string => Boolean(token));
 }
 
-export function actorRunNextActions(run: unknown): string[] {
+export function runNextActions(run: unknown): string[] {
   const id = String(run ?? "").trim();
   if (!id) return [];
   return [
-    `inspect target=run:${id} view=status`,
-    `inspect target=run:${id} view=messages`,
-    `message to=run:${id} type=<actor.action>`,
+    `inspect target=run:${id} view=recipe`,
+    `inspect target=run:${id} view=trace`,
+    `inspect target=run:${id} view=control`,
   ];
 }
 
@@ -126,58 +125,12 @@ export function compactAsyncRunStatus(value: unknown): string {
   if (result.killed === true) tokens.push("killed=true");
   const draftRecipe = status.draft_recipe;
   if (draftRecipe) tokens.push(`draft_recipe=${String(draftRecipe)}`);
-  const nextActions = actorRunNextActions(run);
+  const nextActions = runNextActions(run);
   if (nextActions.length > 0)
     tokens.push(
       `next=${nextActions.map((action) => action.replaceAll(/\s+/g, "_")).join("|")}`,
     );
   return `\n${tokens.join(" ")}`;
-}
-
-export function compactInboxMessages(
-  messages: Array<Record<string, unknown>>,
-  emptyLabel: string,
-): string {
-  if (messages.length === 0) return `\n(no ${emptyLabel} messages)`;
-  return `\n${messages
-    .map((message) =>
-      [
-        ...(message.id ? [`id=${String(message.id)}`] : []),
-        `status=${String(message.status ?? "")}`,
-        `type=${String(message.type ?? "")}`,
-        `from=${String(message.from ?? "")}`,
-        `to=${String(message.to ?? "")}`,
-        ...(message.queued_at
-          ? [`queued_at=${String(message.queued_at)}`]
-          : []),
-        ...(message.sent_at ? [`sent_at=${String(message.sent_at)}`] : []),
-        ...(message.claimed_at
-          ? [`claimed_at=${String(message.claimed_at)}`]
-          : []),
-        ...(message.handled_at
-          ? [`handled_at=${String(message.handled_at)}`]
-          : []),
-        ...(message.failed_at
-          ? [`failed_at=${String(message.failed_at)}`]
-          : []),
-      ].join(" "),
-    )
-    .join("\n")}`;
-}
-
-export function compactBranchInbox(
-  messages: Array<Record<string, unknown>>,
-): string {
-  return compactInboxMessages(messages, "branch inbox");
-}
-
-export function compactRunMailbox(
-  run: string,
-  mailbox: Record<string, unknown>,
-  messages: Array<Record<string, unknown>>,
-): string {
-  const normalized = ToolsMailbox.normalizeMailboxContracts(mailbox);
-  return `\nrun=${run} accepts=${ToolsMailbox.mailboxTypes(normalized.accepts).join(",")} emits=${ToolsMailbox.mailboxTypes(normalized.emits).join(",")}${compactInboxMessages(messages, "run inbox")}`;
 }
 
 export function artifactNextActions(

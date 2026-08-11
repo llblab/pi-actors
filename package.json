@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.42.3",
+  "version": "0.43.0",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -28,6 +28,7 @@
     "check": "node --experimental-strip-types -e \"await import('./index.ts'); console.log('pi-actors: extension import ok')\"",
     "conformance": "node scripts/conformance.mjs",
     "test": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
+    "test:preservation": "node --experimental-strip-types --test --test-concurrency=1 tests/async-runs.test.ts tests/observability.test.ts tests/session-evidence.test.ts tests/inspector-security.test.ts tests/inspector-overlay.test.ts tests/review-control.test.ts",
     "pack:dry": "npm pack --dry-run",
     "recipes:qa": "node scripts/validate-recipe.mjs recipes --all --qa --summary",
     "release:validate": "npm run validate && node scripts/release-gates.mjs",

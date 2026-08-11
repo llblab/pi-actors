@@ -1,0 +1,169 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
+
+async function fixture(): Promise<{ root: string; status: Record<string, unknown> }> {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-kernel-"));
+  const status = {
+    artifacts: {},
+    control: ["pause"],
+    ownerId: "session-a",
+    run: "demo",
+    run_instance_id: "generation-a",
+    state_dir: root,
+    status: "running",
+  };
+  await writeFile(
+    join(root, "run.json"),
+    JSON.stringify({
+      ...status,
+      recipe: "demo-recipe",
+      recipe_context_records: [{
+        depth: 0,
+        file: "/recipes/demo.json",
+        import_path: [],
+        name: "demo-recipe",
+        recipe: { control: ["pause"], template: "echo demo" },
+      }],
+      template: "echo demo",
+      values: {},
+    }),
+  );
+  await writeFile(
+    join(root, "trace.jsonl"),
+    `${JSON.stringify({ id: "trace-1", ts: "2026-01-01T00:00:00.000Z", kind: "run.start" })}\n`,
+  );
+  await writeFile(
+    join(root, "controls.jsonl"),
+    `${JSON.stringify({ id: "control-1", run_instance_id: "generation-a", action: "pause", status: "handled", queued_at: "2026-01-01T00:00:00.000Z", handled_at: "2026-01-01T00:00:01.000Z" })}\n`,
+  );
+  await writeFile(
+    join(root, "control-endpoint.json"),
+    JSON.stringify({
+      path: "named-pipe-demo",
+      ready_at: "2026-01-01T00:00:00.000Z",
+      run_instance_id: "generation-a",
+      type: "named-pipe",
+    }),
+  );
+  return { root, status };
+}
+
+test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () => {
+  const { root, status } = await fixture();
+  try {
+    const tool = createInspectToolDefinition({ getRunStatus: () => status });
+    const recipe = await tool.execute("recipe", { target: "run:demo", view: "recipe", verbose: true }, undefined, undefined, {});
+    assert.equal(recipe.details.identity.recipe, "demo-recipe");
+    const trace = await tool.execute("trace", { target: "run:demo", view: "trace", source: "lifecycle", verbose: true }, undefined, undefined, {});
+    assert.equal(trace.details.items[0].kind, "run.start");
+    const control = await tool.execute("control", { target: "run:demo", view: "control", verbose: true }, undefined, undefined, {});
+    assert.deepEqual(control.details.actor_actions, ["pause"]);
+    assert.deepEqual(control.details.runtime_actions, ["kill"]);
+    assert.equal(control.details.endpoint.type, "named-pipe");
+    assert.equal(control.details.recent_controls[0].status, "handled");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Inspect rejects removed Run views on the canonical target", async () => {
+  const { root, status } = await fixture();
+  try {
+    const tool = createInspectToolDefinition({ getRunStatus: () => status });
+    await assert.rejects(
+      tool.execute("status", { target: "run:demo", view: "status" }, undefined, undefined, {}),
+      /supports view=recipe, view=trace, or view=control/,
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Runtime triage reports stale Controls and Trace attention", async () => {
+  const { root, status } = await fixture();
+  try {
+    await writeFile(
+      join(root, "trace.jsonl"),
+      `${JSON.stringify({ id: "attention-1", ts: "2026-01-01T00:00:02.000Z", kind: "checkpoint.ready", summary: "Review checkpoint", attention: "followup" })}\n`,
+    );
+    await writeFile(
+      join(root, "controls.jsonl"),
+      `${JSON.stringify({ id: "queued-1", run_instance_id: "generation-a", action: "pause", status: "queued", queued_at: "2026-01-01T00:00:01.000Z" })}\n`,
+    );
+    const tool = createInspectToolDefinition({
+      getRunStatus: () => status,
+      listRuns: () => [status],
+    });
+    const result = await tool.execute(
+      "triage",
+      { target: "runtime", view: "triage", verbose: true },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "session-a" } },
+    );
+    assert.equal(result.details.stale_controls.length, 1);
+    assert.equal(result.details.attention_events[0].id, "attention-1");
+    assert.deepEqual(result.details.next_actions, [
+      "inspect target=run:demo view=control",
+      "inspect target=run:demo view=trace source=runtime",
+    ]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Inspect rejects every removed target", async () => {
+  const tool = createInspectToolDefinition();
+  for (const target of [
+    "coordinator",
+    "session:all",
+    "session:demo",
+    "room:demo",
+    "branch:demo/worker",
+    "recipe-registry",
+  ]) {
+    await assert.rejects(
+      tool.execute("removed", { target, view: "status" }, undefined, undefined, {}),
+      /unsupported inspect target/,
+    );
+  }
+});
+
+test("Inspect treats tools as capability definitions, not runtime actors", async () => {
+  const tool = createInspectToolDefinition({
+    getTool: (name) =>
+      name === "demo"
+        ? { description: "Demo capability", parameters: { properties: {}, required: [] } }
+        : undefined,
+  });
+  const result = await tool.execute(
+    "tool",
+    { target: "tool:demo", view: "status", verbose: true },
+    undefined,
+    undefined,
+    {},
+  );
+  assert.equal(result.details.name, "demo");
+  await assert.rejects(
+    tool.execute("runtime", { target: "tool:pi-actors", view: "triage" }, undefined, undefined, {}),
+    /supports view=status or view=schema/,
+  );
+});
+
+test("Inspect schema documents only kernel targets and Trace source", () => {
+  const tool = createInspectToolDefinition();
+  assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
+    "lines",
+    "source",
+    "status",
+    "target",
+    "verbose",
+    "view",
+  ]);
+  assert.match(tool.description, /Recipe, Trace, or Control/);
+});

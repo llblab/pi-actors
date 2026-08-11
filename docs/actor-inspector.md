@@ -1,86 +1,48 @@
 # Actor Inspector
 
-The actor inspector is a manually opened TUI navigator for owned actor runs. Evidence remains read-only; its one explicit lifecycle action can send canonical `control.kill` to the selected running run after confirmation. It keeps recipe/launch identity, communication evidence, and persisted subagent execution evidence in one hierarchy without merging their meanings.
+Open the live owner-filtered Run browser with:
 
 ```text
-owned run
-  → recipe
-  → messages | turns
-    → filtered timeline
-      → one bounded detail level
+/actor-inspector
 ```
 
-## Navigation
+The Inspector follows the kernel directly. It shows Runs owned by the current Pi session and offers exactly three tabs.
 
-`/actors-inspector` opens one centered overlay and remains the only command to remember. The latest run owned by the current Pi session becomes active automatically; an empty session still exposes functional tabs and filters.
+## Recipe
 
-The overlay exposes an explicit focus hierarchy:
+Shows captured execution provenance:
 
-```text
-Run       ←/→ chooses the previous/next owned run, Enter opens runs, K asks to Kill a running run, ↓ enters tabs
-Tabs      ←/→ chooses Recipe, Messages, or Turns
-Recipe    ↑/↓ scroll; PageUp/PageDown jumps by viewport; ↑ at top, Escape, or ← returns to tabs
-Filters   Enter on Messages/Turns opens Channel/State or Subagent; Enter opens values
-Values    ↑/↓ hovers, Enter applies, Escape returns one menu level
-List      ↑/↓ chooses, PageUp/PageDown jumps by viewport, Enter/→ opens detail, ← returns to tabs
-Detail    ↑/↓ scroll, PageUp/PageDown jumps by viewport, Escape/← returns to the list
-Escape    Close (or cancel the active options popup)
-```
+- Recipe name and source path;
+- resolved template and values;
+- imports/context records;
+- declared artifacts and actor-local actions;
+- model/thinking policy and launch source.
 
-Navigation stays bounded by available actions. `↑` on Run does nothing because no higher control exists. `↓` on Tabs enters the timeline only when it contains rows. Empty timelines therefore never receive focus.
+Captured Recipe evidence belongs to the Run generation and does not change when an active Recipe file later changes.
 
-`K` appears only while Run is focused and the selected owned run reports `running`. It replaces the Inspector with a dedicated responsive `Confirm Actor Kill` overlay that names the exact `run:<id>`, shows its current status, and states that canonical `control.kill` is destructive and irreversible. Cancel owns initial focus; ←/→/Tab moves between Cancel and Kill actor, Enter activates the focused choice, `Y` confirms directly, and `N`/Escape cancels. Confirmation captures the immutable run generation and routes expected owner/generation through canonical `control.kill`; control compares owner, generation, and running status while serialized against same-directory restart, so terminal, ownership, or replacement-generation races reject without signaling. After the dialog closes, success, cancellation, rejection, and failure remain bounded in the Inspector content area; terminal runs expose no Kill hint and reject a stale keypress.
+## Trace
 
-Selection and focus remain separate visual states. Accent-blue text marks the current tab, active filter popup, and applied option. The Run control uses `← … →` markers plus a light neutral background to show both focus and horizontal cycling; menus and timeline rows retain the single `▶` focus marker, while selected tabs retain brackets. Opening a popup keeps its parent filter blue so the relationship remains visible. Key hints live directly in the bottom overlay border rather than a dedicated body row: border-accent `─` connectors run through and between them instead of bullet glyphs, while key names and arrows retain blue accent color and descriptions use the border accent.
+Shows the unified bounded Trace projection. Sources include lifecycle/runtime observations, Controls, owned Pi turns, command-log tails, results, artifacts, and diagnostics. Filter by source and open a row for structured detail.
 
-The top Run control aligns vertically with the tab labels, names the selected owned run, and colors its textual lifecycle status semantically. ←/→ cycles owned runs directly with wraparound, while Enter opens the complete owned-run list immediately beneath the control. That run list starts one cell farther left than the filter menus so its border aligns with the Run control rather than the tab/filter grid. It still overlays the tab row rather than leaving a detached gap. The timeline no longer renders run metadata as a data row.
+Trace ordering stays deterministic and newest-first. The projection applies path containment and redaction before rendering.
 
-Filters live behind their tab rather than occupying a permanent row. Non-default filters remain visible as compact parenthesized suffixes in the tab label, so hidden state never silently changes the timeline. Enter on Messages opens `Channel: <current>`, `State: <current>`, and `From: <current>`; `From` draws its values from the selected run's roster and limits rows to one actor. Enter on Turns opens `Subagent: <current>`. Enter on a parameter opens its alternative values as a second menu to the right while the parent and current value remain visible. Parent and child share their touching border rather than leaving or doubling a spacer column. Escape returns one level at a time. Moving focus never applies a value.
+## Control
 
-Nested menus overlay rather than replace the timeline. Only rows and columns containing menu borders or values occlude underlying cells. When adjacent menus have different heights, the unused corner remains transparent and preserves the separator, striped background, and timeline data beneath it. Every run, filter, and nested value menu is viewport-bounded: ↑/↓ moves through the complete option set, the visible window follows focus, and `↑`/`↓` border markers disclose hidden options above or below without growing past the available inspector rows.
+Shows:
 
-The overlay uses most of the available terminal width and height and reduces its content/menu viewport on shorter terminals. Its border-embedded key rail replaces the former three-row footer, returning two rows to a viewport that now caps at 24 rows. The bordered header keeps all three tabs visible, while the body shows the selected run and its current status above the active document or evidence rows. Run, Message, and Turn lists place the newest retained item directly below their control; a newly opened Inspector therefore selects the latest owned run, and ↓ moves backward in time toward older entries. Run options, Messages, and Turns all use compact descending `#N` labels, providing one timestamp-free time axis without repeating type words on every row. Evidence rows retain stable alternating backgrounds based on their absolute timeline position, including while scrolling: even rows keep the dark overlay background, while odd rows use the neutral `customMessageBg` stripe. Unused viewport padding stays on the plain overlay background instead of drawing fake striped rows beneath the last item. The bottom frame exposes the active keys. Messages retain attention markers and unread filtering and open into bounded detail without leaving the overlay. The overlay refreshes while visible and distinguishes true empty timelines from filtered-empty results; filtered-empty copy points back to Enter on the active tab without moving focus.
+- Recipe-declared actor-local actions;
+- runtime-owned lifecycle actions;
+- generation-fenced endpoint readiness;
+- recent durable Control records and outcomes.
 
-## Recipe Document
+A service endpoint counts as ready only when `control-endpoint.json` matches the Run's immutable `run_instance_id`.
 
-`Recipe` is the first and initially selected tab. It reads only persisted owned-run evidence from `run.json`: recipe identity and source, the authored recipe context captured at launch, the resolved executable template and runtime values, composition records, model policy, mailbox, artifacts, notification/retirement policy, and bounded read diagnostics. It never follows a mutable external recipe path while the Inspector is open.
+## Keys
 
-The document renders as labeled, indented terminal text rather than raw JSON and scrolls as one level. Secret-bearing values receive the same redaction as turn evidence. Recipe context lives here rather than repeating inside every Turn.
+The footer displays current bindings. Use tab navigation to switch Recipe/Trace/Control, movement keys to select rows, detail navigation to inspect evidence, refresh to reconcile disk state, and the documented kill key for lifecycle termination.
 
-## Communication Timeline
+Run kill revalidates owner and generation through the canonical lifecycle path. The Inspector never edits state directly and never derives authority from displayed data.
 
-The communication timeline reads run-local room, direct, branch-inbox, and coordinator/session message evidence. Rows display their stable `#N` sequence in newest-first order. It preserves channel/sender filters, unread state, attention markers, roster-derived sender options, and bounded body previews. Unread remains filterable but does not consume a row column with a separate dot marker.
+## Scope
 
-Communication evidence describes messages between actors. It does not prove model execution.
-
-## Turns Timeline
-
-Detached child `pi -p` commands receive isolated session storage under their owned run state:
-
-```text
-<run-state>/sessions/command-NNN/*.jsonl
-```
-
-The runner records direct command-template session files in `review-evidence.json`. Coordinator-managed room/swarm participants also persist role/phase-scoped directories under the same `sessions/` root; the inspector discovers those owned files even though the coordinator, rather than the command-template runner, launched them. Explicit caller session policy (`--no-session`, `--session`, `--session-id`, `--session-dir`, or `--fork`) remains authoritative and is not replaced. A command may therefore have no inspector-visible session.
-
-The turns timeline follows the latest persisted entry branch in each recorded Pi session and displays numbered turns newest-first. Each list row begins with compact `#N`, then a humanized `Subagent N` derived from the internal `command-NNN` session owner, followed by an optional parenthesized semantic stage such as `(reviewer)`. The internal command id remains available in evidence detail for provenance but no longer acts as the unexplained primary list label. The visible model column shows only the model id, not its provider. Tool activity appears as a compact parenthesized action summary such as `(read)`, `(read, bash)`, or `(3 tools)`; `(error)` appears only when the turn or a tool result failed.
-
-Each turn groups:
-
-- User input associated with the response;
-- Assistant text and host-persisted thinking blocks;
-- Model, stop reason, usage, and error metadata;
-- Tool calls in assistant source order;
-- Tool results correlated by `toolCallId`, regardless of completion order.
-
-Enter/→ opens the selected turn as one structured, scrollable detail document inside the overlay. A compact `Subagent N` heading with an optional meaningful role leads into meaning-first sections: User, persisted Thinking, Assistant, Tools, Execution, and Diagnostics. A final Provenance section retains session/prompt paths and truncation state without duplicating recipe context from the Recipe tab. Generic internal stages such as `command` and `subagent` stay hidden; technical `command-NNN` provenance remains available through the session and prompt paths without producing a redundant `Command / command-NNN (command)` block. Secondary qualifiers use parentheses rather than centered-dot separators. Long text, paths, and structured values wrap to subsequent terminal rows instead of receiving visual ellipsis; lines that already fit the available inner width remain intact, leading indentation is reserved before wrapping long unbroken paths so it cannot become a whitespace-only row, and every section plus all of its explicit or wrapped continuations keeps one background stripe. Blank-only source lines and trailing line breaks are omitted from both evidence and readable rendering. Section boundaries change the stripe without inserting separator rows, so the next heading follows the previous value immediately. ↑/↓ scrolls the resulting visual-row document while the footer remains visible. Source evidence remains bounded by the persisted session reader, but the detail view no longer truncates that retained evidence to one terminal row per field.
-
-The detail view removes a single enclosing `<file name="…">…</file>` prompt transport wrapper and renders structured values as indented key/value text rather than one-line JSON. It has no nested transcript mode: Escape/← returns directly to the Turns list.
-
-## Evidence And Privacy Boundary
-
-The inspector reads file-backed evidence; it does not reconstruct hidden provider reasoning or claim access to data Pi did not persist. When no explicit thinking block exists, Execution reports `thinking: not persisted`.
-
-Session text, communication bodies, and structured values remain bounded. Common secret-bearing keys, camelCase/private-key credentials, serialized JSON credentials, and inline credential patterns are redacted before rendering. Malformed JSONL lines, missing parents, cycles, missing sessions, and incomplete tool correlation remain diagnostic states rather than inferred data.
-
-Ownership filtering happens before run summaries, communication previews, roster data, or session evidence become visible. Selection and read state reset across Pi sessions. Manifest session paths must resolve canonically beneath the selected owned run's `sessions/` directory; absolute paths, traversal, and symlink escapes remain invisible. The inspector never scans another coordinator session's run state into the current view.
+The Actor Inspector treats each Run as a concrete actor instance. It does not expose group conversations, peer addresses, routing, or communication topology. Use `inspect target=runtime`, `inspect target=recipes`, and `inspect target=tool:<name>` for non-Run management targets.

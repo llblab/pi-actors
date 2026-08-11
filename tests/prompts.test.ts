@@ -63,7 +63,7 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /avoid runtime\/FIFO\/outbox vocabulary/,
+    /avoid internal transport vocabulary/,
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,

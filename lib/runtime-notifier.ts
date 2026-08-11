@@ -1,7 +1,7 @@
 /**
  * Runtime wake notifications for actor state.
  * Zones: advisory wake layer, file-backed runtime state, cross-platform notification boundary
- * Owns best-effort live wake signals while durable mailbox/state files remain canonical.
+ * Owns best-effort live wake signals while durable Run state remains canonical.
  */
 
 import { randomUUID } from "node:crypto";

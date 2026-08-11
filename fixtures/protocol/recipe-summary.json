@@ -1,16 +1,8 @@
 {
-  "id": "actor-worker",
-  "path": "recipes/actor-worker.json",
+  "id": "music-player",
+  "path": "recipes/music-player.json",
   "location": "packaged",
   "active": true,
-  "args": [
-    "run",
-    "branch",
-    "poll_ms",
-    "state_dir"
-  ],
-  "mailbox": {
-    "kind": "branch",
-    "accepts": ["task.assign", "control.stop"]
-  }
+  "args": ["repo", "command", "source", "loop", "volume", "player", "state_dir"],
+  "control": ["play", "pause", "resume", "toggle", "next", "previous", "stop", "status"]
 }

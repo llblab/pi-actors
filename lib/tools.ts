@@ -73,8 +73,7 @@ export function createCoreActorToolDefinitions<
       setActiveTools: deps.setActiveTools,
     }),
     ToolsSpawn.createSpawnToolDefinition<TContext>(),
-    ToolsMessage.createActorMessageToolDefinition<TContext>({
-      getTool: (name) => deps.getRuntimeTool(name),
+    ToolsMessage.createControlToolDefinition<TContext>({
       handleRuntimeMessage: deps.handleRuntimeMessage,
     }),
     ToolsInspect.createInspectToolDefinition<TContext>({

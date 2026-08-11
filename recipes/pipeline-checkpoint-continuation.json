@@ -18,20 +18,6 @@
     "mode": "degraded-new-branch",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.reply",
-      "control.revise",
-      "control.kill"
-    ],
-    "emits": [
-      "checkpoint.needs_input",
-      "checkpoint.continued",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "name": "checkpoint",

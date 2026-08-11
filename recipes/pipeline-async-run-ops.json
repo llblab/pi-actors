@@ -22,18 +22,6 @@
     "artifact_path": "./async-run-ops.md",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "operations.completed",
-      "artifact.prepared",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "template": [
     {
       "name": "snapshot",

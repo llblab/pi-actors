@@ -27,18 +27,6 @@
     "risk_notes": "No extra risk notes supplied.",
     "tools": ""
   },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "release.summary_ready",
-      "artifact.prepared",
-      "command.done",
-      "run.done",
-      "run.failed"
-    ]
-  },
   "artifacts": {
     "summary": "{artifact_path}"
   },

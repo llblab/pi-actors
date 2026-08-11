@@ -29,21 +29,15 @@ const controlRaceWorker = fileURLToPath(
 );
 
 import {
-  appendRunOutboxEvent,
   archiveRun,
   cancelRun,
   getRunProcessSignalPlan,
   getRunStatus,
-  claimRunInboxMessage,
   killRun,
   listRuns,
-  processRunInboxMessages,
   pruneRun,
-  readRunEvents,
   readRunStateIndex,
   rebuildRunStateIndex,
-  readRunInboxMessages,
-  sendRunMessage,
   startRun,
   tailRun,
   teardownRunsOwnedByParent,
@@ -294,22 +288,27 @@ test("Async runs write state files and finish", async () => {
       process.cwd(),
     );
     assert.equal(meta.run, "hello");
+    assert.equal(meta.state_schema, "run-kernel-v1");
     assert.equal(meta.ownerId, undefined);
-    assert.equal(meta.values.actor_address, "run:hello");
-    assert.equal(meta.values.communication_file, join(stateDir, "communication.json"));
-    assert.equal(meta.values.default_room, "room:hello");
+    assert.equal(meta.values.actor_address, undefined);
+    assert.equal(meta.values.communication_file, undefined);
+    assert.equal(meta.values.default_room, undefined);
+    assert.equal(meta.values.trace_file, join(stateDir, "trace.jsonl"));
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
     const status = getRunStatus(stateDir);
     assert.equal(status.status, "done");
     assert.equal((listRuns(root)[0] || {}).run, "hello");
-    assert.match(tailRun(stateDir), /run\.(start|runner\.start|done)/);
+    assert.match(
+      await readFile(join(stateDir, "trace.jsonl"), "utf8"),
+      /"kind":"run\.(start|runner\.start|done)"/,
+    );
     assert.match(
       await readFile(join(stateDir, "stdout.log"), "utf8"),
       /hello world/,
     );
     const evidence = JSON.parse(
-      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+      await readFile(join(stateDir, "execution.json"), "utf8"),
     );
     assert.equal(evidence.version, 1);
     assert.equal(evidence.run, "hello");
@@ -352,28 +351,26 @@ test("Async review evidence rejects marker prefixes", async () => {
     );
     const result = await waitForResult(stateDir);
     const evidence = await waitForJsonStatus(
-      join(stateDir, "review-evidence.json"),
+      join(stateDir, "execution.json"),
       "failed",
     );
     assert.equal(result.code, 65);
     assert.equal(evidence.status, "failed");
     assert.equal(evidence.commands[0].effective_exit_code, 65);
     assert.equal(evidence.commands[0].semantic_acceptance, "rejected");
-    const events = (await readFile(join(stateDir, "events.jsonl"), "utf8"))
+    const trace = (await readFile(join(stateDir, "trace.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    const commandDone = events.find((event) => event.event === "command.done");
-    assert.equal(commandDone.code, 65);
-    const outbox = (await readFile(join(stateDir, "outbox.jsonl"), "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    const commandNotification = outbox.find(
-      (entry) => entry.event === "command.done",
+    const commandDone = trace.find(
+      (event) => event.kind === "command.done" && event.data?.code === 65,
     );
-    assert.equal(commandNotification.body.code, 65);
-    assert.equal(commandNotification.delivery, "followup");
+    assert.equal(commandDone.data.code, 65);
+    const commandNotification = trace.find(
+      (entry) => entry.kind === "command.done" && entry.attention === "followup",
+    );
+    assert.equal(commandNotification.data.code, 65);
+    assert.equal(commandNotification.attention, "followup");
     assert.equal(commandNotification.level, "error");
     assert.match(commandNotification.summary, /code 65/);
     const progress = await waitForJsonField(
@@ -405,7 +402,7 @@ test("Async review evidence accepts a large marker from complete capture", async
     );
     const result = await waitForResult(stateDir);
     const evidence = await waitForJsonStatus(
-      join(stateDir, "review-evidence.json"),
+      join(stateDir, "execution.json"),
       "done",
     );
     assert.equal(result.code, 0);
@@ -448,7 +445,7 @@ test("Async review reports fail closed when complete evidence references are mis
     );
     const result = await waitForResult(stateDir);
     const evidence = JSON.parse(
-      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+      await readFile(join(stateDir, "execution.json"), "utf8"),
     );
     assert.equal(result.code, 65, JSON.stringify(evidence));
     assert.equal(result.failure_reason, "incomplete review report evidence");
@@ -456,7 +453,7 @@ test("Async review reports fail closed when complete evidence references are mis
     assert.equal(evidence.report_evidence.claims_complete, true);
     assert.equal(evidence.report_evidence.complete_allowed, false);
     assert.deepEqual(evidence.report_evidence.missing, [
-      "review-evidence.json#command-001",
+      "execution.json#command-001",
     ]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -477,11 +474,11 @@ test("Async runs persist bounded high-volume command captures", async () => {
     );
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
-    const events = await readFile(join(stateDir, "events.jsonl"), "utf8");
-    assert.match(events, /"stdout_bytes":1100000/);
-    assert.match(events, /"stderr_bytes":1100000/);
-    assert.match(events, /"stdout_truncated":true/);
-    assert.match(events, /"stderr_truncated":true/);
+    const trace = await readFile(join(stateDir, "trace.jsonl"), "utf8");
+    assert.match(trace, /"stdout_bytes":1100000/);
+    assert.match(trace, /"stderr_bytes":1100000/);
+    assert.match(trace, /"stdout_truncated":true/);
+    assert.match(trace, /"stderr_truncated":true/);
     assert.equal(
       (await readFile(join(stateDir, "captures", "command-001", "attempt-001", "stdout.log"), "utf8")).length,
       1100000,
@@ -506,7 +503,7 @@ test("Async lifecycle status files preserve terminal semantics", async () => {
       join(exitedDir, "run.json"),
       JSON.stringify({ pid: 0, run: "exited-before-result", state_dir: exitedDir }),
     );
-    await writeFile(join(exitedDir, "events.jsonl"), `${JSON.stringify({ event: "run.start" })}\n`);
+    await writeFile(join(exitedDir, "trace.jsonl"), `${JSON.stringify({ kind: "run.start" })}\n`);
     assert.equal(getRunStatus(exitedDir).status, "exited");
     assert.match(tailRun(exitedDir), /run\.start/);
 
@@ -515,7 +512,7 @@ test("Async lifecycle status files preserve terminal semantics", async () => {
       join(cancelledDir, "run.json"),
       JSON.stringify({ pid: 0, run: "cancelled-before-result", state_dir: cancelledDir }),
     );
-    await writeFile(join(cancelledDir, "events.jsonl"), `${JSON.stringify({ event: "run.cancel" })}\n`);
+    await writeFile(join(cancelledDir, "trace.jsonl"), `${JSON.stringify({ kind: "run.cancel" })}\n`);
     assert.equal(getRunStatus(cancelledDir).status, "cancelled");
 
     await mkdir(killedDir, { recursive: true });
@@ -523,21 +520,21 @@ test("Async lifecycle status files preserve terminal semantics", async () => {
       join(killedDir, "run.json"),
       JSON.stringify({ pid: 0, run: "killed-before-result", state_dir: killedDir }),
     );
-    await writeFile(join(killedDir, "events.jsonl"), `${JSON.stringify({ event: "run.kill" })}\n`);
+    await writeFile(join(killedDir, "trace.jsonl"), `${JSON.stringify({ kind: "run.kill" })}\n`);
     assert.equal(getRunStatus(killedDir).status, "killed");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Async runs emit command completion outbox events", async () => {
+test("Async runs emit command completion Trace events", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
-  const stateDir = join(root, "command-outbox");
+  const stateDir = join(root, "command-trace");
   const longArg = "x".repeat(220);
   try {
     startRun(
       {
-        run_id: "command-outbox",
+        run_id: "command-trace",
         state_dir: stateDir,
         defaults: { report_path: "{state_dir}/report.md" },
         artifacts: {
@@ -549,113 +546,48 @@ test("Async runs emit command completion outbox events", async () => {
       process.cwd(),
     );
     await waitForResult(stateDir);
-    const outbox = (await readFile(join(stateDir, "outbox.jsonl"), "utf8"))
+    const trace = (await readFile(join(stateDir, "trace.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const commandDone = trace.find(
+      (entry) => entry.kind === "command.done" && typeof entry.summary === "string",
+    )!;
     const status = getRunStatus(stateDir);
     assert.deepEqual(status.artifacts, {
       report: `${stateDir}/report.md`,
       summary: `${stateDir}/result.json`,
     });
-    assert.equal(outbox[0].event, "command.done");
-    assert.equal(outbox[0].type, "command.done");
-    assert.equal(outbox[0].to, "coordinator");
-    assert.equal(outbox[0].from, "run:command-outbox");
-    assert.equal(outbox[0].delivery, "log");
-    assert.match(String(outbox[0].summary), /completed with code 0/);
-    assert.equal(String(outbox[0].summary).includes(longArg), false);
+    assert.equal(commandDone.kind, "command.done");
+    assert.equal(Object.hasOwn(commandDone, "type"), false);
+    assert.equal(Object.hasOwn(commandDone, "to"), false);
+    assert.equal(Object.hasOwn(commandDone, "from"), false);
+    assert.equal(commandDone.attention, undefined);
+    assert.match(String(commandDone.summary), /completed with code 0/);
+    assert.equal(String(commandDone.summary).includes(longArg), false);
     assert.match(
-      String((outbox[0].data as Record<string, unknown>).command),
+      String((commandDone.data as Record<string, unknown>).command),
       new RegExp(longArg),
     );
     assert.deepEqual(
-      (outbox[0].data as Record<string, unknown>).artifacts,
+      (commandDone.data as Record<string, unknown>).artifacts,
       {
         report: `${stateDir}/report.md`,
         summary: `${stateDir}/result.json`,
       },
     );
+    assert.equal(Object.hasOwn(commandDone, "body"), false);
     assert.deepEqual(
-      (outbox[0].body as Record<string, unknown>).artifacts,
-      {
-        report: `${stateDir}/report.md`,
-        summary: `${stateDir}/result.json`,
-      },
-    );
-    assert.deepEqual(
-      (outbox[0].data as Record<string, unknown>).run_files,
+      (commandDone.data as Record<string, unknown>).run_files,
       [
         join(stateDir, "stdout.log"),
         join(stateDir, "stderr.log"),
         join(stateDir, "result.json"),
-        join(stateDir, "events.jsonl"),
-        join(stateDir, "outbox.jsonl"),
-        join(stateDir, "review-evidence.json"),
+        join(stateDir, "trace.jsonl"),
+        join(stateDir, "execution.json"),
       ],
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Async runs append actor messages to outbox", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
-  const stateDir = join(root, "actor-outbox");
-  try {
-    startRun(
-      {
-        run_id: "actor-outbox",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
-      },
-      process.cwd(),
-    );
-    const result = appendRunOutboxEvent(stateDir, {
-      body: { ok: true },
-      delivery: "followup",
-      event: "checkpoint.ready",
-      from: "run:actor-outbox",
-      metadata: { checkpoint: "ready" },
-      summary: "Ready for approval",
-      to: "coordinator",
-      type: "checkpoint.ready",
-    });
-    assert.equal(result.sent, true);
-    const events = readRunEvents(stateDir);
-    const checkpoint = events.find((event) => event.event === "checkpoint.ready")!;
-    assert.equal(checkpoint.type, "checkpoint.ready");
-    assert.equal(checkpoint.to, "coordinator");
-    assert.equal(checkpoint.from, "run:actor-outbox");
-    assert.equal(checkpoint.delivery, "followup");
-    assert.deepEqual(checkpoint.metadata, { checkpoint: "ready" });
-    assert.deepEqual(checkpoint.body, { ok: true });
-
-    appendRunOutboxEvent(stateDir, {
-      event: "progress.update",
-      metadata: { percent: 50 },
-      summary: "Halfway",
-      to: "coordinator",
-    });
-    appendRunOutboxEvent(stateDir, {
-      event: "checkpoint.needs_input",
-      metadata: { reason: "scope", requires_response: true },
-      summary: "Need scope",
-      to: "coordinator",
-    });
-    const updatedEvents = readRunEvents(stateDir);
-    const progress = updatedEvents.find((event) => event.event === "progress.update")!;
-    const needsInput = updatedEvents.find((event) => event.event === "checkpoint.needs_input")!;
-    assert.equal(progress.delivery, "notify");
-    assert.equal(needsInput.delivery, "followup");
-    assert.deepEqual(needsInput.metadata, { reason: "scope", requires_response: true });
-  } finally {
-    try {
-      cancelRun(stateDir);
-      await waitForRunProcessExit(stateDir);
-    } catch {
-      // Best-effort cleanup for the intentionally long-running actor.
-    }
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -698,6 +630,8 @@ test("Async run restart clears stale terminal state", async () => {
     await waitForResult(stateDir);
     assert.equal(getRunStatus(stateDir).status, "done");
     await waitForRunProcessExit(stateDir);
+    await writeFile(join(stateDir, "controls.jsonl"), "{\"id\":\"stale\"}\n");
+    await writeFile(join(stateDir, "control-endpoint.json"), "{}\n");
 
     startRun(
       {
@@ -710,6 +644,8 @@ test("Async run restart clears stale terminal state", async () => {
     const status = getRunStatus(stateDir);
     assert.equal(status.status, "running");
     assert.equal(status.result, null);
+    assert.equal(existsSync(join(stateDir, "controls.jsonl")), false);
+    assert.equal(existsSync(join(stateDir, "control-endpoint.json")), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -746,7 +682,7 @@ test("Async runs can start from recipe files with overrides", async () => {
       JSON.stringify(
         {
           name: "from-file",
-          mailbox: { accepts: ["control.continue"], emits: ["run.done"] },
+          control: ["continue"],
           retire_when: "children_terminal",
           template: `${process.execPath} -e "console.log(process.argv[1] + ' ' + process.argv[2])" {greeting} {name}`,
           values: { greeting: "hello", name: "file" },
@@ -762,7 +698,7 @@ test("Async runs can start from recipe files with overrides", async () => {
     assert.equal(meta.run, "override-run");
     assert.equal(meta.recipe, "say");
     assert.equal(meta.values.greeting, "hello");
-    assert.deepEqual(meta.mailbox, { accepts: ["control.continue"], emits: ["run.done"] });
+    assert.deepEqual(meta.control, ["continue"]);
     assert.equal(meta.retire_when, "children_terminal");
     assert.equal(meta.values.name, "override");
     assert.equal(meta.values.run_id, "override-run");
@@ -892,7 +828,7 @@ test("Async Pi commands persist owned session provenance in review evidence", {
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
     const evidence = JSON.parse(
-      await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+      await readFile(join(stateDir, "execution.json"), "utf8"),
     );
     assert.equal(evidence.commands[0].session_dir, "sessions/command-001");
     assert.deepEqual(evidence.commands[0].session_files, [
@@ -1014,36 +950,6 @@ test("Recipe imports execute under repeated parallel parent nodes", async () => 
   }
 });
 
-
-test("Async runs expose script-authored outbox events", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
-  const stateDir = join(root, "outbox");
-  const script =
-    "const fs=require('fs');const path=require('path');fs.appendFileSync(path.join(process.argv[1],'outbox.jsonl'),JSON.stringify({event:'demo.update',summary:'Demo update',level:'warning',delivery:'notify',data:{ok:true}})+'\\n')";
-  try {
-    startRun(
-      {
-        run_id: "outbox",
-        state_dir: stateDir,
-        template: `${process.execPath} -e {script} {state_dir}`,
-        values: { script },
-      },
-      process.cwd(),
-    );
-    await waitForResult(stateDir);
-    const events = readRunEvents(stateDir).filter(
-      (event) => event.event === "demo.update",
-    );
-    assert.equal(events.length, 1);
-    assert.equal(events[0].event, "demo.update");
-    assert.equal(events[0].summary, "Demo update");
-    assert.equal(events[0].level, "warning");
-    assert.equal(events[0].delivery, "notify");
-    assert.deepEqual(events[0].data, { ok: true });
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
 
 test("Runtime notifier persists advisory wake events", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-"));
@@ -1209,309 +1115,6 @@ test("Runtime notifier buffers partial wake records until file catch-up", async 
   }
 });
 
-test(
-  "Async runs can send line messages to a run control FIFO",
-  { skip: process.platform === "win32" },
-  async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
-    const stateDir = join(root, "controlled");
-    const readyFile = join(root, "ready");
-    const messageFile = join(root, "message");
-    const script =
-      'mkfifo "$1/control.fifo"; printf ready >"$2"; IFS= read -r message <"$1/control.fifo"; printf %s "$message" >"$3"';
-    try {
-      startRun(
-        {
-          run_id: "controlled",
-          state_dir: stateDir,
-          template:
-            "bash -lc {script} -- {state_dir} {readyFile} {messageFile}",
-          values: { messageFile, readyFile, script },
-        },
-        process.cwd(),
-      );
-      await waitForFile(readyFile);
-      const result = await sendRunMessage(stateDir, "next");
-      assert.equal(result.sent, true);
-      assert.equal(result.control, "control.fifo");
-      assert.equal(typeof result.inbox_id, "string");
-      await waitForFile(messageFile);
-      assert.equal(await readFile(messageFile, "utf8"), "next");
-      assert.equal((await waitForResult(stateDir)).code, 0);
-      assert.match(tailRun(stateDir), /run\.message/);
-
-      const status = getRunStatus(stateDir);
-      assert.equal(status.inboxFile, join(stateDir, "inbox.jsonl"));
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  },
-);
-
-test(
-  "Async runs mirror actor envelopes sent to control FIFO into inbox",
-  { skip: process.platform === "win32" },
-  async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
-    const stateDir = join(root, "controlled-envelope");
-    const readyFile = join(root, "ready");
-    const messageFile = join(root, "message");
-    const script =
-      'mkfifo "$1/control.fifo"; printf ready >"$2"; IFS= read -r message <"$1/control.fifo"; printf %s "$message" >"$3"';
-    try {
-      startRun(
-        {
-          run_id: "controlled-envelope",
-          state_dir: stateDir,
-          template:
-            "bash -lc {script} -- {state_dir} {readyFile} {messageFile}",
-          values: { messageFile, readyFile, script },
-        },
-        process.cwd(),
-      );
-      await waitForFile(readyFile);
-      await sendRunMessage(
-        stateDir,
-        JSON.stringify({
-          body: "private hello",
-          from: "branch:controlled-envelope/a",
-          to: "branch:controlled-envelope/b",
-          type: "chat.message",
-        }),
-      );
-      await waitForFile(messageFile);
-      const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
-      assert.equal(inbox.from, "branch:controlled-envelope/a");
-      assert.equal(inbox.to, "branch:controlled-envelope/b");
-      assert.equal(inbox.body, "private hello");
-      assert.match(inbox.received_at, /\d{4}-\d{2}-\d{2}T/);
-      assert.equal((await waitForResult(stateDir)).code, 0);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  },
-);
-
-test("Async runs can send messages to a Windows named-pipe control endpoint", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-winpipe-"));
-  const stateDir = join(root, "controlled-winpipe");
-  const pipePath = "\\\\.\\pipe\\pi-actors-test-controlled-winpipe";
-  let sentPayload = "";
-  try {
-    startRun(
-      {
-        run_id: "controlled-winpipe",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
-      },
-      process.cwd(),
-    );
-    await waitForStatus(stateDir, "running");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const runJsonPath = join(stateDir, "run.json");
-    const meta = JSON.parse(await readFile(runJsonPath, "utf8"));
-    await writeFile(
-      runJsonPath,
-      `${JSON.stringify({ ...meta, control: { path: pipePath, type: "named-pipe" } }, null, 2)}\n`,
-    );
-    const result = await sendRunMessage(
-      stateDir,
-      JSON.stringify({
-        body: "hello windows",
-        from: "coordinator",
-        to: "run:controlled-winpipe",
-        type: "control.note",
-      }),
-      {
-        namedPipeSend: async (_path, payload) => {
-          sentPayload = payload;
-          return Buffer.byteLength(payload);
-        },
-        platform: "win32",
-      },
-    );
-    assert.equal(result.sent, true);
-    assert.equal(result.control, pipePath);
-    assert.equal(result.control_type, "named-pipe");
-    assert.equal(typeof result.inbox_id, "string");
-    assert.match(sentPayload, /hello windows/);
-    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
-    assert.equal(inbox.body, "hello windows");
-    const wakeEvents = readRuntimeWakeEvents(stateDir);
-    assert.equal(wakeEvents.length, 1);
-    assert.equal(wakeEvents[0].actor, "run:controlled-winpipe");
-    assert.equal(wakeEvents[0].reason, "run.message");
-    assert.equal(typeof wakeEvents[0].metadata?.inbox_id, "string");
-    assert.deepEqual(
-      {
-        bytes: wakeEvents[0].metadata?.bytes,
-        control_type: wakeEvents[0].metadata?.control_type,
-      },
-      {
-        bytes: Buffer.byteLength(sentPayload),
-        control_type: "named-pipe",
-      },
-    );
-    assert.match(tailRun(stateDir), /run\.message/);
-  } finally {
-    killRun(stateDir);
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Async run named-pipe timeout keeps durable queued message details", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-winpipe-timeout-"));
-  const stateDir = join(root, "controlled-winpipe-timeout");
-  const pipePath = "\\\\.\\pipe\\pi-actors-test-timeout";
-  try {
-    startRun(
-      {
-        run_id: "controlled-winpipe-timeout",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
-      },
-      process.cwd(),
-    );
-    await waitForStatus(stateDir, "running");
-    const runJsonPath = join(stateDir, "run.json");
-    const meta = JSON.parse(await readFile(runJsonPath, "utf8"));
-    await writeFile(
-      runJsonPath,
-      `${JSON.stringify({ ...meta, control: { path: pipePath, type: "named-pipe" } }, null, 2)}\n`,
-    );
-    await assert.rejects(
-      () => sendRunMessage(
-        stateDir,
-        JSON.stringify({
-          body: "queued despite pipe timeout",
-          from: "coordinator",
-          to: "run:controlled-winpipe-timeout",
-          type: "control.note",
-        }),
-        {
-          namedPipeSend: async () => {
-            throw new Error("named pipe connection timed out");
-          },
-          platform: "win32",
-        },
-      ),
-      (error: unknown) => {
-        const record = error as Record<string, unknown>;
-        assert.equal(record.queued, true);
-        assert.equal(record.sent, false);
-        assert.equal(record.control_type, "named-pipe");
-        assert.equal(record.control_path, pipePath);
-        assert.equal(typeof record.inbox_id, "string");
-        assert.equal(record.delivery_error, "named pipe connection timed out");
-        return true;
-      },
-    );
-    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
-    assert.equal(inbox.body, "queued despite pipe timeout");
-    assert.equal(inbox.status, "queued");
-  } finally {
-    killRun(stateDir);
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Async runs can accept messages through mailbox-only control endpoint", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-mailbox-control-"));
-  const stateDir = join(root, "controlled-mailbox");
-  try {
-    startRun(
-      {
-        run_id: "controlled-mailbox",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
-      },
-      process.cwd(),
-    );
-    await waitForStatus(stateDir, "running");
-    const runJsonPath = join(stateDir, "run.json");
-    const meta = JSON.parse(await readFile(runJsonPath, "utf8"));
-    await writeFile(
-      runJsonPath,
-      `${JSON.stringify({ ...meta, control: { path: join(stateDir, "inbox.jsonl"), type: "mailbox" } }, null, 2)}\n`,
-    );
-    const result = await sendRunMessage(
-      stateDir,
-      JSON.stringify({
-        body: "hello mailbox",
-        from: "coordinator",
-        to: "run:controlled-mailbox",
-        type: "control.note",
-      }),
-      { platform: "win32" },
-    );
-    assert.equal(result.sent, true);
-    assert.equal(result.queued, true);
-    assert.equal(result.control_type, "mailbox");
-    assert.equal(result.control_path, join(stateDir, "inbox.jsonl"));
-    assert.equal(typeof result.inbox_id, "string");
-    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
-    assert.equal(inbox.body, "hello mailbox");
-    assert.equal(inbox.status, "queued");
-    const [wake] = readRuntimeWakeEvents(stateDir);
-    assert.equal(wake.actor, "run:controlled-mailbox");
-    assert.equal(wake.metadata?.control_type, "mailbox");
-    assert.equal(wake.metadata?.inbox_id, inbox.id);
-  } finally {
-    killRun(stateDir);
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Async run messages persist mailbox wake before endpoint delivery failure", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-wake-before-endpoint-"));
-  const stateDir = join(root, "controlled-missing-endpoint");
-  try {
-    startRun(
-      {
-        run_id: "controlled-missing-endpoint",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
-      },
-      process.cwd(),
-    );
-    await waitForStatus(stateDir, "running");
-    await assert.rejects(
-      () => sendRunMessage(
-        stateDir,
-        JSON.stringify({
-          body: "queued despite missing endpoint",
-          from: "coordinator",
-          to: "run:controlled-missing-endpoint",
-          type: "control.note",
-        }),
-      ),
-      (error: unknown) => {
-        const record = error as Record<string, unknown>;
-        assert.match(String(record.message), /Run control (?:FIFO not found|endpoint is not ready)/);
-        assert.equal(record.queued, true);
-        assert.equal(record.sent, false);
-        assert.equal(typeof record.inbox_id, "string");
-        assert.match(
-          String(record.delivery_error),
-          /Run control (?:FIFO not found|endpoint is not ready)|native Windows require a named-pipe/,
-        );
-        return true;
-      },
-    );
-    const inbox = JSON.parse(await readFile(join(stateDir, "inbox.jsonl"), "utf8"));
-    assert.equal(inbox.body, "queued despite missing endpoint");
-    assert.equal(inbox.status, "queued");
-    assert.match(inbox.queued_at, /\d{4}-\d{2}-\d{2}T/);
-    const [wake] = readRuntimeWakeEvents(stateDir);
-    assert.equal(wake.actor, "run:controlled-missing-endpoint");
-    assert.equal(wake.reason, "run.message");
-    assert.equal(wake.metadata?.inbox_id, inbox.id);
-  } finally {
-    killRun(stateDir);
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 test("Runtime wake reader skips corrupt records and preserves later wakes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-corrupt-"));
   const stateDir = join(root, "notified-corrupt");
@@ -1527,172 +1130,6 @@ test("Runtime wake reader skips corrupt records and preserves later wakes", asyn
     await writeFile(runtimeWakeFile(stateDir), `{bad json\n${JSON.stringify(valid)}\n`);
     assert.deepEqual(readRuntimeWakeEvents(stateDir), [valid]);
   } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Async run inbox processing does not require wake records", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-missing-wake-"));
-  const stateDir = join(root, "missing-wake");
-  try {
-    startRun(
-      {
-        run_id: "missing-wake",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
-      },
-      process.cwd(),
-    );
-    await waitForStatus(stateDir, "running");
-    await writeFile(
-      join(stateDir, "inbox.jsonl"),
-      `${JSON.stringify({ body: "durable work", id: "manual-1", status: "queued", type: "task.assign" })}\n`,
-    );
-    assert.deepEqual(readRuntimeWakeEvents(stateDir), []);
-    const processed = await processRunInboxMessages(
-      stateDir,
-      (message) => {
-        assert.equal(message.body, "durable work");
-      },
-      { owner: "test-worker" },
-    );
-    assert.deepEqual(processed, { claimed: 1, failed: 0, handled: 1 });
-    assert.equal(readRunInboxMessages(stateDir)[0].status, "handled");
-  } finally {
-    killRun(stateDir);
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Async run inbox messages can be claimed and handled", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-inbox-process-"));
-  const stateDir = join(root, "inbox-process");
-  try {
-    startRun(
-      {
-        run_id: "inbox-process",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
-      },
-      process.cwd(),
-    );
-    await waitForStatus(stateDir, "running");
-    await assert.rejects(
-      () => sendRunMessage(
-        stateDir,
-        JSON.stringify({
-          body: "claim me",
-          from: "coordinator",
-          to: "run:inbox-process",
-          type: "control.note",
-        }),
-      ),
-      /Run control (?:FIFO not found|endpoint is not ready)/,
-    );
-    const claimed = claimRunInboxMessage(stateDir, "test-worker");
-    assert.equal(claimed?.body, "claim me");
-    assert.equal(claimed?.status, "claimed");
-    assert.equal(claimed?.claimed_by, "test-worker");
-    assert.equal(claimRunInboxMessage(stateDir, "other-worker"), undefined);
-    await processRunInboxMessages(
-      stateDir,
-      () => {
-        throw new Error("should not see claimed messages by default");
-      },
-      { owner: "other-worker" },
-    );
-    const afterClaim = readRunInboxMessages(stateDir, 1)[0];
-    assert.equal(afterClaim.status, "claimed");
-  } finally {
-    killRun(stateDir);
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Async run inbox reads skip malformed state records", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-inbox-corrupt-"));
-  const stateDir = join(root, "inbox-corrupt");
-  try {
-    startRun(
-      {
-        run_id: "inbox-corrupt",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
-      },
-      process.cwd(),
-    );
-    await waitForStatus(stateDir, "running");
-    await assert.rejects(
-      () => sendRunMessage(
-        stateDir,
-        JSON.stringify({
-          body: "valid",
-          from: "coordinator",
-          to: "run:inbox-corrupt",
-          type: "control.note",
-        }),
-      ),
-      /Run control (?:FIFO not found|endpoint is not ready)/,
-    );
-    await appendFile(join(stateDir, "inbox.jsonl"), "{bad json\n");
-
-    const messages = readRunInboxMessages(stateDir, 10);
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].body, "valid");
-    const claimed = claimRunInboxMessage(stateDir, "worker");
-    assert.equal(claimed?.body, "valid");
-  } finally {
-    killRun(stateDir);
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Async run inbox processor marks handled and failed messages", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-inbox-handler-"));
-  const stateDir = join(root, "inbox-handler");
-  try {
-    startRun(
-      {
-        run_id: "inbox-handler",
-        state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
-      },
-      process.cwd(),
-    );
-    await waitForStatus(stateDir, "running");
-    for (const body of ["ok", "bad"]) {
-      await assert.rejects(
-        () => sendRunMessage(
-          stateDir,
-          JSON.stringify({
-            body,
-            from: "coordinator",
-            to: "run:inbox-handler",
-            type: "control.note",
-          }),
-        ),
-        /Run control (?:FIFO not found|endpoint is not ready)/,
-      );
-    }
-    const result = await processRunInboxMessages(
-      stateDir,
-      (message) => {
-        if (message.body === "bad") throw new Error("handler failed");
-      },
-      { limit: 2, owner: "handler" },
-    );
-    assert.deepEqual(result, { claimed: 2, failed: 1, handled: 1 });
-    const messages = readRunInboxMessages(stateDir, 2);
-    assert.deepEqual(
-      messages.map((message) => message.status),
-      ["handled", "failed"],
-    );
-    assert.equal(messages[0].claimed_by, "handler");
-    assert.match(String(messages[0].handled_at ?? ""), /\d{4}-\d{2}-\d{2}T/);
-    assert.match(String(messages[1].failed_at ?? ""), /\d{4}-\d{2}-\d{2}T/);
-    assert.equal(messages[1].error, "handler failed");
-  } finally {
-    killRun(stateDir);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1761,7 +1198,7 @@ test("Async cancel and kill finalize in-flight review evidence", async () => {
       for (let attempt = 0; attempt < 80; attempt += 1) {
         try {
           runningEvidence = JSON.parse(
-            await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+            await readFile(join(stateDir, "execution.json"), "utf8"),
           );
           if (runningEvidence.commands?.[0]?.status === "running") break;
         } catch {
@@ -1779,7 +1216,7 @@ test("Async cancel and kill finalize in-flight review evidence", async () => {
       else killRun(stateDir);
       await waitForStatus(stateDir, mode);
       const evidence = JSON.parse(
-        await readFile(join(stateDir, "review-evidence.json"), "utf8"),
+        await readFile(join(stateDir, "execution.json"), "utf8"),
       );
       assert.equal(evidence.status, mode);
       assert.equal(evidence.commands[0].status, mode);
@@ -1843,8 +1280,8 @@ test("Async run status keeps killed runs diagnosable with stale progress", async
       `${JSON.stringify({ created_at: new Date().toISOString(), pid: 0, run: "stale-progress", state_dir: stateDir })}\n`,
     );
     await writeFile(
-      join(stateDir, "events.jsonl"),
-      `${JSON.stringify({ event: "run.kill", signal: "SIGKILL", ts: new Date().toISOString() })}\n`,
+      join(stateDir, "trace.jsonl"),
+      `${JSON.stringify({ kind: "run.kill", data: { signal: "SIGKILL" }, ts: new Date().toISOString() })}\n`,
     );
     await writeFile(
       join(stateDir, "progress.json"),
@@ -1889,7 +1326,7 @@ test("Async run kill terminates matching stuck runs", async () => {
     const progress = status.progress as Record<string, unknown>;
     assert.equal(progress.phase, "killed");
     assert.equal(Object.hasOwn(progress, "activeSubagents"), false);
-    assert.match(tailRun(stateDir), /run\.kill/);
+    assert.match(await readFile(join(stateDir, "trace.jsonl"), "utf8"), /"kind":"run\.kill"/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -2057,11 +1494,11 @@ test("Parent teardown kills only exact-session runs through canonical run contro
     assert.equal(teardownSummary.killed, 1);
     assert.equal((await waitForStatus(ownedDir, "killed")).status, "killed");
     assert.equal(getRunStatus(otherDir).status, "running");
-    const events = await readFile(join(ownedDir, "events.jsonl"), "utf8");
-    assert.match(events, /"event":"run\.kill"/);
-    assert.match(events, /"event":"run\.parent_teardown"/);
-    assert.match(events, /"type":"control\.kill"/);
-    assert.match(events, /"trigger":"session_shutdown:quit"/);
+    const trace = await readFile(join(ownedDir, "trace.jsonl"), "utf8");
+    assert.match(trace, /"kind":"run\.kill"/);
+    assert.match(trace, /"kind":"run\.parent_teardown"/);
+    assert.doesNotMatch(trace, /"type":"control\.kill"/);
+    assert.match(trace, /"trigger":"session_shutdown:quit"/);
   } finally {
     try {
       killRun(otherDir);
@@ -2138,7 +1575,7 @@ test("Async run retirement smoke stops supervisor after nested child is terminal
     );
     const results = await executeRunRetirements(summary, {
       cancelRun: (candidate) => cancelRun(candidate.stateDir),
-      sendStop: (candidate) => sendRunMessage(candidate.stateDir, "stop"),
+      sendStop: async () => { throw new Error("no actor-local stop action"); },
     });
     assert.deepEqual(results, [
       { action: "cancel", run: "supervisor", stateDir: supervisorDir },
@@ -2150,7 +1587,10 @@ test("Async run retirement smoke stops supervisor after nested child is terminal
     assert.equal(getRunStatus(supervisorDir).status, "cancelled");
     assert.equal(getRunStatus(childDir).status, "done");
     assert.equal(getRunStatus(serviceDir).status, "running");
-    assert.match(tailRun(supervisorDir), /run\.cancel/);
+    assert.match(
+      await readFile(join(supervisorDir, "trace.jsonl"), "utf8"),
+      /"kind":"run\.cancel"/,
+    );
   } finally {
     try {
       cancelRun(supervisorDir);
@@ -2289,6 +1729,23 @@ test("Async run archive and prune only allow terminal run state", async () => {
     assert.equal(await readFile(preserved.second, "utf8"), "second");
     assert.equal(preserved.optional, undefined);
     assert.throws(() => getRunStatus(pruneDir), /Run not found/);
+    const retention = (await readFile(join(root, "retention.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      retention.map((record) => [record.action, record.outcome]),
+      [
+        ["archive", "queued"],
+        ["archive", "handled"],
+        ["prune", "queued"],
+        ["prune", "handled"],
+      ],
+    );
+    assert.equal(retention[0].id, retention[1].id);
+    assert.equal(retention[2].id, retention[3].id);
+    assert.equal(archived.retention_id, retention[0].id);
+    assert.equal(pruned.retention_id, retention[2].id);
 
     startRun(
       {

@@ -7,15 +7,15 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import { killOwnedInspectorRun } from "../lib/inspector-actions.ts";
+import { killOwnedRunFromInspector } from "../lib/inspector-actions.ts";
 
 const INSTANCE_A = "instance-a";
 
 function kill(
-  deps: Parameters<typeof killOwnedInspectorRun>[4],
+  deps: Parameters<typeof killOwnedRunFromInspector>[4],
   expectedRunInstanceId = INSTANCE_A,
 ) {
-  return killOwnedInspectorRun(
+  return killOwnedRunFromInspector(
     "session-a",
     "demo",
     "/runs",

@@ -4,8 +4,7 @@
     "artifactWrite": "pipeline-artifact-write.json",
     "manifest": "utility-artifact-manifest.json",
     "manifestWrite": "utility-artifact-write.json",
-    "validation": "utility-validation-wrapper.json",
-    "message": "utility-actor-message.json"
+    "validation": "utility-validation-wrapper.json"
   },
   "args": [
     "input:string",
@@ -32,18 +31,6 @@
     "validation_scope": ".",
     "validation_timeout_ms": "300000",
     "tools": ""
-  },
-  "mailbox": {
-    "accepts": [
-      "control.kill"
-    ],
-    "emits": [
-      "artifact.bundle_ready",
-      "artifact.written",
-      "artifact.blocked",
-      "run.done",
-      "run.failed"
-    ]
   },
   "artifacts": {
     "artifact": "{artifact_path}",
@@ -84,14 +71,6 @@
       "values": {
         "artifact_path": "{manifest_path}",
         "mode": "{write_mode}"
-      }
-    },
-    {
-      "name": "message",
-      "values": {
-        "type": "artifact.bundle_ready",
-        "summary": "Artifact bundle ready: {artifact_path} with manifest {manifest_path}.",
-        "metadata": "{\"artifact\":\"{artifact_path}\",\"manifest\":\"{manifest_path}\"}"
       }
     }
   ]

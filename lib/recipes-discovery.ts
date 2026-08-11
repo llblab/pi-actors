@@ -503,6 +503,8 @@ function diagnosticSuggestedAction(message: string): string {
   if (/cyclic/i.test(message)) return "break the import cycle";
   if (/exceeds.*size/i.test(message))
     return "split large prompt or data into separate files";
+  if (/recipe\.mailbox was removed/i.test(message))
+    return "replace mailbox.accepts with control actions and route outputs to Trace events";
   if (/repeat must/i.test(message))
     return "use a positive repeat count or an array-typed repeat source";
   if (/shadows/i.test(message))

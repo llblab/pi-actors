@@ -70,9 +70,9 @@ test("Entrypoint imports local domains through namespace imports", () => {
   );
 });
 
-test("Entrypoint exposes only current manual actor commands", () => {
+test("Entrypoint exposes only the current Actor Inspector command", () => {
   assert.match(indexSource, /InspectorCommand\.registerActorInspectorCommand/);
-  assert.match(inspectorCommandSource, /registerCommand\("actors-inspector"/);
+  assert.match(inspectorCommandSource, /registerCommand\("actor-inspector"/);
   assert.doesNotMatch(indexSource, /registerCommand\("actors-consolidate-drafts"/);
   assert.doesNotMatch(indexSource, /registerCommand\("actors-inspector-toggle"/);
   assert.doesNotMatch(indexSource, /handleDraftConsolidationCommand/);
@@ -172,7 +172,7 @@ test("Operator guidance avoids direct inbox and outbox wording", () => {
     assert.doesNotMatch(
       content,
       /\binbox\/outbox\b|\bdirect inbox\b|\bdirect outbox\b/i,
-      `${file} should describe actor messages instead of inbox/outbox routing`,
+      `${file} should describe Control and Trace instead of legacy routing`,
     );
   }
 });
@@ -183,7 +183,7 @@ test("Operator guidance avoids stale FIFO queue wording", () => {
     assert.doesNotMatch(
       content,
       /FIFO queue|queued FIFO/i,
-      `${file} should describe queued mailbox work, not FIFO queues`,
+      `${file} should avoid stale transport queue wording`,
     );
   }
 });
@@ -197,15 +197,9 @@ test("README first-run actor uses a shell-free command template", () => {
 test("Platform guidance makes native Windows FIFO limits visible", () => {
   const readme = readFileSync("README.md", "utf8");
   const asyncRuns = readFileSync("docs/async-runs.md", "utf8");
-  assert.match(
-    readme,
-    /FIFO control endpoints[\s\S]*Not supported; use mailbox or named pipe/,
-  );
-  assert.match(asyncRuns, /FIFO endpoint[\s\S]*Rejected before delivery/);
-  assert.match(
-    asyncRuns,
-    /Mailbox-only endpoint[\s\S]*Use for cross-platform workers/,
-  );
+  assert.match(readme, /Supported transports are Unix FIFO and Windows named pipe/);
+  assert.match(asyncRuns, /FIFO or named pipe/);
+  assert.match(asyncRuns, /Windows named pipe/);
 });
 
 test("Platform-neutral validation includes protocol conformance", () => {
@@ -251,12 +245,30 @@ test("Unreleased changelog items avoid version literals", () => {
   }
 });
 
+test("Music player helper uses only Control and Trace state", () => {
+  const script = readFileSync("scripts/music-player.mjs", "utf8");
+  assert.match(script, /controls\.jsonl/);
+  assert.match(script, /control-endpoint\.json/);
+  assert.match(script, /trace\.jsonl/);
+  assert.doesNotMatch(script, /inbox\.jsonl|outbox\.jsonl|message to=|player\.<command>/);
+});
+
 test("Music player helper keeps player processes inside the run process group", () => {
   const script = readFileSync("scripts/music-player.mjs", "utf8");
   assert.doesNotMatch(
     script,
     /detached:\s*process\.platform\s*!==\s*["']win32["']/,
     "music-player must not detach backend players from the async run process group",
+  );
+  assert.match(
+    script,
+    /detached:\s*process\.platform\s*===\s*["']win32["']/,
+    "music-player must isolate the Windows playback console group from its controller",
+  );
+  assert.match(
+    script,
+    /spawnSync\("taskkill", \["\/PID", String\(pid\), "\/T", "\/F"\]/,
+    "music-player must terminate the Windows playback tree outside the controller process",
   );
 });
 

@@ -137,7 +137,6 @@ test("Transaction promotes, merges, discards, preserves complete recipes, and em
       async: true,
       artifacts: { report: "{path}/report.md" },
       description: "Promoted complete recipe",
-      mailbox: { accepts: ["control.kill"], emits: ["run.done"] },
       output: "summary",
       template: "promote {path}",
     };

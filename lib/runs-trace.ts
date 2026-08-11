@@ -1,13 +1,14 @@
 /**
  * Run Trace event journal.
- * Zones: structured event validation, bounded append, resilient bounded reads
- * Owns Run-local semantic Trace events; lifecycle projection and owner attention delivery stay in adapters.
+ * Zones: structured event validation, token-locked append-only writes, resilient bounded reads
+ * Owns canonical Run-local Trace persistence; lifecycle projection and owner attention delivery stay in adapters.
  */
 
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { withFileMutationLock } from "./file-state.ts";
 import * as Limits from "./limits.ts";
 import { readJsonlFileResilient } from "./state-readers.ts";
 
@@ -104,23 +105,26 @@ export function appendRunTraceEvent(
   stateDir: string,
   input: AppendTraceEventInput,
 ): TraceEvent {
-  const normalized = normalizeTraceEventInput(input);
-  const event: TraceEvent = {
-    id: randomUUID(),
-    ts: new Date().toISOString(),
-    ...normalized,
-  };
-  let encoded: string;
-  try {
-    encoded = JSON.stringify(event);
-  } catch {
-    throw new Error("Trace event data must be JSON-serializable");
-  }
-  if (Buffer.byteLength(encoded) > Limits.TRACE_EVENT_MAX_BYTES) {
-    throw new Error(`Trace event exceeds ${Limits.TRACE_EVENT_MAX_BYTES} bytes`);
-  }
-  writeFileSync(runTraceFile(stateDir), `${encoded}\n`, { flag: "a" });
-  return event;
+  const path = runTraceFile(stateDir);
+  return withFileMutationLock(path, () => {
+    const normalized = normalizeTraceEventInput(input);
+    const event: TraceEvent = {
+      id: randomUUID(),
+      ts: new Date().toISOString(),
+      ...normalized,
+    };
+    let encoded: string;
+    try {
+      encoded = JSON.stringify(event);
+    } catch {
+      throw new Error("Trace event data must be JSON-serializable");
+    }
+    if (Buffer.byteLength(encoded) > Limits.TRACE_EVENT_MAX_BYTES) {
+      throw new Error(`Trace event exceeds ${Limits.TRACE_EVENT_MAX_BYTES} bytes`);
+    }
+    writeFileSync(path, `${encoded}\n`, { flag: "a" });
+    return event;
+  });
 }
 
 export function readRunTraceEvents(

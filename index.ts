@@ -110,7 +110,7 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
         Tools.resolveActiveRuntimeTool(name, runtime.getTools(), (activeName) =>
           actorToolDefinitions.get(activeName),
         ),
-      handleRuntimeMessage: automaticReview.handleMessage,
+      handleRuntimeControl: automaticReview.handleControl,
       registryRuntime: runtime,
       setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
     }).map(withCurrentThinkingContext),

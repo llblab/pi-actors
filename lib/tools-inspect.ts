@@ -7,6 +7,7 @@
 import { join } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
+import * as ControlProjection from "./control-projection.ts";
 import * as Inspector from "./inspector.ts";
 import * as Limits from "./limits.ts";
 import * as Paths from "./paths.ts";
@@ -15,6 +16,8 @@ import * as ReviewDiagnostics from "./review-diagnostics.ts";
 import * as RunsControls from "./runs-controls.ts";
 import * as RunControlDelivery from "./runs-control-delivery.ts";
 import * as RunsTrace from "./runs-trace.ts";
+import * as RuntimeIdentity from "./runtime-identity.ts";
+import * as RuntimeTriage from "./runtime-triage.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsAccess from "./tools-access.ts";
 import * as ToolsResponse from "./tools-response.ts";
@@ -35,7 +38,8 @@ function runtimeStatus(): Record<string, unknown> {
   return {
     automatic_review: process.env.PI_ACTORS_AUTOMATIC_REVIEW !== "off",
     run_root: Paths.getRunStateRoot(),
-    version: process.env.npm_package_version ?? "unknown",
+    state_schema: RuntimeIdentity.RUN_STATE_SCHEMA,
+    version: RuntimeIdentity.getPackageVersion(),
   };
 }
 
@@ -69,13 +73,39 @@ function runtimeTriage(
   const inventory = runtimeRuns(ctx, deps, undefined);
   const runs = inventory.runs as Array<Record<string, unknown>>;
   const failed = runs.filter((run) => run.status === "failed");
-  const staleControls = runs.flatMap((run) => {
+  const pendingControls: RuntimeTriage.RuntimePendingControl[] = [];
+  const staleControls: RuntimeTriage.RuntimePendingControl[] = [];
+  const controlDiagnostics: Array<Record<string, unknown>> = [];
+  const nowMs = Date.now();
+  for (const run of runs) {
     const stateDir = typeof run.state_dir === "string" ? run.state_dir : undefined;
-    if (!stateDir) return [];
-    return RunsControls.readRunControlsFromStateDir(stateDir)
-      .filter((control) => control.status === "queued" || control.status === "claimed")
-      .map((control) => ({ run: run.run, control }));
-  });
+    if (!stateDir) continue;
+    const runId = String(run.run ?? "unknown");
+    const journal = RunsControls.readRunControlJournalFromStateDir(stateDir);
+    controlDiagnostics.push(...journal.diagnostics.map((diagnostic) => ({
+      ...(diagnostic.line === undefined ? {} : { line: diagnostic.line }),
+      reason: diagnostic.line === undefined
+        ? "unreadable_control_journal"
+        : "invalid_control_json",
+      run: runId,
+    })));
+    for (const control of journal.records) {
+      const classified = RuntimeTriage.classifyRuntimeControl(
+        {
+          run: runId,
+          ...(typeof run.run_instance_id === "string"
+            ? { runInstanceId: run.run_instance_id }
+            : {}),
+          status: String(run.status ?? "unknown"),
+        },
+        control,
+        nowMs,
+      );
+      if (classified.pending) pendingControls.push(classified.pending);
+      if (classified.stale) staleControls.push(classified.stale);
+      if (classified.diagnostic) controlDiagnostics.push({ ...classified.diagnostic });
+    }
+  }
   const attentionEvents = runs.flatMap((run) => {
     const stateDir = typeof run.state_dir === "string" ? run.state_dir : undefined;
     if (!stateDir) return [];
@@ -90,18 +120,31 @@ function runtimeTriage(
         ts: event.ts,
       }));
   });
+  const boundedStaleControls = staleControls.slice(0, 40);
+  const staleKeys = new Set(boundedStaleControls.map((control) =>
+    `${control.run}\0${control.run_instance_id}\0${control.id}`,
+  ));
+  const boundedPendingControls = [
+    ...boundedStaleControls,
+    ...pendingControls.filter((control) =>
+      !staleKeys.has(`${control.run}\0${control.run_instance_id}\0${control.id}`),
+    ),
+  ].slice(0, 40);
   return {
     ...inventory,
     failed_runs: failed,
-    stale_controls: staleControls.slice(0, 40),
+    pending_control_count: pendingControls.length,
+    pending_controls: boundedPendingControls,
+    stale_control_count: staleControls.length,
+    stale_controls: boundedStaleControls,
+    control_diagnostic_count: controlDiagnostics.length,
+    control_diagnostics: controlDiagnostics.slice(0, 40),
     attention_events: attentionEvents.slice(-40).reverse(),
     next_actions: [
       ...(failed.length ? ["inspect target=runtime view=runs status=failed"] : []),
-      ...(staleControls.length
-        ? staleControls.slice(0, 3).map((entry) =>
-            `inspect target=run:${String(entry.run)} view=control`,
-          )
-        : []),
+      ...staleControls.slice(0, 3).map((entry) =>
+        `inspect target=run:${entry.run} view=control`,
+      ),
       ...(attentionEvents.length
         ? attentionEvents.slice(-3).map((entry) =>
             `inspect target=run:${String(entry.run)} view=trace source=runtime`,
@@ -116,9 +159,9 @@ function compactRuntime(view: string, details: Record<string, unknown>): string 
     return `\nruntime runs=${(details.runs as unknown[] | undefined)?.length ?? 0}`;
   }
   if (view === "triage") {
-    return `\nruntime failed=${(details.failed_runs as unknown[] | undefined)?.length ?? 0} stale_controls=${(details.stale_controls as unknown[] | undefined)?.length ?? 0} attention=${(details.attention_events as unknown[] | undefined)?.length ?? 0}`;
+    return `\nruntime failed=${(details.failed_runs as unknown[] | undefined)?.length ?? 0} pending_controls=${Number(details.pending_control_count ?? 0)} stale_controls=${Number(details.stale_control_count ?? 0)} attention=${(details.attention_events as unknown[] | undefined)?.length ?? 0}`;
   }
-  return `\nruntime version=${String(details.version ?? "unknown")} automatic_review=${String(details.automatic_review)}`;
+  return `\nruntime version=${String(details.version)} state_schema=${String(details.state_schema)} automatic_review=${String(details.automatic_review)}`;
 }
 
 function inspectRuntime(
@@ -232,7 +275,8 @@ function inspectRun(
       : undefined,
     recent_controls: RunsControls.readRunControlsFromStateDir(stateDir)
       .slice(-Math.max(1, Number(input.lines || 20)))
-      .reverse(),
+      .reverse()
+      .map(ControlProjection.projectRunControl),
   };
 }
 

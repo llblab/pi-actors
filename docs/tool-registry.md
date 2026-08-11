@@ -27,8 +27,8 @@ User Recipes take priority over packaged Recipes. Active invalid or disabled sha
 Inspect registry state with:
 
 ```text
-inspect target=recipes
-inspect target=tool:<name>
+inspect target=recipes view=status
+inspect target=tool:<name> view=status
 ```
 
 Recipe inspection reports active, shadowed, invalid, disabled, diagnostic, risk, usage, and review evidence. Tool inspection reports the current capability definition/schema; a registered tool is not a running actor.

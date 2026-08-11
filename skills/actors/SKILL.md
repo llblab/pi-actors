@@ -1,8 +1,6 @@
 ---
 name: actors
 description: Required practical guide for non-trivial pi-actors use and Run-kernel work. Read before using or changing spawn, message, inspect, Runs, tools, Recipes, command templates, Control, Trace, artifacts, or lifecycle mechanics.
-metadata:
-  version: 0.43.0
 ---
 
 # Actors (pi-actors)
@@ -38,20 +36,28 @@ Prefer maintained packaged Recipes over ad hoc wrappers. Keep model, thinking, m
 Trace records bounded structured observations in `trace.jsonl`:
 
 ```json
-{"id":"…","ts":"…","kind":"progress.update","summary":"…","data":{},"level":"info","attention":"notify"}
+{
+  "id": "…",
+  "ts": "…",
+  "kind": "progress.update",
+  "summary": "…",
+  "data": {},
+  "level": "info",
+  "attention": "notify"
+}
 ```
 
-Trace never carries sender, recipient, route, reply, or message-envelope fields. Use `attention: "notify"` for visible notification and `attention: "followup"` only when the coordinator must receive semantic follow-up context. Prefer artifacts or complete execution captures for large evidence.
+Trace never carries sender, recipient, route, reply, or message-envelope fields. First-party writers use the canonical append authority, which validates and size-checks under a token-owned cross-process lock before one append-only JSONL write. Use `attention: "notify"` for visible notification and `attention: "followup"` only when the coordinator must receive semantic follow-up context. Prefer artifacts or complete execution captures for large evidence.
 
 ## Control
 
 The public Control request is exact:
 
 ```json
-{"target":"run:<id>","action":"pause","input":{},"verbose":false}
+{ "target": "run:<id>", "action": "pause", "input": {}, "verbose": false }
 ```
 
-Controls persist in `controls.jsonl` before delivery. Token-owned locks serialize atomic journal replacements. Service endpoints publish readiness in `control-endpoint.json` with the immutable startup `run_instance_id`; only FIFO and named-pipe endpoints transport Controls. Expected-status-fenced transitions remain monotonic when a fast consumer completes before sender delivery evidence. FIFO documents must fit the portable 512-byte atomic-write bound, partial writes fail, and controlled FIFO readers remain gap-free across writers. Delivery revalidates owner, generation, running state, and process identity under the lifecycle lock.
+Valid Controls persist in `controls.jsonl` before delivery; invalid envelopes remain outside the journal. Token-owned locks serialize atomic journal replacements. Service endpoints publish readiness in `control-endpoint.json` with the immutable startup `run_instance_id`; only FIFO and named-pipe endpoints transport Controls. Both transports share one portable envelope: action is at most 64 lowercase ASCII characters, serialized JSON input is at most 380 bytes, and the newline-terminated wire record is at most 512 bytes. Partial writes fail, and controlled FIFO readers remain gap-free across writers. Put larger data in a declared artifact/path and send only its bounded reference or instruction through Control. Delivery revalidates owner, generation, running state, and process identity under the lifecycle lock.
 
 `kill` remains a runtime lifecycle action. Use an actor-local action such as `stop` only when the Recipe declares and implements it.
 
@@ -90,7 +96,6 @@ If work may outlive the current turn, needs steering, produces artifacts, fans o
 
 ## Deep References
 
-- [Actors deep reference](../../docs/actors-deep-reference.md)
 - [Recipe library](../../docs/recipe-library.md)
 - [Async Runs](../../docs/async-runs.md)
 - [Baseline and preservation gates](../../docs/0.43-baseline.md)

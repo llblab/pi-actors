@@ -16,7 +16,7 @@ import * as ToolReviewScheduler from "./tool-review-scheduler.ts";
 
 export interface AutomaticReviewRuntime {
   close(): void;
-  handleMessage(type: string, body: unknown): Record<string, unknown>;
+  handleControl(action: string, input: unknown): Record<string, unknown>;
   schedule(): void;
   start(ctx: Pi.ExtensionContext): void;
 }
@@ -52,18 +52,18 @@ export function createAutomaticReviewRuntime(
 
   return {
     close,
-    handleMessage(type, body) {
-      if (type !== "review.retry" && type !== "review.reset") {
-        throw new Error("tool:pi-actors accepts review.retry or review.reset messages.");
+    handleControl(action, input) {
+      if (action !== "review.retry" && action !== "review.reset") {
+        throw new Error("runtime accepts review.retry or review.reset Controls.");
       }
-      if (type === "review.retry" && !Paths.isAutomaticRecipeReviewEnabled()) {
+      if (action === "review.retry" && !Paths.isAutomaticRecipeReviewEnabled()) {
         throw new Error(
           "Automatic recipe review is disabled by PI_ACTORS_AUTOMATIC_REVIEW.",
         );
       }
       return ReviewControl.controlAutomaticReview(
-        type,
-        ReviewControl.parseAutomaticReviewScope(body),
+        action,
+        ReviewControl.parseAutomaticReviewScope(input),
         {
           scheduleDraft: () => draftScheduler?.schedule(),
           scheduleTool: () => toolScheduler?.schedule(),

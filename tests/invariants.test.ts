@@ -33,17 +33,38 @@ const toolsSource = await readFile(
   new URL("../lib/tools.ts", import.meta.url),
   "utf8",
 );
+const toolsMessageSource = await readFile(
+  new URL("../lib/tools-message.ts", import.meta.url),
+  "utf8",
+);
+const reviewControlSource = await readFile(
+  new URL("../lib/review-control.ts", import.meta.url),
+  "utf8",
+);
 const changelogSource = await readFile(
   new URL("../CHANGELOG.md", import.meta.url),
+  "utf8",
+);
+const releaseGatesSource = await readFile(
+  new URL("../scripts/release-gates.mjs", import.meta.url),
+  "utf8",
+);
+const baselineSource = await readFile(
+  new URL("../docs/0.43-baseline.md", import.meta.url),
   "utf8",
 );
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 ) as { scripts?: Record<string, string> };
-const validateWorkflowSource = await readFile(
+const normalizeNewlines = (source: string): string => source.replaceAll("\r\n", "\n");
+const validateWorkflowSource = normalizeNewlines(await readFile(
   new URL("../.github/workflows/validate.yml", import.meta.url),
   "utf8",
-);
+));
+const releaseWorkflowSource = normalizeNewlines(await readFile(
+  new URL("../.github/workflows/release.yml", import.meta.url),
+  "utf8",
+));
 const automaticReviewerRecipes = await Promise.all(
   ["draft-review.json", "tool-review.json"].map(async (name) => ({
     name,
@@ -110,6 +131,21 @@ test("Entrypoint delegates low-level review and run lifecycle operations", () =>
   assert.doesNotMatch(indexSource, /createRunStateWatcher|createRunTerminalReconciliationLoop/);
   assert.match(automaticReviewRuntimeSource, /DraftSleep\.createDraftSleepScheduler/);
   assert.match(automaticReviewRuntimeSource, /ToolReviewScheduler\.createToolReviewScheduler/);
+});
+
+test("Internal runtime input adapters use only Control terminology", () => {
+  const sources = [
+    indexSource,
+    automaticReviewRuntimeSource,
+    toolsSource,
+    toolsMessageSource,
+    reviewControlSource,
+  ].join("\n");
+  assert.doesNotMatch(sources, /handleRuntimeMessage|handleMessage/);
+  assert.match(sources, /handleRuntimeControl/);
+  assert.match(sources, /handleControl/);
+  assert.doesNotMatch(toolsMessageSource, /\bgetTool\b/);
+  assert.doesNotMatch(reviewControlSource, /\bsent\s*:/);
 });
 
 const publicGuidanceFiles = [
@@ -194,12 +230,16 @@ test("README first-run actor uses a shell-free command template", () => {
   assert.doesNotMatch(readme, /spawn template="[^"]*(?:&&|\|\||[|<>])[^"]*" as=run:demo/);
 });
 
-test("Platform guidance makes native Windows FIFO limits visible", () => {
+test("Platform guidance uses one portable FIFO and named-pipe envelope", () => {
   const readme = readFileSync("README.md", "utf8");
   const asyncRuns = readFileSync("docs/async-runs.md", "utf8");
   assert.match(readme, /Supported transports are Unix FIFO and Windows named pipe/);
-  assert.match(asyncRuns, /FIFO or named pipe/);
-  assert.match(asyncRuns, /Windows named pipe/);
+  for (const content of [readme, asyncRuns]) {
+    assert.match(content, /64 lowercase ASCII characters/);
+    assert.match(content, /380 bytes/);
+    assert.match(content, /512 bytes/);
+    assert.doesNotMatch(content, /larger Control input|general Control input bound/);
+  }
 });
 
 test("Platform-neutral validation includes protocol conformance", () => {
@@ -218,6 +258,86 @@ test("CI release validation includes exact-tree, Domain DAG, and ABCd gates", ()
   assert.match(releaseValidate, /npm run validate/);
   assert.match(releaseValidate, /node scripts\/release-gates\.mjs/);
   assert.match(validateWorkflowSource, /npm run release:validate/);
+});
+
+test("Release compression ratchets strictly from the documented 0.43.0 tree", () => {
+  assert.match(releaseGatesSource, /const baselineShippedLines = 28_853;/);
+  assert.match(releaseGatesSource, /shippedLines < baselineShippedLines/);
+  assert.match(releaseGatesSource, /shipped lines \$\{shippedLines\} < released baseline/);
+  assert.match(baselineSource, /0d6db30cd2e070c1d03ed1e60bef70538a3083c1/);
+  assert.match(baselineSource, /exactly \*\*28,853\*\* lines/);
+  assert.match(baselineSource, /strictly below 28,853 lines/);
+});
+
+test("CI workflows use reusable validation and Node 24 action runtimes", () => {
+  assert.match(validateWorkflowSource, /^  workflow_call:$/m);
+  assert.equal(validateWorkflowSource.match(/actions\/checkout@v7/g)?.length, 2);
+  assert.equal(validateWorkflowSource.match(/actions\/setup-node@v7/g)?.length, 2);
+  assert.equal(releaseWorkflowSource.match(/actions\/checkout@v7/g)?.length, 1);
+  assert.equal(releaseWorkflowSource.match(/actions\/setup-node@v7/g)?.length, 1);
+  for (const source of [validateWorkflowSource, releaseWorkflowSource]) {
+    assert.doesNotMatch(source, /actions\/(?:checkout|setup-node)@v[1-6]\b/);
+    assert.equal(
+      [...source.matchAll(/node-version:\s*(\d+)/g)].every((match) => match[1] === "24"),
+      true,
+    );
+  }
+});
+
+test("Release publication depends on complete validation and exact-tag preflight", () => {
+  const validateJob = releaseWorkflowSource.match(
+    /^  validate:[\s\S]*?(?=^  publish:)/m,
+  )?.[0] ?? "";
+  const publishJob = releaseWorkflowSource.match(/^  publish:[\s\S]*/m)?.[0] ?? "";
+  assert.match(validateJob, /uses: \.\/\.github\/workflows\/validate\.yml/);
+  assert.match(publishJob, /needs: validate/);
+  assert.doesNotMatch(releaseWorkflowSource, /npm run release:validate/);
+  assert.match(releaseWorkflowSource, /group: release-\$\{\{ github\.ref_name \}\}/);
+  assert.match(releaseWorkflowSource, /cancel-in-progress: false/);
+  assert.match(publishJob, /GITHUB_REF[^\n]*refs\/tags/);
+  assert.match(publishJob, /HEAD\^\{commit\}/);
+  assert.match(publishJob, /refs\/tags\/\$\{tagName\}\^\{commit\}/);
+  assert.match(publishJob, /packageJson\.version !== version/);
+  assert.match(publishJob, /packageLock\.version !== version/);
+  assert.match(publishJob, /CHANGELOG\.md has no section/);
+  assert.match(publishJob, /gh release view[\s\S]*gh release edit[\s\S]*gh release create/);
+});
+
+test("Release workflow scopes read and publication permissions per job", () => {
+  const publishOffset = releaseWorkflowSource.indexOf("\n  publish:");
+  assert.ok(publishOffset > 0);
+  const nonPublish = releaseWorkflowSource.slice(0, publishOffset);
+  const publishJob = releaseWorkflowSource.slice(publishOffset);
+  assert.match(validateWorkflowSource, /^permissions:\n  contents: read$/m);
+  assert.doesNotMatch(validateWorkflowSource, /contents: write|id-token: write/);
+  assert.match(releaseWorkflowSource, /^permissions:\n  contents: read$/m);
+  assert.doesNotMatch(nonPublish, /contents: write|id-token: write/);
+  assert.match(publishJob, /permissions:\n      contents: write\n      id-token: write/);
+  assert.equal(releaseWorkflowSource.match(/contents: write/g)?.length, 1);
+  assert.equal(releaseWorkflowSource.match(/id-token: write/g)?.length, 1);
+});
+
+test("Release publishes through tokenless npm Trusted Publisher before GitHub Release", () => {
+  const publishJob = releaseWorkflowSource.match(/^  publish:[\s\S]*/m)?.[0] ?? "";
+  assert.match(publishJob, /registry-url: https:\/\/registry\.npmjs\.org/);
+  assert.match(publishJob, /package-manager-cache: false/);
+  assert.doesNotMatch(publishJob, /^\s+cache: npm$/m);
+  assert.match(publishJob, /require npm >= 11\.5\.1/);
+  assert.doesNotMatch(publishJob, /NPM_TOKEN|NODE_AUTH_TOKEN/);
+  assert.doesNotMatch(publishJob, /^ {12,}NODE$/m);
+  assert.doesNotMatch(publishJob, /uses: (?!actions\/(?:checkout|setup-node)@v7)/);
+  assert.match(publishJob, /npm view "\$PACKAGE_NAME@\$VERSION" --json version gitHead/);
+  assert.match(publishJob, /published\.gitHead !== process\.env\.TAG_COMMIT/);
+  assert.match(publishJob, /grep -Eq 'E404\|404 Not Found'/);
+  assert.match(publishJob, /npm publish --access public --provenance/);
+  assert.match(publishJob, /for attempt in \$\(seq 1 20\)/);
+  assert.match(publishJob, /npm pack "\$PACKAGE_NAME@\$VERSION" --dry-run --json/);
+  assert.match(publishJob, /dist\/pi-actors\/index\.js/);
+  assert.match(publishJob, /dist\/skills\/actors\/SKILL\.md/);
+  const npmVerification = publishJob.indexOf("Verify public npm package and packed manifest");
+  const githubRelease = publishJob.indexOf("Publish GitHub release");
+  assert.ok(npmVerification > publishJob.indexOf("npm publish --access public --provenance"));
+  assert.ok(githubRelease > npmVerification);
 });
 
 test("Automatic recipe reviewers have no general filesystem tools", () => {
@@ -245,12 +365,41 @@ test("Unreleased changelog items avoid version literals", () => {
   }
 });
 
+test("Every changelog release stays compact", () => {
+  for (const section of normalizeNewlines(changelogSource).split("\n## ").slice(1)) {
+    const [title, ...body] = section.split("\n");
+    if (!/^\d+\.\d+\.\d+(?::|$)/.test(title)) continue;
+    const records = body.filter((line) => /^(?:[-*+] |\d+\. )/.test(line));
+    assert.ok(records.length <= 8, `${title}: ${records.length} changelog records`);
+    for (const record of records) {
+      assert.ok([...record].length <= 512, `${title}: changelog record exceeds 512 characters`);
+    }
+  }
+});
+
 test("Music player helper uses only Control and Trace state", () => {
   const script = readFileSync("scripts/music-player.mjs", "utf8");
   assert.match(script, /controls\.jsonl/);
   assert.match(script, /control-endpoint\.json/);
-  assert.match(script, /trace\.jsonl/);
   assert.doesNotMatch(script, /inbox\.jsonl|outbox\.jsonl|message to=|player\.<command>/);
+});
+
+test("First-party scripts use only canonical Trace append", () => {
+  const directTraceWrite = /(?:appendFileSync|writeFileSync|writeText(?:Atomic)?)\s*\(\s*[A-Za-z0-9_.]*?(?:trace|event)(?:Path|File)/iu;
+  for (const file of [
+    "scripts/async-runner.mjs",
+    "scripts/locker.mjs",
+    "scripts/music-player.mjs",
+  ]) {
+    const source = readFileSync(file, "utf8");
+    assert.match(source, /importRuntimeModule\("runs-trace"\)/, file);
+    assert.match(source, /appendRunTraceEvent/, file);
+    assert.doesNotMatch(source, directTraceWrite, file);
+  }
+  assert.match(
+    readFileSync("scripts/release-gates.mjs", "utf8"),
+    /direct Trace writer outside canonical authority/,
+  );
 });
 
 test("Music player helper keeps player processes inside the run process group", () => {

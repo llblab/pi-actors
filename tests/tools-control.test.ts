@@ -19,7 +19,7 @@ test("Public message tool exposes only the exact Control schema", () => {
 test("Public message tool routes only allowlisted runtime Controls", async () => {
   const calls: Array<{ action: string; input: unknown }> = [];
   const tool = createControlToolDefinition({
-    handleRuntimeMessage(action, input) {
+    handleRuntimeControl(action, input) {
       calls.push({ action, input });
       return { status: "handled" };
     },
@@ -35,6 +35,7 @@ test("Public message tool routes only allowlisted runtime Controls", async () =>
     { action: "review.retry", input: { scope: "draft" } },
   ]);
   assert.match(response.content[0].text, /target=runtime action=review\.retry status=handled/);
+  assert.equal(Object.hasOwn(response.details.result, "sent"), false);
   await assert.rejects(
     tool.execute(
       "call-2",

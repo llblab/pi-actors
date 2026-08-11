@@ -97,14 +97,13 @@ test("validate-recipe validates recipe directories with --all", async () => {
   }
 });
 
-test("validate-recipe qa accepts packaged-style async recipes", async () => {
+test("validate-recipe qa accepts component Recipes without optional descriptions", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-qa-"));
   try {
     await mkdir(join(root, "recipes"));
     await writeFile(
       join(root, "recipes", "worker.json"),
       JSON.stringify({
-        description: "Worker",
         async: true,
         artifacts: { report: "{state_dir}/report.md" },
         template: "{repo}/scripts/validate-recipe.mjs {target}",
@@ -119,6 +118,7 @@ test("validate-recipe qa accepts packaged-style async recipes", async () => {
     const report = JSON.parse(stdout);
     assert.equal(report.ok, true);
     assert.equal(report.results[0].qa.ok, true);
+    assert.deepEqual(report.results[0].qa.warnings, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -147,8 +147,7 @@ test("validate-recipe qa fails exact packaged recipe diagnostics", async () => {
         const stdout = (error as { stdout?: string }).stdout ?? "";
         const report = JSON.parse(stdout);
         const diagnostics = report.results[0].qa.diagnostics.join("\n");
-        const warnings = report.results[0].qa.warnings.join("\n");
-        assert.match(warnings, /description: missing or empty/);
+        assert.deepEqual(report.results[0].qa.warnings, []);
         assert.match(diagnostics, /artifacts.report: must not use a machine-local absolute path/);
         assert.match(diagnostics, /helper scripts must be referenced through \{repo\}\/scripts/);
         return true;

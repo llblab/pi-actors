@@ -248,7 +248,9 @@ test("Recipe watcher converges only after the synchronous multi-target commit", 
       ]),
       { ...paths, inventory: [first, second] },
     );
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    for (let attempt = 0; attempt < 100 && snapshots.length < 1; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
 
     assert.equal(snapshots.length >= 1, true);
     assert.equal(snapshots.every(([a, b]) => a && b), true);

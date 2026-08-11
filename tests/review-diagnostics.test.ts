@@ -24,7 +24,7 @@ test("Automatic review diagnostics expose bounded failure remediation", () => {
       attempts: 3,
       failedStage: "result_validation",
       lastError: "x".repeat(700),
-      nextAction: "message to=tool:pi-actors type=review.retry body={\"scope\":\"draft\"}",
+      nextAction: "message target=runtime action=review.retry input={\"scope\":\"draft\"}",
       phase: "processing_failed",
       processingAttempts: 3,
     });
@@ -32,7 +32,10 @@ test("Automatic review diagnostics expose bounded failure remediation", () => {
     const draft = diagnostics.draft_review as Record<string, unknown>;
     assert.equal(draft.failed_stage, "result_validation");
     assert.equal(String(draft.last_error).length <= 500, true);
-    assert.match(String(draft.next_action), /review\.retry/);
+    assert.equal(
+      draft.next_action,
+      "message target=runtime action=review.retry input={\"scope\":\"draft\"}",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

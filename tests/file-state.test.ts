@@ -31,7 +31,7 @@ function startLockWorker(
   target: string,
   paths: WorkerPaths,
   log: string,
-  mode: "crash" | "first" | "second" | "unknown-owner",
+  mode: "crash" | "first" | "publication-race" | "second" | "unknown-owner",
   reclaimBarrier?: { proceed: string; ready: string },
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -109,6 +109,48 @@ test("File mutation locks deterministically serialize sibling processes", async 
     await mkdir(root, { recursive: true });
     const target = join(root, "recipe.json");
     await assertDeterministicContention(root, target, target);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("File mutation lock owner publication is atomic under contention", async () => {
+  const root = join(tmpdir(), `pi-actors-file-lock-publish-${process.pid}-${Date.now()}`);
+  const target = join(root, "recipe.json");
+  const log = join(root, "order.log");
+  const publisherRelease = join(root, "publisher-release");
+  const contenderRelease = join(root, "contender-release");
+  const publishReady = join(root, "publish-ready");
+  const publishProceed = join(root, "publish-proceed");
+  const publisherPaths = workerPaths(root, "publisher", publisherRelease);
+  const contenderPaths = workerPaths(root, "contender", contenderRelease);
+  try {
+    await mkdir(root, { recursive: true });
+    const publisher = startLockWorker(
+      target,
+      publisherPaths,
+      log,
+      "publication-race",
+      { ready: publishReady, proceed: publishProceed },
+    );
+    await waitForFile(publishReady);
+    const contender = startLockWorker(target, contenderPaths, log, "first");
+    await waitForFile(contenderPaths.acquired);
+
+    await writeFile(publishProceed, "proceed\n");
+    await waitForFile(publisherPaths.blocked);
+    assert.equal(existsSync(publisherPaths.acquired), false);
+    await writeFile(contenderRelease, "release\n");
+    await waitForFile(publisherPaths.acquired);
+    await writeFile(publisherRelease, "release\n");
+    await Promise.all([publisher, contender]);
+
+    assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), [
+      "first:acquired",
+      "first:released",
+      "publication-race:acquired",
+      "publication-race:released",
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -207,6 +249,58 @@ test("File mutation locks immediately reclaim a proven-dead owner", async () => 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("File mutation locks reclaim a stale legacy ownerless boundary", async () => {
+  const root = join(tmpdir(), `pi-actors-file-lock-ownerless-${process.pid}-${Date.now()}`);
+  const target = join(root, "recipe.json");
+  const lockPath = mutationLockPath(target);
+  try {
+    await mkdir(root, { recursive: true });
+    await mkdir(lockPath, { recursive: true });
+    const abandoned = new Date(Date.now() - 60_000);
+    await utimes(lockPath, abandoned, abandoned);
+
+    const unlock = acquireFileMutationLock(target);
+    unlock();
+
+    assert.equal(existsSync(lockPath), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(lockPath, { recursive: true, force: true });
+  }
+});
+
+test(
+  "File mutation locks reclaim a killed child before its exit event is reaped",
+  { skip: process.platform === "win32" },
+  async () => {
+    const root = join(tmpdir(), `pi-actors-file-lock-zombie-${process.pid}-${Date.now()}`);
+    const target = join(root, "recipe.json");
+    const releasePath = join(root, "release");
+    const paths = workerPaths(root, "holder", releasePath);
+    const log = join(root, "order.log");
+    await mkdir(root, { recursive: true });
+    const child = spawn(process.execPath, [
+      "--experimental-strip-types", worker, target, paths.started, paths.acquired,
+      paths.blocked, paths.release, log, "first",
+    ], { stdio: "ignore" });
+    const closed = new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", () => resolve());
+    });
+    try {
+      await waitForFile(paths.acquired);
+      child.kill("SIGKILL");
+      const unlock = acquireFileMutationLock(target);
+      unlock();
+      await closed;
+      assert.equal(existsSync(mutationLockPath(target)), false);
+    } finally {
+      child.kill("SIGKILL");
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("Concurrent dead-owner reclaimers cannot remove the replacement lock", async () => {
   const root = join(tmpdir(), `pi-actors-file-lock-reclaim-${process.pid}-${Date.now()}`);

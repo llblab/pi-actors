@@ -16,7 +16,7 @@ Layer boundary: command templates own only the synchronous execution graph. Reci
 
 Command-template standard owns:
 
-- Command string splitting and direct argv execution.
+- Command string splitting, portable script-interpreter inference, and direct argv execution.
 - Placeholder resolution, typed public args, defaults, `??`, ternary string selection, and array-index placeholders.
 - Synchronous graph shape: sequence, `parallel`, `when`, `repeat`, stdin flow, stdout joins, and output selection.
 - Per-node execution controls: `timeout`, `delay`, `retry`, `failure`, and `recover`.
@@ -72,7 +72,7 @@ A runtime must:
 
 1. Split the template into shell-like words with simple single quotes, double quotes, and backslash escapes
 2. Substitute placeholders inside each split word
-3. Execute command + args directly, without shell evaluation
+3. Infer a first-word `.js` or `.mjs` script through the first available `node`, `bun`, or `deno run` runtime, infer `.sh` through `bash`, and otherwise execute command + args directly; explicit interpreters remain unchanged and no shell evaluates the resulting argv
 4. Treat exit code `0` as success and non-zero as failure
 5. Use stdout as the default result channel and stderr only for diagnostics
 
@@ -106,35 +106,11 @@ With runtime values `{ "text": "hello" }`, argv is:
 
 Use `defaults` for visible configuration data; use inline defaults for compact local literals. Prefer flag-style examples such as `/path/to/tool --file {file} --lang {lang=ru}` for readability, but positional forms such as `/path/to/tool {file} {lang=ru}` are valid when the invoked script defines that CLI contract.
 
-Fallback values can be selected with nullish coalescing:
-
-```json
-{
-  "template": "deploy --env {env??dev} --region {region??local}"
-}
-```
-
-Optional flags can be mapped from boolean args with a ternary:
-
-```json
-{
-  "args": ["target:path", "all:bool"],
-  "defaults": { "all": "true" },
-  "template": "validate-recipe {target} {all?--all:}"
-}
-```
+Use `{env??dev}` for fallback values and `{all?--all:}` to map boolean args to optional text.
 
 Typed declarations annotate the public tool interface, not the shell command. They may live in `args` or inline placeholders such as `{request_timeout:int=60000}` and `{mode:enum(check,fix)=check}`. Use metadata-first authoring (`args` plus `defaults`) when long templates should stay visually short; use inline-first authoring when one self-contained `template` property is clearer. They do not sandbox or reinterpret the executable; they only let the host generate narrower input schemas and normalize runtime values before placeholder substitution. Untyped `args` and untyped placeholders continue to work unchanged.
 
-Node control fields can also read public args. Use distinct arg names so execution controls stay visually separate from public inputs:
-
-```json
-{
-  "args": ["timeout_ms:int"],
-  "timeout": "{timeout_ms}",
-  "template": "npm test"
-}
-```
+Node control fields can also read public args, for example `"timeout": "{timeout_ms}"`; use distinct names so execution controls stay visually separate from public inputs.
 
 ## Quoting
 
@@ -194,21 +170,6 @@ Composition rules:
 - `min_successful` adds a join header with `complete`, `degraded`, or `insufficient_data`; with `failure: "branch"` or `"root"`, an unmet threshold fails at that scope
 - Each leaf still applies its own inline defaults
 
-```json
-{
-  "template": [
-    "/path/to/tts --text {text} --lang {lang} --out {mp3}",
-    {
-      "defaults": { "codec": "libopus" },
-      "template": "ffmpeg -y -i {mp3} -c:a {codec} {ogg}"
-    }
-  ],
-  "args": ["text", "lang", "mp3", "ogg"],
-  "defaults": { "lang": "en" },
-  "output": "ogg"
-}
-```
-
 `output` selects the primary result channel. Omitted `output` means `"stdout"`, and explicitly writing `"output": "stdout"` is valid standard syntax. Artifact-producing handlers may instead name a runtime value or placeholder path, e.g. `"ogg"` or `"{ogg}"`. Do not use `artifacts` in command-template nodes; named artifact manifests belong to the template-recipe layer.
 
 ### Repeat
@@ -245,52 +206,7 @@ Repeat expressions support only integers, `index`, `prev`, `next`, `repeat`, par
 
 Repeat placeholders are local generated values. Call-time args should not use these reserved names to override the repeat index.
 
-Parallel nodes use the same object shape. Flags come first and `template` stays last:
-
-```json
-{
-  "template": [
-    "prepare {out_dir}",
-    {
-      "parallel": true,
-      "template": [
-        {
-          "label": "reviewer-a",
-          "timeout": 300000,
-          "template": "review-gpt {scope}"
-        },
-        {
-          "label": "reviewer-b",
-          "timeout": 300000,
-          "template": "review-deepseek {scope}"
-        },
-        {
-          "label": "kimi",
-          "timeout": 300000,
-          "template": "review-kimi {scope}"
-        }
-      ]
-    },
-    "merge {out_dir}"
-  ]
-}
-```
-
-A degraded parallel join is still usable when at least one branch succeeds:
-
-```text
---- branch: reviewer-a status: done ---
-review text
---- branch: reviewer-b status: failed ---
-exit: 1
-stderr: provider balance exhausted
-```
-
-Some local schemas may accept `pipe` as an alias, but the portable standard is `template: [...]`.
-
-## Fail-Open Default Policy
-
-By default, composition continues on failure: the failed step is logged and the next step executes. This is analogous to `make -k` — the user sees all failures at once and decides what to fix.
+Parallel children use the same object shape: flags come first and `template` stays last. A join remains usable when at least one branch succeeds and reports each branch label/status. Some local schemas may accept `pipe`, but the portable standard is `template: [...]`.
 
 ## Failure Propagation
 
@@ -302,33 +218,7 @@ Use `failure` when a node should stop more aggressively:
 - `"branch"`: stop the current sequence/subtree and return a failed branch to the nearest parent. In a parallel node, sibling branches keep running and the join becomes degraded. At the root, branch failure is still a tool failure.
 - `"root"`: abort the outermost composition.
 
-```json
-{
-  "parallel": true,
-  "template": [
-    {
-      "label": "agent-a",
-      "failure": "branch",
-      "template": [
-        "agent-a-work {scope}",
-        "agent-a-validate {scope}",
-        "agent-a-push {scope}"
-      ]
-    },
-    {
-      "label": "agent-b",
-      "failure": "branch",
-      "template": [
-        "agent-b-work {scope}",
-        "agent-b-validate {scope}",
-        "agent-b-push {scope}"
-      ]
-    }
-  ]
-}
-```
-
-If `agent-a-validate` fails, `agent-a-push` is skipped, `agent-b` can still finish, and the parallel join reports degraded branch coverage.
+A branch failure skips the remainder of that branch while parallel siblings can finish; their join reports degraded coverage.
 
 ## Retry
 

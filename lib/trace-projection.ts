@@ -7,6 +7,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
+import * as ControlProjection from "./control-projection.ts";
 import * as ExecutionSessions from "./execution-sessions.ts";
 import * as Limits from "./limits.ts";
 import {
@@ -78,6 +79,25 @@ function diagnosticItems(diagnostics: StateReadDiagnostic[]): TraceItem[] {
   }));
 }
 
+function controlDiagnosticItems(
+  diagnostics: StateReadDiagnostic[],
+): TraceItem[] {
+  return diagnostics.slice(-SOURCE_LIMIT).map((diagnostic, index) => ({
+    id: `control-diagnostic:${diagnostic.line ?? 0}:${index}`,
+    ts: new Date(0).toISOString(),
+    source: "runtime",
+    kind: "state.read_error",
+    summary: "Malformed or unreadable Control evidence",
+    level: "warning",
+    detail: {
+      ...(diagnostic.line === undefined ? {} : { line: diagnostic.line }),
+      reason: diagnostic.line === undefined
+        ? "unreadable_control_journal"
+        : "invalid_control_json",
+    },
+  }));
+}
+
 function traceEventItems(stateDir: string): TraceItem[] {
   const read = readJsonlFileResilient<TraceEvent>(join(stateDir, "trace.jsonl"));
   return [
@@ -102,16 +122,19 @@ function controlItems(stateDir: string): TraceItem[] {
     join(stateDir, "controls.jsonl"),
   );
   return [
-    ...read.records.slice(-SOURCE_LIMIT).map((control) => ({
-      id: `control:${control.id}`,
-      ts: latestControlTimestamp(control),
-      source: "control" as const,
-      kind: `control.${control.status}`,
-      summary: `${control.action} ${control.status}`,
-      ...(control.status === "failed" ? { level: "error" as const } : {}),
-      detail: redact(control),
-    })),
-    ...diagnosticItems(read.diagnostics),
+    ...read.records.slice(-SOURCE_LIMIT).map((control) => {
+      const projected = ControlProjection.projectRunControl(control);
+      return {
+        id: `control:${projected.id}`,
+        ts: latestControlTimestamp(projected),
+        source: "control" as const,
+        kind: `control.${projected.status}`,
+        summary: `${projected.action} ${projected.status}`,
+        ...(projected.status === "failed" ? { level: "error" as const } : {}),
+        detail: projected,
+      };
+    }),
+    ...controlDiagnosticItems(read.diagnostics),
   ];
 }
 

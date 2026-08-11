@@ -1,6 +1,6 @@
 /**
- * Packaged skill metadata regressions
- * Ensures extension-owned skills stay version-aligned with package metadata
+ * Packaged skill regressions
+ * Ensures extension-owned skills remain discoverable and self-contained
  */
 
 import assert from "node:assert/strict";
@@ -28,25 +28,6 @@ function readSkillFrontmatter(path: string): string {
   return content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
 }
 
-function readSkillMetadataVersion(path: string): string | undefined {
-  const frontmatter = readSkillFrontmatter(path);
-  return frontmatter.match(/^\s*version:\s*([^\n]+)\s*$/m)?.[1]?.trim();
-}
-
-test("Packaged skills metadata versions match package version", () => {
-  assert.deepEqual(packagedSkillPaths, [
-    "skills/actors/SKILL.md",
-    "skills/swarm/SKILL.md",
-  ]);
-  for (const skillPath of packagedSkillPaths) {
-    assert.equal(
-      readSkillMetadataVersion(skillPath),
-      packageJson.version,
-      skillPath,
-    );
-  }
-});
-
 test("Package extension entrypoint uses compiled dist output", () => {
   assert.deepEqual(packageJson.pi.extensions, ["./dist/pi-actors/index.js"]);
   assert.equal(packageJson.files.includes("index.ts"), true);
@@ -57,6 +38,10 @@ test("Package extension entrypoint uses compiled dist output", () => {
 });
 
 test("Packaged skills are registered through dist metadata", () => {
+  assert.deepEqual(packagedSkillPaths, [
+    "skills/actors/SKILL.md",
+    "skills/swarm/SKILL.md",
+  ]);
   assert.deepEqual(packageJson.pi.skills, ["./dist/skills"]);
   assert.deepEqual(packageJson.pi.sourceSkills, ["./skills"]);
 });
@@ -130,7 +115,7 @@ test("Packaged actors skill top recipes link prioritized recipes and deep invent
     /## Top Recipes\r?\n(?<body>[\s\S]*?)\r?\n## Deep References/,
   )?.groups?.body;
   assert.ok(topRecipes, "actors skill should contain a Top Recipes section");
-  assert.match(actorSkill, /docs\/actors-deep-reference\.md/);
+  assert.match(actorSkill, /docs\/async-runs\.md/);
   assert.match(actorSkill, /docs\/recipe-library\.md/);
 
   const linkedRecipes = [

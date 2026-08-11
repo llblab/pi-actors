@@ -9,13 +9,12 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  rmSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
@@ -35,6 +34,7 @@ async function importRuntimeModule(name) {
 
 const { acquireFileMutationLock, writeJsonAtomic, writeTextAtomic } =
   await importRuntimeModule("file-state");
+const { appendRunTraceEvent } = await importRuntimeModule("runs-trace");
 
 function parseArgs(argv) {
   const args = { mode: "serve", stateDir: "", leaseMs: 600000, lines: 20 };
@@ -59,7 +59,6 @@ async function runLocker(argv = process.argv.slice(2)) {
   const queuePath = join(stateDir, "queue.json");
   const locksPath = join(stateDir, "locks.json");
   const journalPath = join(stateDir, "journal.jsonl");
-  const tracePath = join(stateDir, "trace.jsonl");
   const controlsPath = join(stateDir, "controls.jsonl");
   const controlPath = join(stateDir, "control.fifo");
   let runInstanceId;
@@ -104,18 +103,13 @@ async function runLocker(argv = process.argv.slice(2)) {
   }
 
   function emitTrace(kind, summary, data = {}, level = "info") {
-    appendFileSync(
-      tracePath,
-      `${JSON.stringify({
-        attention: "followup",
-        data,
-        id: randomUUID(),
-        kind,
-        level,
-        summary,
-        ts: new Date().toISOString(),
-      })}\n`,
-    );
+    appendRunTraceEvent(stateDir, {
+      attention: "followup",
+      data,
+      kind,
+      level,
+      summary,
+    });
   }
 
   function now() {
@@ -454,7 +448,6 @@ async function runLocker(argv = process.argv.slice(2)) {
   }
 
   async function serveNamedPipe(endpoint) {
-    rmSync(endpoint.path, { force: true });
     let resolveStopped;
     const stopped = new Promise((resolve) => {
       resolveStopped = resolve;

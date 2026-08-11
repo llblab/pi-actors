@@ -145,13 +145,44 @@ try {
   }
   console.log("[release] removed-surface and legacy-fallback allowlists checked");
 
-  const baselineShippedLines = 35_077;
+  const directTraceWrite = /(?:appendFileSync|writeFileSync|writeText(?:Atomic)?)\s*\(\s*[A-Za-z0-9_.]*?(?:trace|event)(?:Path|File)/iu;
+  for (const path of files.filter((candidate) =>
+    (candidate.startsWith("lib/") && candidate.endsWith(".ts")) ||
+    (candidate.startsWith("scripts/") && candidate.endsWith(".mjs"))
+  )) {
+    if (path === "lib/runs-trace.ts") continue;
+    check(!directTraceWrite.test(stagedText(path) ?? ""), `direct Trace writer outside canonical authority: ${path}`);
+  }
+  const canonicalTrace = stagedText("lib/runs-trace.ts") ?? "";
+  check(/withFileMutationLock\(path/u.test(canonicalTrace), "canonical Trace append lacks mutation lock");
+  for (const path of [
+    "scripts/async-runner.mjs",
+    "scripts/locker.mjs",
+    "scripts/music-player.mjs",
+  ]) {
+    const text = stagedText(path) ?? "";
+    check(
+      text.includes('importRuntimeModule("runs-trace")') && text.includes("appendRunTraceEvent"),
+      `first-party Trace writer bypasses canonical runtime module: ${path}`,
+    );
+  }
+  console.log("[release] canonical Trace writer residue checked");
+
+  check(
+    (stagedText("scripts/validate-recipe.mjs") ?? "").includes(
+      "qaReport.diagnostics.length === 0 && qaReport.warnings.length === 0",
+    ),
+    "Recipe QA warnings are not release-blocking",
+  );
+  console.log("[release] zero-warning Recipe QA gate checked");
+
+  const baselineShippedLines = 28_853;
   const shippedPath = /^(?:lib\/|scripts\/|recipes\/|docs\/|skills\/)/u;
   const shippedLines = files
     .filter((path) => shippedPath.test(path))
     .reduce((total, path) => total + (((stagedText(path) ?? "").match(/\n/gu) ?? []).length + 1), 0);
   check(shippedLines < baselineShippedLines, `shipped lines ${shippedLines} are not below baseline ${baselineShippedLines}`);
-  console.log(`[release] shipped lines ${shippedLines} < frozen baseline ${baselineShippedLines}`);
+  console.log(`[release] shipped lines ${shippedLines} < released baseline ${baselineShippedLines}`);
 
   const sources = files.filter((path) => path === "index.ts" || (path.startsWith("lib/") && path.endsWith(".ts")));
   const sourceSet = new Set(sources);

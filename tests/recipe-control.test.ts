@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import * as Limits from "../lib/limits.ts";
 import {
   assertRecipeHasNoMailbox,
   normalizeRecipeControl,
@@ -18,12 +19,18 @@ test("Recipe Control contracts preserve declared lowercase action order", () => 
     "review.continue",
     "seek_to",
   ]);
+  const longest = "a".repeat(Limits.CONTROL_ACTION_MAX_LENGTH);
+  assert.deepEqual(normalizeRecipeControl([longest]), [longest]);
 });
 
 test("Recipe Control contracts reject malformed and duplicate actions", () => {
   assert.throws(() => normalizeRecipeControl("pause"), /must be an array/);
   assert.throws(() => normalizeRecipeControl([""]), /non-empty strings/);
   assert.throws(() => normalizeRecipeControl(["Pause"]), /invalid recipe.control action/);
+  assert.throws(
+    () => normalizeRecipeControl(["a".repeat(Limits.CONTROL_ACTION_MAX_LENGTH + 1)]),
+    /exceeds 64 ASCII characters/,
+  );
   assert.throws(() => normalizeRecipeControl(["pause", "pause"]), /duplicate recipe.control action/);
 });
 

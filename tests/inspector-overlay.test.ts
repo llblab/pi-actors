@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -39,7 +39,16 @@ async function fixture(status = "done"): Promise<{ root: string; stateDir: strin
         file: "/recipes/demo.json",
         import_path: [],
         name: "demo",
-        recipe: { control: ["pause"], prompt: "first\nsecond", template: "echo demo" },
+        recipe: {
+          artifacts: {
+            queue: "{state_dir}/queue.json",
+            locks: "{state_dir}/locks.json",
+            journal: "{state_dir}/journal.jsonl",
+          },
+          control: ["pause"],
+          prompt: "first\nsecond",
+          template: "echo demo",
+        },
       }],
       run: "demo",
       run_instance_id: "generation-a",
@@ -95,7 +104,8 @@ test("Actor Inspector exposes exactly Recipe, Trace, and Control tabs", async ()
     assert.match(recipe, /import_path: \[\]/);
     assert.doesNotMatch(recipe, /import_path:\s*\n\s*\[\]/);
     assert.match(recipe, /control: \[pause\]/);
-    assert.match(recipe, /values: \{\}/);
+    assert.match(recipe, /artifacts: \{[\s\S]*queue: \{state_dir\}\/queue\.json,[\s\S]*locks: \{state_dir\}\/locks\.json,[\s\S]*journal: \{state_dir\}\/journal\.jsonl[\s\S]*\}/);
+    assert.doesNotMatch(recipe, /artifacts: \{ queue:/);
     assert.match(recipe, /prompt: first[^\n]*│\n│\s+second/);
     assert.equal(themeCalls.some(([kind, color]) => kind === "fg" && color === "borderAccent"), true);
     assert.equal(themeCalls.some(([kind, color]) => kind === "fg" && color === "accent"), true);
@@ -111,6 +121,7 @@ test("Actor Inspector exposes exactly Recipe, Trace, and Control tabs", async ()
     const trace = instance.render(90).join("\n");
     assert.match(trace, /\[ Trace \]/);
     assert.match(trace, /lifecycle\/run\.start/);
+    assert.doesNotMatch(trace, /[•·]/u);
     assert.match(trace, /enter\/f source/);
     instance.handleInput("\u001b[B");
     assert.match(instance.render(90).join("\n"), /→\/enter open/);
@@ -129,6 +140,59 @@ test("Actor Inspector exposes exactly Recipe, Trace, and Control tabs", async ()
     assert.match(control, /\[ Control \]/);
     assert.match(control, /actor_actions:/);
     assert.match(control, /pause/);
+  } finally {
+    instance.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Actor Inspector redacts Control rows, details, and Control documents", async () => {
+  const { root, stateDir } = await fixture();
+  const { instance } = overlay(root);
+  try {
+    await writeFile(
+      join(stateDir, "controls.jsonl"),
+      `${JSON.stringify({
+        id: "control-secret",
+        run_instance_id: "generation-a",
+        action: "pause",
+        input: {
+          password: "INSPECTOR_PASSWORD_SECRET",
+          nested: { token: "INSPECTOR_TOKEN_SECRET" },
+          note: "Bearer INSPECTOR_BEARER_SECRET",
+        },
+        status: "failed",
+        queued_at: "2099-01-01T00:00:00.000Z",
+        failed_at: "2099-01-01T00:00:01.000Z",
+        error: "cookie=INSPECTOR_ERROR_SECRET unavailable",
+      })}\n`,
+    );
+    instance.handleInput("\u001b[B");
+    instance.handleInput("\u001b[C");
+    instance.handleInput("\u001b[B");
+    const row = instance.render(90).join("\n");
+    assert.match(row, /control\/control\.failed/);
+    assert.doesNotMatch(row, /INSPECTOR_.*_SECRET/);
+    instance.handleInput("\r");
+    const detail = instance.render(90).join("\n");
+    assert.match(detail, /action: pause/);
+    assert.match(detail, /status: failed/);
+    assert.match(detail, /\[REDACTED\]/);
+    assert.doesNotMatch(detail, /INSPECTOR_.*_SECRET/);
+
+    instance.handleInput("\u001b");
+    instance.handleInput("\u001b[D");
+    instance.handleInput("\u001b[C");
+    instance.handleInput("\r");
+    const control = instance.render(90).join("\n");
+    assert.match(control, /\[ Control \]/);
+    assert.match(control, /recent_controls:/);
+    assert.match(control, /\[REDACTED\]/);
+    assert.doesNotMatch(control, /INSPECTOR_.*_SECRET/);
+
+    const durable = await readFile(join(stateDir, "controls.jsonl"), "utf8");
+    assert.match(durable, /INSPECTOR_PASSWORD_SECRET/);
+    assert.match(durable, /INSPECTOR_ERROR_SECRET/);
   } finally {
     instance.dispose();
     await rm(root, { force: true, recursive: true });
@@ -194,22 +258,93 @@ test("Actor Inspector caches Trace projection while browsing its list", async ()
   }
 });
 
-test("Actor Inspector confirms generation-fenced Run Kill", async () => {
+test("Actor Inspector keeps newest Trace records at the top across refresh and navigation", async () => {
+  const { root } = await fixture();
+  const older: TraceProjection.TraceItem = {
+    detail: {},
+    id: "older",
+    kind: "run.start",
+    source: "lifecycle",
+    summary: "Oldest event",
+    ts: "2026-01-01T00:00:00.000Z",
+  };
+  const middle: TraceProjection.TraceItem = {
+    detail: {},
+    id: "middle",
+    kind: "run.progress",
+    source: "lifecycle",
+    summary: "Middle event",
+    ts: "2026-01-02T00:00:00.000Z",
+  };
+  const newest: TraceProjection.TraceItem = {
+    detail: { attention: "notify" },
+    id: "newest",
+    kind: "run.done",
+    source: "lifecycle",
+    summary: "Newest event",
+    ts: "2026-01-03T00:00:00.000Z",
+  };
+  let refreshed = false;
+  const { instance } = overlay(
+    root,
+    undefined,
+    () => refreshed ? [older, middle, newest] : [older, middle],
+  );
+  try {
+    instance.handleInput("\u001b[B");
+    instance.handleInput("\u001b[C");
+    const initial = instance.render(90).join("\n");
+    assert.ok(initial.indexOf("Middle event") < initial.indexOf("Oldest event"));
+
+    instance.handleInput("\u001b[B");
+    instance.render(90);
+    instance.handleInput("\u001b[B");
+    assert.match(instance.render(90).join("\n"), /▶\s+#1.*Oldest event/);
+
+    refreshed = true;
+    instance.invalidate();
+    const updated = instance.render(90).join("\n");
+    assert.ok(updated.indexOf("Newest event") < updated.indexOf("Middle event"));
+    assert.ok(updated.indexOf("Middle event") < updated.indexOf("Oldest event"));
+    assert.match(updated, /#3\s+A\s+lifecycle\/run\.done.*Newest event/);
+    assert.doesNotMatch(updated, /[•·]/u);
+    assert.match(updated, /#2.*Middle event/);
+    assert.match(updated, /▶\s+#1.*Oldest event/);
+  } finally {
+    instance.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Actor Inspector confirms generation-fenced Run Kill without duplicate success copy", async () => {
   const { root } = await fixture("running");
   const calls: string[] = [];
-  const { instance } = overlay(root, (run, generation) => {
-    calls.push(`${run}:${generation}`);
-    return { ok: true, message: "Killed" };
-  });
+  let status = "running";
+  const { instance } = overlay(
+    root,
+    (run, generation) => {
+      calls.push(`${run}:${generation}`);
+      status = "killed";
+      return { ok: true, message: "Killed run:demo." };
+    },
+    undefined,
+    () => [{
+      run: "demo",
+      runInstanceId: "generation-a",
+      status,
+    }],
+  );
   try {
     instance.handleInput("k");
     const confirmation = instance.render(90).join("\n");
     assert.match(confirmation, /Confirm Actor Kill/);
-    assert.match(confirmation, /The action is destructive and cannot be undone/);
+    assert.doesNotMatch(confirmation, /cannot be undone/);
     instance.handleInput("\u001b[C");
     instance.handleInput("\r");
     assert.deepEqual(calls, ["demo:generation-a"]);
-    assert.match(instance.render(90).join("\n"), /Killed/);
+    const killed = instance.render(90).join("\n");
+    assert.match(killed, /Run:.*demo.*killed/);
+    assert.doesNotMatch(killed, /Killed run:demo/);
   } finally {
     instance.dispose();
     await rm(root, { force: true, recursive: true });

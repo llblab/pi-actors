@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -39,7 +39,7 @@ async function fixture(): Promise<{ root: string; status: Record<string, unknown
   );
   await writeFile(
     join(root, "controls.jsonl"),
-    `${JSON.stringify({ id: "control-1", run_instance_id: "generation-a", action: "pause", status: "handled", queued_at: "2026-01-01T00:00:00.000Z", handled_at: "2026-01-01T00:00:01.000Z" })}\n`,
+    `${JSON.stringify({ id: "control-1", run_instance_id: "generation-a", action: "pause", input: { token: "TOOL_CONTROL_SECRET", nested: { password: "TOOL_PASSWORD_SECRET", note: "token=TOOL_INLINE_SECRET" } }, status: "failed", queued_at: "2026-01-01T00:00:00.000Z", failed_at: "2026-01-01T00:00:01.000Z", error: "authorization=TOOL_ERROR_SECRET unavailable" })}\n`,
   );
   await writeFile(
     join(root, "control-endpoint.json"),
@@ -65,7 +65,30 @@ test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () 
     assert.deepEqual(control.details.actor_actions, ["pause"]);
     assert.deepEqual(control.details.runtime_actions, ["kill"]);
     assert.equal(control.details.endpoint.type, "named-pipe");
-    assert.equal(control.details.recent_controls[0].status, "handled");
+    assert.equal(control.details.recent_controls[0].status, "failed");
+    assert.equal(control.details.recent_controls[0].input.token, "[REDACTED]");
+    assert.match(control.details.recent_controls[0].error, /\[REDACTED\]/);
+    const exposed = JSON.stringify(control);
+    for (const sentinel of [
+      "TOOL_CONTROL_SECRET",
+      "TOOL_PASSWORD_SECRET",
+      "TOOL_INLINE_SECRET",
+      "TOOL_ERROR_SECRET",
+    ]) {
+      assert.doesNotMatch(exposed, new RegExp(sentinel));
+    }
+    const controlTrace = await tool.execute(
+      "control-trace",
+      { target: "run:demo", view: "trace", source: "control", verbose: true },
+      undefined,
+      undefined,
+      {},
+    );
+    assert.equal(controlTrace.details.items[0].kind, "control.failed");
+    assert.doesNotMatch(JSON.stringify(controlTrace), /TOOL_.*_SECRET/);
+    const durable = await readFile(join(root, "controls.jsonl"), "utf8");
+    assert.match(durable, /TOOL_CONTROL_SECRET/);
+    assert.match(durable, /TOOL_ERROR_SECRET/);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -84,6 +107,28 @@ test("Inspect rejects removed Run views on the canonical target", async () => {
   }
 });
 
+test("Runtime status reports immutable source package identity", async () => {
+  const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
+  const tool = createInspectToolDefinition();
+  const previous = process.env.npm_package_version;
+  process.env.npm_package_version = "9.9.9-untrusted";
+  try {
+    const result = await tool.execute(
+      "status",
+      { target: "runtime", view: "status" },
+      undefined,
+      undefined,
+      {},
+    );
+    assert.equal(result.details.version, pkg.version);
+    assert.equal(result.details.state_schema, "run-kernel-v1");
+    assert.match(result.content[0].text, new RegExp(`version=${pkg.version} state_schema=run-kernel-v1`));
+  } finally {
+    if (previous === undefined) delete process.env.npm_package_version;
+    else process.env.npm_package_version = previous;
+  }
+});
+
 test("Runtime triage reports stale Controls and Trace attention", async () => {
   const { root, status } = await fixture();
   try {
@@ -93,7 +138,7 @@ test("Runtime triage reports stale Controls and Trace attention", async () => {
     );
     await writeFile(
       join(root, "controls.jsonl"),
-      `${JSON.stringify({ id: "queued-1", run_instance_id: "generation-a", action: "pause", status: "queued", queued_at: "2026-01-01T00:00:01.000Z" })}\n`,
+      `${JSON.stringify({ id: "queued-1", run_instance_id: "generation-a", action: "pause", input: { apiKey: "TRIAGE_API_SECRET", note: "Bearer TRIAGE_BEARER_SECRET" }, status: "queued", queued_at: "2026-01-01T00:00:01.000Z" })}\n`,
     );
     const tool = createInspectToolDefinition({
       getRunStatus: () => status,
@@ -106,7 +151,16 @@ test("Runtime triage reports stale Controls and Trace attention", async () => {
       undefined,
       { sessionManager: { getSessionId: () => "session-a" } },
     );
+    assert.equal(result.details.pending_control_count, 1);
+    assert.equal(result.details.pending_controls.length, 1);
+    assert.equal(result.details.pending_controls[0].id, "queued-1");
+    assert.equal(result.details.pending_controls[0].status, "queued");
+    assert.equal(result.details.stale_control_count, 1);
     assert.equal(result.details.stale_controls.length, 1);
+    assert.equal(result.details.stale_controls[0].reason, "age_threshold_reached");
+    assert.equal(result.details.pending_controls[0].input.apiKey, "[REDACTED]");
+    assert.match(result.details.pending_controls[0].input.note, /\[REDACTED\]/);
+    assert.doesNotMatch(JSON.stringify(result), /TRIAGE_API_SECRET|TRIAGE_BEARER_SECRET/);
     assert.equal(result.details.attention_events[0].id, "attention-1");
     assert.deepEqual(result.details.next_actions, [
       "inspect target=run:demo view=control",
@@ -114,6 +168,130 @@ test("Runtime triage reports stale Controls and Trace attention", async () => {
     ]);
   } finally {
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Runtime triage preserves truthful counts when bounded projections truncate", async () => {
+  const { root, status } = await fixture();
+  try {
+    const fresh = new Date().toISOString();
+    const records = [
+      ...Array.from({ length: 45 }, (_, index) => ({
+        id: `fresh-${index}`,
+        run_instance_id: "generation-a",
+        action: "pause",
+        status: "queued",
+        queued_at: fresh,
+      })),
+      ...Array.from({ length: 2 }, (_, index) => ({
+        id: `stale-${index}`,
+        run_instance_id: "generation-a",
+        action: "pause",
+        status: "queued",
+        queued_at: "2020-01-01T00:00:00.000Z",
+      })),
+    ];
+    await writeFile(
+      join(root, "controls.jsonl"),
+      `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    );
+    const tool = createInspectToolDefinition({
+      getRunStatus: () => status,
+      listRuns: () => [status],
+    });
+    const result = await tool.execute(
+      "triage",
+      { target: "runtime", view: "triage", verbose: true },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "session-a" } },
+    );
+    assert.equal(result.details.pending_control_count, 47);
+    assert.equal(result.details.pending_controls.length, 40);
+    assert.equal(result.details.stale_control_count, 2);
+    assert.deepEqual(
+      result.details.stale_controls.map((control: Record<string, unknown>) => control.id),
+      ["stale-0", "stale-1"],
+    );
+    const projectedPending = new Set(
+      result.details.pending_controls.map((control: Record<string, unknown>) => control.id),
+    );
+    assert.equal(projectedPending.has("stale-0"), true);
+    assert.equal(projectedPending.has("stale-1"), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Runtime triage filters owners and diagnoses malformed Controls without stale inflation", async () => {
+  const { root, status } = await fixture();
+  const foreignRoot = await mkdtemp(join(tmpdir(), "pi-actors-inspect-foreign-"));
+  const foreign = {
+    ...status,
+    ownerId: "session-b",
+    run: "foreign",
+    run_instance_id: "generation-b",
+    state_dir: foreignRoot,
+  };
+  try {
+    const now = new Date().toISOString();
+    await writeFile(
+      join(root, "controls.jsonl"),
+      [
+        JSON.stringify({
+          id: "delivered-1",
+          run_instance_id: "generation-a",
+          action: "pause",
+          status: "delivered",
+          queued_at: now,
+          delivered_at: now,
+        }),
+        "{malformed",
+        JSON.stringify({
+          id: "bad-time",
+          run_instance_id: "generation-a",
+          action: "pause",
+          status: "claimed",
+          queued_at: now,
+          delivered_at: now,
+          claimed_at: "not-a-time",
+        }),
+      ].join("\n"),
+    );
+    await writeFile(
+      join(foreignRoot, "controls.jsonl"),
+      `${JSON.stringify({
+        id: "foreign-stale",
+        run_instance_id: "generation-b",
+        action: "pause",
+        status: "queued",
+        queued_at: "2020-01-01T00:00:00.000Z",
+      })}\n`,
+    );
+    const tool = createInspectToolDefinition({
+      getRunStatus: (target) => target === foreignRoot ? foreign : status,
+      listRuns: () => [status, foreign],
+    });
+    const result = await tool.execute(
+      "triage",
+      { target: "runtime", view: "triage", verbose: true },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "session-a" } },
+    );
+    assert.deepEqual(result.details.runs.map((run: Record<string, unknown>) => run.run), ["demo"]);
+    assert.equal(result.details.pending_control_count, 1);
+    assert.deepEqual(result.details.pending_controls.map((control: Record<string, unknown>) => control.id), ["delivered-1"]);
+    assert.equal(result.details.stale_control_count, 0);
+    assert.equal(result.details.stale_controls.length, 0);
+    assert.deepEqual(
+      result.details.control_diagnostics.map((diagnostic: Record<string, unknown>) => diagnostic.reason).sort(),
+      ["invalid_control_json", "invalid_status_timestamp"],
+    );
+    assert.deepEqual(result.details.next_actions, []);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+    await rm(foreignRoot, { force: true, recursive: true });
   }
 });
 

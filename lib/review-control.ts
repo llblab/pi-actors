@@ -124,14 +124,13 @@ export function controlAutomaticReview(
   return {
     ...result,
     next_actions: nextActions,
-    sent: result.changed === true,
   };
 }
 
-export function parseAutomaticReviewScope(body: unknown): AutomaticReviewScope {
-  const record = body && typeof body === "object" && !Array.isArray(body)
-    ? body as Record<string, unknown>
+export function parseAutomaticReviewScope(input: unknown): AutomaticReviewScope {
+  const record = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
     : {};
   if (record.scope === "draft" || record.scope === "tool") return record.scope;
-  throw new Error("review control requires body.scope=draft or body.scope=tool.");
+  throw new Error("review Control requires input.scope=draft or input.scope=tool.");
 }

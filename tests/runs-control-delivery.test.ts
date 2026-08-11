@@ -1,17 +1,24 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { closeSync, constants, openSync, readSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import * as Limits from "../lib/limits.ts";
 import {
   deliverRunControl,
-  FIFO_ATOMIC_CONTROL_MAX_BYTES,
+  encodeRunControlWire,
 } from "../lib/runs-control-delivery.ts";
 import {
   readRunControlsFromStateDir,
   updateRunControlStatusInStateDir,
 } from "../lib/runs-controls.ts";
+
+const MAX_ACTION = "a".repeat(Limits.CONTROL_ACTION_MAX_LENGTH);
+const MAX_INPUT = "x".repeat(Limits.CONTROL_INPUT_MAX_BYTES - 2);
+const WIRE_ID = "00000000-0000-4000-8000-000000000000";
 
 async function writeEndpoint(
   stateDir: string,
@@ -52,6 +59,95 @@ test("Named-pipe Control sends the exact actor-local wire envelope", async () =>
     assert.equal(receipt.delivery, "delivered");
     assert.equal(record.status, "delivered");
   } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Portable Control wire admits canonical maxima and rejects one byte over", () => {
+  assert.equal(
+    Buffer.byteLength(JSON.stringify(MAX_INPUT)),
+    Limits.CONTROL_INPUT_MAX_BYTES,
+  );
+  const canonical = encodeRunControlWire({
+    id: WIRE_ID,
+    action: MAX_ACTION,
+    input: MAX_INPUT,
+  });
+  assert.equal(canonical.bytes, 511);
+  assert.equal(canonical.payload.endsWith("\n"), true);
+  assert.equal(
+    encodeRunControlWire({
+      id: "i".repeat(37),
+      action: MAX_ACTION,
+      input: MAX_INPUT,
+    }).bytes,
+    Limits.CONTROL_WIRE_MAX_BYTES,
+  );
+  assert.throws(
+    () => encodeRunControlWire({
+      id: "i".repeat(38),
+      action: MAX_ACTION,
+      input: MAX_INPUT,
+    }),
+    /exceeds the 512-byte portable bound/,
+  );
+});
+
+test("Windows named-pipe path accepts the largest admitted Control", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-control-delivery-"));
+  let sent = "";
+  try {
+    await writeEndpoint(root, {
+      path: "named-pipe-test",
+      run_instance_id: "generation-a",
+      type: "named-pipe",
+    });
+    const receipt = await deliverRunControl(
+      "demo",
+      root,
+      { action: MAX_ACTION, input: MAX_INPUT, run_instance_id: "generation-a" },
+      {
+        platform: "win32",
+        namedPipeSend: async (_path, payload) => {
+          sent = payload;
+          return Buffer.byteLength(payload);
+        },
+      },
+    );
+    assert.equal(receipt.bytes, 511);
+    assert.equal(Buffer.byteLength(sent), 511);
+    assert.equal(JSON.parse(sent).input, MAX_INPUT);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Unix FIFO path accepts the largest admitted Control", {
+  skip: process.platform === "win32" ? "requires a Unix FIFO" : false,
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-control-delivery-"));
+  const fifo = join(root, "control.fifo");
+  let fd: number | undefined;
+  try {
+    execFileSync("mkfifo", [fifo]);
+    fd = openSync(fifo, constants.O_RDWR | constants.O_NONBLOCK);
+    await writeEndpoint(root, {
+      path: fifo,
+      run_instance_id: "generation-a",
+      type: "fifo",
+    });
+    const receipt = await deliverRunControl("demo", root, {
+      action: MAX_ACTION,
+      input: MAX_INPUT,
+      run_instance_id: "generation-a",
+    });
+    const buffer = Buffer.alloc(Limits.CONTROL_WIRE_MAX_BYTES);
+    const bytes = readSync(fd, buffer, 0, buffer.length, null);
+    assert.equal(receipt.bytes, 511);
+    assert.equal(bytes, 511);
+    assert.equal(JSON.parse(buffer.subarray(0, bytes).toString()).input, MAX_INPUT);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
     await rm(root, { force: true, recursive: true });
   }
 });
@@ -108,23 +204,59 @@ test("Partial endpoint writes fail the durable Control attempt", async () => {
   }
 });
 
-test("FIFO Controls reject payloads above the portable atomic-write bound", async () => {
+test("Invalid Control envelopes fail before journal or transport admission", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-control-delivery-"));
+  let sends = 0;
   try {
     await writeEndpoint(root, {
-      path: join(root, "control.fifo"),
+      path: "named-pipe-test",
       run_instance_id: "generation-a",
-      type: "fifo",
+      type: "named-pipe",
     });
+    const options = {
+      namedPipeSend: async () => {
+        sends += 1;
+        return 0;
+      },
+    };
     await assert.rejects(
-      deliverRunControl("demo", root, {
-        action: "enqueue",
-        input: "x".repeat(FIFO_ATOMIC_CONTROL_MAX_BYTES),
-        run_instance_id: "generation-a",
-      }, { platform: "linux" }),
-      /portable atomic-write bound/,
+      deliverRunControl(
+        "demo",
+        root,
+        {
+          action: `${MAX_ACTION}a`,
+          run_instance_id: "generation-a",
+        },
+        options,
+      ),
+      /exceeds 64 ASCII characters/,
     );
-    assert.equal(readRunControlsFromStateDir(root)[0]?.status, "failed");
+    await assert.rejects(
+      deliverRunControl(
+        "demo",
+        root,
+        {
+          action: "enqueue",
+          input: "x".repeat(379),
+          run_instance_id: "generation-a",
+        },
+        options,
+      ),
+      /exceeds 380 serialized bytes/,
+    );
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    await assert.rejects(
+      deliverRunControl(
+        "demo",
+        root,
+        { action: "enqueue", input: cyclic, run_instance_id: "generation-a" },
+        options,
+      ),
+      /JSON-serializable/,
+    );
+    assert.equal(sends, 0);
+    assert.deepEqual(readRunControlsFromStateDir(root), []);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

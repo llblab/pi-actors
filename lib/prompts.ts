@@ -22,7 +22,7 @@ export const REGISTER_TOOL_GUIDELINES = [
 export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Local-first actor memory: persist trusted local capabilities instead of rebuilding shell recipes.
 - Layers: task -> command template -> recipe/tool -> spawn -> run:<id>; tool:<name> wraps registered capabilities.
-- Command templates stay sync and shell-free: string leaves split into executable + argv, so operators such as && are literal arguments; use template arrays for sequencing or an explicit trusted shell/script when shell semantics are required. Flags include args/defaults, parallel, concurrency, min_successful, when, timeout, delay, retry, failure, recover, repeat, accept_output, output.
+- Command templates stay sync and shell-free: string leaves split into executable + argv, infer .js/.mjs through node→bun→deno run and .sh through bash, and treat operators such as && as literal arguments; use template arrays for sequencing or an explicit trusted shell/script when shell semantics are required. Flags include args/defaults, parallel, concurrency, min_successful, when, timeout, delay, retry, failure, recover, repeat, accept_output, output.
 - Placeholders support typed/default args plus {value??fallback} and {flag?yes:no}.
 - ~/.pi/agent/recipes/*.json is actor muscle memory: every recipe there is auto-registered as an agent tool across sessions; register_tool writes there.
 - Recipes own template directly and may declare metadata/defaults/imports/control/artifacts; files >1 MiB or import depth >32 fail closed.

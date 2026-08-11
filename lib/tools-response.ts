@@ -133,18 +133,6 @@ export function compactAsyncRunStatus(value: unknown): string {
   return `\n${tokens.join(" ")}`;
 }
 
-export function artifactNextActions(
-  run: unknown,
-  artifacts: Record<string, unknown>,
-): string[] {
-  const id = String(run ?? "").trim();
-  if (!id || Object.keys(artifacts).length === 0) return [];
-  return [
-    `inspect target=run:${id} view=artifacts verbose=true`,
-    `inspect target=run:${id} view=messages`,
-  ];
-}
-
 export function maybeJsonText(
   value: unknown,
   verbose: boolean | undefined,

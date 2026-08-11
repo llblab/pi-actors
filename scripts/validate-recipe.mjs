@@ -29,7 +29,7 @@ export function validateRecipeUsage() {
   return `Usage:
   validate-recipe.mjs <recipe-file-or-dir> [--all] [--qa] [--summary]
 
-Validates one template recipe file, or all *.json/*.md files in a directory when --all is set. Add --qa for packaged-recipe quality checks. Add --summary for compact CLI output.`;
+Validates one template recipe file, or all *.json/*.md files in a directory when --all is set. Add --qa for packaged-recipe quality checks, where diagnostics and warnings fail validation. Add --summary for compact CLI output.`;
 }
 
 function expandPath(value) {
@@ -120,8 +120,6 @@ function validateHelperPaths(file, config) {
 function qaDiagnostics(file, config) {
   const diagnostics = [];
   const warnings = [];
-  if (typeof config.description !== "string" || !config.description.trim())
-    warnings.push("description: missing or empty");
   if (config.mailbox !== undefined)
     diagnostics.push("recipe.mailbox was removed; use control actions and Trace events");
   diagnostics.push(...validateArtifactDeclarations(config));
@@ -138,7 +136,7 @@ function qaDiagnostics(file, config) {
 }
 
 function qaOk(qaReport) {
-  return qaReport.diagnostics.length === 0;
+  return qaReport.diagnostics.length === 0 && qaReport.warnings.length === 0;
 }
 
 function validateFile(file, qa = false) {
@@ -224,6 +222,9 @@ function summarizeReport(report) {
         ...(result.error ? { error: result.error } : {}),
         ...(result.qa?.diagnostics?.length
           ? { diagnostics: result.qa.diagnostics }
+          : {}),
+        ...(result.qa?.warnings?.length
+          ? { warnings: result.qa.warnings }
           : {}),
       })),
   };

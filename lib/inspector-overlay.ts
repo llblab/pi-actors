@@ -16,6 +16,7 @@ import {
 } from "@earendil-works/pi-tui";
 
 import * as ActorInspector from "./inspector.ts";
+import * as ControlProjection from "./control-projection.ts";
 import * as RunsControls from "./runs-controls.ts";
 import * as RunControlDelivery from "./runs-control-delivery.ts";
 import * as TraceProjection from "./trace-projection.ts";
@@ -58,6 +59,12 @@ const TRACE_SOURCES: TraceProjection.TraceSourceFilter[] = [
   "runtime",
 ];
 
+function newestTraceItems(items: readonly TraceProjection.TraceItem[]): TraceProjection.TraceItem[] {
+  return [...items].sort((left, right) =>
+    right.ts.localeCompare(left.ts) || right.id.localeCompare(left.id),
+  );
+}
+
 export class ActorInspectorOverlay {
   private readonly done: () => void;
   private readonly killRun?: (run: string, runInstanceId: string) => ActorInspectorActionResult;
@@ -77,6 +84,7 @@ export class ActorInspectorOverlay {
   private killDialogChoice: "cancel" | "kill" = "cancel";
   private rowIndex = 0;
   private runCache?: ActorInspector.ActorInspectorRunItem[];
+  private selectedTraceId?: string;
   private runIndex = 0;
   private selectorIndex = 0;
   private selectorMode?: SelectorMode;
@@ -99,8 +107,7 @@ export class ActorInspectorOverlay {
     this.theme = options.theme;
     this.tui = options.tui;
     this.refreshTimer = setInterval(() => {
-      this.runCache = undefined;
-      if (this.focus !== "list" && this.focus !== "detail") this.traceCache = undefined;
+      this.invalidate();
       this.tui.requestRender();
     }, 1_000);
     this.refreshTimer.unref?.();
@@ -110,7 +117,10 @@ export class ActorInspectorOverlay {
     clearInterval(this.refreshTimer);
   }
 
-  invalidate(): void {}
+  invalidate(): void {
+    this.runCache = undefined;
+    this.traceCache = undefined;
+  }
 
   handleInput(data: string): void {
     const runs = this.runs();
@@ -134,10 +144,12 @@ export class ActorInspectorOverlay {
         this.selectorMode = undefined;
         this.focus = this.tab === "trace" ? "tabs" : "runs";
       } else if (this.focus === "detail") {
+        this.selectedTraceId = this.traceDetail?.id;
         this.traceDetail = undefined;
         this.detailScroll = 0;
         this.focus = "list";
       } else if (this.focus === "document" || this.focus === "list") {
+        if (this.focus === "list") this.selectedTraceId = undefined;
         this.focus = "tabs";
       } else {
         this.done();
@@ -179,19 +191,27 @@ export class ActorInspectorOverlay {
       } else if (matchesKey(data, "up")) {
         this.focus = "runs";
       } else if (matchesKey(data, "down")) {
-        this.focus = this.tab === "trace" && this.traceItems(runs[this.runIndex]).length > 0
-          ? "list"
-          : "document";
+        const items = this.tab === "trace" ? this.traceItems(runs[this.runIndex]) : [];
+        this.focus = items.length > 0 ? "list" : "document";
+        if (this.focus === "list") {
+          this.rowIndex = 0;
+          this.selectedTraceId = items[0]?.id;
+        }
       } else if (matchesKey(data, "return")) {
         if (this.tab === "trace") this.openSourceSelector(runs[this.runIndex]);
         else this.focus = "document";
       }
     } else if (this.focus === "list") {
-      const count = this.traceItems(runs[this.runIndex]).length;
-      if (matchesKey(data, "left")) this.focus = "tabs";
-      else if (matchesKey(data, "up")) {
-        if (this.rowIndex === 0) this.focus = "tabs";
-        else this.rowIndex -= 1;
+      const items = this.traceItems(runs[this.runIndex]);
+      const count = items.length;
+      if (matchesKey(data, "left")) {
+        this.selectedTraceId = undefined;
+        this.focus = "tabs";
+      } else if (matchesKey(data, "up")) {
+        if (this.rowIndex === 0) {
+          this.selectedTraceId = undefined;
+          this.focus = "tabs";
+        } else this.rowIndex -= 1;
       } else if (matchesKey(data, "down")) {
         this.rowIndex = Math.min(Math.max(0, count - 1), this.rowIndex + 1);
       } else if (matchesKey(data, "pageUp")) {
@@ -202,13 +222,14 @@ export class ActorInspectorOverlay {
           this.rowIndex + this.contentViewportRows(),
         );
       } else if (matchesKey(data, "return") || matchesKey(data, "right")) {
-        const item = this.traceItems(runs[this.runIndex])[this.rowIndex];
+        const item = items[this.rowIndex];
         if (item) {
           this.traceDetail = item;
           this.detailScroll = 0;
           this.focus = "detail";
         }
       }
+      if (this.focus === "list") this.selectedTraceId = items[this.rowIndex]?.id;
     }
     if (data.toLowerCase() === "f" && this.tab === "trace") {
       this.cycleTraceSource(runs[this.runIndex]);
@@ -273,6 +294,7 @@ export class ActorInspectorOverlay {
     this.documentScroll = 0;
     this.detailScroll = 0;
     this.rowIndex = 0;
+    this.selectedTraceId = undefined;
     this.traceDetail = undefined;
   }
 
@@ -291,6 +313,7 @@ export class ActorInspectorOverlay {
     } else if (matchesKey(data, "pageDown")) {
       this[key] += this.contentViewportRows();
     } else if (matchesKey(data, "left") && target === "detail") {
+      this.selectedTraceId = this.traceDetail?.id;
       this.traceDetail = undefined;
       this.detailScroll = 0;
       this.focus = "list";
@@ -392,7 +415,9 @@ export class ActorInspectorOverlay {
     this.killDialogChoice = "cancel";
     if (!confirmation || !this.killRun) return;
     try {
-      this.feedback = this.killRun(confirmation.run, confirmation.runInstanceId);
+      const result = this.killRun(confirmation.run, confirmation.runInstanceId);
+      this.feedback = result.ok ? undefined : result;
+      if (result.ok) this.invalidate();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.feedback = {
@@ -418,7 +443,6 @@ export class ActorInspectorOverlay {
       `${this.theme.fg("muted", "Current status:")} ${this.theme.fg("warning", confirmation.status)}`,
       "",
       this.theme.fg("text", "This sends canonical kill Control."),
-      this.theme.fg("error", "The action is destructive and cannot be undone."),
       "",
       `${cancel}    ${kill}`,
       "",
@@ -521,7 +545,15 @@ export class ActorInspectorOverlay {
   private renderTraceList(run: ActorInspector.ActorInspectorRunItem): string[] {
     const items = this.traceItems(run);
     if (items.length === 0) return [this.theme.fg("muted", " No Trace evidence")];
+    if (this.selectedTraceId) {
+      const selectedIndex = items.findIndex((item) => item.id === this.selectedTraceId);
+      if (selectedIndex >= 0) this.rowIndex = selectedIndex;
+      else this.selectedTraceId = undefined;
+    }
     this.rowIndex = Math.min(this.rowIndex, items.length - 1);
+    if (this.focus === "list" && !this.selectedTraceId) {
+      this.selectedTraceId = items[this.rowIndex]?.id;
+    }
     const viewportRows = this.contentViewportRows();
     const maxStart = Math.max(0, items.length - viewportRows);
     const start = Math.max(0, Math.min(this.rowIndex - Math.floor(viewportRows / 2), maxStart));
@@ -536,12 +568,12 @@ export class ActorInspectorOverlay {
       const marker = item.level === "error"
         ? this.theme.fg("error", "!")
         : detail.attention
-          ? this.theme.fg("warning", "•")
-          : this.theme.fg("muted", "·");
+          ? this.theme.fg("warning", "A")
+          : " ";
       const prefix = this.focus === "list" && index === this.rowIndex
         ? this.theme.fg("accent", " ▶ ")
         : "   ";
-      const row = `${prefix}${this.theme.fg("text", `#${index + 1}`)} ${marker} ${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
+      const row = `${prefix}${this.theme.fg("text", `#${items.length - index}`)} ${marker} ${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
       return this.focus === "list" && index === this.rowIndex
         ? this.theme.fg("accent", row)
         : row;
@@ -577,7 +609,10 @@ export class ActorInspectorOverlay {
       actor_actions: Array.isArray(meta.control) ? meta.control : [],
       runtime_actions: run.status === "running" ? ["kill"] : ["archive", "prune"],
       endpoint,
-      recent_controls: RunsControls.readRunControlsFromStateDir(stateDir).slice(-20).reverse(),
+      recent_controls: RunsControls.readRunControlsFromStateDir(stateDir)
+        .slice(-20)
+        .reverse()
+        .map(ControlProjection.projectRunControl),
     };
   }
 
@@ -589,10 +624,10 @@ export class ActorInspectorOverlay {
     ) {
       return this.traceCache.items;
     }
-    const items = this.readTrace(path.join(this.stateRoot, run.run), {
+    const items = newestTraceItems(this.readTrace(path.join(this.stateRoot, run.run), {
       limit: 100,
       source: "all",
-    });
+    }));
     this.traceCache = { run: run.run, runInstanceId: run.runInstanceId, items };
     return items;
   }
@@ -627,14 +662,9 @@ export class ActorInspectorOverlay {
     width: number,
   ): { lines: string[]; stripes: number[] } {
     const sections = value && typeof value === "object" && !Array.isArray(value)
-      ? Object.entries(value as Record<string, unknown>).map(([key, item]) => {
-          const inline = this.inlineDocumentValue(item);
-          return inline !== undefined
-            ? [`${key}: ${inline}`]
-            : item && typeof item === "object"
-              ? [`${key}:`, ...this.document(item, 1)]
-              : this.labeledScalarLines(key, item);
-        })
+      ? Object.entries(value as Record<string, unknown>).map(([key, item]) =>
+          this.labeledDocumentLines(key, item)
+        )
       : [this.document(value)];
     const lines: string[] = [];
     const stripes: number[] = [];
@@ -658,21 +688,20 @@ export class ActorInspectorOverlay {
       return undefined;
     }
     if (value && typeof value === "object") {
-      const entries = Object.entries(value as Record<string, unknown>);
-      if (entries.length === 0) return "{}";
-      if (
-        entries.length <= 3 &&
-        entries.every(([, item]) =>
-          (item === null || typeof item !== "object") &&
-          !(typeof item === "string" && /[\r\n]/u.test(item))
-        )
-      ) {
-        return `{ ${entries
-          .map(([key, item]) => `${key}: ${String(item ?? "none")}`)
-          .join(", ")} }`;
-      }
+      if (Object.keys(value as Record<string, unknown>).length === 0) return "{}";
     }
     return undefined;
+  }
+
+  private labeledDocumentLines(key: string, value: unknown, depth = 0): string[] {
+    const inline = this.inlineDocumentValue(value);
+    if (inline !== undefined) return [`${"  ".repeat(depth)}${key}: ${inline}`];
+    if (value && typeof value === "object") {
+      const indent = "  ".repeat(depth);
+      const nested = this.document(value, depth);
+      return [`${indent}${key}: ${nested[0]!.slice(indent.length)}`, ...nested.slice(1)];
+    }
+    return this.labeledScalarLines(key, value, depth);
   }
 
   private labeledScalarLines(key: string, value: unknown, depth = 0): string[] {
@@ -689,25 +718,31 @@ export class ActorInspectorOverlay {
     const inline = this.inlineDocumentValue(value);
     if (inline !== undefined) return [`${"  ".repeat(depth)}${inline}`];
     if (Array.isArray(value)) {
-      return value.flatMap((item, index) => {
-        const marker = `${"  ".repeat(depth)}- #${index + 1}`;
-        const itemInline = this.inlineDocumentValue(item);
-        return itemInline !== undefined
-          ? [`${marker}: ${itemInline}`]
-          : [marker, ...this.document(item, depth + 1)];
-      });
+      const indent = "  ".repeat(depth);
+      return [
+        `${indent}[`,
+        ...value.flatMap((item, index) => {
+          const marker = `${indent}  - #${index + 1}`;
+          const itemInline = this.inlineDocumentValue(item);
+          return itemInline !== undefined
+            ? [`${marker}: ${itemInline}`]
+            : [marker, ...this.document(item, depth + 2)];
+        }),
+        `${indent}]`,
+      ];
     }
     if (typeof value === "object") {
-      return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
-        const itemInline = this.inlineDocumentValue(item);
-        if (itemInline !== undefined) {
-          return [`${"  ".repeat(depth)}${key}: ${itemInline}`];
-        }
-        if (item && typeof item === "object") {
-          return [`${"  ".repeat(depth)}${key}:`, ...this.document(item, depth + 1)];
-        }
-        return this.labeledScalarLines(key, item, depth);
-      });
+      const indent = "  ".repeat(depth);
+      const entries = Object.entries(value as Record<string, unknown>);
+      return [
+        `${indent}{`,
+        ...entries.flatMap(([key, item], index) => {
+          const lines = this.labeledDocumentLines(key, item, depth + 1);
+          if (index < entries.length - 1) lines[lines.length - 1] += ",";
+          return lines;
+        }),
+        `${indent}}`,
+      ];
     }
     return String(value)
       .split(/\r?\n/u)

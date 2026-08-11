@@ -9,7 +9,11 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { acquireFileMutationLock, writeTextAtomic } from "./file-state.ts";
-import { readJsonlFileResilient } from "./state-readers.ts";
+import {
+  readJsonlFileResilient,
+  type JsonlReadResult,
+} from "./state-readers.ts";
+
 export const RUN_CONTROL_TERMINAL_LIMIT = 128;
 
 export type RunControlStatus =
@@ -45,9 +49,14 @@ export function runControlsFile(stateDir: string): string {
   return join(stateDir, "controls.jsonl");
 }
 
+export function readRunControlJournalFromStateDir(
+  stateDir: string,
+): JsonlReadResult<unknown> {
+  return readJsonlFileResilient<unknown>(runControlsFile(stateDir));
+}
+
 export function readRunControlsFromStateDir(stateDir: string): RunControlRecord[] {
-  return readJsonlFileResilient<RunControlRecord>(runControlsFile(stateDir))
-    .records;
+  return readRunControlJournalFromStateDir(stateDir).records as RunControlRecord[];
 }
 
 function acquireRunControlsLock(stateDir: string): () => void {

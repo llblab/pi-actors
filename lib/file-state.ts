@@ -4,23 +4,13 @@
  * Owns generic durable JSON file writes shared by registry config and async run state.
  */
 
+import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 
-const FILE_MUTATION_LOCK_TIMEOUT_MS = 5000;
+const FILE_MUTATION_LOCK_TIMEOUT_MS = process.platform === "win32" ? 15000 : 5000;
 const FILE_MUTATION_LOCK_STALE_MS = 30000;
 const FILE_MUTATION_LOCK_ROOT = join(tmpdir(), "pi-actors-file-locks");
 
@@ -56,6 +46,16 @@ export function mutationLockPath(path: string): string {
   return join(FILE_MUTATION_LOCK_ROOT, `${key}.lock`);
 }
 
+function isZombieProcess(pid: number): boolean {
+  if (process.platform === "linux") try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z ");
+  } catch { return false; }
+  if (process.platform !== "darwin") return false;
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" });
+  return result.status === 0 && result.stdout.trim().startsWith("Z");
+}
+
 function lockOwnerStatus(lockPath: string): "alive" | "dead" | "unknown" {
   try {
     const owner = JSON.parse(
@@ -65,6 +65,7 @@ function lockOwnerStatus(lockPath: string): "alive" | "dead" | "unknown" {
     if (!Number.isInteger(pid) || pid <= 0) return "unknown";
     try {
       process.kill(pid, 0);
+      if (Date.now() - statSync(lockPath).mtimeMs > 50 && isZombieProcess(pid)) return "dead";
       return "alive";
     } catch (error) {
       return (error as NodeJS.ErrnoException).code === "ESRCH"
@@ -77,6 +78,7 @@ function lockOwnerStatus(lockPath: string): "alive" | "dead" | "unknown" {
 }
 
 export interface FileMutationLockOptions {
+  onBeforeLockPublish?(): void;
   onBeforeReclaimRemove?(): void;
   onContention?(): void;
   onRemovalContention?(): void;
@@ -93,6 +95,28 @@ function readLockToken(lockPath: string): string | undefined {
   }
 }
 
+function prepareLockBoundary(lockPath: string, token: string, onBeforePublish?: () => void): string {
+  const pendingPath = `${lockPath}.${process.pid}.${token}.pending`;
+  try {
+    mkdirSync(pendingPath);
+    writeFileSync(join(pendingPath, "owner.json"), `${JSON.stringify({ pid: process.pid, token, acquired_at: new Date().toISOString() })}\n`, "utf8");
+    onBeforePublish?.();
+    return pendingPath;
+  } catch (error) {
+    try { rmSync(pendingPath, { recursive: true, force: true }); } catch {}
+    throw error;
+  }
+}
+
+function removeLockBoundary(lockPath: string, token: string | undefined): boolean {
+  if (readLockToken(lockPath) !== token) return false;
+  if (process.platform === "win32") try { rmSync(lockPath, { recursive: true, force: true, maxRetries: 20, retryDelay: 5 }); return true; } catch { return false; }
+  const removingPath = `${lockPath}.${process.pid}.${randomUUID()}.removing`;
+  try { renameSync(lockPath, removingPath); } catch { return false; }
+  try { rmSync(removingPath, { recursive: true, force: true }); } catch {}
+  return true;
+}
+
 function tryReclaimRemovalBoundary(reclaimPath: string): void {
   if (!existsSync(reclaimPath)) return;
   try {
@@ -104,7 +128,7 @@ function tryReclaimRemovalBoundary(reclaimPath: string): void {
         (ownerStatus === "unknown" && age > FILE_MUTATION_LOCK_STALE_MS)) &&
       readLockToken(reclaimPath) === inspectedToken
     ) {
-      rmSync(reclaimPath, { recursive: true, force: true });
+      removeLockBoundary(reclaimPath, inspectedToken);
     }
   } catch {
     /* another contender changed the boundary */
@@ -117,29 +141,20 @@ function withRemovalBoundary(
 ): boolean {
   const reclaimPath = `${lockPath}.reclaim`;
   const token = randomUUID();
+  const pendingPath = prepareLockBoundary(reclaimPath, token);
   try {
-    mkdirSync(reclaimPath);
+    try { renameSync(pendingPath, reclaimPath); } catch {
+      tryReclaimRemovalBoundary(reclaimPath);
+      return false;
+    }
     try {
-      writeFileSync(
-        join(reclaimPath, "owner.json"),
-        `${JSON.stringify({ pid: process.pid, token, acquired_at: new Date().toISOString() })}\n`,
-        "utf8",
-      );
-    } catch (error) {
-      rmSync(reclaimPath, { recursive: true, force: true });
-      throw error;
+      action();
+      return true;
+    } finally {
+      removeLockBoundary(reclaimPath, token);
     }
-  } catch {
-    tryReclaimRemovalBoundary(reclaimPath);
-    return false;
-  }
-  try {
-    action();
-    return true;
   } finally {
-    if (readLockToken(reclaimPath) === token) {
-      rmSync(reclaimPath, { recursive: true, force: true });
-    }
+    try { rmSync(pendingPath, { recursive: true, force: true }); } catch {}
   }
 }
 
@@ -162,8 +177,7 @@ function tryReclaimMutationLock(
       readLockToken(lockPath) === inspectedToken
     ) {
       options.onBeforeReclaimRemove?.();
-      rmSync(lockPath, { recursive: true, force: true });
-      reclaimed = true;
+      reclaimed = removeLockBoundary(lockPath, inspectedToken);
     }
   })) {
     return false;
@@ -179,34 +193,29 @@ export function acquireFileMutationLock(
   const lockPath = mutationLockPath(path);
   const deadline = Date.now() + FILE_MUTATION_LOCK_TIMEOUT_MS;
   const token = randomUUID();
+  const pendingPath = prepareLockBoundary(lockPath, token, options.onBeforeLockPublish);
   let contentionReported = false;
-  for (;;) {
-    try {
-      mkdirSync(lockPath);
+  try {
+    for (;;) {
       try {
-        writeFileSync(
-          join(lockPath, "owner.json"),
-          `${JSON.stringify({ pid: process.pid, token, acquired_at: new Date().toISOString() })}\n`,
-          "utf8",
-        );
+        renameSync(pendingPath, lockPath);
+        break;
       } catch (error) {
-        rmSync(lockPath, { recursive: true, force: true });
-        throw error;
+        if (!contentionReported) {
+          contentionReported = true;
+          options.onContention?.();
+        }
+        tryReclaimMutationLock(lockPath, options);
+        if (Date.now() >= deadline) {
+          throw new Error(`Timed out waiting for file mutation lock: ${canonicalMutationPath(path)}`, {
+            cause: error,
+          });
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       }
-      break;
-    } catch (error) {
-      if (!contentionReported) {
-        contentionReported = true;
-        options.onContention?.();
-      }
-      tryReclaimMutationLock(lockPath, options);
-      if (Date.now() >= deadline) {
-        throw new Error(`Timed out waiting for file mutation lock: ${canonicalMutationPath(path)}`, {
-          cause: error,
-        });
-      }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
+  } finally {
+    try { rmSync(pendingPath, { recursive: true, force: true }); } catch {}
   }
   let released = false;
   return () => {
@@ -216,9 +225,7 @@ export function acquireFileMutationLock(
     let removalContentionReported = false;
     while (
       !withRemovalBoundary(lockPath, () => {
-        if (readLockToken(lockPath) === token) {
-          rmSync(lockPath, { recursive: true, force: true });
-        }
+        removeLockBoundary(lockPath, token);
       })
     ) {
       if (!removalContentionReported) {

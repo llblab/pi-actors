@@ -27,7 +27,27 @@ const REMOVED_FIELDS = new Set([
   "type",
 ]);
 
-function serializedInputBytes(input: unknown): number {
+export function isControlAction(value: string): boolean {
+  return ACTION_PATTERN.test(value);
+}
+
+export function normalizeControlAction(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("control.action is required");
+  }
+  const action = value.trim();
+  if (!isControlAction(action)) {
+    throw new Error(`invalid control action: ${action}`);
+  }
+  if (action.length > Limits.CONTROL_ACTION_MAX_LENGTH) {
+    throw new Error(
+      `control.action exceeds ${Limits.CONTROL_ACTION_MAX_LENGTH} ASCII characters`,
+    );
+  }
+  return action;
+}
+
+export function normalizeControlInput(input: unknown): unknown {
   let serialized: string | undefined;
   try {
     serialized = JSON.stringify(input);
@@ -37,7 +57,13 @@ function serializedInputBytes(input: unknown): number {
   if (serialized === undefined) {
     throw new Error("control.input must be JSON-serializable");
   }
-  return Buffer.byteLength(serialized);
+  const bytes = Buffer.byteLength(serialized);
+  if (bytes > Limits.CONTROL_INPUT_MAX_BYTES) {
+    throw new Error(
+      `control.input exceeds ${Limits.CONTROL_INPUT_MAX_BYTES} serialized bytes`,
+    );
+  }
+  return JSON.parse(serialized) as unknown;
 }
 
 function normalizeTarget(value: unknown): ControlRequest["target"] {
@@ -75,28 +101,17 @@ export function normalizeControlRequest(input: unknown): ControlRequest {
     throw new Error(`unsupported control fields: ${unknown.sort().join(", ")}`);
   }
   const target = normalizeTarget(record.target);
-  if (typeof record.action !== "string" || !record.action.trim()) {
-    throw new Error("control.action is required");
-  }
-  const action = record.action.trim();
-  if (!ACTION_PATTERN.test(action)) {
-    throw new Error(`invalid control action: ${action}`);
-  }
+  const action = normalizeControlAction(record.action);
   if (record.verbose !== undefined && typeof record.verbose !== "boolean") {
     throw new Error("control.verbose must be a boolean");
   }
-  if (
-    record.input !== undefined &&
-    serializedInputBytes(record.input) > Limits.CONTROL_INPUT_MAX_BYTES
-  ) {
-    throw new Error(
-      `control.input exceeds ${Limits.CONTROL_INPUT_MAX_BYTES} bytes`,
-    );
-  }
+  const normalizedInput = record.input === undefined
+    ? undefined
+    : normalizeControlInput(record.input);
   return {
     target,
     action,
-    ...(record.input !== undefined ? { input: record.input } : {}),
+    ...(normalizedInput !== undefined ? { input: normalizedInput } : {}),
     ...(record.verbose !== undefined ? { verbose: record.verbose } : {}),
   };
 }

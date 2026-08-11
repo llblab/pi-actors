@@ -87,7 +87,7 @@ Only a process that consumes actor-local input declares actions:
 }
 ```
 
-Actions must be lowercase, unique, and non-reserved. One-shot Recipes omit Control. Outputs belong in Trace, artifacts, execution evidence, or the command result.
+Actions must be lowercase ASCII, unique, non-reserved, and at most 64 characters. Serialized Control input is at most 380 bytes so every admitted wire record remains within 512 bytes on FIFO and named pipe. One-shot Recipes omit Control. Larger data belongs in a declared artifact/path; outputs belong in Trace, artifacts, execution evidence, or the command result.
 
 ## Artifacts
 

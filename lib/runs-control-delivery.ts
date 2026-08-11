@@ -15,6 +15,8 @@ import {
 import { createConnection } from "node:net";
 import { join } from "node:path";
 
+import * as Control from "./control.ts";
+import * as Limits from "./limits.ts";
 import {
   appendRunControlInStateDir,
   updateRunControlStatusInStateDir,
@@ -37,7 +39,26 @@ export interface DeliverRunControlRequest {
   run_instance_id: string;
 }
 
-export const FIFO_ATOMIC_CONTROL_MAX_BYTES = 512;
+const PREFLIGHT_CONTROL_ID = "00000000-0000-4000-8000-000000000000";
+
+export function encodeRunControlWire(wire: {
+  action: string;
+  id: string;
+  input?: unknown;
+}): { bytes: number; payload: string } {
+  const payload = `${JSON.stringify({
+    id: wire.id,
+    action: wire.action,
+    ...(wire.input !== undefined ? { input: wire.input } : {}),
+  })}\n`;
+  const bytes = Buffer.byteLength(payload);
+  if (bytes > Limits.CONTROL_WIRE_MAX_BYTES) {
+    throw new Error(
+      `Run Control wire record exceeds the ${Limits.CONTROL_WIRE_MAX_BYTES}-byte portable bound`,
+    );
+  }
+  return { bytes, payload };
+}
 
 export function readRunControlEndpoint(
   stateDir: string,
@@ -107,7 +128,21 @@ export async function deliverRunControl(
   request: DeliverRunControlRequest,
   options: DeliverRunControlOptions = {},
 ): Promise<Record<string, unknown>> {
-  const control = appendRunControlInStateDir(stateDir, request);
+  const action = Control.normalizeControlAction(request.action);
+  const input = request.input === undefined
+    ? undefined
+    : Control.normalizeControlInput(request.input);
+  const normalizedRequest = {
+    action,
+    ...(input !== undefined ? { input } : {}),
+    run_instance_id: request.run_instance_id,
+  };
+  encodeRunControlWire({
+    id: PREFLIGHT_CONTROL_ID,
+    action,
+    ...(input !== undefined ? { input } : {}),
+  });
+  const control = appendRunControlInStateDir(stateDir, normalizedRequest);
   const endpoint = readRunControlEndpoint(stateDir, request.run_instance_id);
   if (!endpoint) {
     updateRunControlStatusInStateDir(
@@ -118,30 +153,23 @@ export async function deliverRunControl(
       ["queued", "delivered"],
     );
     throw Object.assign(new Error("Run Control endpoint is not ready."), {
-      action: request.action,
+      action,
       control_id: control.id,
       reason: "endpoint_not_ready",
       run,
       run_instance_id: request.run_instance_id,
     });
   }
-  const wire = {
-    id: control.id,
-    action: request.action,
-    ...(request.input !== undefined ? { input: request.input } : {}),
-  };
-  const payload = `${JSON.stringify(wire)}\n`;
-  const bytes = Buffer.byteLength(payload);
   try {
+    const { bytes, payload } = encodeRunControlWire({
+      id: control.id,
+      action,
+      ...(input !== undefined ? { input } : {}),
+    });
     let written: number;
     if (endpoint.type === "fifo") {
       if ((options.platform ?? process.platform) === "win32") {
         throw new Error("FIFO Control delivery is unsupported on native Windows");
-      }
-      if (bytes > FIFO_ATOMIC_CONTROL_MAX_BYTES) {
-        throw new Error(
-          `FIFO Control payload exceeds the ${FIFO_ATOMIC_CONTROL_MAX_BYTES}-byte portable atomic-write bound`,
-        );
       }
       written = sendToFifo(endpoint, payload);
     } else {
@@ -152,7 +180,7 @@ export async function deliverRunControl(
     }
     updateRunControlStatusInStateDir(stateDir, control.id, "delivered");
     return {
-      action: request.action,
+      action,
       bytes,
       control_id: control.id,
       delivery: "delivered",
@@ -170,7 +198,7 @@ export async function deliverRunControl(
       ["queued", "delivered"],
     );
     throw Object.assign(new Error(`Run Control delivery failed: ${reason}`), {
-      action: request.action,
+      action,
       control_id: control.id,
       endpoint_type: endpoint.type,
       reason: "delivery_failed",

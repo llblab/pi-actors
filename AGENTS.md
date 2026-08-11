@@ -8,7 +8,7 @@
 - `CHANGELOG.md`: completed delivery history.
 - `docs/README.md`: documentation index.
 
-Keep these surfaces distinct and reconcile them after meaningful changes.
+Keep these surfaces distinct and reconcile them after meaningful changes. Every release section, historical or new, keeps at most 8 outcome records of at most 512 characters.
 
 ## Concept
 
@@ -48,15 +48,16 @@ Pi host
 - `recipes-references.ts`, `recipes-discovery.ts`, `recipe-control.ts`: Recipe resolution, imports, shadowing, and Control declarations.
 - `async-runs.ts`: lifecycle facade.
 - `runs-start.ts`, `runs-status.ts`, `runs-control.ts`, `runs-control-delivery.ts`, `runs-controls.ts`, `runs-trace.ts`, `runs-process.ts`, `runs-retention.ts`, `runs-parent-teardown.ts`: focused Run internals.
-- `execution-sessions.ts`, `trace-projection.ts`, `session-evidence.ts`: bounded/redacted execution and inspection evidence.
+- `execution-sessions.ts`, `trace-projection.ts`, `control-projection.ts`, `session-evidence.ts`: bounded/redacted execution and inspection evidence.
 - `tools-message.ts`: exact Control facade.
 - `tools-inspect.ts`: exact `run:<id>`, `runtime`, `recipes`, and `tool:<name>` inspection.
+- `runtime-identity.ts`, `runtime-triage.ts`: immutable package/schema identity and pure pending/stale Control classification.
 - `tools-spawn.ts`, `tools-register.ts`, `tools-local.ts`, `tools-response.ts`: Run creation, persistent capabilities, Recipe-backed tools, and compact results.
 - `inspector.ts`, `inspector-overlay.ts`, `inspector-command.ts`, `inspector-actions.ts`: actor-instance Recipe/Trace/Control projection, navigation, command wiring, and fenced actions. **Actor Inspector** remains the product and command name, not a separate domain.
 - `observability.ts`, `runtime-notifier.ts`, `run-ui-runtime.ts`: Trace attention, terminal reconciliation, and Pi follow-up delivery.
 - automatic draft/tool review domains: structurally redacted model review, journaled mutation, lineage, recovery, and explicit retry/reset safety.
 
-Scripts remain self-contained when no non-script consumer justifies a TypeScript domain. Recipes stay optional, composable, policy-light, and caller-configurable.
+Scripts remain self-contained when no non-script consumer justifies a TypeScript domain. Command-template script leaves infer `.js`/`.mjs` in order through Node, Bun, or `deno run` and `.sh` through Bash without shell evaluation. Helper-backed packaged Recipes self-locate their installed package root while explicit caller values remain authoritative. Recipes stay optional, composable, policy-light, and caller-configurable.
 
 ## Operating Principles
 
@@ -77,7 +78,7 @@ Canonical event:
 {"id":"…","ts":"…","kind":"…","summary":"…","data":{},"level":"info","attention":"notify"}
 ```
 
-Keep events bounded and free of addressing/routing fields. Use artifacts or execution captures for large evidence. `attention: "followup"` must remain rare and semantically justified.
+Keep events bounded and free of addressing/routing fields. Every first-party writer must call `appendRunTraceEvent`; it validates and size-checks inside the canonical token-owned mutation lock, then performs one append-only JSONL write. Never append `trace.jsonl` directly from scripts. Use artifacts or execution captures for large evidence. `attention: "followup"` must remain rare and semantically justified.
 
 ### Control
 
@@ -87,7 +88,9 @@ Public shape:
 {"target":"run:<id>","action":"…","input":{},"verbose":false}
 ```
 
-Persist Control before transport. Fence every record and endpoint with immutable `run_instance_id`; controlled services capture that generation at startup. Serialize atomic journal replacement through token-owned dead-process-reclaiming locks, and keep status transitions expected-state-fenced and monotonic when consumers complete before producer delivery evidence. FIFO and named pipe are transport details, not public concepts; constrain FIFO documents to the portable atomic-write bound, reject partial writes, and keep FIFO readers gap-free across writers. Revalidate owner, generation, state, and process identity under the lifecycle lock immediately before delivery.
+Admit only lowercase ASCII actions of at most 64 characters, serialized JSON input of at most 380 bytes, and complete newline-terminated wire records of at most 512 bytes on both FIFO and named pipe. Invalid envelopes remain outside the journal; persist every admitted Control before transport. Put larger data in a declared artifact/path and send only a bounded reference or instruction through Control. Fence every record and endpoint with immutable `run_instance_id`; controlled services capture that generation at startup. Serialize atomic journal replacement through token-owned dead-process-reclaiming locks, and keep status transitions expected-state-fenced and monotonic when consumers complete before producer delivery evidence. FIFO and named pipe are transport details, not public concepts; reject partial writes and keep FIFO readers gap-free across writers. Revalidate owner, generation, state, and process identity under the lifecycle lock immediately before delivery.
+
+Keep `controls.jsonl` raw and local for execution fidelity. Every model-facing and Actor Inspector Control surface must use the shared bounded `control-projection.ts` redaction before exposure; never attach a second raw copy in tool details.
 
 Runtime lifecycle and review actions remain runtime-owned.
 
@@ -115,7 +118,7 @@ Lifecycle operations fail closed when identity, ownership, or generation cannot 
 
 ## Registry and Evolution
 
-`~/.pi/agent/recipes/*.json` is executable capability memory. Preserve filename identity, atomic writes, canonical per-path locks, explicit operator-gated changes, and transportability.
+`~/.pi/agent/recipes/*.json` is executable capability memory. Preserve filename identity, atomic writes, canonical per-path locks with atomic owner publication and non-blocking abandoned staging, explicit operator-gated changes, and transportability.
 
 Automatic review receives value-free structural projections, not executable content, paths, prose, canonical names, or secrets. Deterministic executors derive unchanged Recipes from trusted captures. Approved mutation must journal intent before mutation and roll forward safely after crashes.
 
@@ -134,5 +137,8 @@ When a deferred Run result gates the next step, wait for its terminal follow-up.
 - Keep published text portable: use `~`, `<repo>`, or relative paths.
 - Update `skills/actors/SKILL.md` when durable operating mechanics change.
 - Keep `skills/swarm/SKILL.md` focused on multi-agent methodology rather than kernel internals.
+- Recipe `description` is optional because discovery supplies stable fallback tool copy; packaged Recipe QA must report zero diagnostics and zero release-blocking warnings without component boilerplate.
 - Before release run build, full tests, preservation tests, Recipe QA, Domain DAG validation, ABCd context validation, line-count gates, and release gates.
+- `.github/workflows/release.yml` owns the immutable sequence reusable validation → npm Trusted Publisher publication/verification → GitHub Release convergence; follow [docs/releasing.md](docs/releasing.md).
+- Keep npm publication tokenless: use the exact npm Trusted Publisher binding and job-scoped OIDC permission, never a long-lived npm token or token fallback.
 - Until a stable version beyond `1.x`, prefer clean breaking simplification over compatibility aliases or renamed legacy abstractions.

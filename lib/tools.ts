@@ -25,9 +25,9 @@ export interface CoreActorToolDefinitionDeps<
   configPath: string;
   getActiveTools: () => string[];
   getRuntimeTool: (name: string) => unknown;
-  handleRuntimeMessage?: (
-    type: string,
-    body: unknown,
+  handleRuntimeControl?: (
+    action: string,
+    input: unknown,
   ) => Record<string, unknown>;
   registryRuntime: Pick<
     RegisterToolRuntimeDeps<TContext>,
@@ -74,7 +74,7 @@ export function createCoreActorToolDefinitions<
     }),
     ToolsSpawn.createSpawnToolDefinition<TContext>(),
     ToolsMessage.createControlToolDefinition<TContext>({
-      handleRuntimeMessage: deps.handleRuntimeMessage,
+      handleRuntimeControl: deps.handleRuntimeControl,
     }),
     ToolsInspect.createInspectToolDefinition<TContext>({
       getTool: (name) => deps.getRuntimeTool(name),

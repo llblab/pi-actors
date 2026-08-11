@@ -53,8 +53,10 @@ Send one exact Control:
 Run targets accept only actions declared by the captured Recipe. Runtime targets accept only reserved review actions:
 
 ```text
-message target=runtime action=review.retry
-message target=runtime action=review.reset
+message target=runtime action=review.retry input={"scope":"draft"}
+message target=runtime action=review.retry input={"scope":"tool"}
+message target=runtime action=review.reset input={"scope":"draft"}
+message target=runtime action=review.reset input={"scope":"tool"}
 ```
 
 Lifecycle `kill` remains runtime-owned rather than Recipe-declared.
@@ -67,9 +69,9 @@ Inspect one exact management target:
 inspect target=run:test view=recipe
 inspect target=run:test view=trace source=lifecycle lines=40
 inspect target=run:test view=control
-inspect target=runtime
-inspect target=recipes
-inspect target=tool:my_tool
+inspect target=runtime view=status
+inspect target=recipes view=status
+inspect target=tool:my_tool view=status
 ```
 
 A Run exposes exactly `recipe`, `trace`, and `control` views.
@@ -119,7 +121,7 @@ String command-template leaves execute directly without shell interpretation. Us
 }
 ```
 
-Trace fields are exact: `id`, `ts`, `kind`, and optional `summary`, `data`, `level`, `attention`. Address, sender, recipient, reply, and routing fields fail validation.
+Trace fields are exact: `id`, `ts`, `kind`, and optional `summary`, `data`, `level`, `attention`. Address, sender, recipient, reply, and routing fields fail validation. The canonical append authority validates and size-checks under a cross-process mutation lock before one append-only JSONL write; first-party scripts never append this file directly.
 
 Use `attention: "notify"` for visible status and `attention: "followup"` only when the coordinator needs semantic follow-up context. Store large evidence in artifacts or bounded execution captures.
 
@@ -138,7 +140,7 @@ Long-lived services publish `control-endpoint.json` only when ready:
 }
 ```
 
-Supported transports are Unix FIFO and Windows named pipe. FIFO wire documents must fit the portable 512-byte atomic-write bound; larger Control input remains available to named-pipe services. Delivery revalidates owner, generation, state, and process identity under the canonical lifecycle lock.
+Supported transports are Unix FIFO and Windows named pipe. Every actor-local Control uses the same portable envelope: action is at most 64 lowercase ASCII characters, serialized JSON input is at most 380 bytes, and the newline-terminated wire record is at most 512 bytes. Put larger data in a declared artifact/path and send only its bounded reference or instruction through Control. Delivery revalidates owner, generation, state, and process identity under the canonical lifecycle lock.
 
 ## Run State
 

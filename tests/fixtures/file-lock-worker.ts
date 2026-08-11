@@ -64,6 +64,13 @@ withFileMutationLock(
     appendFileSync(logPath, `${mode ?? "hold"}:released\n`);
   },
   {
+    onBeforeLockPublish: () => {
+      if (mode !== "publication-race" || !reclaimReadyPath || !reclaimProceedPath) return;
+      writeFileSync(reclaimReadyPath, "ready\n");
+      while (!existsSync(reclaimProceedPath)) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    },
     onBeforeReclaimRemove: () => {
       if (!reclaimReadyPath || !reclaimProceedPath) return;
       writeFileSync(reclaimReadyPath, "ready\n");

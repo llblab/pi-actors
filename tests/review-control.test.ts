@@ -41,6 +41,7 @@ test("Draft review retry returns a failed immutable batch to capture launch", ()
     });
     assert.equal(result.changed, true);
     assert.equal(result.phase, "captured");
+    assert.equal(Object.hasOwn(result, "sent"), false);
     assert.equal(scheduled, 1);
     const state = JSON.parse(readFileSync(fx.draftStatePath, "utf8"));
     assert.equal(state.attempts, 0);

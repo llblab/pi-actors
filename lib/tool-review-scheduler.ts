@@ -404,7 +404,7 @@ export function applyApprovedToolReviewAtSessionBoundary(
         ...state,
         failedStage: "approval_state",
         lastError: "approved review path is unavailable",
-        nextAction: "message to=tool:pi-actors type=review.retry body={\"scope\":\"tool\"}",
+        nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
         phase: "processing_failed" as const,
         updatedAt: (options.now ?? (() => new Date()))().toISOString(),
       };
@@ -427,7 +427,7 @@ export function applyApprovedToolReviewAtSessionBoundary(
           ...state,
           failedStage: "transaction",
           lastError: `tool review transaction remained ${transaction.phase}`,
-          nextAction: "message to=tool:pi-actors type=review.retry body={\"scope\":\"tool\"}",
+          nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
           phase: "processing_failed" as const,
           updatedAt: (options.now ?? (() => new Date()))().toISOString(),
         };
@@ -458,7 +458,7 @@ export function applyApprovedToolReviewAtSessionBoundary(
           ...pending,
           failedStage: "lineage",
           lastError: error instanceof Error ? error.message : String(error),
-          nextAction: "message to=tool:pi-actors type=review.retry body={\"scope\":\"tool\"}",
+          nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
         };
         writeJsonAtomic(statePath, failedPending);
         return { outcome: "lineage_pending", state: failedPending };
@@ -478,7 +478,7 @@ export function applyApprovedToolReviewAtSessionBoundary(
         ...state,
         failedStage: "transaction",
         lastError: error instanceof Error ? error.message : String(error),
-        nextAction: "message to=tool:pi-actors type=review.retry body={\"scope\":\"tool\"}",
+        nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
         phase: "processing_failed" as const,
         updatedAt: (options.now ?? (() => new Date()))().toISOString(),
       };
@@ -541,7 +541,7 @@ export function createToolReviewScheduler(
           ...existing,
           failedStage: processed.stage ?? "review_result",
           lastError: processed.error ?? "automatic tool reviewer failed",
-          nextAction: "message to=tool:pi-actors type=review.retry body={\"scope\":\"tool\"}",
+          nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
           phase: processed.outcome === "processing_failed"
             ? "processing_failed"
             : "failed",
@@ -577,7 +577,7 @@ export function createToolReviewScheduler(
             attempts: existing.attempts + 1,
             failedStage: "review_launch",
             lastError: error instanceof Error ? error.message : String(error),
-            nextAction: "message to=tool:pi-actors type=review.retry body={\"scope\":\"tool\"}",
+            nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
             phase: "failed",
             updatedAt: now().toISOString(),
           } satisfies ToolReviewAdmissionState);
@@ -612,7 +612,7 @@ export function createToolReviewScheduler(
           failedStage: "review_launch",
           inputPath: batch.inputPath,
           lastError: error instanceof Error ? error.message : String(error),
-          nextAction: "message to=tool:pi-actors type=review.retry body={\"scope\":\"tool\"}",
+          nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
           phase: "failed",
           reviewerInputPath: batch.reviewerInputPath,
           reviewId: batch.reviewId,

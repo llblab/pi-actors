@@ -37,7 +37,7 @@ Artifact pipelines terminate in files/manifests and result evidence; they do not
 - `music-player.json` — playback service with declared playback actions, `controls.jsonl`, generation-fenced endpoint readiness, state artifact, and playback Trace. Player selection is `player:enum(auto,mpv,afplay,ffplay,cvlc,play,wmp)=auto`.
 - `resource-locker.json` — optional queue/lease-lock service with explicit owner/resource input and lock Trace.
 
-These are the packaged Recipes that declare actor-local Control. Ordinary one-shot Recipes omit it.
+These are the packaged Recipes that declare actor-local Control. Ordinary one-shot Recipes omit it. Helper-backed packaged Recipes self-locate their installed package root when `repo` is omitted; an explicit caller value still wins for development or custom layouts.
 
 ## Component Recipes
 
@@ -76,12 +76,10 @@ Do not bulk-copy `recipes/*.json` into the user Recipe root. Internal `draft-rev
 npm run recipes:qa
 ```
 
-Recipe QA validates syntax, imports, Control declarations, artifact paths, helper references, and platform documentation. Removed mailbox declarations fail with the migration diagnostic rather than receiving automatic conversion.
+Recipe QA validates syntax, imports, Control declarations, artifact paths, helper references, and platform documentation. Recipe descriptions are optional because discovery supplies stable fallback tool copy; internal component Recipes do not need boilerplate. The packaged baseline requires zero diagnostics and zero warnings, and any future warning is release-blocking with its concrete file and repair. Removed mailbox declarations fail with the migration diagnostic rather than receiving automatic conversion.
 
 ## Related
 
 - [Template Recipes](./template-recipes.md)
 - [Command templates](./command-templates.md)
 - [Runs](./async-runs.md)
-- [Component Recipes](./component-recipes.md)
-- [Task-first design](./task-first-recipes.md)

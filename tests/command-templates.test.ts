@@ -14,6 +14,7 @@ import {
   expandCommandTemplateConfigs,
   getCommandTemplateRiskLabels,
   getCommandTemplateWarnings,
+  resolveCommandTemplateScriptInvocation,
   resolveInheritedDefaultReferences,
   splitCommandTemplate,
 } from "../lib/command-templates.ts";
@@ -39,6 +40,44 @@ test("Command templates accept shorthand string configs", () => {
     command: resolve("/work", "tts"),
     args: ["--text", "hello world", "--lang", "ru"],
   });
+});
+
+test("Command templates infer portable script interpreters", () => {
+  const node = buildCommandTemplateInvocation("./worker.mjs --mode check", {}, "/work");
+  assert.deepEqual(node, {
+    command: process.execPath,
+    args: [resolve("/work", "worker.mjs"), "--mode", "check"],
+  });
+
+  const seen: string[] = [];
+  const deno = resolveCommandTemplateScriptInvocation(
+    { command: "/work/worker.js", args: ["value"] },
+    (name) => {
+      seen.push(name);
+      return name === "deno" ? "/runtime/deno" : undefined;
+    },
+  );
+  assert.deepEqual(seen, ["node", "bun", "deno"]);
+  assert.deepEqual(deno, {
+    command: "/runtime/deno",
+    args: ["run", "/work/worker.js", "value"],
+  });
+  const seenBun: string[] = [];
+  resolveCommandTemplateScriptInvocation(
+    { command: "/work/worker.mjs", args: [] },
+    (name) => {
+      seenBun.push(name);
+      return name === "bun" ? "/runtime/bun" : undefined;
+    },
+  );
+  assert.deepEqual(seenBun, ["node", "bun"]);
+  assert.deepEqual(
+    resolveCommandTemplateScriptInvocation(
+      { command: "/work/task.sh", args: ["value"] },
+      (name) => name === "bash" ? "/runtime/bash" : undefined,
+    ),
+    { command: "/runtime/bash", args: ["/work/task.sh", "value"] },
+  );
 });
 
 test("Command template arrays inherit only top-level args and defaults", () => {
@@ -211,6 +250,7 @@ test("Command templates detect high-risk trusted executable shapes", () => {
     getCommandTemplateWarnings("bash -lc {script}").join("\n"),
     /shell command strings/,
   );
+  assert.deepEqual(getCommandTemplateRiskLabels("/work/task.sh"), ["risk.shell"]);
 });
 
 test("Command templates classify advisory risk labels deterministically", () => {

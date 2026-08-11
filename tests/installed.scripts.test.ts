@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -47,20 +47,53 @@ async function removeTreeEventually(path: string): Promise<void> {
   }
 }
 
-async function prepareInstalledPackage(root: string): Promise<string> {
-  const packageDir = join(root, "node_modules", "@llblab", "pi-actors");
+async function linkPiPeers(root: string): Promise<void> {
   const peersDir = join(root, "node_modules", "@earendil-works");
-  await mkdir(packageDir, { recursive: true });
   await mkdir(peersDir, { recursive: true });
   for (const peer of ["pi-coding-agent", "pi-tui"]) {
     await symlink(join(process.cwd(), "node_modules", "@earendil-works", peer), join(peersDir, peer), "dir");
   }
+}
+
+async function prepareInstalledPackage(root: string): Promise<string> {
+  const packageDir = join(root, "node_modules", "@llblab", "pi-actors");
+  await mkdir(packageDir, { recursive: true });
+  await linkPiPeers(root);
   await cp(join(process.cwd(), "package.json"), join(packageDir, "package.json"));
   await cp(join(process.cwd(), "dist"), join(packageDir, "dist"), { recursive: true });
   await cp(join(process.cwd(), "lib"), join(packageDir, "lib"), { recursive: true });
   await cp(join(process.cwd(), "scripts"), join(packageDir, "scripts"), { recursive: true });
   await cp(join(process.cwd(), "recipes"), join(packageDir, "recipes"), { recursive: true });
   return packageDir;
+}
+
+async function preparePackedPackage(root: string): Promise<string> {
+  const packDir = join(root, "pack");
+  await mkdir(packDir, { recursive: true });
+  await writeFile(join(root, "package.json"), `${JSON.stringify({ private: true })}\n`);
+  const npmCli = process.env.npm_execpath;
+  assert.ok(npmCli, "npm_execpath is required for packed-package tests");
+  await execFileAsync(process.execPath, [
+    npmCli,
+    "pack",
+    process.cwd(),
+    "--pack-destination",
+    packDir,
+    "--silent",
+  ], { cwd: root });
+  const tarballs = (await readdir(packDir)).filter((name) => name.endsWith(".tgz"));
+  assert.equal(tarballs.length, 1);
+  await execFileAsync(process.execPath, [
+    npmCli,
+    "install",
+    "--ignore-scripts",
+    "--legacy-peer-deps",
+    "--no-package-lock",
+    "--no-save",
+    join(packDir, tarballs[0]),
+  ], { cwd: root });
+  await linkPiPeers(root);
+  return join(root, "node_modules", "@llblab", "pi-actors");
 }
 
 test("package metadata exposes compiled and source extension entrypoints", async () => {
@@ -126,6 +159,186 @@ test("dist package contract excludes stale renamed files and source runtime impo
     const text = await readFile(join(process.cwd(), "dist", "scripts", script), "utf8");
     assert.doesNotMatch(text, /\.\.\/lib\/.*\.ts/);
     assert.doesNotMatch(text, /node_modules.*\.ts/);
+  }
+});
+
+test("installed dist runtime reports exact package identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-identity-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const { stdout, stderr } = await execFileAsync(process.execPath, [
+      "-e",
+      `const { readFileSync } = require("node:fs");
+       const { join } = require("node:path");
+       const { pathToFileURL } = require("node:url");
+       const packageDir = process.argv[1];
+       const pkg = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+       import(pathToFileURL(join(packageDir, "dist", "lib", "tools-inspect.js")).href).then(async (mod) => {
+         const tool = mod.createInspectToolDefinition();
+         const result = await tool.execute("status", { target: "runtime", view: "status", verbose: true }, undefined, undefined, {});
+         if (result.details.version !== pkg.version) process.exitCode = 2;
+         if (result.details.state_schema !== "run-kernel-v1") process.exitCode = 3;
+         console.log(JSON.stringify({ version: result.details.version, state_schema: result.details.state_schema }));
+       }).catch((error) => { console.error(error); process.exitCode = 1; });`,
+      packageDir,
+    ]);
+    assert.equal(stderr, "");
+    const pkg = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"));
+    assert.deepEqual(JSON.parse(stdout), {
+      version: pkg.version,
+      state_schema: "run-kernel-v1",
+    });
+  } finally {
+    await removeTreeEventually(root);
+  }
+});
+
+test("packed artifact imports compiled extension, skills, and public schemas", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-packed-artifact-"));
+  try {
+    const packageDir = await preparePackedPackage(root);
+    const pkg = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"));
+    const agentDir = join(root, "agent");
+    const homeDir = join(root, "home");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(homeDir, { recursive: true });
+    const { stdout, stderr } = await execFileAsync(process.execPath, [
+      "-e",
+      `const { readFileSync } = require("node:fs");
+       const { join } = require("node:path");
+       const { pathToFileURL } = require("node:url");
+       const packageDir = process.argv[1];
+       import(pathToFileURL(join(packageDir, "dist", "pi-actors", "index.js")).href).then(async (mod) => {
+         const tools = [];
+         const definitions = new Map();
+         const commands = [];
+         const handlers = new Map();
+         const pi = {
+           getActiveTools: () => [],
+           getThinkingLevel: () => "off",
+           on: (name, handler) => handlers.set(name, handler),
+           registerCommand: (name) => commands.push(name),
+           registerTool: (definition) => {
+             definitions.set(definition.name, definition);
+             tools.push({
+               name: definition.name,
+               properties: Object.keys(definition.parameters.properties).sort(),
+               required: definition.parameters.required,
+             });
+           },
+           setActiveTools: () => undefined,
+         };
+         mod.default(pi);
+         const resources = await handlers.get("resources_discover")();
+         const context = {
+           cwd: packageDir,
+           sessionManager: { getSessionId: () => "packed-owner" },
+         };
+         const spawn = definitions.get("spawn");
+         const inspect = definitions.get("inspect");
+         const message = definitions.get("message");
+         let started;
+         let control;
+         try {
+           started = await spawn.execute("packed-spawn", {
+             as: "run:packed-locker",
+             recipe: "resource-locker",
+             values: { lease_ms: 1000 },
+           }, undefined, undefined, context);
+           for (let attempt = 0; attempt < 200; attempt += 1) {
+             control = await inspect.execute("packed-control", {
+               target: "run:packed-locker",
+               view: "control",
+               verbose: true,
+             }, undefined, undefined, context);
+             if (control.details.endpoint) break;
+             if (control.details.status !== "running") {
+               let failure = "stderr unavailable";
+               try {
+                 failure = readFileSync(join(started.details.state_dir, "stderr.log"), "utf8").trim();
+               } catch {}
+               throw new Error("packed locker terminated before readiness: " + failure);
+             }
+             await new Promise((resolve) => setTimeout(resolve, 25));
+           }
+           if (!control?.details.endpoint) throw new Error("packed locker endpoint unavailable");
+           await message.execute("packed-stop", {
+             target: "run:packed-locker",
+             action: "stop",
+             verbose: true,
+           }, undefined, undefined, context);
+           for (let attempt = 0; attempt < 200; attempt += 1) {
+             control = await inspect.execute("packed-terminal", {
+               target: "run:packed-locker",
+               view: "control",
+               verbose: true,
+             }, undefined, undefined, context);
+             if (control.details.status === "done") break;
+             if (["failed", "cancelled", "killed"].includes(control.details.status)) {
+               throw new Error("packed locker stopped as " + control.details.status);
+             }
+             await new Promise((resolve) => setTimeout(resolve, 25));
+           }
+         } finally {
+           if (started && control?.details.status === "running") {
+             await message.execute("packed-kill", {
+               target: "run:packed-locker",
+               action: "kill",
+             }, undefined, undefined, context).catch(() => undefined);
+           }
+         }
+         console.log(JSON.stringify({
+           commands,
+           packedRun: {
+             endpoint: control.details.endpoint?.type,
+             repo: started.details.values.repo,
+             status: control.details.status,
+           },
+           resources,
+           tools,
+         }));
+       }).catch((error) => { console.error(error); process.exit(1); });`,
+      packageDir,
+    ], {
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        PI_CODING_AGENT_DIR: agentDir,
+        USERPROFILE: homeDir,
+      },
+    });
+    assert.equal(stderr, "");
+    assert.equal(pkg.version, JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")).version);
+    assert.deepEqual(pkg.pi.extensions, ["./dist/pi-actors/index.js"]);
+    assert.deepEqual(pkg.pi.skills, ["./dist/skills"]);
+    const loaded = JSON.parse(stdout);
+    assert.deepEqual(loaded.commands, ["actor-inspector"]);
+    assert.equal(loaded.packedRun.endpoint, process.platform === "win32" ? "named-pipe" : "fifo");
+    assert.equal(await realpath(loaded.packedRun.repo), await realpath(packageDir));
+    assert.equal(loaded.packedRun.status, "done");
+    assert.equal(loaded.resources.skillPaths.length, 1);
+    assert.equal(loaded.resources.skillPaths[0].replaceAll("\\", "/").endsWith("/dist/skills"), true);
+    assert.deepEqual(loaded.tools.map((tool: any) => tool.name), [
+      "register_tool",
+      "spawn",
+      "message",
+      "inspect",
+    ]);
+    assert.deepEqual(loaded.tools.map((tool: any) => tool.properties), [
+      ["args", "async", "description", "draft", "name", "template", "update", "values"],
+      ["artifacts", "as", "file", "recipe", "template", "transport_context", "values", "verbose"],
+      ["action", "input", "target", "verbose"],
+      ["lines", "source", "status", "target", "verbose", "view"],
+    ]);
+    for (const [name, skill] of [["actors", "actors"], ["swarm", "swarm"]]) {
+      assert.match(
+        await readFile(join(packageDir, "dist", "skills", name, "SKILL.md"), "utf8"),
+        new RegExp(`^---\\r?\\nname: ${skill}\\r?$`, "m"),
+      );
+    }
+    assert.doesNotMatch(stderr, /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/);
+  } finally {
+    await removeTreeEventually(root);
   }
 });
 

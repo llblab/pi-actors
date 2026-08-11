@@ -4,7 +4,9 @@
  * Owns pure Recipe control validation; Recipe loading and Run capture stay in recipe/run domains.
  */
 
-const ACTION_PATTERN = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)*$/;
+import * as Control from "./control.ts";
+import * as Limits from "./limits.ts";
+
 const RUNTIME_RUN_ACTIONS = new Set(["archive", "kill", "prune"]);
 
 export function normalizeRecipeControl(value: unknown): string[] | undefined {
@@ -19,8 +21,13 @@ export function normalizeRecipeControl(value: unknown): string[] | undefined {
       throw new Error("recipe.control actions must be non-empty strings");
     }
     const action = raw.trim();
-    if (!ACTION_PATTERN.test(action)) {
+    if (!Control.isControlAction(action)) {
       throw new Error(`invalid recipe.control action: ${action}`);
+    }
+    if (action.length > Limits.CONTROL_ACTION_MAX_LENGTH) {
+      throw new Error(
+        `recipe.control action exceeds ${Limits.CONTROL_ACTION_MAX_LENGTH} ASCII characters: ${action}`,
+      );
     }
     if (RUNTIME_RUN_ACTIONS.has(action)) {
       throw new Error(

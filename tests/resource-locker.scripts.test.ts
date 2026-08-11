@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { deliverRunControl } from "../lib/runs-control-delivery.ts";
+import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 
 const script = fileURLToPath(new URL("../scripts/locker.mjs", import.meta.url));
 
@@ -46,6 +47,9 @@ test("resource-locker consumes exact Controls and emits Trace", {
     [script, "serve", "--state-dir", stateDir, "--lease-ms", "1000"],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
   const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
   try {
     const endpointPath = join(stateDir, "control-endpoint.json");
@@ -59,6 +63,7 @@ test("resource-locker consumes exact Controls and emits Trace", {
         id: "task-1",
         task: "Edit docs",
         resources: ["file:README.md"],
+        metadata: { token: "LOCKER_CONTROL_SECRET" },
       },
       run_instance_id: "generation-a",
     });
@@ -75,20 +80,63 @@ test("resource-locker consumes exact Controls and emits Trace", {
     });
     await waitForTrace(stateDir, "lock.renewed");
     await deliverRunControl("resource-locker", stateDir, {
+      action: "complete",
+      input: { id: "task-1", owner: "worker-a" },
+      run_instance_id: "generation-a",
+    });
+    await waitForTrace(stateDir, "lock.complete");
+    await deliverRunControl("resource-locker", stateDir, {
+      action: "release",
+      input: { resource: "file:README.md", owner: "worker-a" },
+      run_instance_id: "generation-a",
+    });
+    await waitForTrace(stateDir, "lock.released");
+    await deliverRunControl("resource-locker", stateDir, {
+      action: "acquire",
+      input: { resource: "file:AGENTS.md", owner: "worker-b" },
+      run_instance_id: "generation-a",
+    });
+    await waitForTrace(stateDir, "lock.granted");
+    await deliverRunControl("resource-locker", stateDir, {
+      action: "release",
+      input: { resource: "file:AGENTS.md", owner: "worker-b" },
+      run_instance_id: "generation-a",
+    });
+    await deliverRunControl("resource-locker", stateDir, {
       action: "stop",
       run_instance_id: "generation-a",
     });
-    assert.equal(await exited, 0);
+    assert.equal(await exited, 0, stderr);
     const controls = (await readFile(join(stateDir, "controls.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.equal(controls.length, 4);
+    assert.equal(controls.length, 8);
     assert.equal(controls.every((control) => control.status === "handled"), true);
     assert.equal(controls.every((control) => typeof control.delivered_at === "string"), true);
+    assert.equal(controls.every((control) => typeof control.claimed_at === "string"), true);
     const trace = await readFile(join(stateDir, "trace.jsonl"), "utf8");
     assert.doesNotMatch(trace, /\"to\"|\"from\"|\"type\"|\"body\"/);
-    assert.match(trace, /\"kind\":\"lock\.stopped\"/);
+    for (const kind of ["complete", "granted", "released", "stopped"]) {
+      assert.match(trace, new RegExp(`"kind":"lock\\.${kind}"`));
+    }
+    const inspect = createInspectToolDefinition({
+      getRunStatus: () => ({
+        control: ["enqueue", "claim", "complete", "acquire", "renew", "release", "stop"],
+        ownerId: "session-a",
+        run: "resource-locker",
+        run_instance_id: "generation-a",
+        state_dir: stateDir,
+        status: "done",
+      }),
+    });
+    const context = { sessionManager: { getSessionId: () => "session-a" } };
+    const controlView = await inspect.execute("control", { target: "run:resource-locker", view: "control", verbose: true }, undefined, undefined, context);
+    const traceView = await inspect.execute("trace", { target: "run:resource-locker", view: "trace", source: "runtime", verbose: true }, undefined, undefined, context);
+    const exposed = JSON.stringify([controlView, traceView]);
+    assert.doesNotMatch(exposed, /LOCKER_CONTROL_SECRET/);
+    assert.match(exposed, /\[REDACTED\]/);
+    assert.match(await readFile(join(stateDir, "controls.jsonl"), "utf8"), /LOCKER_CONTROL_SECRET/);
   } finally {
     child.kill("SIGKILL");
     await rm(stateDir, { recursive: true, force: true });

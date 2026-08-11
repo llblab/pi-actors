@@ -5,9 +5,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, constants, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, resolve as resolvePath } from "node:path";
+import { basename, delimiter, extname, isAbsolute, join, resolve as resolvePath } from "node:path";
 
 export type CommandTemplateFailureScope = "continue" | "branch" | "root";
 
@@ -259,7 +259,7 @@ function getLeafCommandTemplateRiskLabels(
   const command = getExecutableName(parts[0]);
   const args = parts.slice(1);
   const labels = new Set<CommandTemplateRiskLabel>();
-  if (["bash", "sh", "zsh", "fish"].includes(command)) {
+  if (["bash", "sh", "zsh", "fish"].includes(command) || command.endsWith(".sh")) {
     labels.add("risk.shell");
     if (hasAnyFlag(args, ["-c"])) labels.add("risk.eval");
   }
@@ -600,6 +600,46 @@ export function expandCommandTemplateExecutable(
   if (command.includes("/") && !isAbsolute(command))
     return resolvePath(cwd, command);
   return command;
+}
+
+export type CommandTemplateExecutableResolver = (name: string) => string | undefined;
+
+function resolveExecutableOnPath(name: string): string | undefined {
+  if (name === "node" && /^node(?:\.exe)?$/i.test(basename(process.execPath)))
+    return process.execPath;
+  const pathValue = Object.entries(process.env)
+    .find(([key]) => key.toLowerCase() === "path")?.[1] ?? "";
+  const suffixes = process.platform === "win32" ? [".exe", ".com"] : [""];
+  for (const entry of pathValue.split(delimiter).filter(Boolean)) {
+    const directory = entry.replace(/^"|"$/g, "");
+    for (const suffix of suffixes) {
+      const candidate = join(directory, `${name}${suffix}`);
+      try {
+        accessSync(candidate, constants.X_OK);
+        if (statSync(candidate).isFile()) return candidate;
+      } catch {}
+    }
+  }
+  return undefined;
+}
+
+export function resolveCommandTemplateScriptInvocation(
+  invocation: CommandTemplateInvocation,
+  resolveExecutable: CommandTemplateExecutableResolver = resolveExecutableOnPath,
+): CommandTemplateInvocation {
+  const extension = extname(invocation.command).toLowerCase();
+  const interpreters = extension === ".js" || extension === ".mjs"
+    ? [["node"], ["bun"], ["deno", "run"]]
+    : extension === ".sh" ? [["bash"]] : [];
+  if (interpreters.length === 0) return invocation;
+  for (const [name, ...prefix] of interpreters) {
+    const executable = resolveExecutable(name);
+    if (executable)
+      return { command: executable, args: [...prefix, invocation.command, ...invocation.args] };
+  }
+  throw new Error(
+    `No interpreter available for command-template ${extension} script; tried ${interpreters.map(([name]) => name).join(", ")}.`,
+  );
 }
 
 function evaluateCommandTemplateExpression(
@@ -1072,5 +1112,5 @@ export function buildCommandTemplateInvocation(
       ),
     )
     .filter((part) => part !== "");
-  return { command, args };
+  return resolveCommandTemplateScriptInvocation({ command, args });
 }

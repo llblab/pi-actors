@@ -142,8 +142,9 @@ async function waitForWakeCount(
 async function waitForStatus(
   stateDir: string,
   expected: string,
+  attempts = 40,
 ): Promise<Record<string, unknown>> {
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < attempts; i++) {
     const status = getRunStatus(stateDir);
     if (status.status === expected) return status;
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -172,7 +173,7 @@ test("Async runs reject reuse of an active run state", async () => {
       {
         run_id: "active",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 2000)"`,
+        template: `${process.execPath} -e "setTimeout(() => {}, 10000)"`,
       },
       process.cwd(),
     );
@@ -647,6 +648,10 @@ test("Async run restart clears stale terminal state", async () => {
     assert.equal(existsSync(join(stateDir, "controls.jsonl")), false);
     assert.equal(existsSync(join(stateDir, "control-endpoint.json")), false);
   } finally {
+    try {
+      cancelRun(stateDir);
+    } catch {}
+    await waitForRunProcessExit(stateDir);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1580,11 +1585,7 @@ test("Async run retirement smoke stops supervisor after nested child is terminal
     assert.deepEqual(results, [
       { action: "cancel", run: "supervisor", stateDir: supervisorDir },
     ]);
-    for (let index = 0; index < 40; index += 1) {
-      if (getRunStatus(supervisorDir).status === "cancelled") break;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    assert.equal(getRunStatus(supervisorDir).status, "cancelled");
+    assert.equal((await waitForStatus(supervisorDir, "cancelled", 200)).status, "cancelled");
     assert.equal(getRunStatus(childDir).status, "done");
     assert.equal(getRunStatus(serviceDir).status, "running");
     assert.match(

@@ -46,8 +46,7 @@ function runNextActions(run: string, result: Record<string, unknown>): string[] 
 }
 
 export interface ControlToolDeps {
-  getTool?: (name: string) => unknown;
-  handleRuntimeMessage?: (
+  handleRuntimeControl?: (
     action: string,
     input: unknown,
   ) => Record<string, unknown>;
@@ -64,11 +63,11 @@ export function createControlToolDefinition<TContext = unknown>(
     parameters: Schema.objectSchema(
       {
         target: Schema.stringSchema("Run target run:<id>, or literal runtime."),
-        action: Schema.stringSchema("Lowercase semantic Control action."),
+        action: Schema.stringSchema("Lowercase ASCII Control action, at most 64 characters."),
         input: Schema.unionSchema([
-          Schema.stringSchema("Optional Control input string."),
-          Schema.looseObjectSchema("Optional structured Control input."),
-          Schema.arraySchema("Optional structured Control input array."),
+          Schema.stringSchema("Optional Control input string; serialized JSON must fit 380 bytes."),
+          Schema.looseObjectSchema("Optional structured Control input; serialized JSON must fit 380 bytes."),
+          Schema.arraySchema("Optional structured Control input array; serialized JSON must fit 380 bytes."),
         ]),
         verbose: Schema.booleanSchema("Return full JSON instead of compact text."),
       },
@@ -89,10 +88,10 @@ export function createControlToolDefinition<TContext = unknown>(
             `unsupported runtime Control action: ${request.action}; use review.retry or review.reset`,
           );
         }
-        if (!deps.handleRuntimeMessage) {
+        if (!deps.handleRuntimeControl) {
           throw new Error("runtime Control is unavailable");
         }
-        result = deps.handleRuntimeMessage(request.action, request.input);
+        result = deps.handleRuntimeControl(request.action, request.input);
       } else {
         const run = request.target.slice(4);
         const status = ToolsAccess.assertRunAccessibleToContext(run, ctx);

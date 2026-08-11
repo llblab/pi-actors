@@ -47,15 +47,28 @@ test("Trace projection preserves rich owned agent turns", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-projection-"));
   try {
     const sessionDir = join(root, "sessions", "command-001");
+    const minimalSessionDir = join(root, "sessions", "command-002");
     await mkdir(sessionDir, { recursive: true });
+    await mkdir(minimalSessionDir, { recursive: true });
+    await writeFile(join(root, "outside.jsonl"), "OUTSIDE_SESSION_SECRET\n");
     await writeFile(
       join(root, "execution.json"),
       JSON.stringify({
-        commands: [{
-          id: "command-001",
-          session_files: ["sessions/command-001/session.jsonl"],
-          stage: "reviewer",
-        }],
+        commands: [
+          {
+            id: "command-001",
+            session_files: [
+              "sessions/command-001/session.jsonl",
+              "outside.jsonl",
+            ],
+            stage: "reviewer",
+          },
+          {
+            id: "command-002",
+            session_files: ["sessions/command-002/session.jsonl"],
+            stage: "worker",
+          },
+        ],
       }),
     );
     await writeFile(
@@ -76,8 +89,11 @@ test("Trace projection preserves rich owned agent turns", async () => {
           timestamp: "2026-01-01T00:00:01.000Z",
           message: {
             role: "assistant",
+            errorMessage: "authorization=AGENT_ERROR_SECRET unavailable",
             model: "test/model",
+            provider: "test",
             stopReason: "toolUse",
+            usage: { input: 12, output: 7, token: "AGENT_USAGE_SECRET" },
             content: [
               { type: "thinking", thinking: "Persisted thought" },
               { type: "text", text: "Audit complete" },
@@ -93,18 +109,59 @@ test("Trace projection preserves rich owned agent turns", async () => {
             role: "toolResult",
             toolCallId: "call-1",
             toolName: "read",
-            content: [{ type: "text", text: "Result" }],
+            content: [{ type: "text", text: "Result token=AGENT_RESULT_SECRET" }],
+            isError: true,
           },
         }),
       ].join("\n"),
     );
+    await writeFile(
+      join(minimalSessionDir, "session.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "minimal" }),
+        JSON.stringify({
+          type: "message",
+          id: "u2",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:02.000Z",
+          message: { role: "user", content: "Run check" },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "a2",
+          parentId: "u2",
+          timestamp: "2026-01-01T00:00:03.000Z",
+          message: { role: "assistant", content: "Check complete" },
+        }),
+      ].join("\n"),
+    );
     const items = projectRunTrace(root, { source: "agent" });
-    assert.equal(items.length, 1);
-    assert.equal(items[0]?.kind, "agent.turn");
-    const detail = items[0]?.detail as Record<string, unknown>;
-    assert.equal(detail.thinking, "Persisted thought");
-    assert.equal((detail.toolCalls as unknown[]).length, 1);
-    assert.equal(JSON.stringify(detail).includes("secret"), false);
+    assert.equal(items.length, 2);
+    assert.equal(items.every((item) => item.kind === "agent.turn"), true);
+    const rich = items.find((item) =>
+      (item.detail as Record<string, unknown>).commandId === "command-001"
+    )?.detail as Record<string, any>;
+    assert.equal(rich.userText, "Audit Trace");
+    assert.equal(rich.assistantText, "Audit complete");
+    assert.equal(rich.thinking, "Persisted thought");
+    assert.deepEqual(rich.usage, { input: 12, output: 7, token: "[REDACTED]" });
+    assert.match(rich.error, /\[REDACTED\]/);
+    assert.equal(rich.toolCalls[0].name, "read");
+    assert.equal(rich.toolCalls[0].resultError, true);
+    assert.match(JSON.stringify(rich.toolCalls[0].result), /\[REDACTED\]/);
+    assert.equal(rich.sessionFile, "sessions/command-001/session.jsonl");
+    const minimal = items.find((item) =>
+      (item.detail as Record<string, unknown>).commandId === "command-002"
+    )?.detail as Record<string, any>;
+    assert.equal(minimal.userText, "Run check");
+    assert.equal(minimal.assistantText, "Check complete");
+    assert.deepEqual(minimal.toolCalls, []);
+    for (const absent of ["thinking", "usage", "error"]) {
+      assert.equal(Object.hasOwn(minimal, absent), false);
+    }
+    const exposed = JSON.stringify(items);
+    assert.doesNotMatch(exposed, /AGENT_.*_SECRET|OUTSIDE_SESSION_SECRET/);
+    assert.doesNotMatch(exposed, new RegExp(root.replaceAll("\\", "\\\\")));
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -115,7 +172,7 @@ test("Trace projection filters sources and keeps malformed evidence diagnosable"
   try {
     await writeFile(
       join(root, "controls.jsonl"),
-      `{bad json}\n${JSON.stringify({ id: "control-1", run_instance_id: "generation-a", action: "pause", status: "failed", queued_at: "2026-01-01T00:00:00.000Z", failed_at: "2026-01-01T00:00:01.000Z", error: "not ready" })}\n`,
+      `{"input":{"token":"MALFORMED_CONTROL_SECRET"\n${JSON.stringify({ id: "control-1", run_instance_id: "generation-a", action: "pause", status: "failed", queued_at: "2026-01-01T00:00:00.000Z", failed_at: "2026-01-01T00:00:01.000Z", error: "not ready" })}\n`,
     );
     const controls = projectRunTrace(root, { source: "control" });
     assert.equal(controls.length, 1);
@@ -123,6 +180,11 @@ test("Trace projection filters sources and keeps malformed evidence diagnosable"
     const runtime = projectRunTrace(root, { source: "runtime" });
     assert.equal(runtime.length, 1);
     assert.equal(runtime[0]?.kind, "state.read_error");
+    assert.equal(
+      (runtime[0]?.detail as Record<string, unknown>).reason,
+      "invalid_control_json",
+    );
+    assert.doesNotMatch(JSON.stringify(runtime), /MALFORMED_CONTROL_SECRET/);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

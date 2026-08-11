@@ -55,7 +55,7 @@ Trace records strict bounded events:
 {"id":"…","ts":"…","kind":"command.done","summary":"Command completed","data":{"code":0},"level":"info","attention":"followup"}
 ```
 
-Required fields: `id`, `ts`, `kind`. Optional fields: `summary`, `data`, `level`, `attention`. Trace rejects addressed-envelope fields and malformed or oversized data.
+Required fields: `id`, `ts`, `kind`. Optional fields: `summary`, `data`, `level`, `attention`. Trace rejects addressed-envelope fields and malformed or oversized data. All first-party writers use the canonical append authority, which validates and size-checks inside a token-owned cross-process lock before one append-only JSONL write.
 
 Runtime lifecycle, runner progress, command completion, cancellation, kill, parent teardown, and controlled-service observations use Trace. `inspect view=trace` projects these events with Controls, owned Pi turns, logs, results, artifacts, and diagnostics under a deterministic global bound.
 
@@ -82,7 +82,7 @@ The runtime:
 5. writes the exact `{id, action, input?}` wire document to FIFO or named pipe;
 6. records delivered or failed outcome.
 
-Unix services may publish a FIFO; native Windows services publish a Windows named pipe. Native Windows FIFO delivery fails before transport rather than degrading to another protocol. FIFO wire documents above the portable 512-byte atomic-write bound fail before writing; named pipes retain the general Control input bound.
+Unix services may publish a FIFO; native Windows services publish a Windows named pipe. Native Windows FIFO delivery fails before transport rather than degrading to another protocol. Both transports admit the same portable envelope: action is at most 64 lowercase ASCII characters, serialized JSON input is at most 380 bytes, and the newline-terminated wire record is at most 512 bytes. Invalid envelopes fail before journal admission or transport. Put larger data in a declared artifact/path and send only a bounded reference or instruction through Control.
 
 A service claims queued or transport-delivered Controls and records handled/failed outcomes under the token-owned Control journal lock. Journal snapshots replace atomically, and expected-status fencing prevents delivery failure evidence from regressing a Control already claimed or completed by a fast consumer. Terminal compaction remains bounded. Services capture their startup generation, so stale-generation Controls never execute.
 

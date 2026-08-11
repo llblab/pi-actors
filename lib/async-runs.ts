@@ -59,6 +59,7 @@ import {
   verifyRunProcessIdentity,
   type RunProcessIdentity,
 } from "./runs-process.ts";
+import * as RuntimeIdentity from "./runtime-identity.ts";
 import * as RunsStart from "./runs-start.ts";
 import { appendRunTraceEvent } from "./runs-trace.ts";
 import * as RunsIndex from "./runs-index.ts";
@@ -173,7 +174,7 @@ export interface AsyncRunMeta {
   run: string;
   run_instance_id: string;
   state_dir: string;
-  state_schema: "run-kernel-v1";
+  state_schema: typeof RuntimeIdentity.RUN_STATE_SCHEMA;
   status: AsyncRunStatus;
   tool?: string;
   template: CommandTemplateValue;
@@ -466,7 +467,22 @@ export function startRun(
   const resolved = resolveRunTemplate(startParams);
   const run = safeRunId(startParams.run_id);
   const stateDir = resolveStateDir(startParams, run);
+  const recipeFile = startParams.file
+    ? resolveRecipeFile(startParams.file)
+    : undefined;
+  const packagedRecipeRoot = resolve(Paths.getPackagedRecipeRoot());
+  const recipeRelation = recipeFile
+    ? relative(packagedRecipeRoot, recipeFile)
+    : undefined;
+  const packagedRepo =
+    startParams.defaults?.repo === "~/.pi/agent/extensions/pi-actors" &&
+    recipeRelation &&
+    !recipeRelation.startsWith("..") &&
+    !isAbsolute(recipeRelation)
+      ? dirname(packagedRecipeRoot)
+      : undefined;
   const values = {
+    ...(packagedRepo ? { repo: packagedRepo } : {}),
     ...(startParams.values || {}),
     run_id: run,
     state_dir: stateDir,
@@ -494,9 +510,6 @@ export function startRun(
     prepareStateDirForStart(stateDir);
     const stdout = join(stateDir, "stdout.log");
     const stderr = join(stateDir, "stderr.log");
-    const recipeFile = startParams.file
-      ? resolveRecipeFile(startParams.file)
-      : undefined;
     const recipe = startParams.name || getRunIdFromFile(recipeFile);
     const includeActorRecipeContext =
       startParams.actor_context !== false &&
@@ -545,7 +558,7 @@ export function startRun(
       run,
       run_instance_id: randomUUID(),
       state_dir: stateDir,
-      state_schema: "run-kernel-v1",
+      state_schema: RuntimeIdentity.RUN_STATE_SCHEMA,
       status: "running",
       ...(startParams.tool ? { tool: startParams.tool } : {}),
       template: resolved.template,

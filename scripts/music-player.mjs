@@ -52,6 +52,7 @@ async function importRuntimeModule(name) {
 
 const { acquireFileMutationLock, writeTextAtomic } =
   await importRuntimeModule("file-state");
+const { appendRunTraceEvent } = await importRuntimeModule("runs-trace");
 
 const AUDIO_EXTENSIONS = new Set([
   ".aac",
@@ -420,18 +421,12 @@ function readText(path) {
 }
 
 function emitPlayerEvent(ctx, kind, summary, data = {}) {
-  writeText(
-    ctx.eventFile,
-    `${JSON.stringify({
-      data,
-      id: randomUUID(),
-      kind,
-      level: "info",
-      summary,
-      ts: new Date().toISOString(),
-    })}\n`,
-    "a",
-  );
+  appendRunTraceEvent(ctx.stateDir, {
+    data,
+    kind,
+    level: "info",
+    summary,
+  });
 }
 
 function emitTrackEvent(ctx, index, count, track, player) {
@@ -859,7 +854,6 @@ async function playMain(args) {
   const ctx = {
     commandFile: join(stateDir, "command.txt"),
     current: undefined,
-    eventFile: join(stateDir, "trace.jsonl"),
     controlsFile: join(stateDir, "controls.jsonl"),
     pidFile: join(stateDir, "current.pid"),
     playerControlFile: join(stateDir, "player-control.txt"),

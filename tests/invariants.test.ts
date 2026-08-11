@@ -260,6 +260,16 @@ test("Music player helper keeps player processes inside the run process group", 
     /detached:\s*process\.platform\s*!==\s*["']win32["']/,
     "music-player must not detach backend players from the async run process group",
   );
+  assert.match(
+    script,
+    /detached:\s*process\.platform\s*===\s*["']win32["']/,
+    "music-player must isolate the Windows playback console group from its controller",
+  );
+  assert.match(
+    script,
+    /spawnSync\("taskkill", \["\/PID", String\(pid\), "\/T", "\/F"\]/,
+    "music-player must terminate the Windows playback tree outside the controller process",
+  );
 });
 
 test("Music player backend enum stays aligned across recipe docs and script", () => {

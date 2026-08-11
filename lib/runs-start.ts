@@ -54,7 +54,7 @@ export function acquireStateStartLock(
   stateDir: string,
   options: FileMutationLockOptions = {},
 ): () => void {
-  return acquireFileMutationLock(`${stateDir}.lifecycle`, options);
+  return acquireFileMutationLock(join(stateDir, ".lifecycle"), options);
 }
 
 export function prepareStateDirForStart(

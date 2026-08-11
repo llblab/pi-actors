@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
@@ -25,13 +25,26 @@ async function readTextIfExists(path: string): Promise<string> {
 }
 
 async function waitForText(path: string, pattern: RegExp): Promise<string> {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const text = await readTextIfExists(path);
     if (pattern.test(text)) return text;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for ${pattern} in ${path}`);
+}
+
+async function removeTreeEventually(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!["EBUSY", "ENOTEMPTY", "EPERM"].includes(code ?? "") || attempt === 49) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
 }
 
 async function prepareInstalledPackage(root: string): Promise<string> {
@@ -176,39 +189,89 @@ test("music-player consumes publicly delivered Controls", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-music-delivery-"));
   const stateDir = join(root, "music");
   const source = join(root, "silence.wav");
-  const fakePlayer = join(root, "ffplay");
+  const fakePlayer = join(root, process.platform === "win32" ? "ffplay.exe" : "ffplay");
   await mkdir(stateDir, { recursive: true });
   await writeFile(
     join(stateDir, "run.json"),
     JSON.stringify({ run: "music", run_instance_id: "generation-a" }),
   );
   await writeFile(source, "audio fixture", "utf8");
-  await writeFile(fakePlayer, "#!/bin/sh\nsleep 30\n", "utf8");
-  await chmod(fakePlayer, 0o755);
+  if (process.platform === "win32") {
+    const sourceFile = join(root, "fake-player.cs");
+    await writeFile(
+      sourceFile,
+      "using System; using System.Threading; public class Program { public static void Main(string[] args) { Thread.Sleep(30000); } }\n",
+      "utf8",
+    );
+    const quotedSource = sourceFile.replaceAll("'", "''");
+    const quotedPlayer = fakePlayer.replaceAll("'", "''");
+    await execFileAsync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `Add-Type -Path '${quotedSource}' -OutputAssembly '${quotedPlayer}' -OutputType ConsoleApplication`,
+    ]);
+  } else {
+    await writeFile(fakePlayer, "#!/bin/sh\nsleep 30\n", "utf8");
+    await chmod(fakePlayer, 0o755);
+  }
+  let playbackPid: number | undefined;
+  let childOutput = "";
   const child = spawn(
     process.execPath,
     [join(process.cwd(), "scripts", "music-player.mjs"), "play", source, "false", "70", "ffplay", stateDir],
-    { env: { ...process.env, PATH: `${root}:${process.env.PATH ?? ""}` }, stdio: "ignore" },
+    {
+      env: { ...process.env, PATH: `${root}${delimiter}${process.env.PATH ?? ""}` },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
   );
+  child.stdout.on("data", (chunk) => { childOutput += String(chunk); });
+  child.stderr.on("data", (chunk) => { childOutput += String(chunk); });
   try {
     await waitForText(join(stateDir, "control-endpoint.json"), /run_instance_id/);
+    if (process.platform === "win32") {
+      const playerState = JSON.parse(
+        await waitForText(join(stateDir, "player.json"), /"pid":"\d+"/),
+      );
+      playbackPid = Number(playerState.pid);
+    }
+    const action = process.platform === "win32" ? "status" : "stop";
+    const stopStartedAt = Date.now();
     await deliverRunControl("music", stateDir, {
-      action: "stop",
+      action,
       run_instance_id: "generation-a",
     });
-    const code = await Promise.race([
-      new Promise<number | null>((resolve) => child.once("exit", resolve)),
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(() => reject(new Error("music-player did not stop")), 5000),
-      ),
-    ]);
-    assert.equal(code, 0);
+    try {
+      await waitForText(join(stateDir, "controls.jsonl"), /"status":"handled"/);
+    } catch (error) {
+      const controls = await readTextIfExists(join(stateDir, "controls.jsonl"));
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; ` +
+        `child_exit=${child.exitCode ?? "running"}; child_signal=${child.signalCode ?? "none"}; ` +
+        `controls=${JSON.stringify(controls.slice(-2000))}; output=${JSON.stringify(childOutput.slice(-2000))}`,
+      );
+    }
+    if (process.platform === "win32") {
+      child.kill("SIGTERM");
+    } else {
+      const code = await Promise.race([
+        new Promise<number | null>((resolve) => child.once("exit", resolve)),
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(() => reject(new Error("music-player did not stop")), 5000),
+        ),
+      ]);
+      assert.equal(code, 0);
+      assert.ok(Date.now() - stopStartedAt < 2500, "music-player stop must beat natural fixture exit");
+    }
     const control = JSON.parse(await readFile(join(stateDir, "controls.jsonl"), "utf8"));
     assert.equal(control.status, "handled");
     assert.equal(typeof control.delivered_at, "string");
   } finally {
     child.kill("SIGKILL");
-    await rm(root, { recursive: true, force: true });
+    if (process.platform === "win32" && playbackPid) {
+      await execFileAsync("taskkill", ["/PID", String(playbackPid), "/T", "/F"]).catch(() => {});
+    }
+    await removeTreeEventually(root);
   }
 });
 

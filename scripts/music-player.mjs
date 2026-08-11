@@ -12,7 +12,7 @@
  * metadata and invocation arguments choose source paths and backend behavior.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   accessSync,
@@ -479,13 +479,20 @@ function setState(ctx, state) {
 function sendSignalToCurrent(ctx, signal) {
   const pid = Number(readText(ctx.pidFile).trim());
   if (!Number.isInteger(pid) || pid <= 0) return;
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-pid, signal);
-      return;
-    } catch {
-      // Fall through to the direct child fallback.
+  if (process.platform === "win32") {
+    if (signal === "SIGTERM") {
+      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
     }
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+    return;
+  } catch {
+    // Fall through to the direct child fallback.
   }
   try {
     process.kill(pid, signal);
@@ -550,6 +557,7 @@ function handleControl(ctx, input) {
       controlCurrentPlayback(ctx, "stop");
       break;
     case "stop":
+      ctx.stopping = true;
       writeText(ctx.commandFile, "stop");
       controlCurrentPlayback(ctx, "stop");
       break;
@@ -574,13 +582,16 @@ function writeJsonFile(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-async function startControlServer(ctx) {
+async function startControlServer(ctx, wakeControlLoop) {
   if (!ctx.runInstanceId) return undefined;
   const path = process.platform === "win32"
     ? `\\\\.\\pipe\\pi-actors-music-${String(process.env.run_id ?? process.pid).replaceAll(/[^A-Za-z0-9_-]/g, "-")}`
     : join(ctx.stateDir, "control.sock");
   if (process.platform !== "win32") rmSync(path, { force: true });
-  const server = createServer((socket) => socket.resume());
+  const server = createServer((socket) => {
+    socket.on("data", wakeControlLoop);
+    socket.resume();
+  });
   await new Promise((resolveReady, rejectReady) => {
     server.once("error", rejectReady);
     server.listen(path, () => {
@@ -742,19 +753,21 @@ function startControlLoop(ctx) {
   let closed = false;
   let dirty = true;
   let watcher;
-  try {
-    watcher = watch(ctx.stateDir, { persistent: false }, (_eventType, file) => {
-      const name = file ? String(file) : "";
-      if (
-        !name ||
-        name === basename(ctx.controlsFile) ||
-        name === basename(runtimeWakeFile(ctx))
-      ) {
-        dirty = true;
-      }
-    });
-  } catch {
-    // fs.watch is advisory; signature checks remain the portable fallback.
+  if (process.platform !== "win32") {
+    try {
+      watcher = watch(ctx.stateDir, { persistent: false }, (_eventType, file) => {
+        const name = file ? String(file) : "";
+        if (
+          !name ||
+          name === basename(ctx.controlsFile) ||
+          name === basename(runtimeWakeFile(ctx))
+        ) {
+          dirty = true;
+        }
+      });
+    } catch {
+      // fs.watch is advisory; signature checks remain the portable fallback.
+    }
   }
   const close = () => {
     closed = true;
@@ -780,20 +793,26 @@ function startControlLoop(ctx) {
       await sleep(250);
     }
   })();
-  return { close, promise };
+  return { close, promise, wake: () => { dirty = true; } };
 }
 
 function playOne(ctx, player, volume, track, index, count) {
   return new Promise((resolveDone) => {
+    if (ctx.stopping) {
+      resolveDone();
+      return;
+    }
     rmSync(ctx.playerControlFile, { force: true });
     const [command, args] = playerCommand(ctx, player, volume, track);
     writeStatus(ctx, "playing", index, count, track, player, "");
     const child = spawn(command, args, {
+      detached: process.platform === "win32",
       stdio: ["ignore", "inherit", "inherit"],
     });
     ctx.child = child;
     const pid = child.pid || "";
     if (pid) writeText(ctx.pidFile, String(pid));
+    if (ctx.stopping) controlCurrentPlayback(ctx, "stop");
     writeStatus(ctx, "playing", index, count, track, player, pid);
     emitTrackEvent(ctx, index, count, track, player);
     child.once("error", (error) => {
@@ -888,8 +907,8 @@ async function playMain(args) {
     process.exit(129);
   });
   try {
-    closeControlServer = await startControlServer(ctx);
     controlLoop = startControlLoop(ctx);
+    closeControlServer = await startControlServer(ctx, controlLoop.wake);
     setState(ctx, "playing");
     console.error(
       `music-player: player=${player} loop=${loop} volume=${volume} tracks=${tracks.length} state_dir=${stateDir}`,

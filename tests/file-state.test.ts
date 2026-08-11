@@ -114,6 +114,19 @@ test("File mutation locks deterministically serialize sibling processes", async 
   }
 });
 
+test("File mutation lock identity survives target materialization", async () => {
+  const root = join(tmpdir(), `pi-actors-file-lock-materialize-${process.pid}-${Date.now()}`);
+  try {
+    await mkdir(root, { recursive: true });
+    const target = join(root, "controls.jsonl");
+    const before = mutationLockPath(target);
+    await writeFile(target, "\n");
+    assert.equal(mutationLockPath(target), before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test(
   "File mutation locks deterministically serialize canonical path aliases",
   { skip: process.platform === "win32" },

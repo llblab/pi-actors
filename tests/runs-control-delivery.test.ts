@@ -121,7 +121,7 @@ test("FIFO Controls reject payloads above the portable atomic-write bound", asyn
         action: "enqueue",
         input: "x".repeat(FIFO_ATOMIC_CONTROL_MAX_BYTES),
         run_instance_id: "generation-a",
-      }),
+      }, { platform: "linux" }),
       /portable atomic-write bound/,
     );
     assert.equal(readRunControlsFromStateDir(root)[0]?.status, "failed");

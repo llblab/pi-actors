@@ -146,7 +146,6 @@ test("Draft review rejects incomplete, duplicate, stale, and fabricated decision
     promote("/recipes/drafts/first.json", "first-hash", 4, "first_tool"),
   ]);
   const validation = validateDraftReviewResult(input(), review);
-
   assert.equal(validation.ok, false);
   assert.match(validation.errors.join("\n"), /review draft changed/);
   assert.match(validation.errors.join("\n"), /launch count differs from lineage/);
@@ -170,7 +169,6 @@ test("Draft review requires an executable revision before re-promoting a demotio
   const blocked = validateDraftReviewResult(demoted, review);
   assert.equal(blocked.ok, false);
   assert.match(blocked.errors.join("\n"), /requires a revision before automatic promotion/);
-
   demoted.drafts[0]!.usage!.fingerprint = "revised-fingerprint";
   assert.equal(validateDraftReviewResult(demoted, review).ok, true);
 });
@@ -186,7 +184,6 @@ test("Draft safety classification covers common credential forms", () => {
     { template: "vault kv get secret/production" },
     { defaults: { value: "ghp_abcdefghijklmnopqrstuvwxyz123456" }, template: "echo safe" },
   ];
-
   for (const recipe of unsafeRecipes) {
     assert.notEqual(findUnsafeRecipeReason(recipe), undefined, JSON.stringify(recipe));
   }
@@ -211,7 +208,6 @@ test("Draft review mechanically rejects secrets and temporary paths", () => {
     discard("/recipes/drafts/second.json", "second-hash", 1),
   ]);
   const validation = validateDraftReviewResult(secretInput, review);
-
   assert.equal(validation.ok, false);
   assert.match(validation.errors.join("\n"), /secret-touching draft may only be discarded/);
   assert.match(validation.errors.join("\n"), /must not supply executable recipe content/);

@@ -48,9 +48,11 @@ test("Packaged skills are registered through dist metadata", () => {
 
 test("Auto-discovered extension contributes co-located skills", () => {
   const extensionSource = readFileSync("index.ts", "utf8");
+  const extensionRuntimeSource = readFileSync("lib/extension-runtime.ts", "utf8");
   const pathsSource = readFileSync("lib/paths.ts", "utf8");
   assert.match(extensionSource, /pi\.on\("resources_discover"/);
-  assert.match(extensionSource, /Paths\.getExistingExtensionSkillPaths/);
+  assert.match(extensionSource, /runtime\.discoverResources/);
+  assert.match(extensionRuntimeSource, /Paths\.getExistingExtensionSkillPaths/);
   assert.match(pathsSource, /getExtensionSkillsDir/);
 });
 
@@ -117,7 +119,6 @@ test("Packaged actors skill top recipes link prioritized recipes and deep invent
   assert.ok(topRecipes, "actors skill should contain a Top Recipes section");
   assert.match(actorSkill, /docs\/async-runs\.md/);
   assert.match(actorSkill, /docs\/recipe-library\.md/);
-
   const linkedRecipes = [
     ...topRecipes.matchAll(/\.\.\/\.\.\/recipes\/([^\)]+\.json)/g),
   ]

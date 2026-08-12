@@ -369,7 +369,6 @@ if (!command) {
   usage();
   process.exit(1);
 }
-
 if (command === "run-summary")
   runSummary(args[0] ?? "~/.pi/agent/tmp/pi-actors/runs");
 else if (command === "run-ops-snapshot")

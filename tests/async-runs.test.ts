@@ -497,7 +497,6 @@ test("Async lifecycle status files preserve terminal semantics", async () => {
     await writeFile(join(exitedDir, "trace.jsonl"), `${JSON.stringify({ kind: "run.start" })}\n`);
     assert.equal(getRunStatus(exitedDir).status, "exited");
     assert.match(tailRun(exitedDir), /run\.start/);
-
     await mkdir(cancelledDir, { recursive: true });
     await writeFile(
       join(cancelledDir, "run.json"),
@@ -505,7 +504,6 @@ test("Async lifecycle status files preserve terminal semantics", async () => {
     );
     await writeFile(join(cancelledDir, "trace.jsonl"), `${JSON.stringify({ kind: "run.cancel" })}\n`);
     assert.equal(getRunStatus(cancelledDir).status, "cancelled");
-
     await mkdir(killedDir, { recursive: true });
     await writeFile(
       join(killedDir, "run.json"),
@@ -629,7 +627,6 @@ test("Async run restart clears all prior bounded evidence", async () => {
       });
     await writeFile(join(stateDir, "control-endpoint.json"), "{}\n");
     assert.equal(summarizeRunTraceJournal(readRunTraceJournal(stateDir)).compacted, true);
-
     startRun(
       {
         run_id: "restart",
@@ -779,7 +776,6 @@ test("Async Recipe values follow caller then values then defaults then inline pr
     );
     assert.equal(bound.values.mode, "bound");
     await waitForResult(boundState);
-
     const callerState = join(root, "caller");
     const caller = startRun(
       {
@@ -813,7 +809,6 @@ test("Async Recipes reject invalid typed values and unknown defaults before laun
       () => startRun({ file: invalidEnum, run_id: "invalid" }, process.cwd()),
       /Argument mode must be one of: check, fix/,
     );
-
     const unknownDefault = join(root, "unknown-default.json");
     await writeFile(
       unknownDefault,
@@ -1285,7 +1280,6 @@ test("Canonical kill rejects a replacement run generation", async () => {
       ownerId: "session-a",
       runInstanceId: "superseded-instance",
     });
-
     assert.equal(result.killed, false);
     assert.equal(result.reason, "run generation changed");
     assert.equal(getRunStatus(stateDir).status, "running");
@@ -1346,7 +1340,6 @@ test("Same-directory restart cannot cross held canonical control", async () => {
       }
       throw new Error(`Timed out waiting for ${path}`);
     };
-
     const settle = <T>(promise: Promise<T>) =>
       promise.then(
         (value) => ({ ok: true as const, value }),
@@ -1364,7 +1357,6 @@ test("Same-directory restart cannot cross held canonical control", async () => {
       await writeFile(releasePath, "release\n");
     }
     const outcomes = await Promise.all([control, restart]);
-
     assert.equal(outcomes[0]!.ok, true);
     assert.equal(outcomes[1]!.ok, true);
     const replacement = getRunStatus(stateDir);
@@ -1413,11 +1405,9 @@ test("Parent teardown kills only exact-session runs through canonical run contro
       }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-
     const result = teardownRunsOwnedByParent("session-a", root, {
       trigger: "session_shutdown:quit",
     });
-
     assert.equal(result.killed, 1);
     assert.equal(result.failed, 0);
     assert.equal(typeof result.summaryPath, "string");
@@ -1450,11 +1440,9 @@ test("Parent teardown persists corrupt-state discovery failures", async () => {
   try {
     await mkdir(corruptDir, { recursive: true });
     await writeFile(join(corruptDir, "run.json"), "{not-json\n");
-
     const result = teardownRunsOwnedByParent("session-a", root, {
       trigger: "session_shutdown:reload",
     });
-
     assert.equal(result.attempted, 0);
     assert.equal(result.discoveryFailed, 1);
     assert.equal(result.failed, 1);
@@ -1640,7 +1628,6 @@ test("Async run archive and prune only allow terminal run state", async () => {
     assert.throws(() => archiveRun(activeDir), /Only terminal runs/);
     assert.throws(() => pruneRun(activeDir), /Only terminal runs/);
     killRun(activeDir);
-
     startRun(
       {
         run_id: `archive-${process.pid}-${Date.now()}`,
@@ -1660,7 +1647,6 @@ test("Async run archive and prune only allow terminal run state", async () => {
     const archivedTrace = readRunTraceJournal(archiveDir);
     assert.equal(summarizeRunTraceJournal(archivedTrace).compacted, true);
     assert.ok(archivedTrace.fileBytes <= Limits.TRACE_JOURNAL_MAX_BYTES);
-
     startRun(
       {
         artifacts: {
@@ -1704,7 +1690,6 @@ test("Async run archive and prune only allow terminal run state", async () => {
     assert.equal(retention[2].id, retention[3].id);
     assert.equal(archived.retention_id, retention[0].id);
     assert.equal(pruned.retention_id, retention[2].id);
-
     startRun(
       {
         artifacts: { report: { path: "{state_dir}/report.txt", required: true } },

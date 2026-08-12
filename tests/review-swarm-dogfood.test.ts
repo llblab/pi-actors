@@ -121,7 +121,6 @@ test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
     await writeFile(fakePi, fakePiScript(), "utf8");
     await chmod(fakePi, 0o755);
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-
     const meta = startRun(
       {
         file: join(__dirname, "..", "recipes", "pipeline-review-readiness.json"),
@@ -140,7 +139,6 @@ test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
       },
       process.cwd(),
     );
-
     await waitForFile(join(stateDir, "result.json"), 20000);
     const status = getRunStatus(stateDir);
     const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8"));
@@ -151,7 +149,6 @@ test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
     const evidence = JSON.parse(
       await readFile(join(stateDir, "execution.json"), "utf8"),
     );
-
     assert.equal(meta.model_policy?.model.source, "inherited");
     assert.equal(status.status, "done", `${stdout}\n${stderr}`);
     assert.equal(result.code, 0);

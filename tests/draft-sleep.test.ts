@@ -86,7 +86,6 @@ test("Draft sleep excludes unchanged demotions until their executable revision c
       demoted_fingerprint: ledger.fingerprint,
     }));
     assert.equal(captureDraftSleepBatch(captureOptions(paths)), undefined);
-
     await writeFile(demotedPath, JSON.stringify({ template: "echo revised" }));
     const batch = captureDraftSleepBatch(captureOptions(paths));
     assert.ok(batch);
@@ -107,7 +106,6 @@ test("Draft sleep captures exactly twelve immutable drafts and leaves newer work
   try {
     const batch = captureDraftSleepBatch(captureOptions(paths))!;
     const input = JSON.parse(await readFile(batch.inputPath, "utf8")) as DraftReviewInput;
-
     assert.equal(input.drafts.length, DRAFT_SLEEP_THRESHOLD);
     assert.equal(batch.sourcePaths.length, DRAFT_SLEEP_THRESHOLD);
     assert.equal(input.drafts.some((draft) => draft.path.endsWith("draft_12.json")), false);
@@ -140,7 +138,6 @@ test("Draft sleep defers under actor load and launches one silent batch later", 
     scheduler.schedule();
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(launched.length, 0);
-
     active = false;
     scheduler.schedule();
     await waitFor(() => launched.length === 1);
@@ -175,7 +172,6 @@ test("Concurrent draft sleep schedulers launch one claimed batch", async () => {
     second.schedule();
     await waitFor(() => existsSync(paths.statePath));
     await new Promise((resolve) => setTimeout(resolve, 30));
-
     assert.deepEqual(launches, [BATCH_ID]);
     assert.equal(JSON.parse(await readFile(paths.statePath, "utf8")).phase, "launched");
     first.close();
@@ -229,13 +225,11 @@ test("Draft sleep applies one promotion, discards the batch, and preserves newer
       sourcePaths: batch.sourcePaths,
       updatedAt: "2026-01-02T00:00:00.000Z",
     };
-
     const processed = processDraftSleepReview(state, {
       getRunStatus: () => ({ state_dir: runDir, status: "done" }),
       now: () => new Date("2026-01-04T00:00:00.000Z"),
       recipeRoot: paths.recipeRoot,
     });
-
     assert.equal(processed.outcome, "completed");
     assert.equal(existsSync(join(paths.recipeRoot, "promoted_tool.json")), true);
     assert.equal(existsSync(join(paths.draftRoot, "draft_00.json")), false);
@@ -313,7 +307,6 @@ test("Draft transaction recovery ignores changed, malformed, and missing reviewe
       ),
       true,
     );
-
     await writeResult("divergent_target");
     const recover = () => processDraftSleepReview(state, {
       getRunStatus: () => {
@@ -327,7 +320,6 @@ test("Draft transaction recovery ignores changed, malformed, and missing reviewe
     assert.equal(existsSync(join(paths.recipeRoot, "divergent_target.json")), false);
     const evidence = JSON.parse(await readFile(recovered.evidencePath!, "utf8"));
     assert.equal(evidence.decisions[0].target, "original_target");
-
     await writeFile(join(runDir, "stdout.log"), "malformed reviewer output");
     assert.equal(recover().outcome, "completed");
     await rm(join(runDir, "stdout.log"));

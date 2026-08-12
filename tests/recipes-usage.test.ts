@@ -91,10 +91,8 @@ test("Recipe usage launch counter increments lineage metadata", async () => {
         template: "echo ok",
       }),
     );
-
     assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-02T03:04:05.000Z"), "spawn"), true);
     assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-03T03:04:05.000Z"), "tool"), true);
-
     const usage = readRecipeUsage(recipe)!;
     assert.equal(usage.calls, 2);
     assert.equal(usage.spawn_calls, 1);
@@ -170,11 +168,9 @@ test("Recipe usage preserves lifetime calls across recipe revisions", async () =
   try {
     const recipe = join(root, "memory.json");
     await writeFile(recipe, JSON.stringify({ template: "echo one" }));
-
     assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-02T03:04:05.000Z")), true);
     const beforeUsage = readRecipeUsage(recipe)!;
     await writeFile(recipe, JSON.stringify({ template: "echo two", external: true }));
-
     assert.equal(recordRecipeLaunch(recipe, new Date("2026-01-03T03:04:05.000Z")), true);
     const usage = readRecipeUsage(recipe)!;
     assert.equal(usage.calls, 2);
@@ -212,7 +208,6 @@ test("Recipe lineage and lifetime usage survive draft promotion and demotion", a
     await writeFile(draft, JSON.stringify({ template: "echo ok" }));
     assert.equal(recordRecipeLaunch(draft, new Date("2026-01-01T00:00:00.000Z")), true);
     const initial = readRecipeUsage(draft, root)!;
-
     await rename(draft, active);
     assert.equal(moveRecipeUsage(draft, active, root), true);
     assert.equal(recordRecipeLaunch(active, new Date("2026-01-02T00:00:00.000Z"), "tool", root), true);
@@ -222,7 +217,6 @@ test("Recipe lineage and lifetime usage survive draft promotion and demotion", a
     assert.equal(promoted.lifetime_calls, 2);
     assert.equal(promoted.revision_calls, 2);
     assert.deepEqual(promoted.former_paths, ["drafts/memory.json"]);
-
     await rename(active, draft);
     assert.equal(moveRecipeUsage(active, draft, root), true);
     const demoted = readRecipeUsage(draft, root)!;

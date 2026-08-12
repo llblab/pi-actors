@@ -84,7 +84,6 @@ test("public spawn and Inspect expose one-shot Recipe, Trace, and Control only",
   const stateDir = String(started.details.state_dir);
   await waitForStatus(run, "done");
   await waitForProcessExit(run);
-
   const inspect = createInspectToolDefinition();
   const recipe = await inspect.execute("recipe", { target: `run:${run}`, view: "recipe", verbose: true }, undefined, undefined, context);
   const trace = await inspect.execute("trace", { target: `run:${run}`, view: "trace", verbose: true }, undefined, undefined, context);
@@ -129,7 +128,6 @@ test("same-id replacement rejects and hides the old Run generation", async () =>
   });
   await waitForStatus(run, "killed");
   await waitForProcessExit(run);
-
   const second = await spawn.execute("spawn-second", { as: `run:${run}`, file: recipePath }, undefined, undefined, context);
   const generationB = String(second.details.run_instance_id);
   assert.notEqual(generationB, generationA);
@@ -143,7 +141,6 @@ test("same-id replacement rejects and hides the old Run generation", async () =>
   );
   assert.equal(await missing(join(stateDir, "controls.jsonl")), true);
   assert.equal(await missing(join(stateDir, "control-endpoint.json")), true);
-
   const inspect = createInspectToolDefinition();
   const control = await inspect.execute("control", { target: `run:${run}`, view: "control", verbose: true }, undefined, undefined, context);
   assert.equal((control.details as any).run_instance_id, generationB);

@@ -187,7 +187,6 @@ export function validateRecipes(argv) {
   if (!targetArg || argv.includes("--help") || argv.includes("-h")) {
     return { help: true, ok: Boolean(targetArg), usage: validateRecipeUsage() };
   }
-
   const files = recipeFiles(expandPath(targetArg), all);
   const results = files.map((file) => validateFile(file, qa));
   const failed = results.filter((result) => !result.ok).length;

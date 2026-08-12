@@ -100,7 +100,6 @@ test("Control projection bounds large structured input and handles circular valu
   );
   assert.equal((largeProjection.input as Record<string, unknown>).truncated, true);
   assert.doesNotMatch(JSON.stringify(largeProjection.input), /LARGE_SECRET_/);
-
   const circular: Record<string, unknown> = {
     password: "CIRCULAR_SECRET",
   };

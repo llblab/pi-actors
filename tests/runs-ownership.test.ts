@@ -30,7 +30,6 @@ test("Run state ownership claims only empty canonical directories", async () => 
       () => assertOwnedRunStateDirectory(owned, "other-run"),
       /ownership marker does not match/,
     );
-
     const unrelated = join(root, "project-root");
     await mkdir(unrelated);
     await writeFile(join(unrelated, "package.json"), "{}");
@@ -38,14 +37,12 @@ test("Run state ownership claims only empty canonical directories", async () => 
       () => claimRunStateDirectory(unrelated, "unsafe"),
       /existing non-run directory/,
     );
-
     const alias = join(root, "alias");
     await symlink(owned, alias, "dir");
     assert.throws(
       () => claimRunStateDirectory(alias, "owned-run"),
       /cannot be a symlink/,
     );
-
     const realParent = join(root, "real-parent");
     const parentAlias = join(root, "parent-alias");
     await mkdir(realParent);

@@ -68,7 +68,6 @@ test("Trace projection uses physical source order for equal timestamps", async (
       { type: "message", id: "u2", parentId: "a1", timestamp: ts, message: { role: "user", content: "second user" } },
       { type: "message", id: "a2", parentId: "u2", timestamp: ts, message: { role: "assistant", content: "second agent" } },
     ].map((value) => JSON.stringify(value)).join("\n"));
-
     assert.deepEqual(
       projectRunTrace(root, { source: "lifecycle" }).map(({ id }) => id),
       ["a-trace-second", "z-trace-first"],
@@ -279,7 +278,6 @@ test("Trace projection exposes compaction and legacy history loss without new fi
       compacted.some(({ kind }) => kind === "runtime.trace_history_incomplete"),
       false,
     );
-
     const prefix = Buffer.alloc(TRACE_JOURNAL_MAX_BYTES + 17, 0x61);
     const suffix = `${JSON.stringify({
       id: "legacy-event",

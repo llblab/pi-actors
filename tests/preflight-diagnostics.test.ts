@@ -40,7 +40,6 @@ test("Review preflight diagnostics expose stage, model, prompt file, and overrid
     promptText: "Preflight check for stage reviewer. Confirm launch.",
     stderr: "404 model not found",
   });
-
   assert.deepEqual(diagnostic, {
     errorClass: "model_unavailable",
     model: "bad-model",

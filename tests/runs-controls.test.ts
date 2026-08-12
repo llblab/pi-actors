@@ -103,7 +103,6 @@ test("Run Control delivery evidence never regresses claimed or terminal state", 
       false,
     );
     updateRunControlStatusInStateDir(root, deliveredFirst.id, "handled");
-
     const handledFirst = appendRunControlInStateDir(root, {
       action: "resume",
       run_instance_id: "generation-a",

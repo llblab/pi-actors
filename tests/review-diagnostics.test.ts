@@ -62,7 +62,6 @@ test("Automatic review diagnostics expose bounded semantic evidence", () => {
       sourcePaths: ["one", "two"],
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
-
     const approvedPath = join(cycleDir, "approved.json");
     const lineageJournalPath = `${approvedPath}.lineage-journal.json`;
     writeJsonAtomic(approvedPath, {
@@ -96,7 +95,6 @@ test("Automatic review diagnostics expose bounded semantic evidence", () => {
     writeJsonAtomic(getRecipeRevisionSnapshotPath("demoted", 1, recipeRoot), {
       type: "recipe_revision_snapshot",
     });
-
     const diagnostics = readAutomaticReviewDiagnostics({
       draftStatePath,
       recipeRoot,

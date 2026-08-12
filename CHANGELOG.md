@@ -2,6 +2,12 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.45.1: Entrypoint and Release Policy
+
+- `Architecture`: Keeps `index.ts` as a thin Pi event-registration and composition root while moving session lifecycle, runtime service composition, Skill discovery, and tool adaptation into the acyclic `extension-runtime.ts` domain.
+- `Release Policy`: Raises the fixed shipped-source ceiling to 32,000 lines and rejects blank lines inside executable JavaScript/TypeScript blocks across the complete source and test tree while exempting structural declarations.
+- `Package Metadata`: Moves the package image to the new raw-content endpoint to restore cross-origin loading.
+
 ## 0.45.0: Skill Recipe Standard Library
 
 - `Recipe Values`: Makes inline argument defaults optional, applies caller > values > defaults > inline precedence across tools, Runs, imports, and delegation, and validates final typed/enum values plus duplicate, unknown-default, and conflicting-type declarations.

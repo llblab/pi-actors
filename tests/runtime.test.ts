@@ -46,7 +46,6 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
       description: "Bad repeat",
       template: { repeat: "{count}", template: "echo {item}" },
     });
-
     const notifications: string[] = [];
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
@@ -56,12 +55,10 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
       registerTool: () => assert.fail("invalid recipe should not register"),
       reservedToolNames: new Set(),
     });
-
     runtime.loadTools({
       hasUI: true,
       ui: { notify: (message) => notifications.push(message) },
     });
-
     assert.equal(runtime.getTools().has("bad-repeat"), false);
     assert.match(notifications.join("\n"), /Command template repeat/);
   } finally {
@@ -84,7 +81,6 @@ test("Runtime suppresses routine bash wrapper startup warnings", async () => {
       description: "Trusted local wrapper",
       template: "bash -- ./script.sh",
     });
-
     const notifications: string[] = [];
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
@@ -94,12 +90,10 @@ test("Runtime suppresses routine bash wrapper startup warnings", async () => {
       registerTool: () => {},
       reservedToolNames: new Set(),
     });
-
     runtime.loadTools({
       hasUI: true,
       ui: { notify: (message) => notifications.push(message) },
     });
-
     assert.equal(runtime.getTools().has("bash-wrapper"), true);
     assert.equal(notifications.join("\n"), "");
   } finally {
@@ -126,7 +120,6 @@ test("Runtime treats same-id recipe shadowing as a normal override", async () =>
       description: "User player",
       template: "echo user",
     });
-
     const notifications: string[] = [];
     const registered: string[] = [];
     const runtime = createAutoToolsRuntime({
@@ -137,12 +130,10 @@ test("Runtime treats same-id recipe shadowing as a normal override", async () =>
       registerTool: (definition) => registered.push(definition.name),
       reservedToolNames: new Set(),
     });
-
     runtime.loadTools({
       hasUI: true,
       ui: { notify: (message) => notifications.push(message) },
     });
-
     assert.deepEqual(registered, ["music_player"]);
     assert.equal(
       runtime.getTools().get("music_player")?.description,
@@ -169,7 +160,6 @@ test("Runtime keeps reserved tool names protected during recipe loading", async 
       description: "Unsafe core override",
       template: "echo nope",
     });
-
     const notifications: string[] = [];
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
@@ -179,12 +169,10 @@ test("Runtime keeps reserved tool names protected during recipe loading", async 
       registerTool: () => assert.fail("reserved recipe should not register"),
       reservedToolNames: new Set(["read"]),
     });
-
     runtime.loadTools({
       hasUI: true,
       ui: { notify: (message) => notifications.push(message) },
     });
-
     assert.match(notifications.join("\n"), /Reserved tool name: read/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -219,7 +207,6 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       description: "Packaged component",
       template: "echo component",
     });
-
     const registered: string[] = [];
     let activeTools = ["read"];
     const runtime = createAutoToolsRuntime({
@@ -237,9 +224,7 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
         activeTools = toolNames;
       },
     });
-
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
-
     assert.deepEqual([...runtime.getTools().keys()].sort(), [
       "recipe-only",
       "user-tool",
@@ -254,10 +239,8 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
     );
     assert.equal(runtime.getTools().get("stdlib-tool"), undefined);
     assert.deepEqual(registered.sort(), ["recipe-only", "user-tool"]);
-
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
     assert.deepEqual(registered.sort(), ["recipe-only", "user-tool"]);
-
     await writeRecipe(recipeRoot, "user-tool", {
       description: "Updated user tool",
       args: ["scope:path"],
@@ -269,7 +252,6 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       "user-tool",
       "user-tool",
     ]);
-
     await writeRecipe(packagedRecipeRoot, "fallback", {
       description: "Packaged fallback",
       template: "echo packaged",
@@ -286,7 +268,6 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
     });
     assert.equal(runtime.getTools().has("fallback"), false);
     assert.match(warnings.join("\n"), /blocks lower-priority recipes/);
-
     await writeRecipe(recipeRoot, "fallback", {
       description: "Recovered user winner",
       template: "echo recovered {topic}",
@@ -297,7 +278,6 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       "Recovered user winner",
     );
     assert.deepEqual(runtime.getTools().get("fallback")?.args, ["topic"]);
-
     await unlink(join(recipeRoot, "user-tool.json"));
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
     assert.equal(runtime.getTools().has("user-tool"), false);
@@ -312,7 +292,6 @@ test("Stale recipe watcher callbacks cannot close a replacement watcher", async 
     closed = false;
     readonly path: string;
     readonly listener: (event: string, changedFile: string | null) => void;
-
     constructor(
       path: string,
       listener: (event: string, changedFile: string | null) => void,
@@ -321,16 +300,13 @@ test("Stale recipe watcher callbacks cannot close a replacement watcher", async 
       this.path = path;
       this.listener = listener;
     }
-
     close(): void {
       this.closed = true;
     }
-
     change(changedFile: string | null = null): void {
       this.listener("rename", changedFile);
     }
   }
-
   const recipeRoot = "/agent/recipes";
   let rootExists = true;
   let loads = 0;
@@ -348,7 +324,6 @@ test("Stale recipe watcher callbacks cannot close a replacement watcher", async 
     },
   );
   const ctx = { hasUI: true, ui: { notify() {} } };
-
   watcher.watch(ctx);
   const firstRoot = watchers[0]!;
   rootExists = false;
@@ -357,13 +332,11 @@ test("Stale recipe watcher callbacks cannot close a replacement watcher", async 
   rootExists = true;
   parent.change("recipes");
   const replacementRoot = watchers[2]!;
-
   firstRoot.emit("error", new Error("delayed stale error"));
   firstRoot.change("stale-event.json");
   assert.equal(replacementRoot.closed, false);
   replacementRoot.change("tool.json");
   await new Promise((resolve) => setTimeout(resolve, 200));
-
   assert.equal(loads, 1);
   assert.equal(replacementRoot.closed, false);
   watcher.close();
@@ -409,7 +382,6 @@ test("Recipe watcher rearms when the recipe root appears", {
     });
     await waitForLoad(0);
     assert.match(notifications.join("\n"), /Recipe tools refreshed/);
-
     previousLoads = loads;
     await rm(recipeRoot, { recursive: true, force: true });
     await waitForLoad(previousLoads);

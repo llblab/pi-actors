@@ -118,7 +118,6 @@ test("Review reset clears disposable failure but preserves recovery evidence", (
     });
     assert.equal(reset.changed, true);
     assert.equal(existsSync(fx.draftStatePath), false);
-
     writeFileSync(fx.toolStatePath, JSON.stringify({
       approvedPath: "/review/approved.json",
       phase: "processing_failed",

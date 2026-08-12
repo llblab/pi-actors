@@ -109,7 +109,6 @@ test("Trace retention selects one newest suffix under target budgets", () => {
   );
   assert.equal(byCount.retained[0]?.value, 4);
   assert.equal(byCount.droppedEvents, 4);
-
   const byBytes = selectNewestTraceSuffix([
     { encodedBytes: Limits.TRACE_JOURNAL_TARGET_BYTES, value: "old" },
     { encodedBytes: 1, value: "middle" },
@@ -224,7 +223,6 @@ test("Control admission distinguishes byte pressure from journal integrity", () 
   if (!bytePressure.admitted) {
     assert.equal(bytePressure.error.reason, "control_backpressure");
   }
-
   for (const [input, integrityReason] of [
     [admission({ integrity: "malformed" }), "malformed"],
     [admission({ records: [{ status: "unknown" }] }), "invalid_record"],

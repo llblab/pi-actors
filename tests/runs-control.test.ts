@@ -47,7 +47,6 @@ test("Process-group ESRCH alone permits exact-process fallback", () => {
     runtimePlatform: "linux",
     verifyIdentity: () => ({ status: "valid", valid: true }),
   });
-
   assert.deepEqual(targets, [-123, 123]);
   assert.deepEqual(result, { signalTarget: "process" });
 });
@@ -114,7 +113,6 @@ test("Windows process-tree signaling tolerates exit after identity validation", 
         : { status: "dead_pid", valid: false };
     },
   });
-
   assert.deepEqual(result, {
     args: ["/PID", "123", "/T"],
     command: "taskkill",

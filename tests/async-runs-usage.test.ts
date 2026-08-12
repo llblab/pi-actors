@@ -26,7 +26,6 @@ test("Async run start increments user recipe launch counter", async () => {
       }
       throw new Error("run did not finish");
     }
-
     const recipeRoot = join(agentDir, "recipes");
     await import("node:fs/promises").then((fs) =>
       fs.mkdir(recipeRoot, { recursive: true }),
@@ -39,10 +38,8 @@ test("Async run start increments user recipe launch counter", async () => {
         template: `${process.execPath} -e "console.log('counted')"`,
       }),
     );
-
     const meta = startRun({ file: "counted", run_id: "counted-run" }, process.cwd());
     await waitForResult(meta.state_dir);
-
     const usage = readRecipeUsage(recipe)!;
     assert.equal(usage.calls, 1);
     assert.equal(typeof usage.last_called, "string");

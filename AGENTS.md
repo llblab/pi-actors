@@ -44,6 +44,7 @@ Pi host
 
 ## Key Domains
 
+- `extension-runtime.ts`: low-level Pi session lifecycle, tool adaptation, and runtime service composition behind the thin `index.ts` event-registration root.
 - `command-templates.ts`: portable synchronous execution graph.
 - `recipes-references.ts`, `recipes-discovery.ts`, `recipe-control.ts`: Recipe resolution, imports, shadowing, and Control declarations.
 - `async-runs.ts`: lifecycle facade.
@@ -135,6 +136,7 @@ When a deferred Run result gates the next step, wait for its terminal follow-up.
 ## Documentation and Release Discipline
 
 - Keep published text portable: use `~`, `<repo>`, or relative paths.
+- Keep executable JavaScript and TypeScript blocks compact: no blank lines inside function bodies or control-flow blocks. Structural object, type, interface, class, and module bodies are exempt.
 - Update `skills/actors/SKILL.md` when durable operating mechanics change.
 - Keep `skills/swarm/SKILL.md` focused on multi-agent methodology rather than kernel internals.
 - Recipe `description` is optional because discovery supplies stable fallback tool copy; packaged Recipe QA must report zero diagnostics and zero release-blocking warnings without component boilerplate.

@@ -74,7 +74,6 @@ function summarizeCommandDetail(commandDetail) {
 
 export async function runAsyncRunner(stateDir = process.argv[2]) {
   if (!stateDir) throw new Error("missing state dir");
-
   const runPath = join(stateDir, "run.json");
   const progressPath = join(stateDir, "progress.json");
   const resultPath = join(stateDir, "result.json");
@@ -83,11 +82,9 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
   const stderrPath = join(stateDir, "stderr.log");
   const executionPath = join(stateDir, "execution.json");
   const meta = JSON.parse(readFileSync(runPath, "utf8"));
-
   function event(kind, data = {}) {
     appendRunTraceEvent(stateDir, { kind, data });
   }
-
   function observation(kind, summary, data = {}, delivery = "log", level = "info") {
     appendRunTraceEvent(stateDir, {
       kind,
@@ -97,7 +94,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       ...(level === "error" ? { level: "error" } : {}),
     });
   }
-
   function progress(phase, extra = {}) {
     writeJsonAtomic(progressPath, {
       ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
@@ -106,7 +102,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       ...extra,
     });
   }
-
   let activeSubagents = 0;
   let completedSubagents = 0;
   let promptCounter = 0;
@@ -115,7 +110,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
   const evidenceRecords = [];
   const stageOccurrences = new Map();
   let reportEvidence;
-
   function writeExecutionManifest(status) {
     writeJsonAtomic(executionPath, {
       version: 1,
@@ -129,7 +123,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       updated_at: new Date().toISOString(),
     });
   }
-
   function commandSessionFiles(sessionDir) {
     if (!sessionDir) return [];
     try {
@@ -141,7 +134,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       return [];
     }
   }
-
   function commandEvidenceStartRecord({
     commandDetail,
     commandId,
@@ -181,7 +173,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
           : "not_required",
     };
   }
-
   function commandEvidenceRecord({
     captureDir,
     commandDetail,
@@ -273,7 +264,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
             : "rejected",
     };
   }
-
   function auditReviewReport(text) {
     const required = evidenceRecords
       .filter((record) =>
@@ -294,11 +284,9 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       complete_allowed: missing.length === 0,
     };
   }
-
   function getCommandDoneDelivery(result) {
     return result.code !== 0 || activeSubagents > 0 ? "followup" : "log";
   }
-
   function progressRunning() {
     progress("running", {
       activeSubagents,
@@ -306,14 +294,12 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       failures: subagentFailures,
     });
   }
-
   function promptFilePath() {
     promptCounter += 1;
     const dir = join(stateDir, "prompts");
     mkdirSync(dir, { recursive: true });
     return join(dir, `command-${String(promptCounter).padStart(3, "0")}.md`);
   }
-
   function readPromptText(promptFile) {
     if (!promptFile) return undefined;
     try {
@@ -322,7 +308,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       return undefined;
     }
   }
-
   async function observedExec(command, args, options) {
     captureCounter += 1;
     const commandId = `command-${String(captureCounter).padStart(3, "0")}`;
@@ -485,7 +470,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     progressRunning();
     return result;
   }
-
   try {
     event("run.runner.start", { pid: process.pid });
     progressRunning();

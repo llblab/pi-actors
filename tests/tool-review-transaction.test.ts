@@ -254,10 +254,8 @@ test("Concurrent session boundaries preserve completed lineage state", async () 
     const second = startBoundaryWorker([statePath, fx.recipeRoot, secondOutput]);
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(existsSync(secondOutput), false);
-
     writeFileSync(firstProceed, "proceed\n");
     await Promise.all([first, second]);
-
     assert.equal(JSON.parse(readFileSync(firstOutput, "utf8")).outcome, "completed");
     assert.equal(JSON.parse(readFileSync(secondOutput, "utf8")).outcome, "completed");
     assert.equal(JSON.parse(readFileSync(statePath, "utf8")).phase, "completed");
@@ -299,7 +297,6 @@ test("Safe-boundary restart completes lineage before quarantine cleanup", () => 
         crashAt,
       );
       assert.equal(existsSync(join(fx.root, "review", "quarantine")), true);
-
       const recovered = applyApprovedToolReviewAtSessionBoundary({
         recipeRoot: fx.recipeRoot,
         statePath,
@@ -381,7 +378,6 @@ test("Tool review recovery rejects journal operations rewritten outside the plan
       .digest("hex");
     journal.quarantined[0].quarantine = journal.operations.sources[0].quarantine;
     writeJsonAtomic(journalPath, journal);
-
     assert.throws(
       () => recoverToolReviewTransaction(fx.approvedPath, { recipeRoot: fx.recipeRoot }),
       /invalid or mismatched tool review transaction journal/i,
@@ -399,7 +395,6 @@ test("Tool review committed recovery rejects changed quarantine", () => {
       readFileSync(join(fx.root, "review", "journal.json"), "utf8"),
     );
     writeFileSync(journal.quarantined[0].quarantine, "changed\n");
-
     assert.throws(
       () => recoverToolReviewTransaction(fx.approvedPath, { recipeRoot: fx.recipeRoot }),
       /quarantine changed/,
@@ -420,7 +415,6 @@ test(
       applyToolReviewPlan(fx.approvedPath, { recipeRoot: fx.recipeRoot });
       renameSync(fx.recipeRoot, movedRoot);
       symlinkSync(movedRoot, fx.recipeRoot, "dir");
-
       assert.throws(
         () => recoverToolReviewTransaction(fx.approvedPath, { recipeRoot: fx.recipeRoot }),
         /invalid tool review transaction root/i,

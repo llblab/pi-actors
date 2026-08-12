@@ -399,6 +399,8 @@ test("Recipe watcher rearms when the recipe root appears", {
     watcher.watch(ctx);
     const recipeRoot = join(agentDir, "recipes");
     await mkdir(recipeRoot);
+    await waitForLoad(0);
+    let previousLoads = loads;
     await writeRecipe(recipeRoot, "first", {
       description: "First",
       template: "echo first",
@@ -406,7 +408,7 @@ test("Recipe watcher rearms when the recipe root appears", {
     await waitForLoad(0);
     assert.match(notifications.join("\n"), /Recipe tools refreshed/);
 
-    let previousLoads = loads;
+    previousLoads = loads;
     await rm(recipeRoot, { recursive: true, force: true });
     await waitForLoad(previousLoads);
     previousLoads = loads;

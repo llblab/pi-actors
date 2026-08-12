@@ -1,7 +1,8 @@
 /** Pi-facing kernel tool contract tests. */
 
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -10,6 +11,7 @@ import { getRunStateRoot } from "../lib/paths.ts";
 import { createRegisterToolDefinition } from "../lib/tools-register.ts";
 import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
+import { setActiveSkillRecipeSources } from "../lib/recipes-references.ts";
 
 function createRegistryDeps() {
   return {
@@ -55,6 +57,40 @@ test("Spawn tool definition exposes Run creation without communication fields", 
   assert.ok(properties.values);
   assert.equal(properties.correlation_id, undefined);
   assert.ok(properties.transport_context);
+});
+
+test("Spawn launches a qualified active-Skill Recipe", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-skill-"));
+  const skillDir = join(root, "skill");
+  const recipeDir = join(skillDir, "recipes");
+  const runId = `spawn-skill-${process.pid}-${Date.now()}`;
+  const stateDir = join(getRunStateRoot(), runId);
+  try {
+    await mkdir(recipeDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), "# Skill\n");
+    await writeFile(
+      join(recipeDir, "task.json"),
+      JSON.stringify({
+        template: `${process.execPath} -e "console.log(process.argv[1])" {skill_dir}`,
+      }),
+    );
+    setActiveSkillRecipeSources([{ name: "sample", baseDir: skillDir }]);
+    const spawn = createSpawnToolDefinition();
+    const result = await spawn.execute(
+      "call-skill-spawn",
+      { as: `run:${runId}`, recipe: "skill:sample/task" },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+    assert.equal(result.details.recipe_file, join(recipeDir, "task.json"));
+    assert.equal(result.details.values.skill_dir, skillDir);
+    await waitForFile(join(stateDir, "result.json"));
+  } finally {
+    setActiveSkillRecipeSources([]);
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Runtime async Recipe tools expose optional run_id", () => {
@@ -176,4 +212,80 @@ test("Runtime inline defaults remain optional", () => {
     async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
   );
   assert.deepEqual(definition.parameters.required, ["text"]);
+});
+
+test("Runtime Recipe arg declaration defaults remain optional", () => {
+  for (const async of [false, true]) {
+    const definition = createRuntimeToolDefinition(
+      {
+        args: ["text", "lang"],
+        defaults: {},
+        description: "Speak text",
+        name: async ? "speak_run" : "speak",
+        recipe: {
+          async,
+          args: ["text", "lang=ru"],
+          template: "speak --text {text} --lang {lang}",
+        },
+        storedArgs: ["text", "lang"],
+        template: "speak.json",
+      },
+      async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+    );
+    assert.deepEqual(definition.parameters.required, ["text"]);
+  }
+});
+
+test("Runtime Recipe values follow caller then values then defaults then inline precedence", async () => {
+  const seen: string[][] = [];
+  const definition = createRuntimeToolDefinition(
+    {
+      argTypes: { mode: { kind: "enum", values: ["inline", "default", "bound", "caller"] } },
+      args: ["mode"],
+      defaults: { mode: "default" },
+      description: "Resolve mode",
+      name: "resolve_mode",
+      recipe: {
+        args: ["mode:enum(inline,default,bound,caller)=inline"],
+        defaults: { mode: "default" },
+        values: { mode: "bound" },
+        template: "resolve {mode}",
+      },
+      storedArgs: ["mode:enum(inline,default,bound,caller)"],
+      template: "resolve.json",
+    },
+    async (command, args) => {
+      seen.push([command, ...args]);
+      return { stdout: "ok", stderr: "", code: 0, killed: false };
+    },
+  );
+  await definition.execute("bound", {}, undefined, undefined, { cwd: "/work" });
+  await definition.execute("caller", { mode: "caller" }, undefined, undefined, { cwd: "/work" });
+  assert.deepEqual(seen.map((command) => command.at(-1)), ["bound", "caller"]);
+});
+
+test("Runtime async Recipe validates the selected bound enum value", async () => {
+  const definition = createRuntimeToolDefinition(
+    {
+      argTypes: { mode: { kind: "enum", values: ["check", "fix"] } },
+      args: ["mode"],
+      defaults: { mode: "check" },
+      description: "Resolve mode",
+      name: "resolve_mode_run",
+      recipe: {
+        async: true,
+        args: ["mode:enum(check,fix)=check"],
+        values: { mode: "delete" },
+        template: "resolve {mode}",
+      },
+      storedArgs: ["mode:enum(check,fix)"],
+      template: "resolve.json",
+    },
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+  );
+  await mkdir(getRunStateRoot(), { recursive: true });
+  await assert.rejects(
+    definition.execute("invalid", {}, undefined, undefined, { cwd: "/work" }),
+    /Argument mode must be one of: check, fix/,
+  );
 });

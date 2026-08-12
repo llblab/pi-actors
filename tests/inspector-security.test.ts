@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { readExecutionTurns } from "../lib/execution-sessions.ts";
-import { readActorInspectorRuns } from "../lib/inspector.ts";
+import { readActorInspectorRecipe, readActorInspectorRuns } from "../lib/inspector.ts";
 
 async function writeRun(
   root: string,
@@ -32,6 +32,30 @@ test("inspector rejects stale cross-session run selections", async () => {
     await writeRun(root, "owned", "new-owner");
     const runs = readActorInspectorRuns(root, "new-owner");
     assert.deepEqual(runs.map((item) => item.run), ["owned"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("inspector hides runtime-owned Recipe origins from model-facing launch values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-origin-"));
+  try {
+    const stateDir = await writeRun(root, "owned", "owner");
+    await writeFile(
+      join(stateDir, "run.json"),
+      JSON.stringify({
+        ownerId: "owner",
+        recipe_file: "/private/skill/recipes/task.json",
+        run: "owned",
+        values: {
+          recipe_dir: "/private/skill/recipes",
+          skill_dir: "/private/skill",
+          visible: "ok",
+        },
+      }),
+    );
+    const view = readActorInspectorRecipe(stateDir);
+    assert.deepEqual(view.launch.values, { visible: "ok" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

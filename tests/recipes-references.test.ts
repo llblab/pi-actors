@@ -13,9 +13,11 @@ import { fileURLToPath } from "node:url";
 import { getPackagedRecipeRoot } from "../lib/paths.ts";
 import {
   buildRecipeContextRecords,
+  getActiveSkillRecipeNamespaces,
   getRecipeIdFromPath,
   readResolvedRecipeConfig,
   resolveRecipePath,
+  setActiveSkillRecipeSources,
 } from "../lib/recipes-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -29,7 +31,7 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
       child,
       JSON.stringify({
         name: "child",
-        args: ["word:string", "suffix:string"],
+        args: ["word:string", "suffix:string=!"],
         defaults: { suffix: "!" },
         template: "printf {word}{suffix}",
       }),
@@ -51,8 +53,8 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
     const config = readResolvedRecipeConfig(parent)!;
     assert.deepEqual(config.template, [
       {
-        args: ["word:string", "suffix:string"],
-        defaults: { suffix: "!", word: "hello" },
+        args: ["word:string", "suffix:string=!"],
+        defaults: { recipe_dir: root, suffix: "!", word: "hello" },
         template: "printf {word}{suffix}",
       },
       "wc -c",
@@ -129,6 +131,149 @@ test("Template recipe context records preserve raw composition identity", async 
   }
 });
 
+test("File-backed Recipes receive immutable recipe and Skill directories", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-origin-"));
+  try {
+    const skillDir = join(root, "sample-skill");
+    const recipeDir = join(skillDir, "recipes", "nested");
+    await import("node:fs/promises").then((fs) =>
+      fs.mkdir(recipeDir, { recursive: true }),
+    );
+    await writeFile(join(skillDir, "SKILL.md"), "# Sample\n");
+    const file = join(recipeDir, "origin.json");
+    await writeFile(
+      file,
+      JSON.stringify({ template: "echo {recipe_dir} {skill_dir}" }),
+    );
+
+    const config = readResolvedRecipeConfig(file)!;
+    assert.equal(config.recipe_dir, recipeDir);
+    assert.equal(config.skill_dir, skillDir);
+    assert.equal(config.values?.recipe_dir, recipeDir);
+    assert.equal(config.values?.skill_dir, skillDir);
+
+    await writeFile(
+      file,
+      JSON.stringify({
+        args: ["recipe_dir:string"],
+        template: "echo {recipe_dir}",
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(file),
+      /Recipe runtime value is reserved: recipe_dir/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipes reject skill_dir outside an owning Skill", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-no-skill-"));
+  try {
+    const file = join(root, "outside.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        artifacts: { report: "{skill_dir}/report.md" },
+        template: "echo ok",
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(file),
+      /uses \{skill_dir\} outside an owning Skill directory/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Qualified std and active-Skill Recipe references resolve without bare shadowing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-skill-recipes-"));
+  try {
+    const skillDir = join(root, "sample");
+    const recipeDir = join(skillDir, "recipes", "nested");
+    await import("node:fs/promises").then((fs) =>
+      fs.mkdir(recipeDir, { recursive: true }),
+    );
+    await writeFile(join(skillDir, "SKILL.md"), "# Sample\n");
+    await writeFile(
+      join(recipeDir, "task.json"),
+      JSON.stringify({ template: "echo {skill_dir}" }),
+    );
+    setActiveSkillRecipeSources([
+      { name: "sample", filePath: join(skillDir, "SKILL.md") },
+    ]);
+
+    const parent = join(root, "parent.json");
+    await writeFile(
+      parent,
+      JSON.stringify({ template: "skill:sample/nested/task" }),
+    );
+    const config = readResolvedRecipeConfig(parent)!;
+    assert.match(JSON.stringify(config.template), /sample/);
+    assert.equal(
+      buildRecipeContextRecords(join(recipeDir, "task.json"))[0]
+        .qualified_name,
+      "skill:sample/nested/task",
+    );
+    assert.equal(JSON.stringify(config.template).includes("skill:sample"), false);
+
+    const stdParent = join(root, "std.json");
+    await writeFile(
+      stdParent,
+      JSON.stringify({ template: "std:utility-package-summary" }),
+    );
+    assert.match(
+      JSON.stringify(readResolvedRecipeConfig(stdParent)?.template),
+      /recipe-utils\.mjs/,
+    );
+
+    assert.deepEqual(getActiveSkillRecipeNamespaces(), {
+      sample: [join(skillDir, "recipes")],
+    });
+    setActiveSkillRecipeSources([]);
+    assert.deepEqual(getActiveSkillRecipeNamespaces(), {});
+    assert.throws(
+      () => readResolvedRecipeConfig(parent),
+      /Active Skill Recipe namespace not found: sample/,
+    );
+  } finally {
+    setActiveSkillRecipeSources([]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Duplicate active Skill names fail with deterministic ambiguity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-skill-collision-"));
+  try {
+    const first = join(root, "first");
+    const second = join(root, "second");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(join(first, "recipes"), { recursive: true }),
+        fs.mkdir(join(second, "recipes"), { recursive: true }),
+      ]),
+    );
+    setActiveSkillRecipeSources([
+      { name: "duplicate", baseDir: first },
+      { name: "duplicate", baseDir: second },
+    ]);
+    const parent = join(root, "parent.json");
+    await writeFile(
+      parent,
+      JSON.stringify({ template: "skill:duplicate/task" }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(parent),
+      /Ambiguous active Skill Recipe namespace duplicate/,
+    );
+  } finally {
+    setActiveSkillRecipeSources([]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Recipe paths expand repo and agent placeholders", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
@@ -189,12 +334,18 @@ test("Template recipe imports resolve bare names by recipe-root priority", async
     );
 
     const config = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
-    assert.deepEqual(config.template, { template: "echo user" });
+    assert.deepEqual(config.template, {
+      defaults: { recipe_dir: userRoot },
+      template: "echo user",
+    });
     await rm(join(userRoot, "shared.json"), { force: true });
     const fallbackConfig = readResolvedRecipeConfig(
       join(adHocRoot, "parent.json"),
     )!;
-    assert.deepEqual(fallbackConfig.template, { template: "echo adhoc" });
+    assert.deepEqual(fallbackConfig.template, {
+      defaults: { recipe_dir: adHocRoot },
+      template: "echo adhoc",
+    });
     const stdlibConfig = readResolvedRecipeConfig(
       join(adHocRoot, "stdlib-parent.json"),
     )!;
@@ -260,7 +411,7 @@ test("Template recipe direct delegation resolves by recipe priority", async () =
     assert.equal(config.retire_when, "children_terminal");
     assert.deepEqual(config.template, {
       args: ["message:string"],
-      defaults: { message: "parent" },
+      defaults: { message: "parent", recipe_dir: userRoot },
       template: "echo {message}",
     });
     await rm(join(userRoot, "shared.json"), { force: true });
@@ -268,7 +419,7 @@ test("Template recipe direct delegation resolves by recipe priority", async () =
       join(adHocRoot, "parent.json"),
     )!;
     assert.deepEqual(fallbackConfig.template, {
-      defaults: { message: "parent" },
+      defaults: { message: "parent", recipe_dir: adHocRoot },
       template: "echo {message}",
     });
     const stdlibConfig = readResolvedRecipeConfig(
@@ -278,6 +429,128 @@ test("Template recipe direct delegation resolves by recipe priority", async () =
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template recipe import and node values override defaults and inline defaults", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-precedence-"));
+  try {
+    const child = join(root, "child.json");
+    const parent = join(root, "parent.json");
+    await writeFile(
+      child,
+      JSON.stringify({
+        args: ["mode:enum(inline,default,recipe,binding,node)=inline"],
+        defaults: { mode: "default" },
+        values: { mode: "recipe" },
+        template: "echo {mode}",
+      }),
+    );
+    await writeFile(
+      parent,
+      JSON.stringify({
+        imports: {
+          child: { from: "child.json", values: { mode: "binding" } },
+        },
+        template: { name: "child", values: { mode: "node" } },
+      }),
+    );
+
+    const config = readResolvedRecipeConfig(parent)!;
+    assert.deepEqual(config.template, {
+      args: ["mode:enum(inline,default,recipe,binding,node)=inline"],
+      defaults: { mode: "node", recipe_dir: root },
+      template: "echo {mode}",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template recipes reject duplicate args, unknown defaults, and invalid enums", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-declarations-"));
+  try {
+    const duplicate = join(root, "duplicate.json");
+    await writeFile(
+      duplicate,
+      JSON.stringify({ args: ["mode:string", "mode:string"], template: "echo {mode}" }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(duplicate),
+      /Duplicate argument name\(s\): mode/,
+    );
+
+    const conflictingType = join(root, "conflicting-type.json");
+    await writeFile(
+      conflictingType,
+      JSON.stringify({
+        args: ["mode:enum(check,fix)"],
+        template: "echo {mode:int}",
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(conflictingType),
+      /Conflicting argument type for mode/,
+    );
+
+    const unknownDefault = join(root, "unknown-default.json");
+    await writeFile(
+      unknownDefault,
+      JSON.stringify({
+        args: ["mode:string"],
+        defaults: { typo: "check" },
+        template: "echo {mode}",
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(unknownDefault),
+      /Unknown Recipe default argument: typo/,
+    );
+
+    const invalidDefault = join(root, "invalid-default.json");
+    await writeFile(
+      invalidDefault,
+      JSON.stringify({
+        args: ["mode:enum(check,fix)"],
+        defaults: { mode: "delete" },
+        template: "echo {mode}",
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(invalidDefault),
+      /Argument mode must be one of: check, fix/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Template recipe imports reject invalid enum bindings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-contract-"));
+  try {
+    const child = join(root, "child.json");
+    await writeFile(
+      child,
+      JSON.stringify({
+        args: ["mode:enum(check,fix)=check"],
+        template: "echo {mode}",
+      }),
+    );
+    const invalid = join(root, "invalid.json");
+    await writeFile(
+      invalid,
+      JSON.stringify({
+        imports: { child: { from: "child.json", values: { mode: "delete" } } },
+        template: { name: "child" },
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(invalid),
+      /Argument mode must be one of: check, fix/,
+    );
+
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -301,7 +574,7 @@ test("Template recipe imports expand repo placeholders", async () => {
     );
     const config = readResolvedRecipeConfig(parent)!;
     assert.deepEqual(config.template, {
-      defaults: { word: "ok" },
+      defaults: { recipe_dir: recipeRoot, word: "ok" },
       template: "echo {word}",
     });
   } finally {
@@ -342,6 +615,7 @@ test("Markdown recipes compile frontmatter and fenced templates", async () => {
 description: Markdown child
 args:
   - word:string
+  - suffix:string=!
 defaults:
   suffix: "!"
 ---
@@ -372,8 +646,8 @@ imports:
     assert.equal(getRecipeIdFromPath(child), "child");
     assert.deepEqual(config.imports, { child: "child" });
     assert.deepEqual(config.template, {
-      args: ["word:string"],
-      defaults: { suffix: "!", word: "hello" },
+      args: ["word:string", "suffix:string=!"],
+      defaults: { recipe_dir: root, suffix: "!", word: "hello" },
       template: "printf {word}{suffix}",
     });
   } finally {

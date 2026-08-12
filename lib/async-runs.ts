@@ -33,6 +33,7 @@ import {
 import * as Paths from "./paths.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
+import * as Schema from "./schema.ts";
 import {
   resolveArtifactManifest,
   resolveArtifactPaths,
@@ -128,6 +129,8 @@ export interface AsyncRunStartParams {
   template?: CommandTemplateValue;
   args?: string[];
   defaults?: Record<string, unknown>;
+  recipe_dir?: string;
+  skill_dir?: string;
   parallel?: boolean;
   concurrency?: number | string;
   min_successful?: number | string;
@@ -309,7 +312,14 @@ function resolveStartParams(params: AsyncRunStartParams): AsyncRunStartParams {
       fileParams.run_id ||
       fileParams.name ||
       getRunIdFromFile(fileParams.file),
-    values: { ...(fileParams.values ?? {}), ...(params.values ?? {}) },
+    values: {
+      ...(fileParams.values ?? {}),
+      ...(params.values ?? {}),
+      ...(fileParams.recipe_dir
+        ? { recipe_dir: fileParams.recipe_dir }
+        : {}),
+      ...(fileParams.skill_dir ? { skill_dir: fileParams.skill_dir } : {}),
+    },
   };
 }
 
@@ -477,13 +487,37 @@ export function startRun(
     !isAbsolute(recipeRelation)
       ? dirname(packagedRecipeRoot)
       : undefined;
-  const values = {
-    ...(packagedRepo ? { repo: packagedRepo } : {}),
-    ...(startParams.values || {}),
-    run_id: run,
-    state_dir: stateDir,
-    trace_file: join(stateDir, "trace.jsonl"),
-  };
+  const argSpec = Schema.parseToolArgDeclarationList(startParams.args ?? []);
+  if (argSpec.error) throw new Error(argSpec.error);
+  const declaredArgs = new Set(argSpec.args);
+  for (const key of Object.keys(startParams.defaults ?? {})) {
+    if (declaredArgs.size > 0 && !declaredArgs.has(key))
+      throw new Error(`Unknown Recipe default argument: ${key}`);
+  }
+  const values = Schema.normalizeRuntimeValues(
+    {
+      ...argSpec.defaults,
+      ...(startParams.defaults || {}),
+      ...(packagedRepo ? { repo: packagedRepo } : {}),
+      ...(startParams.values || {}),
+      run_id: run,
+      state_dir: stateDir,
+      trace_file: join(stateDir, "trace.jsonl"),
+    },
+    argSpec.argTypes,
+  );
+  const runtimeTemplate =
+    resolved.template &&
+    typeof resolved.template === "object" &&
+    !Array.isArray(resolved.template)
+      ? {
+          ...resolved.template,
+          defaults: {
+            ...(resolved.template.defaults ?? {}),
+            ...values,
+          },
+        }
+      : resolved.template;
   const modelPolicy = describeCurrentPolicyProvenance({
     defaults: startParams.defaults,
     template: resolved.template,
@@ -557,7 +591,7 @@ export function startRun(
       state_schema: RuntimeIdentity.RUN_STATE_SCHEMA,
       status: "running",
       ...(startParams.tool ? { tool: startParams.tool } : {}),
-      template: resolved.template,
+      template: runtimeTemplate,
       values,
       model_policy: modelPolicy,
       ...(artifacts ? { artifacts } : {}),

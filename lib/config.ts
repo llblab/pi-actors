@@ -188,6 +188,10 @@ export function normalizeStoredTool(
           template: argTemplate,
         };
   const inferredArgTypes = Schema.getTemplateArgTypes(argTemplateConfig);
+  Schema.assertCompatibleToolArgTypes(
+    inferredArgTypes,
+    declarations.argTypes,
+  );
   const argTypes = { ...inferredArgTypes, ...declarations.argTypes };
   const cfg = {
     name,

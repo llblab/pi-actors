@@ -61,7 +61,7 @@ Usage and lineage live in locked metadata ledgers rather than authored Recipe fi
 
 ## Wrapping Existing Recipes
 
-Prefer a small user-root wrapper that imports a maintained packaged or skill-owned Recipe by path and delegates by alias. Do not duplicate its executable template, defaults, Control declaration, or artifacts. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
+Prefer a small user-root wrapper that imports a maintained Recipe by exact `std:<recipe>` or `skill:<skill>/<recipe-path>` identity and delegates by alias. Skill Recipes remain components and are never exposed merely because their Skill is active. Do not duplicate executable templates, defaults, Control declarations, artifacts, or runtime-owned `{recipe_dir}`/`{skill_dir}`. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
 
 ## Safety
 

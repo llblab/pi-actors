@@ -6,6 +6,7 @@ import test from "node:test";
 
 import * as Limits from "../lib/limits.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
+import { setActiveSkillRecipeSources } from "../lib/recipes-references.ts";
 
 async function fixture(): Promise<{ root: string; status: Record<string, unknown> }> {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-kernel-"));
@@ -140,6 +141,38 @@ test("Inspect rejects removed Run views on the canonical target", async () => {
     );
   } finally {
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Inspect Recipe diagnostics expose active Skill namespaces and collisions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-recipes-"));
+  setActiveSkillRecipeSources([
+    { name: "sample", baseDir: "/skills/sample" },
+    { name: "duplicate", baseDir: "/skills/first" },
+    { name: "duplicate", baseDir: "/skills/second" },
+  ]);
+  try {
+    const tool = createInspectToolDefinition({
+      recipeRoot: join(root, "recipes"),
+      packagedRecipeRoot: join(root, "packaged"),
+    });
+    const result = await tool.execute(
+      "recipes",
+      { target: "recipes", view: "imports", verbose: true },
+      undefined,
+      undefined,
+      {},
+    );
+    assert.deepEqual(result.details.skill_recipe_namespaces.sample, [
+      "/skills/sample/recipes",
+    ]);
+    assert.equal(
+      result.details.skill_recipe_namespace_diagnostics[0].name,
+      "duplicate",
+    );
+  } finally {
+    setActiveSkillRecipeSources([]);
+    await rm(root, { recursive: true, force: true });
   }
 });
 

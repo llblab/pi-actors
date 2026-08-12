@@ -14,6 +14,7 @@ import * as Limits from "./limits.ts";
 import { computeRunControlCapacity } from "./run-evidence-policy.ts";
 import * as Paths from "./paths.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
+import * as RecipesReferences from "./recipes-references.ts";
 import * as ReviewDiagnostics from "./review-diagnostics.ts";
 import * as RunsControls from "./runs-controls.ts";
 import * as RunControlDelivery from "./runs-control-delivery.ts";
@@ -214,8 +215,18 @@ function inspectRecipes(
     { root: recipeRoot, defaultTool: true, mutableUsage: true },
     { root: deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot() },
   ]);
+  const skillRecipeNamespaces =
+    RecipesReferences.getActiveSkillRecipeNamespaces();
   const summary = {
     ...RecipesDiscovery.summarizeDiscovery(discovered),
+    skill_recipe_namespaces: skillRecipeNamespaces,
+    skill_recipe_namespace_diagnostics: Object.entries(skillRecipeNamespaces)
+      .filter(([, roots]) => roots.length > 1)
+      .map(([name, roots]) => ({
+        name,
+        roots,
+        error: `Ambiguous active Skill Recipe namespace ${name}`,
+      })),
     drafts: RecipesDiscovery.listDraftRecipes(join(recipeRoot, "drafts")),
   };
   return {

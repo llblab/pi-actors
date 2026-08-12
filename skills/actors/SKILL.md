@@ -25,11 +25,11 @@ A Run target exposes exactly three inspect views: `recipe`, `trace`, and `contro
 
 ## Recipe
 
-A Recipe defines execution. It may declare args, defaults, imports, artifacts, command-template flags, and `control: ["action"]` when a long-lived service actually consumes actor-local inputs.
+A Recipe defines execution. It may declare named typed args, inline fallbacks, configuration `defaults`, composition `values`, imports, artifacts, command-template flags, and `control: ["action"]` when a long-lived service actually consumes actor-local inputs.
 
 Do not declare Control for ordinary one-shot work. Runtime lifecycle actions such as `kill` stay runtime-owned and must not appear in Recipe Control declarations. Imported Recipes act as local definitions inside one Run; they do not create nested Runs unless execution explicitly spawns them.
 
-Prefer maintained packaged Recipes over ad hoc wrappers. Keep model, thinking, mission, concurrency, quorum, and timeout choices caller-owned unless a Recipe documents a stable policy.
+Prefer maintained packaged Recipes over ad hoc wrappers. Use `std:<recipe>` for exact packaged lookup and `skill:<skill>/<recipe-path>` for a component bundled with a Pi-active Skill. File-backed Recipes own `{recipe_dir}` and Skill Recipes own `{skill_dir}`; callers never pass or override these origins. Skill Recipes are components, not automatic tools. Keep model, thinking, mission, concurrency, quorum, and timeout choices caller-owned unless a Recipe documents a stable policy.
 
 ## Trace
 

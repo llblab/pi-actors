@@ -193,6 +193,50 @@ test("installed dist runtime reports exact package identity", async () => {
   }
 });
 
+test("installed dist resolves qualified std and active-Skill Recipes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-skill-recipes-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const skillDir = join(root, "skill");
+    const recipeDir = join(skillDir, "recipes", "nested");
+    await mkdir(recipeDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), "# Skill\n");
+    await writeFile(
+      join(recipeDir, "task.json"),
+      JSON.stringify({ template: "echo {skill_dir}" }),
+    );
+    const { stdout, stderr } = await execFileAsync(process.execPath, [
+      "-e",
+      `const { join } = require("node:path");
+       const { pathToFileURL } = require("node:url");
+       const packageDir = process.argv[1];
+       const skillDir = process.argv[2];
+       import(pathToFileURL(join(packageDir, "dist", "lib", "recipes-references.js")).href).then((mod) => {
+         mod.setActiveSkillRecipeSources([{ name: "sample", baseDir: skillDir }]);
+         const skill = mod.readResolvedRecipeConfig(mod.resolveRecipeReferencePath("skill:sample/nested/task"));
+         const std = mod.readResolvedRecipeConfig(mod.resolveRecipeReferencePath("std:utility-package-summary"));
+         const context = mod.buildRecipeContextRecords(join(skillDir, "recipes", "nested", "task.json"));
+         console.log(JSON.stringify({
+           skill_dir: skill.skill_dir,
+           skill_template: skill.template,
+           std_ok: JSON.stringify(std.template).includes("recipe-utils.mjs"),
+           qualified_name: context[0].qualified_name,
+         }));
+       }).catch((error) => { console.error(error); process.exitCode = 1; });`,
+      packageDir,
+      skillDir,
+    ]);
+    assert.equal(stderr, "");
+    const result = JSON.parse(stdout);
+    assert.equal(result.skill_dir, skillDir);
+    assert.match(JSON.stringify(result.skill_template), /skill/);
+    assert.equal(result.std_ok, true);
+    assert.equal(result.qualified_name, "skill:sample/nested/task");
+  } finally {
+    await removeTreeEventually(root);
+  }
+});
+
 test("packed artifact imports compiled extension, skills, and public schemas", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-packed-artifact-"));
   try {

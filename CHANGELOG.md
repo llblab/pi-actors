@@ -2,6 +2,13 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.45.0: Skill Recipe Standard Library
+
+- `Recipe Values`: Makes inline argument defaults optional, applies caller > values > defaults > inline precedence across tools, Runs, imports, and delegation, and validates final typed/enum values plus duplicate, unknown-default, and conflicting-type declarations.
+- `Recipe Origins`: Gives file-backed Recipes immutable `{recipe_dir}` and active-Skill Recipes `{skill_dir}` across templates, defaults, artifacts, tools, and Runs while retaining local provenance and hiding machine-local origins from model-facing launch values.
+- `Skill Recipe Library`: Adds exact `std:<name>` and Pi-active `skill:<skill>/<path>` component lookup for imports, delegation, spawn, validation, Inspect diagnostics, captured qualified identity, and installed dist without automatically registering Skill Recipes as tools.
+- `Validation`: Covers source, composed async execution, installed dist, namespace collisions/reload, path redaction, and migrated Skill wrappers while resetting the shipped-line ceiling to the validated 29,767-line release tree.
+
 ## 0.44.0: Bounded Run Evidence
 
 - `Trace`: Bounds each Run to 2,048 events and 4 MiB, atomically retaining the newest suffix with one cumulative `runtime.trace_compacted` marker so discarded history is explicit while terminal, result, execution, and artifact evidence remains authoritative.

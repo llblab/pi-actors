@@ -67,11 +67,16 @@ function formatRuntimeToolUsageHint(
   includeRunId: boolean,
 ): string {
   const optional = cfg.args.filter((arg) => !required.includes(arg));
+  const exampleDefaults = {
+    ...Schema.getExplicitToolArgDefaults(cfg.recipe?.args),
+    ...cfg.defaults,
+    ...(cfg.recipe?.values ?? {}),
+  };
   const example: Record<string, unknown> = {};
   for (const arg of required)
-    example[arg] = sampleValueForArg(arg, cfg.argTypes?.[arg], cfg.defaults);
+    example[arg] = sampleValueForArg(arg, cfg.argTypes?.[arg], exampleDefaults);
   for (const arg of optional)
-    example[arg] = sampleValueForArg(arg, cfg.argTypes?.[arg], cfg.defaults);
+    example[arg] = sampleValueForArg(arg, cfg.argTypes?.[arg], exampleDefaults);
   if (includeRunId) example.run_id = `${cfg.name}-1`;
   const lines = [
     `Expected call shape for ${cfg.name}:`,
@@ -83,6 +88,32 @@ function formatRuntimeToolUsageHint(
       `Optional: ${[...optional, ...(includeRunId ? ["run_id"] : [])].join(", ")}`,
     );
   return lines.join("\n");
+}
+
+function resolveRecipeToolValues(
+  cfg: RegisteredTool,
+  callerValues: Record<string, unknown>,
+  ctx: RuntimeToolContext,
+): Record<string, unknown> {
+  const recipeRuntimeValues = {
+    ...(cfg.recipe?.recipe_dir
+      ? { recipe_dir: cfg.recipe.recipe_dir }
+      : {}),
+    ...(cfg.recipe?.skill_dir ? { skill_dir: cfg.recipe.skill_dir } : {}),
+  };
+  return Schema.normalizeRuntimeValues(
+    ModelContext.withCurrentModelValues(
+      {
+        ...Schema.getExplicitToolArgDefaults(cfg.recipe?.args),
+        ...cfg.defaults,
+        ...(cfg.recipe?.values ?? {}),
+        ...callerValues,
+        ...recipeRuntimeValues,
+      },
+      ctx,
+    ),
+    cfg.argTypes,
+  );
 }
 
 function formatRuntimeToolArgumentError(
@@ -128,9 +159,18 @@ export function createRuntimeToolDefinition(
           defaults: cfg.defaults,
           template: requiredTemplate,
         };
+  const recipeInlineDefaults = Schema.getExplicitToolArgDefaults(
+    cfg.recipe?.args,
+  );
   const requiredArgs =
     isRecipe && cfg.storedArgs !== undefined
-      ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
+      ? new Set(
+          cfg.args.filter(
+            (arg) =>
+              !Object.hasOwn(cfg.defaults, arg) &&
+              !Object.hasOwn(recipeInlineDefaults, arg),
+          ),
+        )
       : RecipesReferences.isRecipeReference(cfg.template) && !recipeTemplate
         ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
         : Schema.getRequiredToolArgNames(requiredTemplateConfig);
@@ -200,13 +240,7 @@ export function createRuntimeToolDefinition(
                 { ...(cfg.recipe?.values ?? {}), ...values },
                 ctx,
               ),
-              values: Schema.normalizeRuntimeValues(
-                ModelContext.withCurrentModelValues(
-                  { ...(cfg.recipe?.values ?? {}), ...cfg.defaults, ...values },
-                  ctx,
-                ),
-                cfg.argTypes,
-              ),
+              values: resolveRecipeToolValues(cfg, values, ctx),
             },
             ctx.cwd,
           );
@@ -221,17 +255,13 @@ export function createRuntimeToolDefinition(
           };
         }
         if (isRecipe && recipeTemplate) {
-          const paramsWithDefaults = ModelContext.withCurrentModelValues(
-            {
-              ...(cfg.recipe?.values ?? {}),
-              ...cfg.defaults,
-              ...(params as Record<string, unknown>),
-            },
-            ctx,
-          );
           return await Execution.executeRegisteredTool(
             { ...cfg, template: recipeTemplate },
-            Schema.normalizeRuntimeValues(paramsWithDefaults, cfg.argTypes),
+            resolveRecipeToolValues(
+              cfg,
+              params as Record<string, unknown>,
+              ctx,
+            ),
             exec,
             ctx.cwd,
             signal,

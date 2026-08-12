@@ -720,6 +720,118 @@ test("Async runs can start from recipe files with overrides", async () => {
   }
 });
 
+test("Async file Recipes expand runtime-owned recipe directories", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-origin-"));
+  const skillDir = join(root, "skill");
+  const recipeDir = join(skillDir, "recipes");
+  const stateDir = join(root, "run");
+  try {
+    await mkdir(recipeDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), "# Skill\n");
+    const file = join(recipeDir, "origin.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        artifacts: { report: "{recipe_dir}/report.md" },
+        defaults: { helper: "{skill_dir}/scripts/helper.mjs" },
+        template: `${process.execPath} -e "console.log(process.argv[1] + '|' + process.argv[2] + '|' + process.argv[3])" {recipe_dir} {skill_dir} {helper}`,
+      }),
+    );
+    const meta = startRun(
+      {
+        file,
+        run_id: "origin",
+        state_dir: stateDir,
+        values: { recipe_dir: "/caller", skill_dir: "/caller-skill" },
+      },
+      process.cwd(),
+    );
+    assert.equal(meta.values.recipe_dir, recipeDir);
+    assert.equal(meta.values.skill_dir, skillDir);
+    assert.deepEqual(meta.artifacts, { report: `${recipeDir}/report.md` });
+    await waitForResult(stateDir);
+    assert.equal(
+      (await readFile(join(stateDir, "stdout.log"), "utf8")).trim(),
+      `${recipeDir}|${skillDir}|${skillDir}/scripts/helper.mjs`,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async Recipe values follow caller then values then defaults then inline precedence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-precedence-"));
+  const file = join(root, "mode.json");
+  try {
+    await writeFile(
+      file,
+      JSON.stringify({
+        args: ["mode:enum(inline,default,bound,caller)=inline"],
+        defaults: { mode: "default" },
+        values: { mode: "bound" },
+        template: `${process.execPath} -e "console.log(process.argv[1])" {mode}`,
+      }),
+    );
+    const boundState = join(root, "bound");
+    const bound = startRun(
+      { file, run_id: "bound", state_dir: boundState },
+      process.cwd(),
+    );
+    assert.equal(bound.values.mode, "bound");
+    await waitForResult(boundState);
+
+    const callerState = join(root, "caller");
+    const caller = startRun(
+      {
+        file,
+        run_id: "caller",
+        state_dir: callerState,
+        values: { mode: "caller" },
+      },
+      process.cwd(),
+    );
+    assert.equal(caller.values.mode, "caller");
+    await waitForResult(callerState);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async Recipes reject invalid typed values and unknown defaults before launch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-contract-"));
+  try {
+    const invalidEnum = join(root, "invalid-enum.json");
+    await writeFile(
+      invalidEnum,
+      JSON.stringify({
+        args: ["mode:enum(check,fix)=check"],
+        values: { mode: "delete" },
+        template: "echo {mode}",
+      }),
+    );
+    assert.throws(
+      () => startRun({ file: invalidEnum, run_id: "invalid" }, process.cwd()),
+      /Argument mode must be one of: check, fix/,
+    );
+
+    const unknownDefault = join(root, "unknown-default.json");
+    await writeFile(
+      unknownDefault,
+      JSON.stringify({
+        args: ["mode:enum(check,fix)"],
+        defaults: { typo: "check" },
+        template: "echo {mode}",
+      }),
+    );
+    assert.throws(
+      () => startRun({ file: unknownDefault, run_id: "unknown" }, process.cwd()),
+      /Unknown Recipe default argument: typo/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async runs reject disabled recipe files", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-disabled-"));
   const file = join(root, "disabled.json");

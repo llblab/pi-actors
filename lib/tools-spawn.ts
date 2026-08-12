@@ -138,10 +138,10 @@ export function createSpawnToolDefinition<
           "Optional Run identity in exact run:<id> form.",
         ),
         file: Schema.stringSchema(
-          "Optional template recipe JSON file. Bare names resolve under ~/.pi/agent/recipes.",
+          "Optional template Recipe reference. Supports paths, bare user/adjacent/std names, std:<name>, and skill:<skill>/<recipe>.",
         ),
         recipe: Schema.stringSchema(
-          "Alias for file; template recipe JSON file/name to spawn.",
+          "Alias for file; qualified Skill/std or ordinary Recipe reference to spawn.",
         ),
         template: Schema.unionSchema([
           Schema.stringSchema("Inline command template string"),

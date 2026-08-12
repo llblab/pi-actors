@@ -198,7 +198,7 @@ try {
   );
   console.log("[release] zero-warning Recipe QA gate checked");
 
-  const maximumShippedLines = 29_598;
+  const maximumShippedLines = 29_767;
   const shippedPath = /^(?:lib\/|scripts\/|recipes\/|docs\/|skills\/)/u;
   const shippedLines = files
     .filter((path) => shippedPath.test(path))

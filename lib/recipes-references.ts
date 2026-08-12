@@ -6,7 +6,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, extname, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 
 import type {
   CommandTemplateConfig,
@@ -15,6 +15,7 @@ import type {
 import * as CommandTemplates from "./command-templates.ts";
 import * as Paths from "./paths.ts";
 import * as RecipeControl from "./recipe-control.ts";
+import * as Schema from "./schema.ts";
 
 const MAX_RECIPE_FILE_BYTES = 1024 * 1024;
 const MAX_RECIPE_IMPORT_DEPTH = 32;
@@ -57,6 +58,8 @@ export interface TemplateRecipeDefinition {
 
 export interface TemplateRecipeConfig extends TemplateRecipeDefinition {
   async?: boolean;
+  recipe_dir?: string;
+  skill_dir?: string;
 }
 
 interface ImportedRecipe {
@@ -74,6 +77,7 @@ export interface TemplateRecipeContextRecord {
   file: string;
   import_path: string[];
   name: string;
+  qualified_name?: string;
   recipe: Record<string, unknown>;
   role: "entry" | "import";
 }
@@ -82,8 +86,118 @@ export interface ReadResolvedRecipeConfigOptions {
   includeActorRecipeContext?: boolean;
 }
 
+const RUNTIME_RECIPE_VALUE_NAMES = new Set(["recipe_dir", "skill_dir"]);
+const activeSkillRecipeRoots = new Map<string, Set<string>>();
+
+export interface ActiveSkillRecipeSource {
+  name: string;
+  filePath?: string;
+  baseDir?: string;
+}
+
+export function setActiveSkillRecipeSources(
+  skills: ActiveSkillRecipeSource[],
+): void {
+  activeSkillRecipeRoots.clear();
+  for (const skill of skills) {
+    const name = skill.name.trim();
+    const skillDir = skill.baseDir
+      ? resolve(skill.baseDir)
+      : skill.filePath
+        ? dirname(resolve(skill.filePath))
+        : undefined;
+    if (!name || !skillDir) continue;
+    const roots = activeSkillRecipeRoots.get(name) ?? new Set<string>();
+    roots.add(resolve(skillDir, "recipes"));
+    activeSkillRecipeRoots.set(name, roots);
+  }
+}
+
+export function getActiveSkillRecipeNamespaces(): Record<string, string[]> {
+  return Object.fromEntries(
+    [...activeSkillRecipeRoots.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, roots]) => [name, [...roots].sort()]),
+  );
+}
+
+function qualifiedRecipeNameForFile(file: string): string | undefined {
+  const path = resolve(file);
+  const stdRelation = relative(Paths.getPackagedRecipeRoot(), path);
+  if (
+    stdRelation &&
+    !stdRelation.startsWith("..") &&
+    !isAbsolute(stdRelation)
+  ) {
+    return `std:${stdRelation.replace(/\.(?:json|md)$/u, "")}`;
+  }
+  for (const [skillName, roots] of activeSkillRecipeRoots) {
+    if (roots.size !== 1) continue;
+    const root = [...roots][0];
+    const relation = relative(root, path);
+    if (relation && !relation.startsWith("..") && !isAbsolute(relation))
+      return `skill:${skillName}/${relation.replace(/\.(?:json|md)$/u, "")}`;
+  }
+  return undefined;
+}
+
+function qualifiedRecipeCandidates(value: string): string[] | undefined {
+  if (value.startsWith("std:")) {
+    return recipeNameFiles(value.slice(4)).map((file) =>
+      resolve(Paths.getPackagedRecipeRoot(), file),
+    );
+  }
+  if (!value.startsWith("skill:")) return undefined;
+  const qualified = value.slice(6);
+  const separator = qualified.indexOf("/");
+  if (separator <= 0 || separator === qualified.length - 1)
+    throw new Error(`Invalid Skill Recipe reference: ${value}`);
+  const skillName = qualified.slice(0, separator);
+  const recipeName = qualified.slice(separator + 1);
+  const roots = [...(activeSkillRecipeRoots.get(skillName) ?? [])];
+  if (roots.length === 0)
+    throw new Error(`Active Skill Recipe namespace not found: ${skillName}`);
+  if (roots.length > 1)
+    throw new Error(
+      `Ambiguous active Skill Recipe namespace ${skillName}: ${roots.join(", ")}`,
+    );
+  const root = roots[0];
+  return recipeNameFiles(recipeName).map((file) => {
+    const candidate = resolve(root, file);
+    const relation = relative(root, candidate);
+    if (!relation || relation.startsWith("..") || isAbsolute(relation))
+      throw new Error(`Skill Recipe reference escapes its recipes root: ${value}`);
+    return candidate;
+  });
+}
+
 function hasWhitespace(value: string): boolean {
   return /\s/.test(value);
+}
+
+function findOwningSkillDir(recipeFile: string): string | undefined {
+  let current = dirname(recipeFile);
+  while (true) {
+    if (existsSync(resolve(current, "SKILL.md"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+function assertRuntimeRecipeValuesNotDeclared(raw: Record<string, unknown>): void {
+  const args = Array.isArray(raw.args)
+    ? Schema.getExplicitToolArgNames(raw.args.map(String))
+    : [];
+  for (const name of RUNTIME_RECIPE_VALUE_NAMES) {
+    if (
+      args.includes(name) ||
+      (isRecord(raw.defaults) && Object.hasOwn(raw.defaults, name)) ||
+      (isRecord(raw.values) && Object.hasOwn(raw.values, name))
+    ) {
+      throw new Error(`Recipe runtime value is reserved: ${name}`);
+    }
+  }
 }
 
 export function resolveRecipePath(
@@ -125,6 +239,8 @@ function recipeCandidatePaths(
   value: string,
   currentRecipeRoot: string,
 ): string[] {
+  const qualified = qualifiedRecipeCandidates(value.trim());
+  if (qualified) return qualified;
   if (!isBareRecipeName(value))
     return [resolveRecipePath(value, currentRecipeRoot)];
   const roots = [
@@ -646,6 +762,63 @@ function mergeDefaults(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+function assertRecipeDefaultsDeclared(
+  args: string[] | undefined,
+  defaults: Record<string, unknown> | undefined,
+  label: string,
+): void {
+  const spec = Schema.parseToolArgDeclarationList(args ?? []);
+  if (spec.error) throw new Error(spec.error);
+  if (spec.args.length === 0) return;
+  const declared = new Set(spec.args);
+  for (const key of Object.keys(defaults ?? {})) {
+    if (!declared.has(key)) throw new Error(`Unknown ${label} argument: ${key}`);
+  }
+}
+
+function assertRecipeArgumentContract(
+  config: Pick<
+    TemplateRecipeDefinition,
+    "args" | "defaults" | "values" | "template"
+  >,
+  label = "Recipe default",
+): void {
+  assertRecipeDefaultsDeclared(config.args, config.defaults, label);
+  const spec = Schema.parseToolArgDeclarationList(config.args ?? []);
+  if (spec.error) throw new Error(spec.error);
+  Schema.assertCompatibleToolArgTypes(
+    spec.argTypes,
+    Schema.getTemplateArgTypes({ template: config.template }),
+  );
+  const staticValues = Object.fromEntries(
+    Object.entries({ ...config.defaults, ...config.values }).filter(
+      ([, value]) =>
+        typeof value !== "string" || !/\{[^{}]+\}/.test(value),
+    ),
+  );
+  Schema.normalizeRuntimeValues(staticValues, spec.argTypes);
+}
+
+function resolveRecipeValueLayers(
+  args: string[] | undefined,
+  ...layers: Array<Record<string, unknown> | undefined>
+): Record<string, unknown> | undefined {
+  const spec = Schema.parseToolArgDeclarationList(args ?? []);
+  if (spec.error) throw new Error(spec.error);
+  const merged = mergeDefaults(spec.defaults, ...layers);
+  if (!merged) return undefined;
+  const staticValues = Object.fromEntries(
+    Object.entries(merged).filter(
+      ([, value]) =>
+        typeof value !== "string" || !/\{[^{}]+\}/.test(value),
+    ),
+  );
+  return {
+    ...merged,
+    ...Schema.normalizeRuntimeValues(staticValues, spec.argTypes),
+  };
+}
+
 function applyDefaultsToTemplate(
   template: CommandTemplateValue,
   defaults: Record<string, unknown> | undefined,
@@ -655,6 +828,7 @@ function applyDefaultsToTemplate(
   delete cleanOverrides.name;
   delete cleanOverrides.template;
   delete cleanOverrides.values;
+  delete cleanOverrides.defaults;
   if (typeof template === "object" && !Array.isArray(template)) {
     return {
       ...template,
@@ -716,11 +890,22 @@ function applyDelegatedRecipeToNode(
   delegated: TemplateRecipeConfig,
   overrides: Record<string, unknown> = {},
 ): CommandTemplateValue {
-  return applyDefaultsToTemplate(
-    delegated.template,
+  const nodeDefaults = isRecord(overrides.defaults)
+    ? overrides.defaults
+    : undefined;
+  const nodeValues = isRecord(overrides.values) ? overrides.values : undefined;
+  const values = resolveRecipeValueLayers(
+    delegated.args,
+    delegated.defaults,
     delegated.values,
-    overrides,
+    nodeDefaults,
+    nodeValues,
+    {
+      ...(delegated.recipe_dir ? { recipe_dir: delegated.recipe_dir } : {}),
+      ...(delegated.skill_dir ? { skill_dir: delegated.skill_dir } : {}),
+    },
   );
+  return applyDefaultsToTemplate(delegated.template, values, overrides);
 }
 
 function expandRecipeDelegations(
@@ -830,7 +1015,8 @@ function expandImportNodes(
       ? record.defaults
       : undefined;
     const nodeValues = isRecord(record.values) ? record.values : undefined;
-    const defaults = mergeDefaults(
+    const defaults = resolveRecipeValueLayers(
+      imported.config.args,
       imported.defaults,
       imported.values,
       nodeDefaults,
@@ -897,6 +1083,8 @@ export function readResolvedRecipeConfig(
   const raw = readRawRecipeConfig(path);
   if (!raw || !Object.hasOwn(raw, "template")) return undefined;
   RecipeControl.assertRecipeHasNoMailbox(raw);
+  assertRuntimeRecipeValuesNotDeclared(raw);
+  assertRecipeArgumentContract(raw as unknown as TemplateRecipeDefinition);
   const imports: Record<string, ImportedRecipe> = {};
   for (const [alias, binding] of Object.entries(getRecipeImports(raw))) {
     const importPath = resolveRecipeImportPath(
@@ -913,13 +1101,22 @@ export function readResolvedRecipeConfig(
       typeof binding === "string" ? undefined : binding.defaults;
     const bindingValues =
       typeof binding === "string" ? undefined : binding.values;
+    assertRecipeDefaultsDeclared(
+      config.args,
+      bindingDefaults,
+      `Recipe import ${alias} default`,
+    );
     imports[alias] = {
       alias,
       file: importPath,
       name: config.name ?? alias,
       config,
       defaults: { ...(config.defaults ?? {}), ...(bindingDefaults ?? {}) },
-      values: { ...(bindingValues ?? {}) },
+      values: {
+        ...(bindingValues ?? {}),
+        ...(config.recipe_dir ? { recipe_dir: config.recipe_dir } : {}),
+        ...(config.skill_dir ? { skill_dir: config.skill_dir } : {}),
+      },
     };
   }
   const substituted = substituteImportRefs(raw, imports) as Record<
@@ -945,6 +1142,21 @@ export function readResolvedRecipeConfig(
       )
     : expandRecipeDelegations(expandedImportsTemplate, path, stack, options);
   const recipeName = getRecipeIdFromPath(path);
+  const recipeDir = dirname(path);
+  const skillDir = findOwningSkillDir(path);
+  if (
+    !skillDir &&
+    JSON.stringify({
+      artifacts: substituted.artifacts,
+      defaults: substituted.defaults,
+      template: substituted.template,
+      values: substituted.values,
+    }).includes("{skill_dir}")
+  ) {
+    throw new Error(
+      `Recipe uses {skill_dir} outside an owning Skill directory: ${path}`,
+    );
+  }
   const templateWithContext = options.includeActorRecipeContext
     ? withActorRecipeContext(expandedTemplate, {
         file: path,
@@ -967,6 +1179,8 @@ export function readResolvedRecipeConfig(
   );
   return {
     name: recipeName,
+    recipe_dir: recipeDir,
+    ...(skillDir ? { skill_dir: skillDir } : {}),
     ...(typeof substituted.description === "string" &&
     substituted.description.trim()
       ? { description: substituted.description.trim() }
@@ -1059,7 +1273,11 @@ export function readResolvedRecipeConfig(
     ...(typeof substituted.repeat === "number"
       ? { repeat: substituted.repeat }
       : {}),
-    ...(isRecord(substituted.values) ? { values: substituted.values } : {}),
+    values: {
+      ...(isRecord(substituted.values) ? substituted.values : {}),
+      recipe_dir: recipeDir,
+      ...(skillDir ? { skill_dir: skillDir } : {}),
+    },
     ...(isRecord(substituted.usage) ? { usage: substituted.usage } : {}),
   };
 }
@@ -1084,12 +1302,14 @@ function collectRecipeContextRecords(
   }
   const raw = readRawRecipeConfig(path);
   if (!raw || !Object.hasOwn(raw, "template")) return [];
+  const qualifiedName = qualifiedRecipeNameForFile(path);
   const record: TemplateRecipeContextRecord = {
     ...(alias ? { alias } : {}),
     depth: stack.length,
     file: path,
     import_path: importPath,
     name: getRecipeIdFromPath(path),
+    ...(qualifiedName ? { qualified_name: qualifiedName } : {}),
     recipe: raw,
     role: stack.length === 0 ? "entry" : "import",
   };

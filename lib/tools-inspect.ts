@@ -4,12 +4,14 @@
  * Owns exact inspect target/view dispatch; source projection stays in domain modules.
  */
 
+import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as ControlProjection from "./control-projection.ts";
 import * as Inspector from "./inspector.ts";
 import * as Limits from "./limits.ts";
+import { computeRunControlCapacity } from "./run-evidence-policy.ts";
 import * as Paths from "./paths.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
 import * as ReviewDiagnostics from "./review-diagnostics.ts";
@@ -75,20 +77,26 @@ function runtimeTriage(
   const failed = runs.filter((run) => run.status === "failed");
   const pendingControls: RuntimeTriage.RuntimePendingControl[] = [];
   const staleControls: RuntimeTriage.RuntimePendingControl[] = [];
+  const backpressuredRuns: Array<Record<string, unknown>> = [];
   const controlDiagnostics: Array<Record<string, unknown>> = [];
+  const traceDiagnostics: Array<Record<string, unknown>> = [];
   const nowMs = Date.now();
   for (const run of runs) {
     const stateDir = typeof run.state_dir === "string" ? run.state_dir : undefined;
     if (!stateDir) continue;
     const runId = String(run.run ?? "unknown");
     const journal = RunsControls.readRunControlJournalFromStateDir(stateDir);
+    const capacity = computeRunControlCapacity(journal.records);
     controlDiagnostics.push(...journal.diagnostics.map((diagnostic) => ({
       ...(diagnostic.line === undefined ? {} : { line: diagnostic.line }),
-      reason: diagnostic.line === undefined
-        ? "unreadable_control_journal"
-        : "invalid_control_json",
-      run: runId,
+      reason: diagnostic.line === undefined ? "unreadable_control_journal" : "invalid_control_json", run: runId,
     })));
+    if (capacity.backpressured) backpressuredRuns.push({
+      run: runId, pending: capacity.pending, pending_limit: capacity.limit,
+      journal_bytes: statSync(RunsControls.runControlsFile(stateDir)).size,
+    });
+    const traceSummary = RunsTrace.summarizeRunTraceJournal(RunsTrace.readRunTraceJournal(stateDir));
+    if (!traceSummary.history_complete) traceDiagnostics.push({ run: runId, ...traceSummary });
     for (const control of journal.records) {
       const classified = RuntimeTriage.classifyRuntimeControl(
         {
@@ -137,14 +145,15 @@ function runtimeTriage(
     pending_controls: boundedPendingControls,
     stale_control_count: staleControls.length,
     stale_controls: boundedStaleControls,
-    control_diagnostic_count: controlDiagnostics.length,
-    control_diagnostics: controlDiagnostics.slice(0, 40),
+    backpressured_run_count: backpressuredRuns.length, backpressured_runs: backpressuredRuns.slice(0, 40),
+    control_diagnostic_count: controlDiagnostics.length, control_diagnostics: controlDiagnostics.slice(0, 40),
+    trace_diagnostic_count: traceDiagnostics.length, trace_diagnostics: traceDiagnostics.slice(0, 40),
     attention_events: attentionEvents.slice(-40).reverse(),
     next_actions: [
       ...(failed.length ? ["inspect target=runtime view=runs status=failed"] : []),
-      ...staleControls.slice(0, 3).map((entry) =>
+      ...new Set([...staleControls, ...backpressuredRuns].slice(0, 3).map((entry) =>
         `inspect target=run:${entry.run} view=control`,
-      ),
+      )),
       ...(attentionEvents.length
         ? attentionEvents.slice(-3).map((entry) =>
             `inspect target=run:${String(entry.run)} view=trace source=runtime`,
@@ -159,7 +168,7 @@ function compactRuntime(view: string, details: Record<string, unknown>): string 
     return `\nruntime runs=${(details.runs as unknown[] | undefined)?.length ?? 0}`;
   }
   if (view === "triage") {
-    return `\nruntime failed=${(details.failed_runs as unknown[] | undefined)?.length ?? 0} pending_controls=${Number(details.pending_control_count ?? 0)} stale_controls=${Number(details.stale_control_count ?? 0)} attention=${(details.attention_events as unknown[] | undefined)?.length ?? 0}`;
+    return `\nruntime failed=${(details.failed_runs as unknown[] | undefined)?.length ?? 0} pending_controls=${Number(details.pending_control_count ?? 0)} stale_controls=${Number(details.stale_control_count ?? 0)} backpressured=${Number(details.backpressured_run_count ?? 0)} incomplete_trace=${Number(details.trace_diagnostic_count ?? 0)} attention=${(details.attention_events as unknown[] | undefined)?.length ?? 0}`;
   }
   return `\nruntime version=${String(details.version)} state_schema=${String(details.state_schema)} automatic_review=${String(details.automatic_review)}`;
 }
@@ -252,8 +261,8 @@ function inspectRun(
       throw new Error(`unsupported Trace source: ${source}`);
     }
     return {
-      run,
-      source,
+      run, source,
+      summary: RunsTrace.summarizeRunTraceJournal(RunsTrace.readRunTraceJournal(stateDir)),
       items: TraceProjection.projectRunTrace(stateDir, {
         artifacts: status.artifacts as
           | Record<string, AsyncRuns.RunArtifactDeclaration>
@@ -264,19 +273,40 @@ function inspectRun(
     };
   }
   const runInstanceId = String(status.run_instance_id ?? "");
+  const journal = RunsControls.readRunControlJournalFromStateDir(stateDir);
+  const capacity = computeRunControlCapacity(journal.records);
+  const structuralDiagnostics = journal.records.flatMap((value) => {
+    const classified = RuntimeTriage.classifyRuntimeControl({ run,
+      runInstanceId: runInstanceId || undefined, status: String(status.status ?? "unknown") }, value, Date.now());
+    return classified.diagnostic ? [classified.diagnostic.reason] : [];
+  });
+  let journalBytes = 0;
+  try { journalBytes = statSync(RunsControls.runControlsFile(stateDir)).size; } catch {}
+  const diagnostics = [...journal.diagnostics.map((item) => ({
+    ...(item.line === undefined ? {} : { line: item.line }),
+    reason: item.line === undefined ? "unreadable_control_journal" : "invalid_control_json",
+  })), ...structuralDiagnostics.map((reason) => ({ reason }))].slice(0, 40);
+  const nowMs = Date.now();
+  const stalePending = journal.records.reduce<number>((count, control) => count + Number(Boolean(
+    RuntimeTriage.classifyRuntimeControl({ run, runInstanceId: runInstanceId || undefined,
+      status: String(status.status ?? "unknown") }, control, nowMs).stale)), 0);
   return {
     run,
     run_instance_id: runInstanceId,
     status: status.status,
+    pending: capacity.pending, pending_limit: capacity.limit,
+    available: capacity.available, backpressured: capacity.backpressured,
+    journal_bytes: journalBytes, journal_limit: Limits.RUN_CONTROL_JOURNAL_MAX_BYTES,
+    ...(capacity.oldest_pending_at ? { oldest_pending_at: capacity.oldest_pending_at } : {}),
+    stale_pending: stalePending,
+    diagnostics,
     actor_actions: Array.isArray(status.control) ? status.control : [],
     runtime_actions: status.status === "running" ? ["kill"] : ["archive", "prune"],
     endpoint: runInstanceId
       ? RunControlDelivery.readRunControlEndpoint(stateDir, runInstanceId)
       : undefined,
-    recent_controls: RunsControls.readRunControlsFromStateDir(stateDir)
-      .slice(-Math.max(1, Number(input.lines || 20)))
-      .reverse()
-      .map(ControlProjection.projectRunControl),
+    recent_controls: journal.records.slice(-Math.max(1, Number(input.lines || 20))).reverse()
+      .map((control) => ControlProjection.projectRunControl(control as RunsControls.RunControlRecord)),
   };
 }
 

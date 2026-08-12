@@ -21,7 +21,9 @@ import {
   deliverRunTransitionNotifications,
   executeRunRetirements,
   findRunRetirementCandidates,
+  primeRunAttentionState,
   pruneRunObservationState,
+  readRunUiSnapshot,
   reconcileRunTerminalNotifications,
   formatRunAttentionMessage,
   formatRunTransitionMessage,
@@ -36,6 +38,8 @@ import {
   summarizeRuns,
 } from "../lib/observability.ts";
 import { readProcessIdentity } from "../lib/runs-process.ts";
+import * as Limits from "../lib/limits.ts";
+import { appendRunTraceEvent } from "../lib/runs-trace.ts";
 
 async function writeRun(
   root: string,
@@ -191,7 +195,8 @@ test("Run observability detects script-authored Trace attention", async () => {
     );
     const summary = summarizeRuns(root, "session-a");
     const previous = new Map<string, number>();
-    const events = detectRunAttentionEvents(previous, summary);
+    const seen = new Map<string, Set<string>>();
+    const events = detectRunAttentionEvents(previous, summary, seen);
     assert.equal(events.length, 1);
     assert.equal(events[0].kind, "player.track");
     assert.equal(events[0].summary, "Now playing: track.flac");
@@ -204,7 +209,131 @@ test("Run observability detects script-authored Trace attention", async () => {
     assert.equal(getRunAttentionNotificationType(events[0]), "info");
     assert.equal(shouldNotifyRunAttentionEvent(events[0]), true);
     assert.equal(shouldSendRunAttentionFollowUp(events[0]), true);
-    assert.deepEqual(detectRunAttentionEvents(previous, summary), []);
+    assert.deepEqual(detectRunAttentionEvents(previous, summary, seen), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability keeps canonical attention exactly-once across replacement", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-replace-"));
+  const stateDir = join(root, "music");
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    const first = appendRunTraceEvent(stateDir, {
+      attention: "notify",
+      kind: "player.first",
+    });
+    const summary = summarizeRuns(root, "session-a");
+    const legacy = new Map<string, number>();
+    const seen = new Map<string, Set<string>>();
+    assert.deepEqual(
+      detectRunAttentionEvents(legacy, summary, seen).map(({ id }) => id),
+      [first.id],
+    );
+    assert.deepEqual(detectRunAttentionEvents(legacy, summary, seen), []);
+
+    const second = {
+      id: "replacement-second",
+      kind: "player.second",
+      ts: "2026-01-01T00:00:01.000Z",
+      attention: "followup",
+    };
+    await writeFile(
+      join(stateDir, "trace.jsonl"),
+      `${JSON.stringify(second)}\n`,
+    );
+    assert.deepEqual(
+      detectRunAttentionEvents(legacy, summary, seen).map(({ id }) => id),
+      [second.id],
+    );
+    assert.equal(seen.get(stateDir)?.has(first.id), false);
+    assert.deepEqual(detectRunAttentionEvents(legacy, summary, seen), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability delivers multiple unseen retained attention in physical order", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-multiple-"));
+  const stateDir = join(root, "music");
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    await writeFile(
+      join(stateDir, "trace.jsonl"),
+      [
+        { id: "first", kind: "player.first", ts: "2026-01-01T00:00:02.000Z", attention: "notify" },
+        { id: "marker", kind: "runtime.trace_compacted", ts: "2026-01-01T00:00:03.000Z", level: "warning", data: { version: 1, compactions_total: 1, dropped_valid_events_total: 1, dropped_malformed_lines_total: 0, dropped_bytes_total: 10, dropped_event_count_exact: true, retained_events: 3, retained_bytes: 400, history_complete: false } },
+        { id: "second", kind: "player.second", ts: "2026-01-01T00:00:01.000Z", attention: "followup" },
+      ].map((value) => JSON.stringify(value)).join("\n") + "\n",
+    );
+    const events = detectRunAttentionEvents(
+      new Map(),
+      summarizeRuns(root, "session-a"),
+      new Map(),
+    );
+    assert.deepEqual(events.map(({ id }) => id), ["first", "second"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability primes retained attention without startup replay", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-prime-"));
+  const stateDir = join(root, "music");
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    const historical = appendRunTraceEvent(stateDir, {
+      attention: "followup",
+      kind: "player.historical",
+    });
+    const state = createRunUiObservationState();
+    primeRunAttentionState(state, "session-a", root);
+    assert.deepEqual(readRunUiSnapshot(state, "session-a", { stateRoot: root }).attentionEvents, []);
+    const current = appendRunTraceEvent(stateDir, {
+      attention: "notify",
+      kind: "player.current",
+    });
+    assert.deepEqual(
+      readRunUiSnapshot(state, "session-a", { stateRoot: root })
+        .attentionEvents.map(({ id }) => id),
+      [current.id],
+    );
+    assert.deepEqual(state.attentionEventIds.get(stateDir), new Set([historical.id, current.id]));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Run observability delivers retained attention once across repeated compaction", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-compaction-"));
+  const stateDir = join(root, "music");
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    const state = createRunUiObservationState();
+    primeRunAttentionState(state, "session-a", root);
+    const delivered: string[] = [];
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      for (let index = 0; index < Limits.TRACE_JOURNAL_MAX_EVENTS - 2; index += 1)
+        appendRunTraceEvent(stateDir, { kind: "player.pressure", data: { cycle, index } });
+      const attention = appendRunTraceEvent(stateDir, {
+        attention: cycle ? "followup" : "notify", kind: `player.cycle_${cycle}`,
+      });
+      const first = readRunUiSnapshot(state, "session-a", { stateRoot: root });
+      delivered.push(...first.attentionEvents.map(({ id }) => id));
+      assert.equal(first.attentionEvents.filter(({ id }) => id === attention.id).length, 1);
+      appendRunTraceEvent(stateDir, { kind: "player.compact", data: { cycle } });
+      assert.deepEqual(readRunUiSnapshot(state, "session-a", { stateRoot: root }).attentionEvents, []);
+      assert.ok((state.attentionEventIds.get(stateDir)?.size ?? 0) <= 1);
+    }
+    const finalAttention = appendRunTraceEvent(stateDir, {
+      attention: "notify", kind: "player.final",
+    });
+    delivered.push(...readRunUiSnapshot(state, "session-a", { stateRoot: root })
+      .attentionEvents.map(({ id }) => id));
+    assert.equal(new Set(delivered).size, 3);
+    assert.equal(delivered.at(-1), finalAttention.id);
+    assert.deepEqual(readRunUiSnapshot(state, "session-a", { stateRoot: root }).attentionEvents, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -247,6 +376,36 @@ test("Run observability skips malformed legacy attention records", async () => {
   }
 });
 
+test("Run observability bounds seen attention ids to the retained canonical set", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-observe-bounded-seen-"));
+  const stateDir = join(root, "music");
+  try {
+    await writeRun(root, "music", "running", [], 0, "session-a");
+    const legacy = new Map<string, number>();
+    const seen = new Map<string, Set<string>>();
+    for (let index = 0; index < 20; index += 1) {
+      const record = {
+        id: `event-${index}`,
+        kind: "player.track",
+        ts: new Date(index).toISOString(),
+        attention: "notify",
+      };
+      await writeFile(join(stateDir, "trace.jsonl"), `${JSON.stringify(record)}\n`);
+      assert.equal(
+        detectRunAttentionEvents(
+          legacy,
+          summarizeRuns(root, "session-a"),
+          seen,
+        ).length,
+        1,
+      );
+      assert.deepEqual(seen.get(stateDir), new Set([record.id]));
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Run observability detects terminal transitions", () => {
   const previous = new Map([["review", "running" as const]]);
   const transitions = detectRunTransitions(previous, {
@@ -279,6 +438,21 @@ test("Run observability detects terminal transitions", () => {
     "Run: `review`\nStatus: `done`\nBase: `artifacts`\nArtifacts: `report.md`",
   );
   assert.equal(previous.get("review"), "done");
+});
+
+test("Terminal reconciliation is independent of retained Trace history", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-trace-"));
+  const stateDir = join(root, "review");
+  try {
+    await writeRun(root, "review", "done", [], 0, "session-a");
+    await writeFile(join(stateDir, "trace.jsonl"), "{compacted away}\n");
+    const transitions = detectRunTransitions(new Map([[stateDir, "running" as const]]),
+      summarizeRuns(root, "session-a"));
+    assert.equal(transitions.length, 1);
+    assert.equal(transitions[0]?.to, "done");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Run observability bounds terminal artifact references", () => {
@@ -584,6 +758,45 @@ test("Periodic terminal reconciliation delivers without a watcher event", async 
   } finally {
     loop?.close();
     degradedWatcher.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Periodic reconciliation recovers missed retained attention events", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-attention-reconcile-"));
+  try {
+    await writeRun(root, "review", "running", [], 0, "session-a");
+    const state = createRunUiObservationState();
+    primeRunAttentionState(state, "session-a", root);
+    const event = appendRunTraceEvent(join(root, "review"), {
+      attention: "notify",
+      kind: "checkpoint.ready",
+    });
+    const notified: string[] = [];
+    reconcileRunTerminalNotifications({
+      includeAttention: true,
+      ownerId: "session-a",
+      sink: {
+        notify: (message) => { notified.push(message); },
+        sendFollowUp: () => {},
+      },
+      state,
+      stateRoot: root,
+    });
+    assert.equal(notified.length, 1);
+    assert.match(notified[0], new RegExp(event.kind));
+    reconcileRunTerminalNotifications({
+      includeAttention: true,
+      ownerId: "session-a",
+      sink: {
+        notify: (message) => { notified.push(message); },
+        sendFollowUp: () => {},
+      },
+      state,
+      stateRoot: root,
+    });
+    assert.equal(notified.length, 1);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

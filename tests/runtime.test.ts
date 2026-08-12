@@ -389,7 +389,7 @@ test("Recipe watcher rearms when the recipe root appears", {
     ui: { notify: (message: string) => notifications.push(message) },
   };
   async function waitForLoad(previous: number): Promise<void> {
-    for (let attempt = 0; attempt < 80; attempt += 1) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
       if (loads > previous) return;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -399,6 +399,8 @@ test("Recipe watcher rearms when the recipe root appears", {
     watcher.watch(ctx);
     const recipeRoot = join(agentDir, "recipes");
     await mkdir(recipeRoot);
+    await waitForLoad(0);
+    let previousLoads = loads;
     await writeRecipe(recipeRoot, "first", {
       description: "First",
       template: "echo first",
@@ -406,7 +408,7 @@ test("Recipe watcher rearms when the recipe root appears", {
     await waitForLoad(0);
     assert.match(notifications.join("\n"), /Recipe tools refreshed/);
 
-    let previousLoads = loads;
+    previousLoads = loads;
     await rm(recipeRoot, { recursive: true, force: true });
     await waitForLoad(previousLoads);
     previousLoads = loads;

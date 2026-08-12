@@ -55,9 +55,9 @@ Trace records strict bounded events:
 {"id":"…","ts":"…","kind":"command.done","summary":"Command completed","data":{"code":0},"level":"info","attention":"followup"}
 ```
 
-Required fields: `id`, `ts`, `kind`. Optional fields: `summary`, `data`, `level`, `attention`. Trace rejects addressed-envelope fields and malformed or oversized data. All first-party writers use the canonical append authority, which validates and size-checks inside a token-owned cross-process lock before one append-only JSONL write.
+Required fields: `id`, `ts`, `kind`. Optional fields: `summary`, `data`, `level`, `attention`. Trace rejects addressed-envelope fields and malformed or oversized data. It retains a recent suffix within 2,048 events and 4 MiB. When either bound would be exceeded, the canonical lock atomically keeps a newest suffix near the lower targets, the new event, and one cumulative warning-only `runtime.trace_compacted` marker. The marker means older history was discarded; it reports cumulative drop evidence and never requests attention.
 
-Runtime lifecycle, runner progress, command completion, cancellation, kill, parent teardown, and controlled-service observations use Trace. `inspect view=trace` projects these events with Controls, owned Pi turns, logs, results, artifacts, and diagnostics under a deterministic global bound.
+Runtime lifecycle, runner progress, command completion, cancellation, kill, parent teardown, and controlled-service observations use Trace. Bounded reads preserve complete UTF-8 lines and disclose omitted legacy prefixes. `inspect view=trace` reports retained-history completeness and projects events with Controls, owned Pi turns, logs, results, artifacts, and diagnostics newest-first. Equal timestamps use same-source physical order, then fixed source rank and stable id without claiming cross-source causality. Terminal state, `result.json`, `execution.json`, and artifacts remain authoritative even when old Trace has compacted.
 
 ## Control
 
@@ -84,13 +84,13 @@ The runtime:
 
 Unix services may publish a FIFO; native Windows services publish a Windows named pipe. Native Windows FIFO delivery fails before transport rather than degrading to another protocol. Both transports admit the same portable envelope: action is at most 64 lowercase ASCII characters, serialized JSON input is at most 380 bytes, and the newline-terminated wire record is at most 512 bytes. Invalid envelopes fail before journal admission or transport. Put larger data in a declared artifact/path and send only a bounded reference or instruction through Control.
 
-A service claims queued or transport-delivered Controls and records handled/failed outcomes under the token-owned Control journal lock. Journal snapshots replace atomically, and expected-status fencing prevents delivery failure evidence from regressing a Control already claimed or completed by a fast consumer. Terminal compaction remains bounded. Services capture their startup generation, so stale-generation Controls never execute.
+A service exact-id claims queued or transport-delivered Controls and records handled/failed outcomes through the canonical Control journal authority. Admission performs one locked read, integrity/generation check, terminal-tail compaction, capacity decision, and atomic write. The 65th pending Control and a rewrite exceeding 1 MiB fail as bounded `control_backpressure` before admission; malformed, unreadable, oversized, or stale-generation journals fail with an integrity reason and no rejected record. `inspect view=control` reports pending capacity, saturation, stale work, journal bytes, and diagnostics. Every transition uses the same lock, expected-state fence, 128-terminal compaction, and atomic bounded rewrite; persisted errors truncate inside the string at 4 KiB. Admitted nonterminal Controls never expire automatically. Delivery failure evidence cannot regress a Control already claimed or completed by a fast consumer. Services capture their startup generation, so stale-generation Controls never execute.
 
-Runtime lifecycle `kill`, retention actions, and review retry/reset remain runtime-owned rather than Recipe-declared.
+Runtime lifecycle `kill`, retention actions, and review retry/reset remain runtime-owned rather than Recipe-declared. Kill is the recovery path for a stuck saturated Run: it bypasses actor-local Control capacity and creates no synthetic Control. Same-directory restart clears all generation-local evidence before the new `run_instance_id`; archive moves the exact bounded terminal tree, while prune removes kernel state and preserves only explicitly requested artifacts.
 
 ## Execution Evidence
 
-`execution.json` stores general command/session provenance. The async runner keeps bounded stdout/stderr logs plus bounded complete captures when semantic validation requires untruncated evidence. Pi command execution also records owned session provenance for later Trace projection and review checks.
+`execution.json` stores general command/session provenance. The async runner keeps bounded stdout/stderr logs plus complete capture artifacts when semantic validation requires untruncated evidence. Pi command execution also records owned session provenance for later Trace projection and review checks. Trace and Control quotas do not constrain declared user artifacts, repositories or media sources, complete execution captures, or actor-owned queue/workload state; each remains governed by its own lifecycle and policy.
 
 Review acceptance remains a command-stage concern. General execution evidence does not imply review approval.
 
@@ -98,7 +98,7 @@ Review acceptance remains a command-stage concern. General execution evidence do
 
 Statuses include `running`, `done`, `failed`, `exited`, `cancelled`, and `killed`. Status resolution combines persisted metadata, result/terminal evidence, and verified process state.
 
-Ambient observation detects terminal transitions and Trace attention. Terminal follow-up delivery persists handled/failure evidence so reloads retry unhandled transitions without duplicating completed notifications.
+Ambient observation detects terminal transitions and retained Trace attention. Canonical attention is an in-memory wake hint, not a durable queue: observers prime retained ids at startup, deliver each later retained unseen id once, and bound memory to the current retained set across compaction. Persist durable recovery state or an artifact before emitting attention; compaction may discard older hints and its marker makes that history loss explicit. Terminal follow-up delivery persists handled/failure evidence so reloads retry unhandled transitions without duplicating completed notifications.
 
 Large semantic results stay outside compact visible follow-up text and remain available in structured details, execution captures, or artifacts.
 
@@ -124,7 +124,9 @@ Archive and prune apply only to terminal Runs and enforce path containment. Rete
 Packaged controlled services demonstrate the endpoint protocol:
 
 - `music-player` consumes playback Controls and emits playback Trace;
-- `resource-locker` consumes queue/lease actions and emits lock Trace.
+- `resource-locker` consumes queue/lease actions, emits lock Trace, and atomically retains at most 512 valid journal records within 1 MiB.
+
+Shared archive/prune evidence similarly retains at most 256 valid records within 1 MiB under its canonical lock. The obsolete advisory `wake.jsonl` notifier was removed; filesystem watchers and bounded reconciliation observe authoritative state directly.
 
 One-shot pipelines omit Control and terminate through their command graph.
 
@@ -136,4 +138,4 @@ inspect target=run:<id> view=trace source=lifecycle lines=40
 inspect target=run:<id> view=control
 ```
 
-Use `/actor-inspector` to inspect Runs as concrete actor instances in the live TUI. Runtime, Recipe registry, and tool definitions remain separate management targets.
+Use `/actor-inspector` to inspect Runs as concrete actor instances in the live TUI. Runtime, Recipe registry, and tool definitions remain separate management targets. No public noun, tool, target, or view is added by bounded retention.

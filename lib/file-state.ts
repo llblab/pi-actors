@@ -10,8 +10,11 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 
-const FILE_MUTATION_LOCK_TIMEOUT_MS = process.platform === "win32" ? 15000 : 5000;
+const FILE_MUTATION_LOCK_TIMEOUT_MS = process.platform === "win32" ? 30000 : 15000;
 const FILE_MUTATION_LOCK_STALE_MS = 30000;
+const FILE_MUTATION_LOCK_RECLAIM_POLL_MS = 100;
+const FILE_MUTATION_LOCK_REMOVAL_GRACE_MS = 250;
+const FILE_MUTATION_LOCK_MAX_WAIT_MS = 50;
 const FILE_MUTATION_LOCK_ROOT = join(tmpdir(), "pi-actors-file-locks");
 
 function canonicalMutationPath(path: string): string {
@@ -65,7 +68,8 @@ function lockOwnerStatus(lockPath: string): "alive" | "dead" | "unknown" {
     if (!Number.isInteger(pid) || pid <= 0) return "unknown";
     try {
       process.kill(pid, 0);
-      if (Date.now() - statSync(lockPath).mtimeMs > 50 && isZombieProcess(pid)) return "dead";
+      if (Date.now() - statSync(lockPath).mtimeMs > FILE_MUTATION_LOCK_REMOVAL_GRACE_MS &&
+          isZombieProcess(pid)) return "dead";
       return "alive";
     } catch (error) {
       return (error as NodeJS.ErrnoException).code === "ESRCH"
@@ -120,8 +124,9 @@ function removeLockBoundary(lockPath: string, token: string | undefined): boolea
 function tryReclaimRemovalBoundary(reclaimPath: string): void {
   if (!existsSync(reclaimPath)) return;
   try {
-    const inspectedToken = readLockToken(reclaimPath);
     const age = Date.now() - statSync(reclaimPath).mtimeMs;
+    if (age <= FILE_MUTATION_LOCK_REMOVAL_GRACE_MS) return;
+    const inspectedToken = readLockToken(reclaimPath);
     const ownerStatus = lockOwnerStatus(reclaimPath);
     if (
       (ownerStatus === "dead" ||
@@ -195,6 +200,8 @@ export function acquireFileMutationLock(
   const token = randomUUID();
   const pendingPath = prepareLockBoundary(lockPath, token, options.onBeforeLockPublish);
   let contentionReported = false;
+  let nextReclaimAt = 0;
+  let waitMs = 10;
   try {
     for (;;) {
       try {
@@ -205,13 +212,22 @@ export function acquireFileMutationLock(
           contentionReported = true;
           options.onContention?.();
         }
-        tryReclaimMutationLock(lockPath, options);
-        if (Date.now() >= deadline) {
+        const now = Date.now();
+        if (now >= nextReclaimAt) {
+          nextReclaimAt = now + FILE_MUTATION_LOCK_RECLAIM_POLL_MS;
+          if (tryReclaimMutationLock(lockPath, options)) {
+            waitMs = 10;
+            continue;
+          }
+        }
+        if (now >= deadline) {
           throw new Error(`Timed out waiting for file mutation lock: ${canonicalMutationPath(path)}`, {
             cause: error,
           });
         }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        const jitter = Math.floor(Math.random() * Math.max(1, Math.floor(waitMs / 2)));
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs + jitter);
+        waitMs = Math.min(FILE_MUTATION_LOCK_MAX_WAIT_MS, waitMs + 5);
       }
     }
   } finally {
@@ -251,11 +267,16 @@ export function withFileMutationLock<T>(
   }
 }
 
-export function writeTextAtomic(path: string, content: string): void {
+export function writeTextAtomic(
+  path: string,
+  content: string,
+  options: { onBeforeReplace?(): void } = {},
+): void {
   mkdirSync(dirname(path), { recursive: true });
   const tempPath = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tempPath, content, "utf8");
+    options.onBeforeReplace?.();
     renameSync(tempPath, path);
   } catch (error) {
     try {

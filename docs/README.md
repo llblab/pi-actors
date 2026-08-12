@@ -4,7 +4,6 @@ Living index of all documentation in the `/docs` directory.
 
 ## Documents
 
-- [0.43-baseline.md](./0.43-baseline.md) — Released tree, strict shipped-line ratchet, and retained-invariant preservation evidence
 - [command-templates.md](./command-templates.md) — Portable synchronous command execution standard
 - [template-recipes.md](./template-recipes.md) — Saved JSON/Markdown recipe standard, imports, and reusable command-template graph composition
 - [async-runs.md](./async-runs.md) — Run lifecycle, state, Control, Trace, cancellation, and terminal reconciliation

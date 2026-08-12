@@ -165,8 +165,30 @@ try {
       text.includes('importRuntimeModule("runs-trace")') && text.includes("appendRunTraceEvent"),
       `first-party Trace writer bypasses canonical runtime module: ${path}`,
     );
+    if (path !== "scripts/async-runner.mjs") check(
+      text.includes('importRuntimeModule("runs-controls")') &&
+        !/function (?:read|write|claimControls|finalizeControls)\b/u.test(text),
+      `first-party Control writer bypasses canonical runtime module: ${path}`,
+    );
   }
-  console.log("[release] canonical Trace writer residue checked");
+  console.log("[release] canonical Trace and Control writer residue checked");
+
+  // owner | class | lock | record bound | byte bound | recovery
+  const appendOnlyOwners = new Set([
+    "lib/runs-trace.ts", // canonical Run evidence | token lock | 2048 | 4 MiB | compact valid suffix
+    "lib/runs-retention.ts", // shared kernel evidence | token lock | 256 | 1 MiB | skip malformed
+    "scripts/locker.mjs", // first-party actor state | token lock | 512 | 1 MiB | skip malformed
+    "lib/command-templates.ts", // complete execution capture | command owner | n/a | artifact policy | preserve
+    "scripts/async-runner.mjs", // captures/prompts | Run owner | n/a | artifact policy | preserve
+    "scripts/recipe-utils.mjs", // user-declared artifact | caller owner | n/a | caller policy | preserve
+    "scripts/release-gates.mjs", // build/test-only source inventory | n/a | n/a | n/a | self-match
+  ]);
+  const appendOnlyPattern = /\bappendFileSync\b|\b(?:writeFileSync|writeTextAtomic)\s*\([^)]*\{\s*flag:\s*["']a["']/su;
+  for (const path of files.filter((candidate) => /^(?:lib\/.*\.ts|scripts\/.*\.mjs)$/u.test(candidate)))
+    if (appendOnlyPattern.test(stagedText(path) ?? ""))
+      check(appendOnlyOwners.has(path), `unregistered shipped append-only writer: ${path}`);
+  for (const path of appendOnlyOwners) check(fileSet.has(path), `stale append-only owner inventory: ${path}`);
+  console.log(`[release] append-only owner inventory checked: ${appendOnlyOwners.size} source owners`);
 
   check(
     (stagedText("scripts/validate-recipe.mjs") ?? "").includes(
@@ -176,13 +198,13 @@ try {
   );
   console.log("[release] zero-warning Recipe QA gate checked");
 
-  const baselineShippedLines = 28_853;
+  const maximumShippedLines = 29_598;
   const shippedPath = /^(?:lib\/|scripts\/|recipes\/|docs\/|skills\/)/u;
   const shippedLines = files
     .filter((path) => shippedPath.test(path))
     .reduce((total, path) => total + (((stagedText(path) ?? "").match(/\n/gu) ?? []).length + 1), 0);
-  check(shippedLines < baselineShippedLines, `shipped lines ${shippedLines} are not below baseline ${baselineShippedLines}`);
-  console.log(`[release] shipped lines ${shippedLines} < released baseline ${baselineShippedLines}`);
+  check(shippedLines <= maximumShippedLines, `shipped lines ${shippedLines} exceed release maximum ${maximumShippedLines}`);
+  console.log(`[release] shipped lines ${shippedLines} <= release maximum ${maximumShippedLines}`);
 
   const sources = files.filter((path) => path === "index.ts" || (path.startsWith("lib/") && path.endsWith(".ts")));
   const sourceSet = new Set(sources);

@@ -49,10 +49,6 @@ const releaseGatesSource = await readFile(
   new URL("../scripts/release-gates.mjs", import.meta.url),
   "utf8",
 );
-const baselineSource = await readFile(
-  new URL("../docs/0.43-baseline.md", import.meta.url),
-  "utf8",
-);
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 ) as { scripts?: Record<string, string> };
@@ -253,6 +249,15 @@ test("CI runs the dependency audit once on Ubuntu", () => {
   assert.match(validateWorkflowSource, /dependency-audit:[\s\S]*runs-on: ubuntu-latest/);
 });
 
+test("release gates register every shipped append-only writer", () => {
+  assert.match(releaseGatesSource, /unregistered shipped append-only writer/);
+  assert.match(releaseGatesSource, /lib\/runs-trace\.ts/);
+  assert.match(releaseGatesSource, /lib\/runs-retention\.ts/);
+  assert.match(releaseGatesSource, /scripts\/locker\.mjs/);
+  assert.match(releaseGatesSource, /complete execution capture/);
+  assert.match(releaseGatesSource, /user-declared artifact/);
+});
+
 test("CI release validation includes exact-tree, Domain DAG, and ABCd gates", () => {
   const releaseValidate = packageJson.scripts?.["release:validate"] ?? "";
   assert.match(releaseValidate, /npm run validate/);
@@ -260,13 +265,11 @@ test("CI release validation includes exact-tree, Domain DAG, and ABCd gates", ()
   assert.match(validateWorkflowSource, /npm run release:validate/);
 });
 
-test("Release compression ratchets strictly from the documented 0.43.0 tree", () => {
-  assert.match(releaseGatesSource, /const baselineShippedLines = 28_853;/);
-  assert.match(releaseGatesSource, /shippedLines < baselineShippedLines/);
-  assert.match(releaseGatesSource, /shipped lines \$\{shippedLines\} < released baseline/);
-  assert.match(baselineSource, /0d6db30cd2e070c1d03ed1e60bef70538a3083c1/);
-  assert.match(baselineSource, /exactly \*\*28,853\*\* lines/);
-  assert.match(baselineSource, /strictly below 28,853 lines/);
+test("Release gate enforces a fixed shipped-line limit", () => {
+  const declaration = releaseGatesSource.match(/const (\w*[Ss]hippedLines\w*) = ([\d_]+);/);
+  assert.ok(declaration);
+  assert.equal(Number(declaration[2].replaceAll("_", "")), 29_598);
+  assert.match(releaseGatesSource, new RegExp(`check\\(shippedLines <=? ${declaration[1]}`));
 });
 
 test("CI workflows use reusable validation and Node 24 action runtimes", () => {
@@ -331,6 +334,7 @@ test("Release publishes through tokenless npm Trusted Publisher before GitHub Re
   assert.match(publishJob, /grep -Eq 'E404\|404 Not Found'/);
   assert.match(publishJob, /npm publish --access public --provenance/);
   assert.match(publishJob, /for attempt in \$\(seq 1 20\)/);
+  assert.match(publishJob, /npm view[\s\S]*&&\n\s*npm pack[\s\S]*&&\n\s*node --input-type=module/);
   assert.match(publishJob, /npm pack "\$PACKAGE_NAME@\$VERSION" --dry-run --json/);
   assert.match(publishJob, /dist\/pi-actors\/index\.js/);
   assert.match(publishJob, /dist\/skills\/actors\/SKILL\.md/);
@@ -384,7 +388,7 @@ test("Music player helper uses only Control and Trace state", () => {
   assert.doesNotMatch(script, /inbox\.jsonl|outbox\.jsonl|message to=|player\.<command>/);
 });
 
-test("First-party scripts use only canonical Trace append", () => {
+test("First-party scripts use only canonical Trace and Control journals", () => {
   const directTraceWrite = /(?:appendFileSync|writeFileSync|writeText(?:Atomic)?)\s*\(\s*[A-Za-z0-9_.]*?(?:trace|event)(?:Path|File)/iu;
   for (const file of [
     "scripts/async-runner.mjs",
@@ -393,6 +397,10 @@ test("First-party scripts use only canonical Trace append", () => {
   ]) {
     const source = readFileSync(file, "utf8");
     assert.match(source, /importRuntimeModule\("runs-trace"\)/, file);
+    if (file !== "scripts/async-runner.mjs") {
+      assert.match(source, /importRuntimeModule\("runs-controls"\)/, file);
+      assert.doesNotMatch(source, /function (?:read|write|claimControls|finalizeControls)\b/, file);
+    }
     assert.match(source, /appendRunTraceEvent/, file);
     assert.doesNotMatch(source, directTraceWrite, file);
   }

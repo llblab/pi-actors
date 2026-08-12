@@ -24,7 +24,7 @@ Captured Recipe evidence belongs to the Run generation and does not change when 
 
 Shows the unified bounded Trace projection. Sources include lifecycle/runtime observations, Controls, owned Pi turns, command-log tails, results, artifacts, and diagnostics. Filter by source and open a row for structured detail.
 
-Trace ordering stays deterministic and newest-first. Row numbers still read chronologically from bottom to top: the oldest visible event is `#1` and the newest carries the highest number. The projection applies path containment and redaction before rendering.
+Trace ordering stays deterministic and newest-first: timestamp descending, same-source physical ordinal descending, fixed internal source rank, then stable id. Internal ordinals are never displayed or interpreted as cross-source causality. Row numbers still read chronologically from bottom to top: the oldest visible event is `#1` and the newest carries the highest number. The summary states whether retained history is complete; `runtime.trace_compacted` means older history was discarded and shows bounded cumulative drop evidence. Terminal/result/execution/artifact evidence keeps its own authority. The projection applies path containment and redaction before rendering.
 
 ## Control
 
@@ -33,9 +33,10 @@ Shows:
 - Recipe-declared actor-local actions;
 - runtime-owned lifecycle actions;
 - generation-fenced endpoint readiness;
+- pending capacity, saturation, journal bytes, stale count, and diagnostics;
 - recent durable Control records and outcomes.
 
-A service endpoint counts as ready only when `control-endpoint.json` matches the Run's immutable `run_instance_id`. Recent Control input and errors use the same bounded structured redaction as tool inspection. The durable `controls.jsonl` journal remains raw and local; rendering never mutates it or attaches an unredacted copy.
+A service endpoint counts as ready only when `control-endpoint.json` matches the Run's immutable `run_instance_id`. Capacity reaches zero at 64 pending Controls; further requests are rejected before admission, while admitted nonterminal Controls never expire automatically. Runtime-owned kill remains available for a stuck saturated Run. Recent Control input and errors use the same bounded structured redaction as tool inspection. The durable `controls.jsonl` journal remains raw and local; rendering never mutates it or attaches an unredacted copy.
 
 ## Keys
 

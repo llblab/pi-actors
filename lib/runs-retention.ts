@@ -4,10 +4,12 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, cpSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import { acquireFileMutationLock, writeJsonAtomic } from "./file-state.ts";
+import { acquireFileMutationLock, writeJsonAtomic, writeTextAtomic } from "./file-state.ts";
+import * as Limits from "./limits.ts";
+import { readJsonlFileResilient } from "./state-readers.ts";
 import {
   resolveArtifactManifest,
   type RunArtifactDeclaration,
@@ -27,27 +29,33 @@ export function appendRunRetentionEvidence(
   const stateDir = String(status.state_dir);
   const path = join(dirname(stateDir), "retention.jsonl");
   const id = options.id ?? randomUUID();
+  const record = {
+    action,
+    ...(options.error ? { error: options.error } : {}),
+    id,
+    outcome,
+    ...(options.result ? { result: options.result } : {}),
+    run: String(status.run ?? basename(stateDir)),
+    ...(typeof status.run_instance_id === "string" ? { run_instance_id: status.run_instance_id } : {}),
+    ts: new Date().toISOString(),
+  };
   const release = acquireFileMutationLock(path);
   try {
-    appendFileSync(
-      path,
-      `${JSON.stringify({
-        action,
-        ...(options.error ? { error: options.error } : {}),
-        id,
-        outcome,
-        ...(options.result ? { result: options.result } : {}),
-        run: String(status.run ?? basename(stateDir)),
-        ...(typeof status.run_instance_id === "string"
-          ? { run_instance_id: status.run_instance_id }
-          : {}),
-        ts: new Date().toISOString(),
-      })}\n`,
-    );
-  } finally {
-    release();
-  }
+    const records = [...readJsonlFileResilient<Record<string, unknown>>(path).records, record]
+      .slice(-Limits.RUN_RETENTION_MAX_RECORDS);
+    let content = encodeRecords(records);
+    while (records.length && Buffer.byteLength(content) > Limits.RUN_RETENTION_MAX_BYTES) {
+      records.shift();
+      content = encodeRecords(records);
+    }
+    if (!records.includes(record)) throw new Error("Run retention record exceeds journal byte limit");
+    writeTextAtomic(path, content);
+  } finally { release(); }
   return id;
+}
+
+function encodeRecords(records: Record<string, unknown>[]): string {
+  return records.length ? `${records.map((value) => JSON.stringify(value)).join("\n")}\n` : "";
 }
 
 function retainedArtifactFilename(name: string, path: string): string {

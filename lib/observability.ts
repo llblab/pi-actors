@@ -25,6 +25,7 @@ import {
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
+import * as RunsTrace from "./runs-trace.ts";
 import { readJsonlFileResilient } from "./state-readers.ts";
 
 export type RunObservedStatus =
@@ -73,7 +74,7 @@ export interface RunSummary {
 
 export interface RunUiObservationState {
   attentionEventIds: Map<string, Set<string>>;
-  eventLines: Map<string, number>;
+  legacyEventLines: Map<string, number>;
   frame: number;
   observed: Map<string, RunObservedStatus>;
 }
@@ -98,10 +99,17 @@ export interface RunUiNotificationSink {
 export function createRunUiObservationState(): RunUiObservationState {
   return {
     attentionEventIds: new Map<string, Set<string>>(),
-    eventLines: new Map<string, number>(),
+    legacyEventLines: new Map<string, number>(),
     frame: 0,
     observed: new Map<string, RunObservedStatus>(),
   };
+}
+
+export function primeRunAttentionState(
+  state: RunUiObservationState, ownerId: string, stateRoot?: string,
+): void {
+  detectRunAttentionEvents(state.legacyEventLines, summarizeRuns(stateRoot, ownerId),
+    state.attentionEventIds, true);
 }
 
 export function readRunUiSnapshot(
@@ -116,7 +124,7 @@ export function readRunUiSnapshot(
       options.includeAttention === false
         ? []
         : detectRunAttentionEvents(
-            state.eventLines,
+            state.legacyEventLines,
             summary,
             state.attentionEventIds,
           ),
@@ -132,7 +140,7 @@ export function pruneRunUiObservationState(
 ): void {
   pruneRunObservationState(
     state.observed,
-    state.eventLines,
+    state.legacyEventLines,
     snapshot.summary,
     snapshot.transitions.map(
       (transition) => transition.stateDir ?? transition.run,
@@ -192,16 +200,15 @@ export function reconcileRunTerminalNotifications(input: {
   sink: RunUiNotificationSink;
   state: RunUiObservationState;
   stateRoot?: string;
+  includeAttention?: boolean;
 }): RunUiSnapshot {
   const snapshot = readRunUiSnapshot(input.state, input.ownerId, {
-    includeAttention: false,
+    includeAttention: input.includeAttention,
     stateRoot: input.stateRoot,
   });
-  deliverRunTransitionNotifications(
-    snapshot.transitions,
-    input.sink,
-    input.inFlight,
-  );
+  if (input.includeAttention)
+    deliverRunAttentionNotifications(snapshot.attentionEvents, input.sink);
+  deliverRunTransitionNotifications(snapshot.transitions, input.sink, input.inFlight);
   pruneRunUiObservationState(input.state, snapshot);
   return snapshot;
 }
@@ -1114,15 +1121,17 @@ function parseAttentionRecord(
   };
 }
 
-function readTraceAttentionRecords(run: RunObservation): Record<string, unknown>[] {
-  if (!run.stateDir) return [];
-  const tracePath = join(run.stateDir, "trace.jsonl");
-  if (existsSync(tracePath)) {
-    return readJsonlFileResilient<Record<string, unknown>>(tracePath).records;
-  }
-  return readJsonlFileResilient<Record<string, unknown>>(
-    join(run.stateDir, "outbox.jsonl"),
-  ).records;
+function readTraceAttentionRecords(run: RunObservation): {
+  canonical: boolean; records: Record<string, unknown>[];
+} {
+  if (!run.stateDir) return { canonical: true, records: [] };
+  if (existsSync(join(run.stateDir, "trace.jsonl"))) return {
+    canonical: true,
+    records: RunsTrace.readRunTraceJournal(run.stateDir).events.map(
+      ({ event }) => event as unknown as Record<string, unknown>),
+  };
+  return { canonical: false, records: readJsonlFileResilient<Record<string, unknown>>(
+    join(run.stateDir, "outbox.jsonl")).records };
 }
 
 export function pruneRunObservationState(
@@ -1134,55 +1143,44 @@ export function pruneRunObservationState(
 ): void {
   const activeRuns = new Set(summary.runs.map((run) => runObservationKey(run)));
   const terminalRunSet = new Set(terminalRuns);
-  const terminalLineKeys = new Set(
-    summary.runs
-      .filter((run) => terminalRunSet.has(runObservationKey(run)))
-      .map((run) => runObservationKey(run)),
-  );
-  const activeLineKeys = new Set(
-    summary.runs.map((run) => run.stateDir ?? run.run),
-  );
+  const terminalLineKeys = new Set(summary.runs
+    .filter((run) => terminalRunSet.has(runObservationKey(run)))
+    .map((run) => runObservationKey(run)));
+  const activeLineKeys = new Set(summary.runs.map((run) => run.stateDir ?? run.run));
   for (const run of terminalRunSet) previousStatuses.delete(run);
-  for (const run of previousStatuses.keys()) {
+  for (const run of previousStatuses.keys())
     if (!activeRuns.has(run)) previousStatuses.delete(run);
-  }
-  for (const key of previousLineCounts.keys()) {
-    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) {
-      previousLineCounts.delete(key);
-    }
-  }
-  for (const key of seenEventIds.keys()) {
-    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) {
-      seenEventIds.delete(key);
-    }
-  }
+  for (const key of previousLineCounts.keys())
+    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) previousLineCounts.delete(key);
+  for (const key of seenEventIds.keys())
+    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) seenEventIds.delete(key);
 }
 
 export function detectRunAttentionEvents(
-  previousLineCounts: Map<string, number>,
-  summary: RunSummary,
-  seenEventIds: Map<string, Set<string>> = new Map(),
+  legacyLineCounts: Map<string, number>, summary: RunSummary,
+  seenEventIds: Map<string, Set<string>> = new Map(), prime = false,
 ): RunAttentionEvent[] {
   const events: RunAttentionEvent[] = [];
   for (const run of summary.runs) {
     const key = run.stateDir ?? run.run;
-    const records = readTraceAttentionRecords(run);
-    const previousCount = previousLineCounts.get(key) ?? 0;
-    if (run.notificationPolicy === "silent") {
-      previousLineCounts.set(key, records.length);
-      seenEventIds.set(key, seenEventIds.get(key) ?? new Set<string>());
-      continue;
-    }
-    const start = Math.min(previousCount, records.length);
+    const read = readTraceAttentionRecords(run);
+    const retained = new Set<string>();
     const seen = seenEventIds.get(key) ?? new Set<string>();
-    for (let index = start; index < records.length; index += 1) {
-      const event = parseAttentionRecord(records[index], run, index);
-      if (!event || seen.has(event.id)) continue;
-      events.push(event);
-      seen.add(event.id);
+    const start = read.canonical ? 0
+      : Math.min(legacyLineCounts.get(key) ?? 0, read.records.length);
+    for (const [index, record] of read.records.entries()) {
+      const event = parseAttentionRecord(record, run, index);
+      if (!event || !shouldNotifyRunAttentionEvent(event) ||
+          event.kind === "runtime.trace_compacted") continue;
+      retained.add(event.id);
+      if (prime || run.notificationPolicy === "silent") seen.add(event.id);
+      else if (index >= start && !seen.has(event.id)) {
+        events.push(event); seen.add(event.id);
+      }
     }
-    previousLineCounts.set(key, records.length);
-    seenEventIds.set(key, seen);
+    seenEventIds.set(key, new Set([...retained].filter((id) => seen.has(id))));
+    if (read.canonical) legacyLineCounts.delete(key);
+    else legacyLineCounts.set(key, read.records.length);
   }
   return events;
 }

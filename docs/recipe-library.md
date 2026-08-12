@@ -35,7 +35,7 @@ Artifact pipelines terminate in files/manifests and result evidence; they do not
 ### Controlled services
 
 - `music-player.json` — playback service with declared playback actions, `controls.jsonl`, generation-fenced endpoint readiness, state artifact, and playback Trace. Player selection is `player:enum(auto,mpv,afplay,ffplay,cvlc,play,wmp)=auto`.
-- `resource-locker.json` — optional queue/lease-lock service with explicit owner/resource input and lock Trace.
+- `resource-locker.json` — optional queue/lease-lock service with explicit owner/resource input, lock Trace, and a 512-record/1 MiB atomically retained journal.
 
 These are the packaged Recipes that declare actor-local Control. Ordinary one-shot Recipes omit it. Helper-backed packaged Recipes self-locate their installed package root when `repo` is omitted; an explicit caller value still wins for development or custom layouts.
 
@@ -64,7 +64,7 @@ Use utilities as imported cells or registered tools where their contract fits.
 3. Use inline templates for genuinely one-off trusted work.
 4. Declare artifacts for outputs that callers must retain.
 5. Declare Control only when a service process actually consumes it.
-6. Keep large semantic evidence in artifacts or execution captures, not Trace summaries.
+6. Keep large semantic evidence in artifacts or execution captures, not Trace summaries; Trace/Control quotas do not bound user artifacts or actor-owned workload state.
 
 ## Installation Safety
 

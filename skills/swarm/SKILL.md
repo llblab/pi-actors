@@ -265,9 +265,9 @@ Report white spots, contradictions, evidence, and risks.
 
 Detached execution is an adapter concern, not a portable Swarm-script requirement. When the host offers Runs, launch the composed Recipe, return its id, and rely on terminal follow-up rather than blocking or polling.
 
-`Progress contract`: expose bounded structured Trace, logs, artifacts, status, timestamps, and final result evidence. Read these through Run inspection rather than scraping process output.
+`Progress contract`: expose bounded structured Trace, logs, artifacts, status, timestamps, and final result evidence. Treat Trace as a retained suffix and attention as a wake hint; write durable task cards, checkpoints, and large evidence to artifacts before signaling attention. Read completeness and Control capacity through existing Run inspection rather than scraping output. Artifact size/lifecycle remains separate from Trace/Control quotas.
 
-`Resumable checkpoint goal`: a controlled agent-backed Run may preserve context and accept a declared Control. When the host cannot preserve context, write a handoff artifact and launch a clean-context Run while marking the context loss explicitly.
+`Resumable checkpoint goal`: a controlled agent-backed Run may preserve context and accept a declared Control. Control saturation rejects before admission and admitted work does not expire; lifecycle recovery remains host-owned. When the host cannot preserve context, write a handoff artifact and launch a clean-context Run while marking the context loss explicitly.
 
 `Cancellation boundary`: terminate only an owned active generation whose process identity the runtime can prove. Stale pid reuse must fail closed.
 

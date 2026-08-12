@@ -54,7 +54,7 @@ Pi host
 - `runtime-identity.ts`, `runtime-triage.ts`: immutable package/schema identity and pure pending/stale Control classification.
 - `tools-spawn.ts`, `tools-register.ts`, `tools-local.ts`, `tools-response.ts`: Run creation, persistent capabilities, Recipe-backed tools, and compact results.
 - `inspector.ts`, `inspector-overlay.ts`, `inspector-command.ts`, `inspector-actions.ts`: actor-instance Recipe/Trace/Control projection, navigation, command wiring, and fenced actions. **Actor Inspector** remains the product and command name, not a separate domain.
-- `observability.ts`, `runtime-notifier.ts`, `run-ui-runtime.ts`: Trace attention, terminal reconciliation, and Pi follow-up delivery.
+- `observability.ts`, `run-ui-runtime.ts`: Trace attention, terminal reconciliation, and Pi follow-up delivery.
 - automatic draft/tool review domains: structurally redacted model review, journaled mutation, lineage, recovery, and explicit retry/reset safety.
 
 Scripts remain self-contained when no non-script consumer justifies a TypeScript domain. Command-template script leaves infer `.js`/`.mjs` in order through Node, Bun, or `deno run` and `.sh` through Bash without shell evaluation. Helper-backed packaged Recipes self-locate their installed package root while explicit caller values remain authoritative. Recipes stay optional, composable, policy-light, and caller-configurable.
@@ -78,7 +78,7 @@ Canonical event:
 {"id":"…","ts":"…","kind":"…","summary":"…","data":{},"level":"info","attention":"notify"}
 ```
 
-Keep events bounded and free of addressing/routing fields. Every first-party writer must call `appendRunTraceEvent`; it validates and size-checks inside the canonical token-owned mutation lock, then performs one append-only JSONL write. Never append `trace.jsonl` directly from scripts. Use artifacts or execution captures for large evidence. `attention: "followup"` must remain rare and semantically justified.
+Trace is a bounded retained suffix, not an audit archive. Every first-party writer must call `appendRunTraceEvent`; under the canonical token-owned lock it appends within both fixed bounds or atomically retains the newest suffix plus one cumulative warning-only `runtime.trace_compacted` marker. The marker means older history was discarded; terminal/result/execution/artifact files remain authoritative independently. Reads are newline-safe and order equal timestamps by same-source ordinal, fixed source rank, then stable id without exposing ordering metadata. Never write `trace.jsonl` directly. Persist durable state or an artifact before attention; `attention: "followup"` remains rare.
 
 ### Control
 
@@ -88,15 +88,15 @@ Public shape:
 {"target":"run:<id>","action":"…","input":{},"verbose":false}
 ```
 
-Admit only lowercase ASCII actions of at most 64 characters, serialized JSON input of at most 380 bytes, and complete newline-terminated wire records of at most 512 bytes on both FIFO and named pipe. Invalid envelopes remain outside the journal; persist every admitted Control before transport. Put larger data in a declared artifact/path and send only a bounded reference or instruction through Control. Fence every record and endpoint with immutable `run_instance_id`; controlled services capture that generation at startup. Serialize atomic journal replacement through token-owned dead-process-reclaiming locks, and keep status transitions expected-state-fenced and monotonic when consumers complete before producer delivery evidence. FIFO and named pipe are transport details, not public concepts; reject partial writes and keep FIFO readers gap-free across writers. Revalidate owner, generation, state, and process identity under the lifecycle lock immediately before delivery.
+Admit only lowercase ASCII actions of at most 64 characters, serialized JSON input of at most 380 bytes, and complete newline-terminated wire records of at most 512 bytes on both FIFO and named pipe. Invalid envelopes remain outside the journal; persist every admitted Control before transport. Put larger data in a declared artifact/path and send only a bounded reference or instruction through Control. Fence every record and endpoint with immutable `run_instance_id`; controlled services capture that generation at startup. Serialize admission and every compacted atomic journal replacement through token-owned dead-process-reclaiming locks. Reject malformed, oversized, stale-generation, or 64-pending journals before admission with bounded backpressure/integrity details; bound persisted errors to 4 KiB inside the string and retain at most 128 terminal records. First-party services must exact-id claim and finalize through `runs-controls.ts`; admitted nonterminal Controls never expire automatically. Keep transitions expected-state-fenced and monotonic when consumers complete before producer delivery evidence. FIFO and named pipe are transport details, not public concepts; reject partial writes and keep FIFO readers gap-free across writers. Revalidate owner, generation, state, and process identity under the lifecycle lock immediately before delivery.
 
 Keep `controls.jsonl` raw and local for execution fidelity. Every model-facing and Actor Inspector Control surface must use the shared bounded `control-projection.ts` redaction before exposure; never attach a second raw copy in tool details.
 
-Runtime lifecycle and review actions remain runtime-owned.
+Runtime lifecycle and review actions remain runtime-owned. Runtime kill is the recovery path for a stuck saturated Run; it never consumes actor-local Control capacity or appends a synthetic Control record. Trace/Control quotas do not constrain user-declared artifacts, repositories, media sources, complete captures, or actor-owned workload state.
 
 ### Inspect
 
-Run views are exactly `recipe`, `trace`, and `control`. Non-Run management targets are `runtime`, `recipes`, and `tool:<name>`. Apply owner filtering and redaction before projecting evidence.
+Run views are exactly `recipe`, `trace`, and `control`. Trace reports retained-history completeness; Control reports capacity, saturation, stale pending work, journal bytes, and bounded diagnostics. Runtime triage aggregates backpressured Runs and incomplete Trace. Non-Run management targets remain `runtime`, `recipes`, and `tool:<name>`. Apply owner filtering and redaction before projecting evidence.
 
 ## Retained Safety Invariants
 
@@ -128,7 +128,7 @@ Automatic review receives value-free structural projections, not executable cont
 
 Tool result/error text contributes exactly one leading line break. Keep model-facing responses compact and state-backed. Preserve complete byte-exact command streams in bounded spill files while returning bounded tails; never feed truncated tails into pipeline stdin.
 
-File watchers accelerate reconciliation; a bounded terminal-only interval recovers missed events. Terminal follow-ups contain only Run id, status, one base path, and relative artifact names in visible content; semantic details remain structured. Delivery remains honestly at-least-once across the send/handled-marker crash window.
+File watchers accelerate reconciliation; a bounded interval recovers missed terminal and retained-attention events. Canonical attention observation uses stable retained ids, primes them at startup without replay, and bounds seen memory to the current suffix across compaction; only allowlisted legacy outbox fallback uses line offsets. Attention is a wake hint, so persist durable recovery state before emitting it. Terminal follow-ups contain only Run id, status, one base path, and relative artifact names in visible content; semantic details remain structured. Delivery remains honestly at-least-once across the send/handled-marker crash window.
 
 When a deferred Run result gates the next step, wait for its terminal follow-up. Inspect early only for operator request, meaningful attention, or diagnosis of an overdue Run.
 

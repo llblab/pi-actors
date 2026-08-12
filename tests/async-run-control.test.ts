@@ -9,7 +9,8 @@ import {
   sendRunControl,
   startRun,
 } from "../lib/async-runs.ts";
-import { readRunControlsFromStateDir } from "../lib/runs-controls.ts";
+import * as Limits from "../lib/limits.ts";
+import { appendRunControlInStateDir, readRunControlsFromStateDir } from "../lib/runs-controls.ts";
 
 async function writeNamedPipeEndpoint(
   stateDir: string,
@@ -25,6 +26,25 @@ async function writeNamedPipeEndpoint(
     })}\n`,
   );
 }
+
+test("Runtime kill bypasses actor-local Control saturation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-kill-saturation-"));
+  const stateDir = join(root, "saturated");
+  const meta = startRun({ ownerId: "session-a", run_id: "saturated", state_dir: stateDir,
+    template: `${process.execPath} -e "setTimeout(() => {}, 30000)"` }, process.cwd());
+  try {
+    for (let index = 0; index < Limits.RUN_CONTROL_PENDING_LIMIT; index += 1)
+      appendRunControlInStateDir(stateDir, {
+        action: "pause", input: { index }, run_instance_id: meta.run_instance_id,
+      });
+    const killed = killRun(stateDir, { ownerId: "session-a", runInstanceId: meta.run_instance_id });
+    assert.equal(killed.killed, true);
+    assert.equal(readRunControlsFromStateDir(stateDir).length, Limits.RUN_CONTROL_PENDING_LIMIT);
+    assert.equal(readRunControlsFromStateDir(stateDir).every(({ status }) => status === "queued"), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
 
 test("Canonical Run Control revalidates owner and generation under the lifecycle lock", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-canonical-control-"));
@@ -76,11 +96,8 @@ test("Canonical Run Control revalidates owner and generation under the lifecycle
       ownerId: "session-a",
       runInstanceId: meta.run_instance_id,
     });
-    assert.equal(typeof killed.control_id, "string");
-    const kill = readRunControlsFromStateDir(stateDir).find(
-      (control) => control.action === "kill",
-    );
-    assert.equal(kill?.status, "handled");
+    assert.equal(killed.killed, true);
+    assert.equal(Object.hasOwn(killed, "control_id"), false);
     await rm(root, { force: true, recursive: true });
   }
 });

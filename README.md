@@ -121,13 +121,13 @@ String command-template leaves execute directly without shell interpretation. Us
 }
 ```
 
-Trace fields are exact: `id`, `ts`, `kind`, and optional `summary`, `data`, `level`, `attention`. Address, sender, recipient, reply, and routing fields fail validation. The canonical append authority validates and size-checks under a cross-process mutation lock before one append-only JSONL write; first-party scripts never append this file directly.
+Trace fields are exact: `id`, `ts`, `kind`, and optional `summary`, `data`, `level`, `attention`. Address, sender, recipient, reply, and routing fields fail validation. Trace is a bounded retained suffix, not an audit archive: the canonical authority appends within 2,048 events and 4 MiB or atomically keeps the newest suffix plus one warning-only `runtime.trace_compacted` marker. That marker means older history was discarded; `result.json`, `execution.json`, terminal state, and declared artifacts retain their own authority. `inspect view=trace` reports whether retained history is complete. Reads are newline-safe and deterministic; first-party scripts never write this file directly.
 
-Use `attention: "notify"` for visible status and `attention: "followup"` only when the coordinator needs semantic follow-up context. Store large evidence in artifacts or bounded execution captures.
+Attention is a live wake hint, not a durable queue: persist recovery state or an artifact first. Use `attention: "notify"` for visible status and `attention: "followup"` only when the coordinator needs semantic follow-up context; compaction may discard older hints. Store large evidence in artifacts or bounded execution captures.
 
 ## Control
 
-Controls persist to `controls.jsonl` before transport. Token-owned dead-process-reclaiming locks serialize atomic journal replacements. Every record carries the immutable `run_instance_id`; expected-status fencing advances outcomes monotonically through queued/delivered/claimed/handled/failed evidence, while a fast consumer may claim or handle before the sender adds independent delivery-time evidence.
+Controls persist to `controls.jsonl` before transport. One token-owned lock rejects a 65th pending Control or 1 MiB rewrite before admission, fails closed on malformed or stale-generation evidence, and atomically admits one record. Canonical transitions retain a 128-terminal tail, expected-state fencing, and 4 KiB errors. Admitted nonterminal Controls never expire automatically. Every record carries immutable `run_instance_id`. `inspect view=control` reports pending capacity, saturation, stale work, journal bytes, and bounded diagnostics. If a stuck Run is saturated, use runtime-owned `kill`; it bypasses actor-local capacity and creates no synthetic Control.
 
 Long-lived services publish `control-endpoint.json` only when ready:
 
@@ -159,7 +159,7 @@ Core files:
 - `execution.json` — command/session provenance and complete-capture references;
 - `result.json`, command logs, progress, and declared artifacts.
 
-The runtime preserves owner filtering, process-identity verification, lifecycle locking, shutdown kill, terminal reconciliation, bounded captures, owned Pi sessions, path containment, and redaction.
+The runtime preserves owner filtering, process-identity verification, lifecycle locking, shutdown kill independent of actor-local Control capacity, terminal reconciliation, bounded captures, owned Pi sessions, path containment, and redaction. Trace/Control quotas do not constrain user-declared artifacts, repositories, media sources, complete captures, or actor-owned workload state. Restart clears generation-local Trace, Control, endpoint, execution, and terminal evidence; archive preserves the bounded tree, while prune preserves only requested artifacts.
 
 ## Actor Inspector
 
@@ -197,7 +197,7 @@ npm run validate
 npm run test:preservation
 ```
 
-See the [documentation index](./docs/README.md), [Run lifecycle](./docs/async-runs.md), [Recipe library](./docs/recipe-library.md), and [0.43 baseline](./docs/0.43-baseline.md).
+See the [documentation index](./docs/README.md), [Run lifecycle](./docs/async-runs.md), and [Recipe library](./docs/recipe-library.md).
 
 Project context: [AGENTS.md](./AGENTS.md) · [BACKLOG.md](./BACKLOG.md) · [CHANGELOG.md](./CHANGELOG.md).
 

@@ -226,7 +226,12 @@ test("Async run controls fail closed on persisted process identity mismatch", as
     assert.equal(cancelled.process_identity_status, "owner_mismatch");
     assert.doesNotThrow(() => process.kill(meta.pid, 0));
     await writeFile(runPath, JSON.stringify(stored));
-    killRun(stateDir);
+    try {
+      killRun(stateDir);
+    } catch (error) {
+      if (process.platform !== "win32" || !/unsupported proof/.test(String(error))) throw error;
+      process.kill(meta.pid, "SIGKILL");
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

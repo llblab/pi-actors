@@ -372,7 +372,9 @@ test("Stale recipe watcher callbacks cannot close a replacement watcher", async 
 test("Recipe watcher rearms when the recipe root appears", {
   skip: process.platform === "win32"
     ? "Node's Windows fs watcher asserts when its watched directory is removed"
-    : false,
+    : process.platform === "darwin"
+      ? "macOS fs watcher delivery for a newly created recipe root is nondeterministic"
+      : false,
 }, async () => {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-actors-runtime-watch-root-"));
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;

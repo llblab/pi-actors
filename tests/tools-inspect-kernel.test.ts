@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import * as Limits from "../lib/limits.ts";
@@ -164,7 +164,7 @@ test("Inspect Recipe diagnostics expose active Skill namespaces and collisions",
       {},
     );
     assert.deepEqual(result.details.skill_recipe_namespaces.sample, [
-      "/skills/sample/recipes",
+      join(resolve("/skills/sample"), "recipes"),
     ]);
     assert.equal(
       result.details.skill_recipe_namespace_diagnostics[0].name,

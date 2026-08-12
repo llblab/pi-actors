@@ -136,7 +136,7 @@ function qualifiedRecipeNameForFile(file: string): string | undefined {
     const root = [...roots][0];
     const relation = relative(root, path);
     if (relation && !relation.startsWith("..") && !isAbsolute(relation))
-      return `skill:${skillName}/${relation.replace(/\.(?:json|md)$/u, "")}`;
+      return `skill:${skillName}/${relation.replaceAll("\\", "/").replace(/\.(?:json|md)$/u, "")}`;
   }
   return undefined;
 }

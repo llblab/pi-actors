@@ -84,7 +84,7 @@ Persist a trusted command template or Recipe-backed capability under `~/.pi/agen
 
 Recipes can declare:
 
-- args and typed defaults;
+- named typed args, inline fallbacks, configuration `defaults`, and composition `values`;
 - imports and command-template composition;
 - retry, failure, recovery, repeat, concurrency, and timeout policy;
 - artifact paths;
@@ -102,6 +102,8 @@ Example controlled Recipe:
 ```
 
 Ordinary one-shot Recipes should omit `control`. Recipe imports compose definitions inside one Run; they do not create peer actors.
+
+File-backed Recipes receive immutable `{recipe_dir}`; Recipes under a Pi-active Skill also receive `{skill_dir}`. Use `std:<recipe>` for an exact packaged component and `skill:<skill>/<recipe-path>` for an exact active-Skill component. Skill Recipes are namespaced reusable components and do not become tools automatically.
 
 String command-template leaves execute directly without shell interpretation. Use template arrays for sequencing or an explicit trusted shell/script when shell semantics matter.
 

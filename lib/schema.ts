@@ -185,7 +185,11 @@ function isValidDefault(type: ToolArgType, value: string): boolean {
 }
 
 export function parseToolArgDeclarations(value: string): ToolArgSpec {
-  const source = splitArgDeclarations(value);
+  return parseToolArgDeclarationList(splitArgDeclarations(value));
+}
+
+export function parseToolArgDeclarationList(value: unknown[]): ToolArgSpec {
+  const source = value.map(String);
   const seen = new Set<string>();
   const duplicates = new Set<string>();
   const args: string[] = [];
@@ -324,6 +328,7 @@ function collectCommandTemplateConfigDeclarations(
     collectTemplatePlaceholderDeclarations(config, declarations);
     return;
   }
+  if (!config || typeof config !== "object") return;
   if (Array.isArray(config)) {
     for (const step of config)
       collectCommandTemplateConfigDeclarations(step, declarations);
@@ -356,11 +361,42 @@ export function getTemplatePlaceholderNames(
   );
 }
 
+function toolArgTypesEqual(left: ToolArgType, right: ToolArgType): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function assertCompatibleToolArgTypes(
+  ...sources: Array<Record<string, ToolArgType> | undefined>
+): void {
+  const seen: Record<string, ToolArgType> = {};
+  for (const source of sources) {
+    for (const [name, type] of Object.entries(source ?? {})) {
+      const previous = seen[name];
+      if (previous && !toolArgTypesEqual(previous, type)) {
+        throw new Error(
+          `Conflicting argument type for ${name}: ${canonicalArgDeclaration(name, previous)} vs ${canonicalArgDeclaration(name, type)}`,
+        );
+      }
+      seen[name] = type;
+    }
+  }
+}
+
 export function getTemplateArgTypes(
   config: CommandTemplates.CommandTemplateConfig,
 ): Record<string, ToolArgType> {
   const argTypes: Record<string, ToolArgType> = {};
   for (const declaration of getTemplatePlaceholderDeclarations(config)) {
+    const previous = argTypes[declaration.arg];
+    if (
+      previous &&
+      declaration.type.kind !== "string" &&
+      !toolArgTypesEqual(previous, declaration.type)
+    ) {
+      throw new Error(
+        `Conflicting argument type for ${declaration.arg}: ${canonicalArgDeclaration(declaration.arg, previous)} vs ${declaration.declaration}`,
+      );
+    }
     if (declaration.type.kind !== "string")
       argTypes[declaration.arg] = declaration.type;
   }
@@ -370,6 +406,22 @@ export function getTemplateArgTypes(
 export function getExplicitToolArgNames(args: string[] | undefined): string[] {
   return mergeUnique(
     (args ?? []).map((item) => parseToolArgToken(String(item)).arg),
+  );
+}
+
+export function getExplicitToolArgDefaults(
+  args: string[] | string | undefined,
+): Record<string, string> {
+  const declarations =
+    typeof args === "string" ? splitArgDeclarations(args) : (args ?? []);
+  return Object.fromEntries(
+    declarations
+      .map((item) => parseToolArgToken(String(item)))
+      .filter(
+        (item): item is ParsedToolArgToken & { defaultValue: string } =>
+          item.defaultValue !== undefined,
+      )
+      .map((item) => [item.arg, item.defaultValue]),
   );
 }
 

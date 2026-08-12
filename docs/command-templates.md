@@ -53,7 +53,7 @@ Common object fields:
 - `concurrency`: Optional positive integer cap for a `parallel: true` node. Omit it to launch all children at once.
 - `min_successful`: Optional non-negative integer evidence threshold for a `parallel: true` node. Usable branches are successful branches with non-empty stdout; joins include a `parallel_status` header when this is set.
 - `when`: Optional node guard. A false guard skips the node; strings may be `flag`, `!flag`, or `{flag?yes:no}` style expressions.
-- `args`: Optional placeholder declarations. Untyped names remain valid; compact typed forms such as `file:path`, `request_timeout:int`, `speed:number`, `dry_run:bool`, `prompts:array`, and `mode:enum(check,fix)` are valid when the host supports typed tool schemas. Defaults belong in `defaults` or inline placeholder defaults; hosts may normalize interactive shorthand such as `request_timeout:int=60000` before persistence.
+- `args`: Optional placeholder declarations. Untyped names remain valid; compact typed forms such as `file:path`, `request_timeout:int`, `speed:number`, `dry_run:bool`, `prompts:array`, and `mode:enum(check,fix)` are valid when the host supports typed tool schemas. `name:type=value` is an optional argument with an inline fallback. Hosts reject duplicate names and conflicting declared/placeholder types rather than selecting one silently.
 - `defaults`: Placeholder default values by name.
 - `timeout`: Optional execution timeout in milliseconds. Omit it, or set `0`, to leave the command unbounded. Set an explicit positive timeout when a tool must fail closed instead of waiting indefinitely. Numeric control fields may be literal numbers or placeholders such as `"{timeout_ms}"`.
 - `delay`: Optional wait in milliseconds before starting this node. Default is no delay. It may be a literal number or placeholder.
@@ -104,7 +104,7 @@ With runtime values `{ "text": "hello" }`, argv is:
 ["--text", "hello", "--lang", "ru", "--rate", "+30%"]
 ```
 
-Use `defaults` for visible configuration data; use inline defaults for compact local literals. Prefer flag-style examples such as `/path/to/tool --file {file} --lang {lang=ru}` for readability, but positional forms such as `/path/to/tool {file} {lang=ru}` are valid when the invoked script defines that CLI contract.
+Use `defaults` for visible fallback configuration, `values` for composition binding, and inline defaults for compact local literals. Named resolution uses caller values before composition values, explicit defaults, and inline defaults; the final selected value is type/enum validated. Prefer flag-style examples such as `/path/to/tool --file {file} --lang {lang=ru}` for readability, but positional forms such as `/path/to/tool {file} {lang=ru}` are valid when the invoked script defines that CLI contract.
 
 Use `{env??dev}` for fallback values and `{all?--all:}` to map boolean args to optional text.
 

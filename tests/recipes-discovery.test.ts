@@ -11,7 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { getPackagedRecipeRoot } from "../lib/paths.ts";
-import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, hasBroadWindowsWriteAcl, listDraftRecipes, summarizeDiscovery } from "../lib/recipes-discovery.ts";
+import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, hasBroadWindowsWriteAcl, listDraftRecipes, summarizeDiscovery, toRegisteredTool } from "../lib/recipes-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
@@ -115,6 +115,24 @@ test("Recipe discovery exposes an integrity manifest", async () => {
     );
     const summary = summarizeDiscovery(result);
     assert.deepEqual(summary.integrity_manifest, manifest);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipe discovery preserves Recipe arg declaration defaults for tool schemas", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-args-"));
+  try {
+    await writeRecipe(root, "speak", {
+      args: ["text", "lang:string=ru"],
+      description: "Speak text",
+      template: "speak --text {text} --lang {lang}",
+    });
+
+    const result = discoverRecipeSources([{ root, defaultTool: true }]);
+    const tool = result.active.get("speak")!;
+    const registered = toRegisteredTool(tool)!;
+    assert.deepEqual(registered.recipe?.args, ["text", "lang:string=ru"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

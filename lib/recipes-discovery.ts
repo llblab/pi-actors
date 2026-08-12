@@ -122,6 +122,25 @@ function getRecipeCommandTemplateConfig(
     : config) as CommandTemplates.CommandTemplateConfig;
 }
 
+function getRecipeDiagnosticTemplateConfig(
+  config: TemplateRecipeConfig,
+): CommandTemplates.CommandTemplateObjectConfig {
+  const templateConfig = getRecipeCommandTemplateConfig(config);
+  return typeof templateConfig === "object" && !Array.isArray(templateConfig)
+    ? {
+        ...templateConfig,
+        defaults: {
+          ...(templateConfig.defaults ?? {}),
+          ...(config.defaults ?? {}),
+          ...(config.values ?? {}),
+        },
+      }
+    : {
+        defaults: { ...(config.defaults ?? {}), ...(config.values ?? {}) },
+        template: templateConfig,
+      };
+}
+
 function getRecipeConfigDiagnostics(
   file: string,
   config: TemplateRecipeConfig | undefined,
@@ -131,7 +150,7 @@ function getRecipeConfigDiagnostics(
     return [`Invalid recipe: ${file}${reason ? `: ${reason}` : ""}`];
   }
   return CommandTemplates.getCommandTemplateWarnings(
-    getRecipeCommandTemplateConfig(config),
+    getRecipeDiagnosticTemplateConfig(config),
   ).map((warning) => `Recipe ${file}: ${warning}`);
 }
 
@@ -141,7 +160,7 @@ function getRecipeRiskLabels(
   if (!config) return [];
   const labels = new Set(
     CommandTemplates.getCommandTemplateRiskLabels(
-      getRecipeCommandTemplateConfig(config),
+      getRecipeDiagnosticTemplateConfig(config),
     ),
   );
   if (config.async === true) labels.add("risk.long_running");
@@ -846,9 +865,10 @@ export function toRegisteredTool(
   assertToolSafeRepeatConfig(
     argTemplateConfig,
     explicitArgTypes,
-    cfg.defaults ?? {},
+    { ...(cfg.defaults ?? {}), ...(cfg.values ?? {}) },
   );
   const argTypes = Schema.getTemplateArgTypes(argTemplateConfig);
+  Schema.assertCompatibleToolArgTypes(explicitArgTypes, argTypes);
   return {
     name: entry.id,
     description,

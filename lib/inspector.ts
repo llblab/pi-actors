@@ -105,9 +105,22 @@ export function readActorInspectorRecipe(
   const redactedRecord = (value: Record<string, unknown>): Record<string, unknown> =>
     SessionEvidence.redactSessionEvidenceValue(
       Object.fromEntries(
-        Object.entries(value).filter(([, entry]) => entry !== undefined),
+        Object.entries(value).filter(
+          ([key, entry]) =>
+            entry !== undefined &&
+            key !== "recipe_dir" &&
+            key !== "skill_dir",
+        ),
       ),
     ) as Record<string, unknown>;
+  const launchValues =
+    meta.values && typeof meta.values === "object" && !Array.isArray(meta.values)
+      ? Object.fromEntries(
+          Object.entries(meta.values as Record<string, unknown>).filter(
+            ([key]) => key !== "recipe_dir" && key !== "skill_dir",
+          ),
+        )
+      : meta.values;
   return {
     composition: contexts.map((entry) =>
       redactedRecord({
@@ -116,6 +129,7 @@ export function readActorInspectorRecipe(
         file: entry.file,
         import_path: entry.import_path,
         name: entry.name,
+        qualified_name: entry.qualified_name,
       }),
     ),
     ...(definition ? { definition: redactedRecord(definition) } : {}),
@@ -129,7 +143,7 @@ export function readActorInspectorRecipe(
     launch: redactedRecord({
       cwd: meta.cwd,
       template: meta.template,
-      values: meta.values,
+      values: launchValues,
       model_policy: meta.model_policy,
       control: meta.control,
       artifacts: meta.artifacts,

@@ -11,6 +11,7 @@ import * as InspectorCommand from "./lib/inspector-command.ts";
 import * as Paths from "./lib/paths.ts";
 import * as Pi from "./lib/pi.ts";
 import * as Prompts from "./lib/prompts.ts";
+import * as RecipesReferences from "./lib/recipes-references.ts";
 import * as RunUiRuntime from "./lib/run-ui-runtime.ts";
 import * as Runtime from "./lib/runtime.ts";
 import * as Temp from "./lib/temp.ts";
@@ -98,9 +99,14 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
     runUiRuntime.shutdown(event.reason, ctx);
   });
   InspectorCommand.registerActorInspectorCommand(pi, getRunOwnerId);
-  pi.on("before_agent_start", async (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,
-  }));
+  pi.on("before_agent_start", async (event) => {
+    RecipesReferences.setActiveSkillRecipeSources(
+      event.systemPromptOptions.skills ?? [],
+    );
+    return {
+      systemPrompt: `${event.systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,
+    };
+  });
   Pi.registerToolDefinitions(
     pi,
     Tools.createCoreActorToolDefinitions<Pi.ExtensionContext>({

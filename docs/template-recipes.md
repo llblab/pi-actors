@@ -44,7 +44,7 @@ Fences marked `template`, `command-template`, `json`, or `recipe` can define exe
 Common Recipe fields:
 
 - `name`, `description`, `disabled`;
-- `args`, typed arg declarations, and `defaults`;
+- `args`, typed arg declarations, inline defaults, `defaults`, and composition `values`;
 - `imports` with optional binding defaults/values;
 - `template`;
 - `async`;
@@ -71,7 +71,9 @@ Common Recipe fields:
 }
 ```
 
-Imports are local definitions. Named nodes call imported templates inside the same execution graph and Run. Resolution enforces Recipe-root priority, file-size/depth bounds, and cycle rejection.
+Imports are local definitions. Named nodes call imported templates inside the same execution graph and Run. Effective values follow `caller > node/import/Recipe values > defaults > inline arg default > missing-value error`, then the selected value is checked against its declared type or enum.
+
+Bare references preserve user → adjacent → packaged resolution. `std:<name>` selects a packaged Recipe exactly. `skill:<skill-name>/<recipe-path>` selects a component under the `recipes/` tree of a Skill currently active through Pi resource discovery. Skill Recipes never become tools merely by existing, and duplicate active Skill names fail as ambiguous rather than shadowing silently.
 
 Direct delegation can use another Recipe as the entire template. The delegated Recipe remains the source of truth while the wrapper may narrow args/defaults or override selected lifecycle metadata.
 
@@ -102,9 +104,13 @@ Actions must be lowercase ASCII, unique, non-reserved, and at most 64 characters
 
 Artifact paths resolve under containment policy and appear in Run inspection. Recipes should write declared artifacts deterministically and fail when the requested write policy cannot be honored.
 
+## File Origins
+
+Every file-backed Recipe receives immutable `{recipe_dir}`. A Recipe under an active Skill also receives `{skill_dir}`, resolved to the directory containing that Skill's `SKILL.md`; using `{skill_dir}` elsewhere fails clearly. These runtime values cannot be declared in `args`, `defaults`, or `values`, and caller input cannot override them. They expand in templates, recursive defaults/values, imports, and artifacts while existing `./` executable behavior remains relative to invocation `cwd`.
+
 ## Context and Provenance
 
-File-backed Runs capture Recipe context records for the entry and imports. The captured bundle explains composition identity and remains generation-local evidence. It does not override the authored task prompt.
+File-backed Runs capture Recipe context records for the entry and imports, including qualified `std:` or `skill:` identity when applicable. The captured bundle explains composition identity and remains generation-local evidence. Runtime origin paths remain in local Run provenance but are omitted from model-facing launch values. It does not override the authored task prompt.
 
 Recipes that need a minimal child prompt may opt out of injected Recipe context through the documented `actor_context` launch option.
 
@@ -125,7 +131,7 @@ Resolution fails before launch when required current policy is unavailable. The 
 
 ## Resolution and Shadowing
 
-User Recipes under `~/.pi/agent/recipes` take priority over packaged Recipes. An invalid active file blocks fallback and reports both paths. Disabled Recipes cannot launch. Registry watchers converge after atomic changes without executing partial definitions.
+User Recipes under `~/.pi/agent/recipes` take priority over adjacent and packaged Recipes for compatible bare lookup. Exact `std:` and `skill:` references bypass that ambiguous space. The active Skill namespace converges from Pi's loaded Skill metadata on startup/reload; pi-actors does not scan ambient Skill roots independently. An invalid active file blocks fallback and reports both paths. Disabled Recipes cannot launch. Registry watchers converge after atomic changes without executing partial definitions.
 
 ## Validation
 

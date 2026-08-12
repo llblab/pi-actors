@@ -45,6 +45,8 @@ Subagent components provide reusable command-template cells for normalization, p
 
 Imports compose these definitions inside one parent Run. They are not independently addressable peers. Parent template flags control sequencing, parallelism, retries, failure scope, recovery, and repeated execution.
 
+Packaged components can be selected exactly as `std:<recipe-name>`. Recipes bundled under a Pi-active Skill are selected as `skill:<skill-name>/<recipe-path>` and receive runtime-owned `{skill_dir}` plus `{recipe_dir}`. Active Skill components are namespaced library entries, never automatic tools; expose one intentionally through a user Recipe wrapper when a direct tool is desired.
+
 ## Utility Recipes
 
 Utilities wrap deterministic local capabilities such as:

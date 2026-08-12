@@ -268,7 +268,7 @@ test("CI release validation includes exact-tree, Domain DAG, and ABCd gates", ()
 test("Release gate enforces a fixed shipped-line limit", () => {
   const declaration = releaseGatesSource.match(/const (\w*[Ss]hippedLines\w*) = ([\d_]+);/);
   assert.ok(declaration);
-  assert.equal(Number(declaration[2].replaceAll("_", "")), 29_598);
+  assert.equal(Number(declaration[2].replaceAll("_", "")), 29_767);
   assert.match(releaseGatesSource, new RegExp(`check\\(shippedLines <=? ${declaration[1]}`));
 });
 

@@ -92,6 +92,16 @@ test("Typed runtime values normalize and reject invalid values", () => {
   );
 });
 
+test("Template argument declarations reject conflicting types", () => {
+  assert.throws(
+    () =>
+      getTemplateArgTypes(
+        "tool {mode:enum(check,fix)} {mode:int}",
+      ),
+    /Conflicting argument type for mode/,
+  );
+});
+
 test("Stored tool arg declarations normalize forgiving input", () => {
   const normalized = normalizeStoredToolArgDeclarations(
     ["file", "lang=en", "lang"],

@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
-  appendFile,
   chmod,
   mkdir,
   mkdtemp,
@@ -43,13 +42,10 @@ import {
   teardownRunsOwnedByParent,
 } from "../lib/async-runs.ts";
 import { executeRunRetirements, summarizeRuns } from "../lib/observability.ts";
-import { pruneTerminalRun } from "../lib/runs-retention.ts";
-import {
-  createFileRuntimeNotifier,
-  notifyRuntimeWake,
-  readRuntimeWakeEvents,
-  runtimeWakeFile,
-} from "../lib/runtime-notifier.ts";
+import * as Limits from "../lib/limits.ts";
+import { appendRunControlInStateDir } from "../lib/runs-controls.ts";
+import { appendRunTraceEvent, summarizeRunTraceJournal, readRunTraceJournal } from "../lib/runs-trace.ts";
+import { appendRunRetentionEvidence, pruneTerminalRun } from "../lib/runs-retention.ts";
 
 async function waitForResult(
   stateDir: string,
@@ -126,17 +122,6 @@ async function waitForJsonField(
   throw new Error(
     `json field did not appear: ${path} -> ${field}=${String(expected)} (observed ${String(observed)})`,
   );
-}
-
-async function waitForWakeCount(
-  observed: unknown[],
-  expected: number,
-): Promise<void> {
-  for (let i = 0; i < 40; i++) {
-    if (observed.length >= expected) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`wake events did not reach count: ${expected}`);
 }
 
 async function waitForStatus(
@@ -616,7 +601,7 @@ test("Async runs expose failed terminal status", async () => {
   }
 });
 
-test("Async run restart clears stale terminal state", async () => {
+test("Async run restart clears all prior bounded evidence", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "restart");
   try {
@@ -631,8 +616,14 @@ test("Async run restart clears stale terminal state", async () => {
     await waitForResult(stateDir);
     assert.equal(getRunStatus(stateDir).status, "done");
     await waitForRunProcessExit(stateDir);
-    await writeFile(join(stateDir, "controls.jsonl"), "{\"id\":\"stale\"}\n");
+    for (let index = 0; index < Limits.TRACE_JOURNAL_MAX_EVENTS + 1; index += 1)
+      appendRunTraceEvent(stateDir, { kind: "restart.pressure", data: { index } });
+    for (let index = 0; index < Limits.RUN_CONTROL_PENDING_LIMIT; index += 1)
+      appendRunControlInStateDir(stateDir, {
+        action: "pause", input: { index }, run_instance_id: String(getRunStatus(stateDir).run_instance_id),
+      });
     await writeFile(join(stateDir, "control-endpoint.json"), "{}\n");
+    assert.equal(summarizeRunTraceJournal(readRunTraceJournal(stateDir)).compacted, true);
 
     startRun(
       {
@@ -647,6 +638,9 @@ test("Async run restart clears stale terminal state", async () => {
     assert.equal(status.result, null);
     assert.equal(existsSync(join(stateDir, "controls.jsonl")), false);
     assert.equal(existsSync(join(stateDir, "control-endpoint.json")), false);
+    const trace = readRunTraceJournal(stateDir);
+    assert.deepEqual(trace.events.map(({ event }) => event.kind), ["run.start"]);
+    assert.equal(summarizeRunTraceJournal(trace).compacted, false);
   } finally {
     try {
       cancelRun(stateDir);
@@ -955,189 +949,6 @@ test("Recipe imports execute under repeated parallel parent nodes", async () => 
   }
 });
 
-
-test("Runtime notifier persists advisory wake events", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-"));
-  const stateDir = join(root, "notified");
-  const observed: unknown[] = [];
-  try {
-    const notifier = createFileRuntimeNotifier(stateDir, {
-      pollIntervalMs: 25,
-      watch: false,
-    });
-    const subscription = notifier.subscribe("run:notified", (event) => {
-      observed.push(event);
-    });
-    try {
-      const event = notifier.notify({
-        actor: "run:notified",
-        metadata: { source: "test" },
-        reason: "mailbox.update",
-      });
-      assert.equal(event.actor, "run:notified");
-      assert.equal(event.reason, "mailbox.update");
-      assert.equal(runtimeWakeFile(stateDir), join(stateDir, "wake.jsonl"));
-      await waitForWakeCount(observed, 1);
-      const events = readRuntimeWakeEvents(stateDir);
-      assert.equal(events.length, 1);
-      assert.equal(events[0].id, event.id);
-      assert.deepEqual(events[0].metadata, { source: "test" });
-    } finally {
-      subscription.close();
-    }
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Runtime notifier emits reconciliation callbacks without wakes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-reconcile-"));
-  const stateDir = join(root, "notified-reconcile");
-  const reconciles: Array<{ actor: string; reason: string }> = [];
-  try {
-    const notifier = createFileRuntimeNotifier(stateDir, {
-      pollIntervalMs: 25,
-      watch: false,
-    });
-    const subscription = notifier.subscribe(
-      "run:notified-reconcile",
-      () => {},
-      {
-        onReconcile: (event) => {
-          reconciles.push(event);
-        },
-      },
-    );
-    try {
-      await waitForWakeCount(reconciles, 2);
-      assert.equal(reconciles[0].reason, "initial");
-      assert.equal(reconciles[0].actor, "run:notified-reconcile");
-      assert.equal(reconciles.some((event) => event.reason === "poll"), true);
-    } finally {
-      subscription.close();
-    }
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Runtime notifier periodic fallback observes missed fs watch events", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-fallback-"));
-  const stateDir = join(root, "notified-fallback");
-  const observed: unknown[] = [];
-  try {
-    const notifier = createFileRuntimeNotifier(stateDir, {
-      pollIntervalMs: 25,
-      watch: false,
-    });
-    const reconciles: Array<{ actor: string; reason: string }> = [];
-    const subscription = notifier.subscribe(
-      "run:notified-fallback",
-      (event) => {
-        observed.push(event);
-      },
-      {
-        onReconcile: (event) => {
-          reconciles.push(event);
-        },
-      },
-    );
-    try {
-      notifyRuntimeWake(stateDir, {
-        actor: "run:notified-fallback",
-        reason: "mailbox.update",
-      });
-      await waitForWakeCount(observed, 1);
-      assert.equal(readRuntimeWakeEvents(stateDir)[0].actor, "run:notified-fallback");
-      assert.equal(reconciles.some((event) => event.reason === "wake"), true);
-    } finally {
-      subscription.close();
-    }
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Runtime notifier replay survives watcher restarts", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-restart-"));
-  const stateDir = join(root, "notified-restart");
-  const observed: unknown[] = [];
-  try {
-    notifyRuntimeWake(stateDir, {
-      actor: "run:notified-restart",
-      reason: "mailbox.update",
-    });
-    const notifier = createFileRuntimeNotifier(stateDir, {
-      pollIntervalMs: 25,
-      replay: true,
-      watch: false,
-    });
-    const subscription = notifier.subscribe("run:notified-restart", (event) => {
-      observed.push(event);
-    });
-    try {
-      await waitForWakeCount(observed, 1);
-      assert.equal((observed[0] as { reason: string }).reason, "mailbox.update");
-    } finally {
-      subscription.close();
-    }
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Runtime notifier buffers partial wake records until file catch-up", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-partial-"));
-  const stateDir = join(root, "notified-partial");
-  const observed: unknown[] = [];
-  try {
-    const notifier = createFileRuntimeNotifier(stateDir, {
-      pollIntervalMs: 25,
-      watch: false,
-    });
-    const subscription = notifier.subscribe("run:notified-partial", (event) => {
-      observed.push(event);
-    });
-    try {
-      const line = JSON.stringify({
-        actor: "run:notified-partial",
-        id: "wake-1",
-        reason: "mailbox.update",
-        state_dir: stateDir,
-        ts: new Date().toISOString(),
-      });
-      await writeFile(runtimeWakeFile(stateDir), line.slice(0, 24));
-      await new Promise((resolve) => setTimeout(resolve, 75));
-      assert.equal(observed.length, 0);
-      await appendFile(runtimeWakeFile(stateDir), `${line.slice(24)}\n`);
-      await waitForWakeCount(observed, 1);
-      assert.equal((observed[0] as { id: string }).id, "wake-1");
-    } finally {
-      subscription.close();
-    }
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Runtime wake reader skips corrupt records and preserves later wakes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-notifier-corrupt-"));
-  const stateDir = join(root, "notified-corrupt");
-  try {
-    const valid = {
-      actor: "run:notified-corrupt",
-      id: "wake-after-corrupt",
-      reason: "mailbox.update",
-      state_dir: stateDir,
-      ts: new Date().toISOString(),
-    };
-    await mkdir(stateDir, { recursive: true });
-    await writeFile(runtimeWakeFile(stateDir), `{bad json\n${JSON.stringify(valid)}\n`);
-    assert.deepEqual(readRuntimeWakeEvents(stateDir), [valid]);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
 
 test("Async run process control maps Windows force kill to taskkill tree", () => {
   assert.deepEqual(getRunProcessSignalPlan(1234, "SIGKILL", "win32"), {
@@ -1671,6 +1482,27 @@ test("Async run state index rebuilds and corrupt index falls back", async () => 
   }
 });
 
+test("Run retention journal keeps a bounded valid tail", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-retention-bound-"));
+  const stateDir = join(root, "run");
+  try {
+    await mkdir(stateDir);
+    const status = { run: "bounded", run_instance_id: "generation-a", state_dir: stateDir };
+    await writeFile(join(root, "retention.jsonl"), `{bad json\n${JSON.stringify({ id: "legacy" })}\n`);
+    for (let index = 0; index <= Limits.RUN_RETENTION_MAX_RECORDS; index += 1) {
+      appendRunRetentionEvidence(status, "archive", "queued", { id: `retention-${index}` });
+    }
+    const content = await readFile(join(root, "retention.jsonl"), "utf8");
+    const records = content.trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(records.length, Limits.RUN_RETENTION_MAX_RECORDS);
+    assert.ok(Buffer.byteLength(content) <= Limits.RUN_RETENTION_MAX_BYTES);
+    assert.equal(records[0].id, "retention-1");
+    assert.equal(records.at(-1).id, `retention-${Limits.RUN_RETENTION_MAX_RECORDS}`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async run archive and prune only allow terminal run state", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-retention-"));
   const activeDir = join(root, "active");
@@ -1699,10 +1531,16 @@ test("Async run archive and prune only allow terminal run state", async () => {
       process.cwd(),
     );
     await waitForResult(doneDir);
+    for (let index = 0; index < Limits.TRACE_JOURNAL_MAX_EVENTS + 1; index += 1)
+      appendRunTraceEvent(doneDir, { kind: "archive.pressure", data: { index } });
     const archived = archiveRun(doneDir);
     assert.equal(archived.archived, true);
     await readFile(join(doneDir, "archive-tombstone.json"), "utf8");
-    await readFile(join(String(archived.archive_dir), "run.json"), "utf8");
+    const archiveDir = String(archived.archive_dir);
+    await readFile(join(archiveDir, "run.json"), "utf8");
+    const archivedTrace = readRunTraceJournal(archiveDir);
+    assert.equal(summarizeRunTraceJournal(archivedTrace).compacted, true);
+    assert.ok(archivedTrace.fileBytes <= Limits.TRACE_JOURNAL_MAX_BYTES);
 
     startRun(
       {

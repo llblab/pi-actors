@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { normalizeControlRequest } from "../lib/control.ts";
+import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
 import { parseAutomaticReviewScope } from "../lib/review-control.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 
@@ -98,6 +99,27 @@ test("Canonical runtime review Controls pass the real normalizers", () => {
     () => parseAutomaticReviewScope({}),
     /input\.scope=draft or input\.scope=tool/,
   );
+});
+
+test("Maintained public examples pass current schemas and protocol fixtures parse", () => {
+  const spawn = createSpawnToolDefinition();
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  const requestBlock = readme.match(/```json\s+(\{\s+"target": "run:player"[\s\S]*?\})\s+```/);
+  assert.ok(requestBlock);
+  const control = normalizeControlRequest(JSON.parse(requestBlock[1]));
+  assert.equal(control.target, "run:player");
+  assert.equal(control.action, "pause");
+  for (const params of [
+    { as: "run:demo", template: "sleep 30" },
+    { recipe: "pipeline-repo-health", values: { repo: "/work/project", model: "provider/model" } },
+    { as: "run:test", template: "make test" },
+  ]) {
+    const unknown = Object.keys(params).filter((key) => !Object.hasOwn(spawn.parameters.properties, key));
+    assert.deepEqual(unknown, []);
+    assert.equal(spawn.parameters.required.every((key: string) => Object.hasOwn(params, key)), true);
+  }
+  for (const file of ["control-record.json", "trace-event.json", "control-endpoint.json", "artifact-manifest.json", "recipe-summary.json"])
+    assert.doesNotThrow(() => JSON.parse(readFileSync(join(root, "fixtures", "protocol", file), "utf8")), file);
 });
 
 test("Canonical management inspect examples pass the real dispatcher", async () => {

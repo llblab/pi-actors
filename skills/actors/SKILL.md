@@ -47,7 +47,7 @@ Trace records bounded structured observations in `trace.jsonl`:
 }
 ```
 
-Trace never carries sender, recipient, route, reply, or message-envelope fields. First-party writers use the canonical append authority, which validates and size-checks under a token-owned cross-process lock before one append-only JSONL write. Use `attention: "notify"` for visible notification and `attention: "followup"` only when the coordinator must receive semantic follow-up context. Prefer artifacts or complete execution captures for large evidence.
+Trace never carries sender, recipient, route, reply, or message-envelope fields. It is a bounded retained suffix: the canonical lock appends within 2,048 events and 4 MiB or atomically keeps the newest suffix plus one warning-only `runtime.trace_compacted` marker. That marker means older history was discarded; terminal/result/execution/artifact evidence stays independently authoritative. `inspect view=trace` reports completeness. Equal timestamps use same-source physical order, fixed source rank, then stable id without exposing an ordinal or claiming cross-source causality. Attention is a wake hint, not a queue: persist durable state or an artifact first, use `notify` for visible status, and reserve `followup` for needed coordinator context. Compaction may discard old hints.
 
 ## Control
 
@@ -57,9 +57,9 @@ The public Control request is exact:
 { "target": "run:<id>", "action": "pause", "input": {}, "verbose": false }
 ```
 
-Valid Controls persist in `controls.jsonl` before delivery; invalid envelopes remain outside the journal. Token-owned locks serialize atomic journal replacements. Service endpoints publish readiness in `control-endpoint.json` with the immutable startup `run_instance_id`; only FIFO and named-pipe endpoints transport Controls. Both transports share one portable envelope: action is at most 64 lowercase ASCII characters, serialized JSON input is at most 380 bytes, and the newline-terminated wire record is at most 512 bytes. Partial writes fail, and controlled FIFO readers remain gap-free across writers. Put larger data in a declared artifact/path and send only its bounded reference or instruction through Control. Delivery revalidates owner, generation, running state, and process identity under the lifecycle lock.
+Valid Controls persist in `controls.jsonl` before delivery; invalid envelopes remain outside it. One token-owned lock rejects a 65th pending Control or 1 MiB rewrite before admission, fails closed on malformed or stale-generation evidence, and atomically admits one queued record. Exact-id claims/finalization preserve a 128-terminal tail, expected-state fencing, and 4 KiB errors. Admitted nonterminal Controls never expire automatically. `inspect view=control` reports capacity, saturation, stale work, bytes, and diagnostics. Endpoints carry immutable startup `run_instance_id`; FIFO and named pipe share limits of 64 action characters, 380 serialized input bytes, and 512 newline-terminated wire bytes. Partial writes fail. Put larger data in an artifact and send only its reference. Delivery revalidates owner, generation, state, and process identity.
 
-`kill` remains a runtime lifecycle action. Use an actor-local action such as `stop` only when the Recipe declares and implements it.
+`kill` remains the runtime recovery path for a stuck saturated Run: it bypasses actor-local Control capacity and adds no synthetic Control. Use actor-local `stop` only when declared and implemented. Restart clears generation-local evidence; archive preserves the bounded terminal tree, while prune preserves only requested artifacts.
 
 ## Run State and Safety
 
@@ -72,6 +72,8 @@ Run state lives under `~/.pi/agent/tmp/pi-actors/runs/<run>/`. Important evidenc
 - `execution.json`: command/session provenance and bounded complete-capture references.
 - `result.json`, logs, and declared artifacts.
 
+Trace/Control quotas do not constrain user-declared artifacts, repositories, media sources, complete captures, or actor-owned workload state. No public noun, tool, target, or view is added by bounded retention.
+
 Never bypass owner filtering, immutable generation fencing, process-identity verification, path containment, redaction, terminal reconciliation, or shutdown kill behavior. Do not edit active Run state to force a result.
 
 ## Operating Pattern
@@ -79,8 +81,8 @@ Never bypass owner filtering, immutable generation fencing, process-identity ver
 1. Inspect the Recipe before launch when its contract or policy matters.
 2. Spawn with explicit values and retain the returned `run:<id>`.
 3. Let short Runs finish; avoid polling.
-4. Inspect Trace when evidence or attention requires it.
-5. Send only declared actor-local Controls.
+4. Inspect Trace when evidence or attention requires it; its summary states whether retained history is complete.
+5. Inspect Control capacity before diagnosing stale work or saturation, then send only declared actor-local Controls.
 6. Use runtime kill/cancel behavior for lifecycle termination.
 7. Inspect artifacts and execution evidence for final validation.
 
@@ -98,6 +100,5 @@ If work may outlive the current turn, needs steering, produces artifacts, fans o
 
 - [Recipe library](../../docs/recipe-library.md)
 - [Async Runs](../../docs/async-runs.md)
-- [Baseline and preservation gates](../../docs/0.43-baseline.md)
 
 Read repository source and tests for exact contracts when changing pi-actors itself. Update this skill whenever durable Run mechanics change.

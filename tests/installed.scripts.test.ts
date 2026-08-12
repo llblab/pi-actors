@@ -239,6 +239,7 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
          const message = definitions.get("message");
          let started;
          let control;
+         let trace;
          try {
            started = await spawn.execute("packed-spawn", {
              as: "run:packed-locker",
@@ -262,6 +263,9 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
              await new Promise((resolve) => setTimeout(resolve, 25));
            }
            if (!control?.details.endpoint) throw new Error("packed locker endpoint unavailable");
+           trace = await inspect.execute("packed-trace", {
+             target: "run:packed-locker", view: "trace", verbose: true,
+           }, undefined, undefined, context);
            await message.execute("packed-stop", {
              target: "run:packed-locker",
              action: "stop",
@@ -290,9 +294,11 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
          console.log(JSON.stringify({
            commands,
            packedRun: {
+             controlPending: control.details.pending,
              endpoint: control.details.endpoint?.type,
              repo: started.details.values.repo,
              status: control.details.status,
+             traceComplete: trace.details.summary.history_complete,
            },
            resources,
            tools,
@@ -316,6 +322,8 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
     assert.equal(loaded.packedRun.endpoint, process.platform === "win32" ? "named-pipe" : "fifo");
     assert.equal(await realpath(loaded.packedRun.repo), await realpath(packageDir));
     assert.equal(loaded.packedRun.status, "done");
+    assert.equal(loaded.packedRun.traceComplete, true);
+    assert.equal(loaded.packedRun.controlPending, 0);
     assert.equal(loaded.resources.skillPaths.length, 1);
     assert.equal(loaded.resources.skillPaths[0].replaceAll("\\", "/").endsWith("/dist/skills"), true);
     assert.deepEqual(loaded.tools.map((tool: any) => tool.name), [
@@ -337,6 +345,51 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
       );
     }
     assert.doesNotMatch(stderr, /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/);
+  } finally {
+    await removeTreeEventually(root);
+  }
+});
+
+test("installed dist enforces the same bounded Trace, Control, and inspect contracts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-bounds-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const { stdout, stderr } = await execFileAsync(process.execPath, ["-e", `
+      const { mkdtempSync, statSync } = require("node:fs");
+      const { tmpdir } = require("node:os");
+      const { join } = require("node:path");
+      const { pathToFileURL } = require("node:url");
+      const packageDir = process.argv[1];
+      Promise.all(["limits", "runs-controls", "runs-trace", "tools-inspect"].map((name) =>
+        import(pathToFileURL(join(packageDir, "dist", "lib", name + ".js")).href))).then(async ([limits, controls, trace, inspect]) => {
+        const stateDir = mkdtempSync(join(tmpdir(), "pi-actors-installed-kernel-"));
+        const status = { control: ["pause"], ownerId: "owner-a", run: "installed",
+          run_instance_id: "generation-a", state_dir: stateDir, status: "running" };
+        for (let index = 0; index <= limits.TRACE_JOURNAL_MAX_EVENTS; index++)
+          trace.appendRunTraceEvent(stateDir, { kind: "installed.pressure", data: { index } });
+        for (let index = 0; index < limits.RUN_CONTROL_PENDING_LIMIT; index++)
+          controls.appendRunControlInStateDir(stateDir, { action: "pause", input: { index }, run_instance_id: "generation-a" });
+        let reason;
+        try { controls.appendRunControlInStateDir(stateDir, { action: "pause", run_instance_id: "generation-a" }); }
+        catch (error) { reason = error.reason; }
+        const tool = inspect.createInspectToolDefinition({ getRunStatus: () => status });
+        const traceView = await tool.execute("trace", { target: "run:installed", view: "trace", verbose: true }, undefined, undefined, {});
+        const controlView = await tool.execute("control", { target: "run:installed", view: "control", verbose: true }, undefined, undefined, {});
+        console.log(JSON.stringify({ reason, trace: traceView.details.summary, control: {
+          available: controlView.details.available, backpressured: controlView.details.backpressured,
+          pending: controlView.details.pending }, traceBytes: statSync(join(stateDir, "trace.jsonl")).size,
+          controlBytes: statSync(join(stateDir, "controls.jsonl")).size }));
+      }).catch((error) => { console.error(error); process.exit(1); });`, packageDir]);
+    assert.equal(stderr, "");
+    const result = JSON.parse(stdout);
+    assert.equal(result.reason, "control_backpressure");
+    assert.equal(result.trace.history_complete, false);
+    assert.equal(result.trace.compacted, true);
+    assert.equal(result.control.pending, 64);
+    assert.equal(result.control.available, 0);
+    assert.equal(result.control.backpressured, true);
+    assert.ok(result.traceBytes <= 4 * 1024 * 1024);
+    assert.ok(result.controlBytes <= 1024 * 1024);
   } finally {
     await removeTreeEventually(root);
   }
@@ -390,9 +443,7 @@ test("music-player direct control queues canonical Controls", async () => {
     assert.equal(control.run_instance_id, "generation-a");
     assert.equal(control.status, "queued");
     assert.equal(Object.hasOwn(control, "to"), false);
-    const wake = JSON.parse(await readFile(join(stateDir, "wake.jsonl"), "utf8"));
-    assert.equal(wake.actor, "run:music");
-    assert.equal(wake.reason, "control.queued");
+    assert.equal(await readTextIfExists(join(stateDir, "wake.jsonl")), "");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import test from "node:test";
 
 import { deliverRunControl } from "../lib/runs-control-delivery.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 
 const script = fileURLToPath(new URL("../scripts/locker.mjs", import.meta.url));
+const execFileAsync = promisify(execFile);
 
 async function waitForPath(path: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -33,6 +35,33 @@ async function waitForTrace(stateDir: string, kind: string): Promise<void> {
   }
   throw new Error(`Timed out waiting for ${kind}`);
 }
+
+test("resource-locker journal keeps a bounded valid tail and useful snapshot", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "pi-actors-resource-locker-journal-"));
+  try {
+    const records = ["{bad json", ...Array.from({ length: 513 }, (_, index) =>
+      JSON.stringify({ event: "legacy", index, payload: "x".repeat(2100) }))];
+    await writeFile(join(stateDir, "journal.jsonl"), `${records.join("\n")}\n`);
+    await writeFile(join(stateDir, "run.json"), JSON.stringify({ run_instance_id: "generation-a" }));
+    const child = spawn(process.execPath, [script, "serve", "--state-dir", stateDir]);
+    try {
+      await waitForPath(join(stateDir, "control-endpoint.json"));
+      child.kill("SIGKILL");
+      await new Promise((resolve) => child.once("exit", resolve));
+    } finally { child.kill("SIGKILL"); }
+    const journal = await readFile(join(stateDir, "journal.jsonl"), "utf8");
+    const retained = journal.trim().split("\n").map((line) => JSON.parse(line));
+    assert.ok(retained.length <= 512);
+    assert.ok(Buffer.byteLength(journal) <= 1024 * 1024);
+    assert.equal(retained.at(-1).event, "lock.started");
+    const { stdout } = await execFileAsync(process.execPath, [script, "snapshot", "--state-dir", stateDir, "--lines", "2"]);
+    const snapshot = JSON.parse(stdout);
+    assert.equal(snapshot.journal.length, 2);
+    assert.equal(snapshot.journal.at(-1).event, "lock.started");
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
 
 test("resource-locker consumes exact Controls and emits Trace", {
   skip: process.platform === "win32" ? "exercises the documented Unix FIFO endpoint" : false,

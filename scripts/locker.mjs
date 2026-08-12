@@ -11,7 +11,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -32,8 +31,12 @@ async function importRuntimeModule(name) {
   return await import(pathToFileURL(existsSync(compiled) ? compiled : source).href);
 }
 
-const { acquireFileMutationLock, writeJsonAtomic, writeTextAtomic } =
-  await importRuntimeModule("file-state");
+const { acquireFileMutationLock, writeJsonAtomic, writeTextAtomic } = await importRuntimeModule("file-state");
+const { readJsonlFileResilient } = await importRuntimeModule("state-readers");
+const LOCKER_JOURNAL_MAX_RECORDS = 512;
+const LOCKER_JOURNAL_MAX_BYTES = 1024 * 1024;
+const { claimRunControlByIdInStateDir, updateRunControlStatusInStateDir } =
+  await importRuntimeModule("runs-controls");
 const { appendRunTraceEvent } = await importRuntimeModule("runs-trace");
 
 function parseArgs(argv) {
@@ -59,7 +62,6 @@ async function runLocker(argv = process.argv.slice(2)) {
   const queuePath = join(stateDir, "queue.json");
   const locksPath = join(stateDir, "locks.json");
   const journalPath = join(stateDir, "journal.jsonl");
-  const controlsPath = join(stateDir, "controls.jsonl");
   const controlPath = join(stateDir, "control.fifo");
   let runInstanceId;
   mkdirSync(stateDir, { recursive: true });
@@ -96,10 +98,22 @@ async function runLocker(argv = process.argv.slice(2)) {
   }
 
   function journal(event, data = {}) {
-    appendFileSync(
-      journalPath,
-      `${JSON.stringify({ event, ts: new Date().toISOString(), ...data })}\n`,
-    );
+    const release = acquireFileMutationLock(journalPath);
+    try {
+      const records = [...readJsonlFileResilient(journalPath).records,
+        { event, ts: new Date().toISOString(), ...data }]
+        .slice(-LOCKER_JOURNAL_MAX_RECORDS);
+      let content = encodeJournal(records);
+      while (records.length && Buffer.byteLength(content) > LOCKER_JOURNAL_MAX_BYTES) {
+        records.shift();
+        content = encodeJournal(records);
+      }
+      writeTextAtomic(journalPath, content);
+    } finally { release(); }
+  }
+
+  function encodeJournal(records) {
+    return records.length ? `${records.map((record) => JSON.stringify(record)).join("\n")}\n` : "";
   }
 
   function emitTrace(kind, summary, data = {}, level = "info") {
@@ -147,69 +161,6 @@ async function runLocker(argv = process.argv.slice(2)) {
     }
   }
 
-  function acquireControlsLock() {
-    return acquireFileMutationLock(controlsPath);
-  }
-
-  function readControls() {
-    if (!existsSync(controlsPath)) return [];
-    return readFileSync(controlsPath, "utf8")
-      .split("\n")
-      .filter((line) => line.trim())
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return undefined;
-        }
-      })
-      .filter(Boolean);
-  }
-
-  function writeControls(controls) {
-    writeTextAtomic(
-      controlsPath,
-      controls.length
-        ? `${controls.map((control) => JSON.stringify(control)).join("\n")}\n`
-        : "",
-    );
-  }
-
-  function claimControl(id) {
-    const release = acquireControlsLock();
-    try {
-      const controls = readControls();
-      const control = controls.find((item) => item.id === id);
-      if (
-        !control ||
-        control.run_instance_id !== runInstanceId ||
-        (control.status !== "queued" && control.status !== "delivered")
-      ) {
-        return undefined;
-      }
-      control.claimed_at = new Date().toISOString();
-      control.status = "claimed";
-      writeControls(controls);
-      return { ...control };
-    } finally {
-      release();
-    }
-  }
-
-  function finalizeControl(id, status, error) {
-    const release = acquireControlsLock();
-    try {
-      const controls = readControls();
-      const control = controls.find((item) => item.id === id);
-      if (!control || control.status !== "claimed") return;
-      control.status = status;
-      control[`${status}_at`] = new Date().toISOString();
-      if (error) control.error = error;
-      writeControls(controls);
-    } finally {
-      release();
-    }
-  }
 
   function tailJournal(count) {
     if (!existsSync(journalPath)) return [];
@@ -397,7 +348,9 @@ async function runLocker(argv = process.argv.slice(2)) {
   function handleLine(line) {
     const control = normalizeControl(line);
     if (!control) return false;
-    const claimed = claimControl(control.id);
+    const claimed = claimRunControlByIdInStateDir(
+      stateDir, runInstanceId, control.id,
+    );
     if (!claimed) {
       emitTrace(
         "lock.control_rejected",
@@ -409,11 +362,15 @@ async function runLocker(argv = process.argv.slice(2)) {
     }
     try {
       const stopping = handle(claimed) === true;
-      finalizeControl(claimed.id, "handled");
+      updateRunControlStatusInStateDir(
+        stateDir, claimed.id, "handled", {}, ["claimed"],
+      );
       return stopping;
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
-      finalizeControl(claimed.id, "failed", text);
+      updateRunControlStatusInStateDir(
+        stateDir, claimed.id, "failed", { error: text }, ["claimed"],
+      );
       journal("lock.error", { error: text });
       emitTrace("lock.error", text, { error: text }, "error");
       return false;

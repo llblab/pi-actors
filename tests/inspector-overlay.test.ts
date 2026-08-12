@@ -146,6 +146,34 @@ test("Actor Inspector exposes exactly Recipe, Trace, and Control tabs", async ()
   }
 });
 
+test("Actor Inspector exposes compacted Trace and Control saturation", async () => {
+  const { root, stateDir } = await fixture();
+  const { instance } = overlay(root);
+  try {
+    const marker = { id: "marker", ts: "2026-01-01T00:00:01.000Z",
+      kind: "runtime.trace_compacted", level: "warning",
+      data: { version: 1, compactions_total: 1, dropped_valid_events_total: 3,
+        dropped_malformed_lines_total: 0, dropped_bytes_total: 90,
+        dropped_event_count_exact: true, retained_events: 1, retained_bytes: 300,
+        history_complete: false } };
+    await writeFile(join(stateDir, "trace.jsonl"), `${JSON.stringify(marker)}\n`);
+    await writeFile(join(stateDir, "controls.jsonl"), Array.from({ length: 64 }, (_, index) =>
+      JSON.stringify({ id: `c-${index}`, run_instance_id: "generation-a", action: "pause",
+        status: "queued", queued_at: new Date().toISOString() })).join("\n") + "\n");
+    instance.handleInput("\u001b[B");
+    instance.handleInput("\u001b[C");
+    assert.match(instance.render(90).join("\n"), /Trace history incomplete: 1 compaction.*3 dropped event/);
+    instance.handleInput("\u001b[C");
+    const control = instance.render(90).join("\n");
+    assert.match(control, /pending: 64/);
+    assert.match(control, /pending_limit: 64/);
+    assert.match(control, /backpressured: true/);
+  } finally {
+    instance.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("Actor Inspector redacts Control rows, details, and Control documents", async () => {
   const { root, stateDir } = await fixture();
   const { instance } = overlay(root);
@@ -258,7 +286,7 @@ test("Actor Inspector caches Trace projection while browsing its list", async ()
   }
 });
 
-test("Actor Inspector keeps newest Trace records at the top across refresh and navigation", async () => {
+test("Actor Inspector preserves newest-first Trace projection across refresh and navigation", async () => {
   const { root } = await fixture();
   const older: TraceProjection.TraceItem = {
     detail: {},
@@ -288,7 +316,7 @@ test("Actor Inspector keeps newest Trace records at the top across refresh and n
   const { instance } = overlay(
     root,
     undefined,
-    () => refreshed ? [older, middle, newest] : [older, middle],
+    () => refreshed ? [newest, middle, older] : [middle, older],
   );
   try {
     instance.handleInput("\u001b[B");
@@ -338,7 +366,8 @@ test("Actor Inspector confirms generation-fenced Run Kill without duplicate succ
     instance.handleInput("k");
     const confirmation = instance.render(90).join("\n");
     assert.match(confirmation, /Confirm Actor Kill/);
-    assert.doesNotMatch(confirmation, /cannot be undone/);
+    assert.match(confirmation, /generation-fenced runtime kill/);
+    assert.doesNotMatch(confirmation, /cannot be undone|kill Control/);
     instance.handleInput("\u001b[C");
     instance.handleInput("\r");
     assert.deepEqual(calls, ["demo:generation-a"]);

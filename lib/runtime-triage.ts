@@ -5,16 +5,14 @@
  */
 
 import * as ControlProjection from "./control-projection.ts";
-import type { RunControlRecord, RunControlStatus } from "./runs-controls.ts";
+import {
+  classifyRunControlRecord,
+  runControlStatusTimestamp,
+  type RunControlStatus,
+} from "./run-evidence-policy.ts";
+import type { RunControlRecord } from "./runs-controls.ts";
 
 export const RUNTIME_CONTROL_STALE_AFTER_MS = 5 * 60 * 1_000;
-
-const PENDING_STATUSES = new Set<RunControlStatus>([
-  "queued",
-  "delivered",
-  "claimed",
-]);
-const TERMINAL_STATUSES = new Set<RunControlStatus>(["handled", "failed"]);
 
 export interface RuntimeTriageRun {
   run: string;
@@ -49,17 +47,6 @@ function diagnostic(
   return { diagnostic: { reason, run } };
 }
 
-function statusTimestamp(
-  record: Record<string, unknown>,
-  status: RunControlStatus,
-): unknown {
-  if (status === "failed") return record.failed_at;
-  if (status === "handled") return record.handled_at;
-  if (status === "claimed") return record.claimed_at;
-  if (status === "delivered") return record.delivered_at;
-  return record.queued_at;
-}
-
 export function classifyRuntimeControl(
   run: RuntimeTriageRun,
   value: unknown,
@@ -70,9 +57,8 @@ export function classifyRuntimeControl(
   }
   const record = value as Record<string, unknown>;
   const status = record.status as RunControlStatus;
-  if (!PENDING_STATUSES.has(status) && !TERMINAL_STATUSES.has(status)) {
-    return diagnostic(run.run, "invalid_status");
-  }
+  const recordClass = classifyRunControlRecord(record);
+  if (!recordClass) return diagnostic(run.run, "invalid_status");
   if (typeof record.id !== "string" || !record.id) {
     return diagnostic(run.run, "invalid_control_id");
   }
@@ -82,12 +68,12 @@ export function classifyRuntimeControl(
   if (typeof record.run_instance_id !== "string" || !record.run_instance_id) {
     return diagnostic(run.run, "invalid_generation");
   }
-  const timestamp = statusTimestamp(record, status);
+  const timestamp = runControlStatusTimestamp(record, status);
   const timestampMs = typeof timestamp === "string" ? Date.parse(timestamp) : Number.NaN;
   if (!Number.isFinite(timestampMs)) {
     return diagnostic(run.run, "invalid_status_timestamp");
   }
-  if (TERMINAL_STATUSES.has(status)) return {};
+  if (recordClass === "terminal") return {};
   const ageMs = Math.max(0, Math.floor(nowMs - timestampMs));
   const staleReason: RuntimePendingControl["reason"] | undefined =
     !run.runInstanceId
@@ -108,7 +94,7 @@ export function classifyRuntimeControl(
     reason: staleReason ?? "within_age_threshold",
     run: run.run,
     status: status as RuntimePendingControl["status"],
-    status_at: statusTimestamp(
+    status_at: runControlStatusTimestamp(
       projected as unknown as Record<string, unknown>,
       status,
     ) as string,

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import * as Limits from "../lib/limits.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 
 async function fixture(): Promise<{ root: string; status: Record<string, unknown> }> {
@@ -61,10 +62,27 @@ test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () 
     assert.equal(recipe.details.identity.recipe, "demo-recipe");
     const trace = await tool.execute("trace", { target: "run:demo", view: "trace", source: "lifecycle", verbose: true }, undefined, undefined, {});
     assert.equal(trace.details.items[0].kind, "run.start");
+    assert.deepEqual(trace.details.summary, {
+      history_complete: true,
+      compacted: false,
+      compactions_total: 0,
+      dropped_events: 0,
+      dropped_bytes: 0,
+      dropped_event_count_exact: true,
+      retained_events: 1,
+      retained_bytes: Buffer.byteLength(await readFile(join(root, "trace.jsonl"))),
+    });
     const control = await tool.execute("control", { target: "run:demo", view: "control", verbose: true }, undefined, undefined, {});
     assert.deepEqual(control.details.actor_actions, ["pause"]);
     assert.deepEqual(control.details.runtime_actions, ["kill"]);
     assert.equal(control.details.endpoint.type, "named-pipe");
+    assert.equal(control.details.pending, 0);
+    assert.equal(control.details.pending_limit, Limits.RUN_CONTROL_PENDING_LIMIT);
+    assert.equal(control.details.available, Limits.RUN_CONTROL_PENDING_LIMIT);
+    assert.equal(control.details.backpressured, false);
+    assert.equal(control.details.journal_limit, Limits.RUN_CONTROL_JOURNAL_MAX_BYTES);
+    assert.equal(control.details.stale_pending, 0);
+    assert.deepEqual(control.details.diagnostics, []);
     assert.equal(control.details.recent_controls[0].status, "failed");
     assert.equal(control.details.recent_controls[0].input.token, "[REDACTED]");
     assert.match(control.details.recent_controls[0].error, /\[REDACTED\]/);
@@ -89,6 +107,24 @@ test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () 
     const durable = await readFile(join(root, "controls.jsonl"), "utf8");
     assert.match(durable, /TOOL_CONTROL_SECRET/);
     assert.match(durable, /TOOL_ERROR_SECRET/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Inspect Control diagnoses structurally invalid retained records", async () => {
+  const { root, status } = await fixture();
+  try {
+    await writeFile(join(root, "controls.jsonl"), `${JSON.stringify({
+      id: "bad", run_instance_id: "generation-a", action: "pause",
+      status: "claimed", queued_at: new Date().toISOString(), claimed_at: "invalid",
+    })}\n`);
+    const tool = createInspectToolDefinition({ getRunStatus: () => status });
+    const control = await tool.execute("control", {
+      target: "run:demo", view: "control", verbose: true,
+    }, undefined, undefined, {});
+    assert.deepEqual(control.details.diagnostics, [{ reason: "invalid_status_timestamp" }]);
+    assert.equal(control.details.pending, 1);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -126,6 +162,33 @@ test("Runtime status reports immutable source package identity", async () => {
   } finally {
     if (previous === undefined) delete process.env.npm_package_version;
     else process.env.npm_package_version = previous;
+  }
+});
+
+test("Inspect reports compacted and inexact Trace history", async () => {
+  const { root, status } = await fixture();
+  try {
+    const marker = {
+      id: "marker", ts: "2026-01-01T00:00:01.000Z",
+      kind: "runtime.trace_compacted", level: "warning",
+      data: { version: 1, compactions_total: 2, dropped_valid_events_total: 5,
+        dropped_malformed_lines_total: 1, dropped_bytes_total: 500,
+        dropped_event_count_exact: false, retained_events: 1, retained_bytes: 300,
+        history_complete: false },
+    };
+    await writeFile(join(root, "trace.jsonl"), `${JSON.stringify(marker)}\n`);
+    const tool = createInspectToolDefinition({ getRunStatus: () => status });
+    const trace = await tool.execute("trace", {
+      target: "run:demo", view: "trace", verbose: true,
+    }, undefined, undefined, {});
+    assert.deepEqual(trace.details.summary, {
+      history_complete: false, compacted: true, compactions_total: 2,
+      dropped_events: 5, dropped_bytes: 500, dropped_event_count_exact: false,
+      retained_events: 1,
+      retained_bytes: Buffer.byteLength(await readFile(join(root, "trace.jsonl"))),
+    });
+  } finally {
+    await rm(root, { force: true, recursive: true });
   }
 });
 
@@ -171,12 +234,12 @@ test("Runtime triage reports stale Controls and Trace attention", async () => {
   }
 });
 
-test("Runtime triage preserves truthful counts when bounded projections truncate", async () => {
+test("Runtime triage distinguishes fresh saturation from stale work", async () => {
   const { root, status } = await fixture();
   try {
     const fresh = new Date().toISOString();
     const records = [
-      ...Array.from({ length: 45 }, (_, index) => ({
+      ...Array.from({ length: Limits.RUN_CONTROL_PENDING_LIMIT }, (_, index) => ({
         id: `fresh-${index}`,
         run_instance_id: "generation-a",
         action: "pause",
@@ -206,18 +269,17 @@ test("Runtime triage preserves truthful counts when bounded projections truncate
       undefined,
       { sessionManager: { getSessionId: () => "session-a" } },
     );
-    assert.equal(result.details.pending_control_count, 47);
+    assert.equal(result.details.pending_control_count, Limits.RUN_CONTROL_PENDING_LIMIT + 2);
     assert.equal(result.details.pending_controls.length, 40);
     assert.equal(result.details.stale_control_count, 2);
-    assert.deepEqual(
-      result.details.stale_controls.map((control: Record<string, unknown>) => control.id),
-      ["stale-0", "stale-1"],
-    );
-    const projectedPending = new Set(
-      result.details.pending_controls.map((control: Record<string, unknown>) => control.id),
-    );
-    assert.equal(projectedPending.has("stale-0"), true);
-    assert.equal(projectedPending.has("stale-1"), true);
+    assert.equal(result.details.backpressured_run_count, 1);
+    assert.deepEqual(result.details.backpressured_runs, [{
+      run: "demo",
+      pending: Limits.RUN_CONTROL_PENDING_LIMIT + 2,
+      pending_limit: Limits.RUN_CONTROL_PENDING_LIMIT,
+      journal_bytes: Buffer.byteLength(await readFile(join(root, "controls.jsonl"))),
+    }]);
+    assert.deepEqual(result.details.next_actions, ["inspect target=run:demo view=control"]);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -284,6 +346,7 @@ test("Runtime triage filters owners and diagnoses malformed Controls without sta
     assert.deepEqual(result.details.pending_controls.map((control: Record<string, unknown>) => control.id), ["delivered-1"]);
     assert.equal(result.details.stale_control_count, 0);
     assert.equal(result.details.stale_controls.length, 0);
+    assert.equal(result.details.backpressured_run_count, 0);
     assert.deepEqual(
       result.details.control_diagnostics.map((diagnostic: Record<string, unknown>) => diagnostic.reason).sort(),
       ["invalid_control_json", "invalid_status_timestamp"],

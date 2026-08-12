@@ -65,10 +65,6 @@ import { appendRunTraceEvent } from "./runs-trace.ts";
 import * as RunsIndex from "./runs-index.ts";
 import * as RunsParentTeardown from "./runs-parent-teardown.ts";
 import {
-  appendRunControlInStateDir,
-  updateRunControlStatusInStateDir,
-} from "./runs-controls.ts";
-import {
   deliverRunControl,
   type DeliverRunControlOptions,
   type DeliverRunControlRequest,
@@ -933,37 +929,9 @@ function stopRun(
     ) {
       return { stopped: false, reason: "run generation changed", status };
     }
-    const control =
-      event === "run.kill" && typeof status.run_instance_id === "string"
-        ? appendRunControlInStateDir(stateDir, {
-            action: "kill",
-            run_instance_id: status.run_instance_id,
-          })
-        : undefined;
-    if (control) {
-      updateRunControlStatusInStateDir(
-        stateDir,
-        control.id,
-        "claimed",
-        {},
-        ["queued"],
-      );
-    }
-    const finish = (result: Record<string, unknown>): Record<string, unknown> => {
-      if (!control) return result;
-      const handled = result.stopped === true;
-      updateRunControlStatusInStateDir(
-        stateDir,
-        control.id,
-        handled ? "handled" : "failed",
-        handled ? {} : { error: String(result.reason ?? "kill rejected") },
-        ["claimed"],
-      );
-      return { ...result, control_id: control.id };
-    };
     const pid = Number(status.pid || 0);
     if (status.status !== "running" && status.status !== "exited") {
-      return finish({ stopped: false, reason: "not running", status });
+      return { stopped: false, reason: "not running", status };
     }
     const identity = verifyRunProcessIdentity(
       pid,
@@ -974,22 +942,22 @@ function stopRun(
         identity.status === "owner_mismatch" ||
         identity.status === "unsupported_proof"
       ) {
-        return finish({
+        return {
           stopped: false,
           reason: identity.status.replaceAll("_", " "),
           process_identity_status: identity.status,
           status,
-        });
+        };
       }
-      return finish({ stopped: false, reason: "not running", status });
+      return { stopped: false, reason: "not running", status };
     }
     if (!identity.valid) {
-      return finish({
+      return {
         stopped: false,
         reason: identity.status.replaceAll("_", " "),
         process_identity_status: identity.status,
         status,
-      });
+      };
     }
     let signalResult: RunProcessSignalPlan;
     try {
@@ -999,11 +967,6 @@ function stopRun(
         status.process_identity as RunProcessIdentity,
       );
     } catch (error) {
-      if (control) {
-        updateRunControlStatusInStateDir(stateDir, control.id, "failed", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
       throw error;
     }
     appendRunTraceEvent(stateDir, {
@@ -1020,13 +983,13 @@ function stopRun(
       finalizeInterruptedExecution(stateDir, "cancelled", signal);
       markTerminalProgress(stateDir, "cancelled");
     }
-    return finish({
+    return {
       stopped: true,
       pid,
       signal,
       ...signalResult,
       state_dir: stateDir,
-    });
+    };
   } finally {
     releaseControlLock();
   }

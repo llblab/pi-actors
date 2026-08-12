@@ -4,7 +4,7 @@
  * Owns manual kernel navigation; evidence parsing and lifecycle mutation stay in ports.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -19,6 +19,10 @@ import * as ActorInspector from "./inspector.ts";
 import * as ControlProjection from "./control-projection.ts";
 import * as RunsControls from "./runs-controls.ts";
 import * as RunControlDelivery from "./runs-control-delivery.ts";
+import * as RunsTrace from "./runs-trace.ts";
+import * as Limits from "./limits.ts";
+import { computeRunControlCapacity } from "./run-evidence-policy.ts";
+import * as RuntimeTriage from "./runtime-triage.ts";
 import * as TraceProjection from "./trace-projection.ts";
 
 export type ActorInspectorTab = "recipe" | "trace" | "control";
@@ -58,12 +62,6 @@ const TRACE_SOURCES: TraceProjection.TraceSourceFilter[] = [
   "artifact",
   "runtime",
 ];
-
-function newestTraceItems(items: readonly TraceProjection.TraceItem[]): TraceProjection.TraceItem[] {
-  return [...items].sort((left, right) =>
-    right.ts.localeCompare(left.ts) || right.id.localeCompare(left.id),
-  );
-}
 
 export class ActorInspectorOverlay {
   private readonly done: () => void;
@@ -442,7 +440,7 @@ export class ActorInspectorOverlay {
       `${this.theme.fg("muted", "Run:")} ${this.theme.fg("accent", `run:${confirmation.run}`)}`,
       `${this.theme.fg("muted", "Current status:")} ${this.theme.fg("warning", confirmation.status)}`,
       "",
-      this.theme.fg("text", "This sends canonical kill Control."),
+      this.theme.fg("text", "This invokes generation-fenced runtime kill."),
       "",
       `${cancel}    ${kill}`,
       "",
@@ -544,7 +542,11 @@ export class ActorInspectorOverlay {
 
   private renderTraceList(run: ActorInspector.ActorInspectorRunItem): string[] {
     const items = this.traceItems(run);
-    if (items.length === 0) return [this.theme.fg("muted", " No Trace evidence")];
+    const summary = RunsTrace.summarizeRunTraceJournal(
+      RunsTrace.readRunTraceJournal(path.join(this.stateRoot, run.run)));
+    const banner = summary.history_complete ? [] : [this.theme.fg("warning",
+      ` ! Trace history incomplete: ${summary.compacted ? `${summary.compactions_total} compaction(s), ` : ""}${summary.dropped_event_count_exact ? summary.dropped_events : "unknown"} dropped event(s), ${summary.dropped_bytes} bytes`)];
+    if (items.length === 0) return [...banner, this.theme.fg("muted", " No Trace evidence")];
     if (this.selectedTraceId) {
       const selectedIndex = items.findIndex((item) => item.id === this.selectedTraceId);
       if (selectedIndex >= 0) this.rowIndex = selectedIndex;
@@ -560,7 +562,7 @@ export class ActorInspectorOverlay {
     this.contentStripeIndices = items
       .slice(start, start + viewportRows)
       .map((_item, offset) => start + offset);
-    return items.slice(start, start + viewportRows).map((item, offset) => {
+    return [...banner, ...items.slice(start, start + viewportRows - banner.length).map((item, offset) => {
       const index = start + offset;
       const detail = item.detail && typeof item.detail === "object"
         ? item.detail as Record<string, unknown>
@@ -577,7 +579,7 @@ export class ActorInspectorOverlay {
       return this.focus === "list" && index === this.rowIndex
         ? this.theme.fg("accent", row)
         : row;
-    });
+    })];
   }
 
   private renderTraceDetail(width: number): string[] {
@@ -603,16 +605,26 @@ export class ActorInspectorOverlay {
       ? RunControlDelivery.readRunControlEndpoint(stateDir, run.runInstanceId)
       : undefined;
     const meta = this.readRunMeta(stateDir);
+    const journal = RunsControls.readRunControlJournalFromStateDir(stateDir);
+    const capacity = computeRunControlCapacity(journal.records);
+    const stalePending = journal.records.reduce<number>((count, control) => count + Number(Boolean(
+      RuntimeTriage.classifyRuntimeControl({ run: run.run,
+        runInstanceId: run.runInstanceId, status: run.status }, control, Date.now()).stale)), 0);
     return {
       status: run.status,
       run_instance_id: run.runInstanceId,
+      pending: capacity.pending, pending_limit: capacity.limit,
+      available: capacity.available, backpressured: capacity.backpressured,
+      journal_bytes: (() => { try { return statSync(RunsControls.runControlsFile(stateDir)).size; } catch { return 0; } })(),
+      journal_limit: Limits.RUN_CONTROL_JOURNAL_MAX_BYTES,
+      stale_pending: stalePending,
+      diagnostics: journal.diagnostics.map((item) => item.line === undefined
+        ? { reason: "unreadable_control_journal" } : { line: item.line, reason: "invalid_control_json" }),
       actor_actions: Array.isArray(meta.control) ? meta.control : [],
       runtime_actions: run.status === "running" ? ["kill"] : ["archive", "prune"],
       endpoint,
-      recent_controls: RunsControls.readRunControlsFromStateDir(stateDir)
-        .slice(-20)
-        .reverse()
-        .map(ControlProjection.projectRunControl),
+      recent_controls: journal.records.slice(-20).reverse().map((control) =>
+        ControlProjection.projectRunControl(control as RunsControls.RunControlRecord)),
     };
   }
 
@@ -624,10 +636,10 @@ export class ActorInspectorOverlay {
     ) {
       return this.traceCache.items;
     }
-    const items = newestTraceItems(this.readTrace(path.join(this.stateRoot, run.run), {
+    const items = this.readTrace(path.join(this.stateRoot, run.run), {
       limit: 100,
       source: "all",
-    }));
+    });
     this.traceCache = { run: run.run, runInstanceId: run.runInstanceId, items };
     return items;
   }

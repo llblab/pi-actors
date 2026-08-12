@@ -106,6 +106,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
         ownerId: deps.getRunOwnerId(ctx),
         sink: Pi.createNotificationSink(deps.pi, ctx),
         state: observation,
+        includeAttention: true,
       });
       reportDiagnostics(ctx);
     },
@@ -141,6 +142,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     },
     start(ctx) {
       close();
+      Observability.primeRunAttentionState(observation, deps.getRunOwnerId(ctx));
       update(ctx, true, true);
       watcher.refresh();
       reconciliation.start();

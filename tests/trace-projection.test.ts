@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { TRACE_JOURNAL_MAX_BYTES } from "../lib/limits.ts";
 import { projectRunTrace } from "../lib/trace-projection.ts";
 
 test("Trace projection merges causal Run evidence newest-first", async () => {
@@ -38,6 +39,59 @@ test("Trace projection merges causal Run evidence newest-first", async () => {
     assert.equal(items.some((item) => item.kind === "artifact.ready"), true);
     assert.equal(JSON.stringify(items).includes("secret"), false);
     assert.equal(JSON.stringify(items).includes("[REDACTED]"), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Trace projection uses physical source order for equal timestamps", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-order-"));
+  const ts = "2026-01-01T00:00:00.000Z";
+  try {
+    await writeFile(join(root, "trace.jsonl"), [
+      { id: "z-trace-first", ts, kind: "run.start" },
+      { id: "a-trace-second", ts, kind: "run.progress" },
+    ].map((value) => JSON.stringify(value)).join("\n") + "\n");
+    await writeFile(join(root, "controls.jsonl"), [
+      { id: "z-control-first", run_instance_id: "g", action: "pause", status: "queued", queued_at: ts },
+      { id: "a-control-second", run_instance_id: "g", action: "resume", status: "queued", queued_at: ts },
+    ].map((value) => JSON.stringify(value)).join("\n") + "\n");
+    const sessionDir = join(root, "sessions", "command-1");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(join(root, "execution.json"), JSON.stringify({
+      commands: [{ id: "command-1", session_files: ["sessions/command-1/session.jsonl"] }],
+    }));
+    await writeFile(join(sessionDir, "session.jsonl"), [
+      { type: "session", version: 3, id: "session" },
+      { type: "message", id: "u1", parentId: null, timestamp: ts, message: { role: "user", content: "first user" } },
+      { type: "message", id: "a1", parentId: "u1", timestamp: ts, message: { role: "assistant", content: "first agent" } },
+      { type: "message", id: "u2", parentId: "a1", timestamp: ts, message: { role: "user", content: "second user" } },
+      { type: "message", id: "a2", parentId: "u2", timestamp: ts, message: { role: "assistant", content: "second agent" } },
+    ].map((value) => JSON.stringify(value)).join("\n"));
+
+    assert.deepEqual(
+      projectRunTrace(root, { source: "lifecycle" }).map(({ id }) => id),
+      ["a-trace-second", "z-trace-first"],
+    );
+    assert.deepEqual(
+      projectRunTrace(root, { source: "control" }).map(({ id }) => id),
+      ["control:a-control-second", "control:z-control-first"],
+    );
+    assert.deepEqual(
+      projectRunTrace(root, { source: "agent" }).map(({ summary }) => summary),
+      ["second agent", "first agent"],
+    );
+    const expected = [
+      "a-trace-second",
+      "z-trace-first",
+      "control:a-control-second",
+      "control:z-control-first",
+      "agent:command-1:sessions/command-1/session.jsonl:2",
+      "agent:command-1:sessions/command-1/session.jsonl:1",
+    ];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      assert.deepEqual(projectRunTrace(root).map(({ id }) => id), expected);
+    }
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -185,6 +239,67 @@ test("Trace projection filters sources and keeps malformed evidence diagnosable"
       "invalid_control_json",
     );
     assert.doesNotMatch(JSON.stringify(runtime), /MALFORMED_CONTROL_SECRET/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Trace projection exposes compaction and legacy history loss without new fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-history-"));
+  try {
+    const marker = {
+      id: "marker-1",
+      ts: "2026-01-01T00:00:01.000Z",
+      kind: "runtime.trace_compacted",
+      level: "warning",
+      data: {
+        version: 1,
+        compactions_total: 1,
+        dropped_valid_events_total: 2,
+        dropped_malformed_lines_total: 0,
+        dropped_bytes_total: 80,
+        dropped_event_count_exact: true,
+        retained_events: 2,
+        retained_bytes: 240,
+        history_complete: false,
+      },
+    };
+    await writeFile(
+      join(root, "trace.jsonl"),
+      `${JSON.stringify({ id: "event-1", ts: "2026-01-01T00:00:00.000Z", kind: "runtime.note" })}\n${JSON.stringify(marker)}\n`,
+    );
+    const compacted = projectRunTrace(root, { source: "runtime" });
+    const projectedMarker = compacted.find(({ kind }) => kind === marker.kind)!;
+    assert.equal(projectedMarker.level, "warning");
+    assert.deepEqual((projectedMarker.detail as Record<string, unknown>).data, marker.data);
+    assert.deepEqual(Object.keys(projectedMarker).sort(), [
+      "detail", "id", "kind", "level", "source", "summary", "ts",
+    ]);
+    assert.equal(
+      compacted.some(({ kind }) => kind === "runtime.trace_history_incomplete"),
+      false,
+    );
+
+    const prefix = Buffer.alloc(TRACE_JOURNAL_MAX_BYTES + 17, 0x61);
+    const suffix = `${JSON.stringify({
+      id: "legacy-event",
+      ts: "2026-01-02T00:00:00.000Z",
+      kind: "runtime.note",
+    })}\n`;
+    await writeFile(
+      join(root, "trace.jsonl"),
+      Buffer.concat([prefix, Buffer.from(`\n${suffix}`)]),
+    );
+    const legacy = projectRunTrace(root, { source: "runtime" });
+    const incomplete = legacy.filter(
+      ({ kind }) => kind === "runtime.trace_history_incomplete",
+    );
+    assert.equal(incomplete.length, 1);
+    assert.equal(incomplete[0]?.level, "warning");
+    assert.ok(
+      Number((incomplete[0]?.detail as Record<string, unknown>).omitted_prefix_bytes) >
+        TRACE_JOURNAL_MAX_BYTES,
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }

@@ -140,45 +140,40 @@ jobs:
           TAG_COMMIT: ${{ steps.preflight.outputs.tag_commit }}
           VERSION: ${{ steps.preflight.outputs.version }}
         run: |
-          published=false
+          verified=false
           for attempt in $(seq 1 20); do
-            if npm view "$PACKAGE_NAME@$VERSION" --json version gitHead pi > npm-published.json 2> npm-published.err; then
-              published=true
-              break
-            fi
-            sleep 3
-          done
-          if [ "$published" != "true" ]; then
-            cat npm-published.err >&2
-            exit 1
-          fi
-          npm pack "$PACKAGE_NAME@$VERSION" --dry-run --json > npm-pack.json
-          node --input-type=module <<'NODE'
+            if npm view "$PACKAGE_NAME@$VERSION" --json version gitHead pi > npm-published.json 2> npm-published.err &&
+               npm pack "$PACKAGE_NAME@$VERSION" --dry-run --json > npm-pack.json 2> npm-pack.err &&
+               node --input-type=module <<'NODE'
           import { readFileSync } from "node:fs";
 
           const published = JSON.parse(readFileSync("npm-published.json", "utf8"));
           if (published.version !== process.env.VERSION || published.gitHead !== process.env.TAG_COMMIT) {
             throw new Error(`Published npm identity does not match the release tag: ${JSON.stringify(published)}.`);
           }
-          if (
-            !published.pi?.extensions?.includes("./dist/pi-actors/index.js") ||
-            !published.pi?.skills?.includes("./dist/skills")
-          ) {
+          if (!published.pi?.extensions?.includes("./dist/pi-actors/index.js") ||
+              !published.pi?.skills?.includes("./dist/skills")) {
             throw new Error("Published npm metadata is missing the Pi extension or skill manifest.");
           }
           const packed = JSON.parse(readFileSync("npm-pack.json", "utf8"))[0];
           const paths = new Set((packed?.files ?? []).map((file) => file.path));
-          if (
-            packed?.name !== process.env.PACKAGE_NAME ||
-            packed?.version !== process.env.VERSION ||
-            !paths.has("dist/pi-actors/index.js") ||
-            !paths.has("dist/skills/actors/SKILL.md") ||
-            !paths.has("package.json")
-          ) {
+          if (packed?.name !== process.env.PACKAGE_NAME || packed?.version !== process.env.VERSION ||
+              !paths.has("dist/pi-actors/index.js") || !paths.has("dist/skills/actors/SKILL.md") ||
+              !paths.has("package.json")) {
             throw new Error("Published npm tarball is missing the expected package identity or runtime manifests.");
           }
-          console.log(`Verified public npm package ${process.env.PACKAGE_NAME}@${process.env.VERSION}.`);
           NODE
+            then
+              verified=true
+              break
+            fi
+            sleep 3
+          done
+          if [ "$verified" != "true" ]; then
+            cat npm-published.err npm-pack.err >&2 2>/dev/null || true
+            exit 1
+          fi
+          echo "Verified public npm package $PACKAGE_NAME@$VERSION."
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -13,7 +13,6 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import {
   accessSync,
   constants,
@@ -50,8 +49,8 @@ async function importRuntimeModule(name) {
   return await import(pathToFileURL(existsSync(compiled) ? compiled : source).href);
 }
 
-const { acquireFileMutationLock, writeTextAtomic } =
-  await importRuntimeModule("file-state");
+const { appendRunControlInStateDir, claimRunControlByIdInStateDir,
+  updateRunControlStatusInStateDir } = await importRuntimeModule("runs-controls");
 const { appendRunTraceEvent } = await importRuntimeModule("runs-trace");
 
 const AUDIO_EXTENSIONS = new Set([
@@ -408,8 +407,8 @@ function playerCommand(ctx, player, volume, track) {
   }
 }
 
-function writeText(path, value, flag = "w") {
-  writeFileSync(path, value, { encoding: "utf8", flag });
+function writeText(path, value) {
+  writeFileSync(path, value, "utf8");
 }
 
 function readText(path) {
@@ -584,7 +583,24 @@ async function startControlServer(ctx, wakeControlLoop) {
     : join(ctx.stateDir, "control.sock");
   if (process.platform !== "win32") rmSync(path, { force: true });
   const server = createServer((socket) => {
-    socket.on("data", wakeControlLoop);
+    let content = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => { content += chunk; });
+    socket.on("end", () => {
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const claimed = claimControl(ctx, JSON.parse(line));
+          if (!claimed) continue;
+          handleControl(ctx, claimed.command);
+          finalizeControl(ctx, claimed.id, "handled");
+        } catch (error) {
+          const id = (() => { try { return JSON.parse(line).id; } catch { return undefined; } })();
+          finalizeControl(ctx, id, "failed", error instanceof Error ? error.message : String(error));
+        }
+      }
+      wakeControlLoop();
+    });
     socket.resume();
   });
   await new Promise((resolveReady, rejectReady) => {
@@ -606,133 +622,38 @@ async function startControlServer(ctx, wakeControlLoop) {
   };
 }
 
-function acquireControlsLock(ctx) {
-  return acquireFileMutationLock(ctx.controlsFile);
-}
-
-function readControls(ctx) {
-  if (!exists(ctx.controlsFile)) return [];
-  return readFileSync(ctx.controlsFile, "utf8")
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return undefined;
-      }
-    })
-    .filter(Boolean);
-}
-
-function writeControls(ctx, controls) {
-  writeTextAtomic(
-    ctx.controlsFile,
-    controls.length
-      ? `${controls.map((control) => JSON.stringify(control)).join("\n")}\n`
-      : "",
-  );
-}
-
 function commandFromControl(control) {
   if (typeof control.action !== "string") return undefined;
   const action = control.action.trim();
   return CONTROL_COMMANDS.has(action) ? action : undefined;
 }
 
-function runtimeWakeFile(ctx) {
-  return join(ctx.stateDir, "wake.jsonl");
-}
-
-function notifyControlWake(ctx, reason = "control.queued") {
-  try {
-    writeText(
-      runtimeWakeFile(ctx),
-      `${JSON.stringify({
-        actor: `run:${basename(ctx.stateDir)}`,
-        id: randomUUID(),
-        metadata: { command: "music-player" },
-        reason,
-        state_dir: ctx.stateDir,
-        ts: new Date().toISOString(),
-      })}\n`,
-      "a",
-    );
-  } catch {
-    // Wake records are advisory; the Control journal remains authoritative.
-  }
-}
-
 function appendControl(ctx, action) {
-  const release = acquireControlsLock(ctx);
-  try {
-    const run = readJsonFile(runJsonFile(ctx), {});
-    const controls = readControls(ctx);
-    controls.push({
-      action,
-      id: randomUUID(),
-      queued_at: new Date().toISOString(),
-      run_instance_id: run.run_instance_id,
-      status: "queued",
-    });
-    writeControls(ctx, controls);
-  } finally {
-    release();
-  }
-  notifyControlWake(ctx);
+  const run = readJsonFile(runJsonFile(ctx), {});
+  appendRunControlInStateDir(ctx.stateDir, {
+    action,
+    run_instance_id: run.run_instance_id,
+  });
 }
 
-function claimControls(ctx) {
-  const release = acquireControlsLock(ctx);
-  try {
-    const controls = readControls(ctx);
-    const commands = [];
-    let changed = false;
-    const claimedAt = new Date().toISOString();
-    for (const control of controls) {
-      if (control.status !== "queued" && control.status !== "delivered") continue;
-      const command =
-        control.run_instance_id === ctx.runInstanceId
-          ? commandFromControl(control)
-          : undefined;
-      if (!command) {
-        control.failed_at = claimedAt;
-        control.status = "failed";
-        control.error = "Unsupported or stale music-player Control";
-        changed = true;
-        continue;
-      }
-      control.claimed_at = claimedAt;
-      control.status = "claimed";
-      commands.push({ command, id: control.id });
-      changed = true;
-    }
-    if (changed) writeControls(ctx, controls);
-    return commands;
-  } finally {
-    release();
+function claimControl(ctx, wire) {
+  const control = claimRunControlByIdInStateDir(
+    ctx.stateDir, ctx.runInstanceId, wire.id,
+  );
+  const command = control ? commandFromControl(control) : undefined;
+  if (!command && control) {
+    updateRunControlStatusInStateDir(ctx.stateDir, control.id, "failed", {
+      error: "Unsupported music-player Control",
+    }, ["claimed"]);
   }
+  return command && control ? { command, id: control.id } : undefined;
 }
 
 function finalizeControl(ctx, id, status, error) {
   if (!id) return;
-  const release = acquireControlsLock(ctx);
-  try {
-    const controls = readControls(ctx);
-    const timestamp = new Date().toISOString();
-    let changed = false;
-    for (const control of controls) {
-      if (control.id !== id || control.status !== "claimed") continue;
-      control.status = status;
-      if (status === "handled") control.handled_at = timestamp;
-      else control.failed_at = timestamp;
-      if (error) control.error = error;
-      changed = true;
-    }
-    if (changed) writeControls(ctx, controls);
-  } finally {
-    release();
-  }
+  updateRunControlStatusInStateDir(
+    ctx.stateDir, id, status, error ? { error } : {}, ["claimed"],
+  );
 }
 
 function controlsSignature(ctx) {
@@ -754,8 +675,7 @@ function startControlLoop(ctx) {
         const name = file ? String(file) : "";
         if (
           !name ||
-          name === basename(ctx.controlsFile) ||
-          name === basename(runtimeWakeFile(ctx))
+          name === basename(ctx.controlsFile)
         ) {
           dirty = true;
         }
@@ -774,14 +694,6 @@ function startControlLoop(ctx) {
       const signature = controlsSignature(ctx);
       if (dirty || signature !== lastSignature) {
         dirty = false;
-        for (const { command, id } of claimControls(ctx)) {
-          try {
-            handleControl(ctx, command);
-            finalizeControl(ctx, id, "handled");
-          } catch (error) {
-            finalizeControl(ctx, id, "failed", error.message);
-          }
-        }
         lastSignature = controlsSignature(ctx);
         continue;
       }

@@ -2,6 +2,16 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.44.0: Bounded Run Evidence
+
+- `Trace`: Bounds each Run to 2,048 events and 4 MiB, atomically retaining the newest suffix with one cumulative `runtime.trace_compacted` marker so discarded history is explicit while terminal, result, execution, and artifact evidence remains authoritative.
+- `Control`: Rejects a 65th pending Control or 1 MiB journal before admission, preserves admitted nonterminal work, atomically fences every transition, retains 128 terminal outcomes, and keeps runtime kill available outside actor-local capacity.
+- `Inspection`: Reports Trace completeness and Control capacity, saturation, stale work, bytes, and diagnostics through existing Run views, runtime triage, and Actor Inspector without adding public nouns, tools, targets, views, or fields.
+- `Runtime`: Makes attention a compaction-safe bounded wake hint, preserves deterministic newest-first projection order, and keeps restart, archive, prune, terminal reconciliation, owner filtering, generation fencing, process identity, and redaction independent of retained Trace history.
+- `Services`: Moves first-party services to canonical exact-id Control claims, bounds shared retention and resource-locker journals, removes the unused wake journal, and explicitly excludes user artifacts, complete captures, repositories, media, and actor workload state from Trace/Control quotas.
+- `Validation`: Stress-tests mixed concurrent Trace compaction, attention, Control backpressure/recovery, lifecycle, source and installed-package parity, append-only ownership, documentation examples, and the 29,598-line release ceiling.
+- `Release`: Extends OIDC publication convergence retry across npm identity, `gitHead`, Pi metadata, and packable tarball manifests before GitHub Release publication.
+
 ## 0.43.1: Run Kernel Contract Closure
 
 - `Actor Inspector`: Keeps newest Trace first with chronological numbering, stable focus, live refresh, plain markers, structured objects, bounded redaction, and generation-fenced kill. Successful kill refreshes the Run header without duplicate copy.

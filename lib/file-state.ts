@@ -251,11 +251,16 @@ export function withFileMutationLock<T>(
   }
 }
 
-export function writeTextAtomic(path: string, content: string): void {
+export function writeTextAtomic(
+  path: string,
+  content: string,
+  options: { onBeforeReplace?(): void } = {},
+): void {
   mkdirSync(dirname(path), { recursive: true });
   const tempPath = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tempPath, content, "utf8");
+    options.onBeforeReplace?.();
     renameSync(tempPath, path);
   } catch (error) {
     try {

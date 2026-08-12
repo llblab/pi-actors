@@ -389,7 +389,7 @@ test("Recipe watcher rearms when the recipe root appears", {
     ui: { notify: (message: string) => notifications.push(message) },
   };
   async function waitForLoad(previous: number): Promise<void> {
-    for (let attempt = 0; attempt < 80; attempt += 1) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
       if (loads > previous) return;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }

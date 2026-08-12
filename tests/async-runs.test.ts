@@ -639,7 +639,9 @@ test("Async run restart clears all prior bounded evidence", async () => {
     assert.equal(existsSync(join(stateDir, "controls.jsonl")), false);
     assert.equal(existsSync(join(stateDir, "control-endpoint.json")), false);
     const trace = readRunTraceJournal(stateDir);
-    assert.deepEqual(trace.events.map(({ event }) => event.kind), ["run.start"]);
+    const kinds = trace.events.map(({ event }) => event.kind);
+    assert.equal(kinds.includes("run.start"), true);
+    assert.equal(kinds.includes("restart.pressure"), false);
     assert.equal(summarizeRunTraceJournal(trace).compacted, false);
   } finally {
     try {

@@ -10,7 +10,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 
-const FILE_MUTATION_LOCK_TIMEOUT_MS = process.platform === "win32" ? 15000 : 5000;
+const FILE_MUTATION_LOCK_TIMEOUT_MS = process.platform === "win32" ? 30000 : 15000;
 const FILE_MUTATION_LOCK_STALE_MS = 30000;
 const FILE_MUTATION_LOCK_ROOT = join(tmpdir(), "pi-actors-file-locks");
 

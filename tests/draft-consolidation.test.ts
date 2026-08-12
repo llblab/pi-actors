@@ -77,7 +77,6 @@ test("Draft consolidation accepts one complete stable decision per draft", () =>
       },
     ],
   };
-
   assert.deepEqual(validateDraftConsolidationPlan(inventory, plan), {
     ok: true,
     errors: [],
@@ -121,7 +120,6 @@ test("Draft consolidation rejects incomplete, stale, duplicate, and unsafe plans
     ],
   };
   const result = validateDraftConsolidationPlan(inventory, plan);
-
   assert.equal(result.ok, false);
   assert.deepEqual(result.errors, [
     "draft changed after inventory: /drafts/first.json",
@@ -162,7 +160,6 @@ test("Draft consolidation rejects inconsistent merge groups", () => {
       },
     ],
   });
-
   assert.deepEqual(result.errors, [
     "target recipe differs across decisions: merged_tool",
   ]);
@@ -203,6 +200,5 @@ test("Draft consolidation compares merge recipes canonically", () => {
       },
     ],
   });
-
   assert.deepEqual(result, { ok: true, errors: [] });
 });

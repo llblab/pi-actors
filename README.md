@@ -1,5 +1,7 @@
 # pi-actors
 
+![pi-actors banner](https://raw.githubusercontent.com/llblab/pi-actors/main/banner.jpg)
+
 Local Run kernel and persistent tool registry for [Pi](https://github.com/badlogic/pi-mono).
 
 ```text

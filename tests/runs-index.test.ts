@@ -20,14 +20,12 @@ test("Run discovery reports depth truncation instead of silently omitting state"
       await mkdir(nested);
     }
     await writeFile(join(nested, "run.json"), "{}\n");
-
     const bounded = discoverRunStateDirs(root, 4);
     assert.equal(bounded.stateDirs.length, 0);
     assert.equal(
       bounded.issues.some((issue) => issue.reason === "depth_truncated"),
       true,
     );
-
     const unbounded = discoverRunStateDirs(root, Number.POSITIVE_INFINITY);
     assert.deepEqual(unbounded.stateDirs, [nested]);
     assert.deepEqual(unbounded.issues, []);

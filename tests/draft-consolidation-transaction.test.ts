@@ -180,12 +180,10 @@ test("Transaction promotes, merges, discards, preserves complete recipes, and em
         sha256: discard.sha256,
       },
     ]);
-
     const result = applyDraftConsolidationPlan(transactionPlan, {
       ...paths,
       inventory: [promote, mergeA, mergeB, discard],
     });
-
     assert.equal(result.phase, "committed");
     assert.equal(result.targets, 2);
     assert.deepEqual(await readdir(paths.draftRoot), []);
@@ -251,7 +249,6 @@ test("Recipe watcher converges only after the synchronous multi-target commit", 
     for (let attempt = 0; attempt < 100 && snapshots.length < 1; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-
     assert.equal(snapshots.length >= 1, true);
     assert.equal(snapshots.every(([a, b]) => a && b), true);
   } finally {
@@ -278,7 +275,6 @@ test("Transaction rejects target changes and restores source plus concurrent tar
       targetSha256: hash(reviewed),
     }]);
     await writeFile(targetPath, concurrent);
-
     assert.throws(
       () => applyDraftConsolidationPlan(transactionPlan, {
         ...paths,
@@ -322,7 +318,6 @@ test("Transaction rolls back earlier targets when a later target is invalid", as
         targetSha256: null,
       },
     ]);
-
     assert.throws(
       () => applyDraftConsolidationPlan(transactionPlan, {
         ...paths,
@@ -353,7 +348,6 @@ test("Evidence publication failure rolls back targets and quarantined sources", 
       targetSha256: null,
     }]);
     await mkdir(join(paths.cycleDir, "evidence.json"), { recursive: true });
-
     assert.throws(
       () => applyDraftConsolidationPlan(transactionPlan, {
         ...paths,
@@ -385,7 +379,6 @@ test("Transaction cycle claim rejects duplicate apply", async () => {
       ...paths,
       inventory: [item],
     });
-
     assert.throws(
       () => applyDraftConsolidationPlan(transactionPlan, {
         ...paths,
@@ -423,14 +416,12 @@ test("Sibling processes allow exactly one apply claim", async () => {
     const secondConfig = await workerConfig(paths, transactionPlan, [item], {
       startedPath: secondStartedPath,
     });
-
     const first = runWorker(firstConfig);
     await waitForFile(readyPath);
     const second = runWorker(secondConfig);
     await waitForFile(secondStartedPath);
     await writeFile(releasePath, "release\n");
     const outcomes = await Promise.allSettled([first, second]);
-
     assert.equal(
       outcomes.filter((outcome) => outcome.status === "fulfilled").length,
       1,
@@ -481,7 +472,6 @@ test("Distinct cycles contend on the shared source and target locks", async () =
       blockedPath,
       startedPath: join(paths.agentRoot, "distinct-second-started"),
     });
-
     const first = runWorker(firstConfig);
     await waitForFile(readyPath);
     const second = runWorker(secondConfig);
@@ -492,7 +482,6 @@ test("Distinct cycles contend on the shared source and target locks", async () =
     );
     await writeFile(releasePath, "release\n");
     const outcomes = await Promise.allSettled([first, second]);
-
     assert.equal(outcomes[0]!.status, "fulfilled");
     assert.equal(outcomes[1]!.status, "rejected");
     assert.equal(existsSync(join(paths.recipeRoot, "target.json")), true);
@@ -535,10 +524,8 @@ test("Hard crashes at every transition recover deterministically", async (t) => 
           [item],
           { crashAt: checkpoint.point },
         );
-
         await assert.rejects(runWorker(configPath));
         const recovered = recoverDraftConsolidationCycle(paths);
-
         assert.equal(recovered.phase, checkpoint.recovery);
         assert.equal(existsSync(item.path), checkpoint.recovery === "rolled_back");
         assert.equal(
@@ -572,7 +559,6 @@ test("Rollback recovery preserves a legitimate post-crash target edit", async ()
     const targetPath = join(paths.recipeRoot, "target.json");
     const concurrent = `${JSON.stringify({ template: "echo concurrent" })}\n`;
     await writeFile(targetPath, concurrent);
-
     assert.throws(
       () => recoverDraftConsolidationCycle(paths),
       /target changed after crash/,
@@ -615,7 +601,6 @@ test(
       );
       await writeFile(external, originalBytes);
       await symlink(external, item.path, "file");
-
       assert.throws(
         () => recoverDraftConsolidationCycle(paths),
         /Symlink is not allowed in consolidation state/,
@@ -647,7 +632,6 @@ test("Roll-forward recovery rejects missing or changed committed targets", async
     await assert.rejects(runWorker(configPath));
     const targetPath = join(paths.recipeRoot, "target.json");
     await rm(targetPath, { force: true });
-
     assert.throws(
       () => recoverDraftConsolidationCycle(paths),
       /Committed source|Committed target/,
@@ -678,9 +662,7 @@ test("Terminal recovery repairs missing runtime evidence", async () => {
       inventory: [item],
     });
     await rm(applied.evidencePath, { force: true });
-
     const recovered = recoverDraftConsolidationCycle(paths);
-
     assert.equal(recovered.phase, "committed");
     assert.equal(existsSync(recovered.evidencePath), true);
   } finally {
@@ -708,12 +690,10 @@ test("Recovery rejects tampered journal paths and plan content", async () => {
     ) as DraftConsolidationJournal;
     journal.sources[0]!.path = "/tmp/escape.json";
     writeJsonAtomic(journalPath, journal);
-
     assert.throws(
       () => recoverDraftConsolidationCycle(paths),
       /journal operations do not match its plan/,
     );
-
     journal.sources[0]!.path = item.path;
     journal.plan.drafts[0]!.rationale = "tampered";
     writeJsonAtomic(journalPath, journal);
@@ -747,7 +727,6 @@ test(
       const displaced = join(paths.cycleDir, "quarantine-real");
       await rename(quarantine, displaced);
       await symlink(displaced, quarantine, "dir");
-
       assert.throws(
         () => recoverDraftConsolidationCycle(paths),
         /Symlink is not allowed in consolidation state/,
@@ -809,7 +788,6 @@ for (const substitution of [
             ? "dir"
             : "file",
         );
-
         assert.throws(
           () => recoverDraftConsolidationCycle(paths),
           /Symlink is not allowed in consolidation state/,
@@ -854,7 +832,6 @@ for (const recoveryState of ["rollback", "roll-forward", "terminal"] as const) {
         }
         await rename(paths.agentRoot, displacedRoot);
         await symlink(displacedRoot, paths.agentRoot, "dir");
-
         assert.throws(
           () => recoverDraftConsolidationCycle(paths),
           /Consolidation root identity changed/,
@@ -919,7 +896,6 @@ test(
       await assert.rejects(runWorker(configPath));
       await rename(paths.draftRoot, displaced);
       await symlink(displaced, paths.draftRoot, "junction");
-
       assert.throws(
         () => recoverDraftConsolidationCycle(paths),
         /Symlink is not allowed|root identity changed/i,
@@ -952,7 +928,6 @@ test(
       await assert.rejects(runWorker(configPath));
       await rename(paths.agentRoot, displacedRoot);
       await symlink(displacedRoot, paths.agentRoot, "junction");
-
       assert.throws(
         () => recoverDraftConsolidationCycle(paths),
         /Consolidation root identity changed|Symlink is not allowed/i,
@@ -985,9 +960,7 @@ test("Recovery rolls forward quarantined sources and recreates evidence", async 
     journal.phase = "sources_quarantined";
     writeJsonAtomic(journalPath, journal);
     await rm(applied.evidencePath, { force: true });
-
     const recovered = recoverDraftConsolidationCycle(paths);
-
     assert.equal(recovered.phase, "committed");
     assert.equal(existsSync(recovered.evidencePath), true);
     assert.deepEqual(await readdir(paths.draftRoot), []);
@@ -1019,9 +992,7 @@ test("Recovery rolls back pre-commit target and source changes", async () => {
     ) as DraftConsolidationJournal;
     journal.phase = "targets_validated";
     writeJsonAtomic(journalPath, journal);
-
     const recovered = recoverDraftConsolidationCycle(paths);
-
     assert.equal(recovered.phase, "rolled_back");
     assert.equal(existsSync(item.path), true);
     assert.equal(existsSync(join(paths.recipeRoot, "target.json")), false);

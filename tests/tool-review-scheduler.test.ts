@@ -202,7 +202,6 @@ test("Concurrent tool review schedulers launch one claimed portfolio", async () 
     first.schedule();
     second.schedule();
     await new Promise((resolve) => setTimeout(resolve, 100));
-
     assert.deepEqual(launches, ["72345678-1234-1234-1234-123456789abc"]);
     assert.equal(JSON.parse(readFileSync(paths.statePath, "utf8")).phase, "launched");
     first.close();

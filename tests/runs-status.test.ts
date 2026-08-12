@@ -22,7 +22,6 @@ test("Live runner with unavailable identity proof remains an explicit running su
     "/runner.mjs",
     0,
   );
-
   assert.equal(status.status, "running");
   assert.equal(status.process_identity_status, "unsupported_proof");
 });

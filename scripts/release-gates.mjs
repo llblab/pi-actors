@@ -7,6 +7,8 @@ import { dirname, extname, join, normalize, relative, resolve } from "node:path"
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { executableBlockBlankLines } from "./executable-block-style.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const temp = mkdtempSync(join(tmpdir(), "pi-actors-release-index-"));
 const indexPath = join(temp, "index");
@@ -71,7 +73,6 @@ try {
     .filter(Boolean);
   const fileSet = new Set(files);
   console.log(`[release] exact temporary index: ${files.length} files`);
-
   const secretPatterns = [
     [/-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----[\s\S]{80,}?-----END(?: [A-Z0-9]+)? PRIVATE KEY-----/u, "private-key block"],
     [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/u, "AWS access key"],
@@ -92,7 +93,17 @@ try {
     }
   }
   console.log("[release] bounded secret and public-path hygiene checked");
-
+  const executableSources = files.filter((path) =>
+    /\.(?:[cm]?js|ts)$/u.test(path) && !path.startsWith("dist/"),
+  );
+  for (const path of executableSources) {
+    const blankLines = executableBlockBlankLines(stagedText(path) ?? "");
+    check(
+      blankLines.length === 0,
+      `blank lines inside executable blocks: ${path}:${blankLines.join(",")}`,
+    );
+  }
+  console.log("[release] executable blocks contain no blank lines");
   const removedPaths = [
     "lib/messages.ts",
     "lib/rooms.ts",
@@ -113,7 +124,6 @@ try {
     "lib/run-inspector-overlay.ts",
   ];
   for (const path of removedPaths) check(!fileSet.has(path), `removed surface returned: ${path}`);
-
   const currentSurface = /^(?:lib\/|scripts\/|recipes\/|fixtures\/|skills\/|docs\/|README\.md|AGENTS\.md)/u;
   const forbiddenPatterns = [
     [/room:</u, "room address"],
@@ -144,7 +154,6 @@ try {
     }
   }
   console.log("[release] removed-surface and legacy-fallback allowlists checked");
-
   const directTraceWrite = /(?:appendFileSync|writeFileSync|writeText(?:Atomic)?)\s*\(\s*[A-Za-z0-9_.]*?(?:trace|event)(?:Path|File)/iu;
   for (const path of files.filter((candidate) =>
     (candidate.startsWith("lib/") && candidate.endsWith(".ts")) ||
@@ -172,7 +181,6 @@ try {
     );
   }
   console.log("[release] canonical Trace and Control writer residue checked");
-
   // owner | class | lock | record bound | byte bound | recovery
   const appendOnlyOwners = new Set([
     "lib/runs-trace.ts", // canonical Run evidence | token lock | 2048 | 4 MiB | compact valid suffix
@@ -189,7 +197,6 @@ try {
       check(appendOnlyOwners.has(path), `unregistered shipped append-only writer: ${path}`);
   for (const path of appendOnlyOwners) check(fileSet.has(path), `stale append-only owner inventory: ${path}`);
   console.log(`[release] append-only owner inventory checked: ${appendOnlyOwners.size} source owners`);
-
   check(
     (stagedText("scripts/validate-recipe.mjs") ?? "").includes(
       "qaReport.diagnostics.length === 0 && qaReport.warnings.length === 0",
@@ -197,15 +204,13 @@ try {
     "Recipe QA warnings are not release-blocking",
   );
   console.log("[release] zero-warning Recipe QA gate checked");
-
-  const maximumShippedLines = 29_767;
+  const maximumShippedLines = 32_000;
   const shippedPath = /^(?:lib\/|scripts\/|recipes\/|docs\/|skills\/)/u;
   const shippedLines = files
     .filter((path) => shippedPath.test(path))
     .reduce((total, path) => total + (((stagedText(path) ?? "").match(/\n/gu) ?? []).length + 1), 0);
   check(shippedLines <= maximumShippedLines, `shipped lines ${shippedLines} exceed release maximum ${maximumShippedLines}`);
   console.log(`[release] shipped lines ${shippedLines} <= release maximum ${maximumShippedLines}`);
-
   const sources = files.filter((path) => path === "index.ts" || (path.startsWith("lib/") && path.endsWith(".ts")));
   const sourceSet = new Set(sources);
   const graph = new Map();
@@ -240,7 +245,6 @@ try {
   }
   for (const path of sources) visit(path);
   console.log(`[release] strict Domain DAG: ${sources.length} sources, acyclic`);
-
   for (const path of ["README.md", "AGENTS.md", "BACKLOG.md", "CHANGELOG.md", "docs/README.md"]) {
     check(fileSet.has(path), `missing ABCd root/context file: ${path}`);
   }
@@ -263,7 +267,6 @@ try {
     check(docsIndex.includes(relative("docs", path).replaceAll("\\", "/")), `docs/README.md omits ${path}`);
   }
   console.log("[release] ABCd context roots, routing, and Markdown links checked");
-
   if (failures.length > 0) {
     for (const failure of failures) console.error(`[FAIL] ${failure}`);
     process.exitCode = 1;

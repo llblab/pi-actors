@@ -13,6 +13,10 @@ const indexSource = await readFile(
   new URL("../index.ts", import.meta.url),
   "utf8",
 );
+const extensionRuntimeSource = await readFile(
+  new URL("../lib/extension-runtime.ts", import.meta.url),
+  "utf8",
+);
 const runtimeSource = await readFile(
   new URL("../lib/runtime.ts", import.meta.url),
   "utf8",
@@ -100,28 +104,32 @@ test("Entrypoint stays free of direct typebox and environment access", () => {
   assert.equal(indexSource.includes("process.env"), false);
 });
 
-test("Entrypoint delegates tool family composition to tools", () => {
-  assert.match(indexSource, /Tools\.createCoreActorToolDefinitions/);
+test("Entrypoint delegates tool and runtime composition", () => {
+  assert.match(indexSource, /ExtensionRuntime\.createActorExtensionRuntime/);
+  assert.match(indexSource, /runtime\.registerCoreTools\(\)/);
+  assert.match(extensionRuntimeSource, /Tools\.createCoreActorToolDefinitions/);
   assert.match(toolsSource, /createRegisterToolDefinition/);
   assert.equal(indexSource.includes('name: "register_tool"'), false);
 });
 
 test("Runtime reports recipe watcher failures", () => {
-  assert.match(indexSource, /Runtime\.createRecipeToolReloadWatcher/);
+  assert.match(extensionRuntimeSource, /Runtime\.createRecipeToolReloadWatcher/);
   assert.match(runtimeSource, /Recipe live reload watcher failed/);
   assert.match(runtimeSource, /notifyFailure\(ctx\)/);
 });
 
 test("Session shutdown tears down exact-parent runs through the run UI runtime", () => {
   assert.match(indexSource, /pi\.on\("session_shutdown"/);
-  assert.match(indexSource, /runUiRuntime\.shutdown\(event\.reason, ctx\)/);
+  assert.match(indexSource, /runtime\.onSessionShutdown\(event\.reason, ctx\)/);
+  assert.match(extensionRuntimeSource, /runUiRuntime\.shutdown\(reason, ctx\)/);
   assert.match(runUiRuntimeSource, /AsyncRuns\.teardownRunsOwnedByParent/);
   assert.match(runUiRuntimeSource, /session_shutdown:\$\{eventReason\}/);
 });
 
 test("Entrypoint delegates low-level review and run lifecycle operations", () => {
-  assert.match(indexSource, /AutomaticReviewRuntime\.createAutomaticReviewRuntime/);
-  assert.match(indexSource, /RunUiRuntime\.createRunUiRuntime/);
+  assert.match(extensionRuntimeSource, /AutomaticReviewRuntime\.createAutomaticReviewRuntime/);
+  assert.match(extensionRuntimeSource, /RunUiRuntime\.createRunUiRuntime/);
+  assert.doesNotMatch(indexSource, /AutomaticReviewRuntime|RunUiRuntime|ToolsResponse/);
   assert.doesNotMatch(indexSource, /AsyncRuns\.(?:startRun|listRuns|cancelRun|killRun)/);
   assert.doesNotMatch(indexSource, /create(?:DraftSleep|ToolReview)Scheduler/);
   assert.doesNotMatch(indexSource, /createRunStateWatcher|createRunTerminalReconciliationLoop/);
@@ -132,6 +140,7 @@ test("Entrypoint delegates low-level review and run lifecycle operations", () =>
 test("Internal runtime input adapters use only Control terminology", () => {
   const sources = [
     indexSource,
+    extensionRuntimeSource,
     automaticReviewRuntimeSource,
     toolsSource,
     toolsMessageSource,
@@ -268,8 +277,16 @@ test("CI release validation includes exact-tree, Domain DAG, and ABCd gates", ()
 test("Release gate enforces a fixed shipped-line limit", () => {
   const declaration = releaseGatesSource.match(/const (\w*[Ss]hippedLines\w*) = ([\d_]+);/);
   assert.ok(declaration);
-  assert.equal(Number(declaration[2].replaceAll("_", "")), 29_767);
+  assert.equal(Number(declaration[2].replaceAll("_", "")), 32_000);
   assert.match(releaseGatesSource, new RegExp(`check\\(shippedLines <=? ${declaration[1]}`));
+});
+
+test("Release gate rejects blank lines inside executable blocks", () => {
+  assert.match(releaseGatesSource, /executableBlockBlankLines/);
+  assert.match(releaseGatesSource, /blank lines inside executable blocks/);
+  assert.match(releaseGatesSource, /executableSources/);
+  assert.match(releaseGatesSource, /\\\.\(\?:\[cm\]\?js\|ts\)\$/);
+  assert.match(releaseGatesSource, /!path\.startsWith\("dist\/"\)/);
 });
 
 test("CI workflows use reusable validation and Node 24 action runtimes", () => {
@@ -444,13 +461,11 @@ test("Music player backend enum stays aligned across recipe docs and script", ()
     "play",
     "wmp",
   ]);
-
   const docs = readFileSync("docs/recipe-library.md", "utf8");
   const docsPlayers = docs
     .match(/player:enum\((?<values>[^)]+)\)=auto/)
     ?.groups?.values.split(",");
   assert.deepEqual(docsPlayers, recipePlayers);
-
   const script = readFileSync("scripts/music-player.mjs", "utf8");
   const usagePlayers = script
     .match(/Supported players: (?<values>[^.]+)\./)

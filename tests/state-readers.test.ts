@@ -20,7 +20,6 @@ test("resilient JSON reader returns fallback and diagnostics for corrupt files",
   try {
     const file = join(root, "state.json");
     await writeFile(file, "{bad json\n");
-
     const result = readJsonFileResilient(file, { ok: false });
     assert.deepEqual(result.value, { ok: false });
     assert.equal(result.diagnostics.length, 1);
@@ -39,7 +38,6 @@ test("resilient JSONL reader preserves valid records and reports bad lines", asy
       file,
       `${JSON.stringify({ event: "one" })}\n{bad json\n${JSON.stringify({ event: "two" })}\n`,
     );
-
     const result = readJsonlFileResilient<Record<string, unknown>>(file);
     assert.deepEqual(result.records, [{ event: "one" }, { event: "two" }]);
     assert.equal(result.diagnostics.length, 1);

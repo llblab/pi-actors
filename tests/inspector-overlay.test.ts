@@ -207,7 +207,6 @@ test("Actor Inspector redacts Control rows, details, and Control documents", asy
     assert.match(detail, /status: failed/);
     assert.match(detail, /\[REDACTED\]/);
     assert.doesNotMatch(detail, /INSPECTOR_.*_SECRET/);
-
     instance.handleInput("\u001b");
     instance.handleInput("\u001b[D");
     instance.handleInput("\u001b[C");
@@ -217,7 +216,6 @@ test("Actor Inspector redacts Control rows, details, and Control documents", asy
     assert.match(control, /recent_controls:/);
     assert.match(control, /\[REDACTED\]/);
     assert.doesNotMatch(control, /INSPECTOR_.*_SECRET/);
-
     const durable = await readFile(join(stateDir, "controls.jsonl"), "utf8");
     assert.match(durable, /INSPECTOR_PASSWORD_SECRET/);
     assert.match(durable, /INSPECTOR_ERROR_SECRET/);
@@ -323,12 +321,10 @@ test("Actor Inspector preserves newest-first Trace projection across refresh and
     instance.handleInput("\u001b[C");
     const initial = instance.render(90).join("\n");
     assert.ok(initial.indexOf("Middle event") < initial.indexOf("Oldest event"));
-
     instance.handleInput("\u001b[B");
     instance.render(90);
     instance.handleInput("\u001b[B");
     assert.match(instance.render(90).join("\n"), /▶\s+#1.*Oldest event/);
-
     refreshed = true;
     instance.invalidate();
     const updated = instance.render(90).join("\n");

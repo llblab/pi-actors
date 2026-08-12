@@ -603,12 +603,10 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
         },
       })}\n`,
     );
-
     await execFileAsync(process.execPath, [
       join(packageDir, "scripts", "async-runner.mjs"),
       stateDir,
     ]);
-
     const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8"));
     assert.equal(result.code, 0);
     assert.doesNotMatch(
@@ -629,7 +627,6 @@ test("installed validate-recipe avoids importing TypeScript from node_modules", 
     const packageDir = await prepareInstalledPackage(root);
     const recipe = join(root, "recipe.json");
     await writeFile(recipe, `${JSON.stringify({ template: "echo ok" })}\n`);
-
     const { stdout } = await execFileAsync(process.execPath, [
       join(packageDir, "scripts", "validate-recipe.mjs"),
       recipe,
@@ -654,7 +651,6 @@ test("installed validate-recipe resolves bare imports from packaged recipes", as
         template: [{ name: "status" }],
       })}\n`,
     );
-
     const { stdout } = await execFileAsync(process.execPath, [
       join(packageDir, "scripts", "validate-recipe.mjs"),
       recipe,

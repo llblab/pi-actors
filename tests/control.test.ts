@@ -84,7 +84,6 @@ test("Control action and serialized input use portable boundaries", () => {
     () => normalizeControlRequest({ target: "run:review", action: `${action}a` }),
     /exceeds 64 ASCII characters/,
   );
-
   const validInputs = [
     "x".repeat(378),
     "é".repeat(189),

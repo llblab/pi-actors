@@ -68,7 +68,6 @@ function plan(): ToolReviewApprovedPlan {
 
 test("Lineage projection groups every approved portfolio action exactly once", () => {
   const operations = projectToolReviewLineage(plan());
-
   assert.deepEqual(
     operations.map((operation) => ({
       action: operation.action,
@@ -97,14 +96,12 @@ test("Lineage projection rejects ambiguous or unrelated target ownership", () =>
     () => projectToolReviewLineage(keptTarget),
     /kept tool owns lineage targets/i,
   );
-
   const unknownTarget = plan();
   unknownTarget.targets.push(target("unknown", "merge", ["missing"]));
   assert.throws(
     () => projectToolReviewLineage(unknownTarget),
     /unknown tool review lineage target source/i,
   );
-
   const partialMerge = plan();
   partialMerge.targets = partialMerge.targets.map((entry) =>
     entry.lineage === "merge"

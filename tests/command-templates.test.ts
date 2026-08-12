@@ -48,7 +48,6 @@ test("Command templates infer portable script interpreters", () => {
     command: process.execPath,
     args: [resolve("/work", "worker.mjs"), "--mode", "check"],
   });
-
   const seen: string[] = [];
   const deno = resolveCommandTemplateScriptInvocation(
     { command: "/work/worker.js", args: ["value"] },
@@ -245,7 +244,6 @@ test("Command templates detect high-risk trusted executable shapes", () => {
     "risk.eval",
     "risk.destructive_fs",
   ]);
-
   assert.match(
     getCommandTemplateWarnings("bash -lc {script}").join("\n"),
     /shell command strings/,

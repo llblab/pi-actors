@@ -225,7 +225,6 @@ test("Revision rollback restores bytes and advances lineage without resetting li
     const before = usage(evolvedPath, fx.recipeRoot);
     assert.equal(before.revision, 2);
     assert.equal(before.lifetime_calls, 1);
-
     const rolledBack = rollbackToolRecipeRevision("evolved", 1, {
       now: () => new Date("2026-01-04T00:00:00.000Z"),
       recipeRoot: fx.recipeRoot,
@@ -242,7 +241,6 @@ test("Revision rollback restores bytes and advances lineage without resetting li
       (after.lineage_events as Array<Record<string, unknown>>).at(-1)?.type,
       "rollback",
     );
-
     rollbackToolRecipeRevision("evolved", 1, { recipeRoot: fx.recipeRoot });
     assert.equal(usage(evolvedPath, fx.recipeRoot).revision, 3);
   } finally {
@@ -277,7 +275,6 @@ test("Revision rollback rolls post-write failures forward from its durable journ
       rmSync(fx.root, { recursive: true, force: true });
     }
   });
-
   await t.test("lineage written before failure", () => {
     const fx = fixture();
     const evolvedPath = join(fx.recipeRoot, "evolved.json");
@@ -334,13 +331,11 @@ test("Revision rollback rejects tampered, rotated, and symlinked snapshots", () 
       () => rollbackToolRecipeRevision("evolved", 1, { recipeRoot: fx.recipeRoot }),
       /invalid or rotated/i,
     );
-
     writeJsonAtomic(snapshotPath, snapshot);
     assert.throws(
       () => rollbackToolRecipeRevision("evolved", 33, { recipeRoot: fx.recipeRoot }),
       /invalid or rotated/i,
     );
-
     const outside = join(fx.root, "outside-snapshot.json");
     renameSync(snapshotPath, outside);
     symlinkSync(outside, snapshotPath);
@@ -372,7 +367,6 @@ test("Lineage finalization rejects recomputed journal paths outside the approved
       .update(canonicalJson({ deletes: journal.deletes, writes: journal.writes }))
       .digest("hex");
     writeJsonAtomic(journalPath, journal);
-
     assert.throws(
       () => finalizeToolReviewLineage(fx.approvedPath, { recipeRoot: fx.recipeRoot }),
       /paths do not match the approved plan/i,
@@ -396,7 +390,6 @@ test("Lineage finalization rolls partial ledger writes forward after hard crash"
       { encoding: "utf8" },
     );
     assert.equal(crashed.status, 75, crashed.stderr || crashed.stdout);
-
     const recovered = finalizeToolReviewLineage(fx.approvedPath, {
       recipeRoot: fx.recipeRoot,
     });

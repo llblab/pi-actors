@@ -319,7 +319,6 @@ test("Run Trace compaction removes malformed lines and accumulates prior statist
     const firstData = first.at(-1)?.data as Record<string, unknown>;
     assert.equal(firstData.dropped_malformed_lines_total, 1);
     assert.equal(firstData.compactions_total, 1);
-
     const added = Array.from(
       { length: TRACE_JOURNAL_MAX_EVENTS - first.length },
       (_, index) => encodeFixture(traceFixture(10_000 + index)),

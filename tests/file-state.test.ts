@@ -136,7 +136,6 @@ test("File mutation lock owner publication is atomic under contention", async ()
     await waitForFile(publishReady);
     const contender = startLockWorker(target, contenderPaths, log, "first");
     await waitForFile(contenderPaths.acquired);
-
     await writeFile(publishProceed, "proceed\n");
     await waitForFile(publisherPaths.blocked);
     assert.equal(existsSync(publisherPaths.acquired), false);
@@ -144,7 +143,6 @@ test("File mutation lock owner publication is atomic under contention", async ()
     await waitForFile(publisherPaths.acquired);
     await writeFile(publisherRelease, "release\n");
     await Promise.all([publisher, contender]);
-
     assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), [
       "first:acquired",
       "first:released",
@@ -236,9 +234,7 @@ test("File mutation locks immediately reclaim a proven-dead owner", async () => 
     await waitForFile(crashedPaths.acquired);
     await crashed;
     await writeFile(release, "release\n");
-
     await startLockWorker(target, recoveryPaths, log, "second");
-
     assert.equal(existsSync(recoveryPaths.acquired), true);
     assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), [
       "crash:acquired",
@@ -259,10 +255,8 @@ test("File mutation locks reclaim a stale legacy ownerless boundary", async () =
     await mkdir(lockPath, { recursive: true });
     const abandoned = new Date(Date.now() - 60_000);
     await utimes(lockPath, abandoned, abandoned);
-
     const unlock = acquireFileMutationLock(target);
     unlock();
-
     assert.equal(existsSync(lockPath), false);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -316,7 +310,6 @@ test("Concurrent dead-owner reclaimers cannot remove the replacement lock", asyn
     const crashed = startLockWorker(target, crashedPaths, log, "crash");
     await waitForFile(crashedPaths.acquired);
     await crashed;
-
     const first = startLockWorker(target, firstPaths, log, "first");
     const second = startLockWorker(target, secondPaths, log, "second");
     for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -333,7 +326,6 @@ test("Concurrent dead-owner reclaimers cannot remove the replacement lock", asyn
     assert.equal(existsSync(loser.acquired), false);
     await writeFile(sharedRelease, "release\n");
     await Promise.all([first, second]);
-
     const events = (await readFile(log, "utf8")).trim().split("\n");
     assert.equal(events[0], "crash:acquired");
     assert.deepEqual(events.slice(1), [
@@ -371,12 +363,10 @@ test("Stale reclaim cannot race old-owner release into deleting its replacement"
       { ready: reclaimReady, proceed: reclaimProceed },
     );
     await waitForFile(reclaimReady);
-
     await writeFile(holderRelease, "release\n");
     await waitForFile(holderPaths.blocked);
     await writeFile(reclaimProceed, "proceed\n");
     await waitForFile(replacementPaths.acquired);
-
     const final = startLockWorker(target, finalPaths, log, "second");
     await waitForFile(finalPaths.blocked);
     assert.equal(existsSync(finalPaths.acquired), false);
@@ -399,10 +389,8 @@ test("File mutation locks recover an abandoned removal boundary", async () => {
     await writeFile(join(reclaimPath, "owner.json"), "{}\n");
     const stale = new Date(Date.now() - 60_000);
     await utimes(reclaimPath, stale, stale);
-
     const release = acquireFileMutationLock(target);
     release();
-
     assert.equal(existsSync(lockPath), false);
     assert.equal(existsSync(reclaimPath), false);
   } finally {

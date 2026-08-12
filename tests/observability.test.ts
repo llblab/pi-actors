@@ -143,7 +143,6 @@ test("Run observability discovers nested child async runs", async () => {
       JSON.stringify({ activeSubagents: 0, completed: 1, failures: [], updatedAt: "2026-01-01T00:00:09.000Z" }),
     );
     await writeFile(join(childDir, "result.json"), JSON.stringify({ code: 0 }));
-
     const summary = summarizeRuns(root);
     assert.deepEqual(summary.runs.map((run) => run.run), ["child", "supervisor"]);
     assert.deepEqual(findRunRetirementCandidates(summary), [
@@ -232,7 +231,6 @@ test("Run observability keeps canonical attention exactly-once across replacemen
       [first.id],
     );
     assert.deepEqual(detectRunAttentionEvents(legacy, summary, seen), []);
-
     const second = {
       id: "replacement-second",
       kind: "player.second",
@@ -510,7 +508,6 @@ test("Successful reviews keep semantic output out of follow-up context", async (
     assert.equal(transition.semanticResult?.correlationId, "task-42");
     assert.match(transition.semanticResult?.body ?? "", /^Status: complete/);
     assert.equal((transition.semanticResult?.body?.length ?? 0) <= 4_000, true);
-
     const delivered: Array<{
       content: string;
       details: unknown;
@@ -854,7 +851,6 @@ test("Terminal delivery failures stay visible and retry without a handled marker
         state,
         stateRoot: root,
       });
-
     reconcile();
     assert.equal(attempts, 1);
     assert.match(notifications.at(-1) ?? "", /terminal delivery failed/);
@@ -868,7 +864,6 @@ test("Terminal delivery failures stay visible and retry without a handled marker
       readFile(join(stateDir, "terminal-handled.json"), "utf8"),
       /ENOENT/,
     );
-
     reconcile();
     assert.equal(attempts, 2);
     const handled = JSON.parse(
@@ -1384,7 +1379,6 @@ test("Run observability blocks retirement candidates with running child async ru
     total: 3,
   });
   assert.deepEqual(candidates, []);
-
   const ready = findRunRetirementCandidates({
     cancelled: 0,
     done: 2,

@@ -35,7 +35,6 @@ for (const runtimePlatform of ["linux", "darwin", "win32"] as const) {
       () => true,
     );
     assert.deepEqual(valid, { status: "valid", valid: true });
-
     const reused = verifyRunProcessIdentity(
       42,
       expected,

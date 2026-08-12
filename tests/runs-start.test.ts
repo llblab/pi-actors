@@ -17,7 +17,6 @@ test("Lifecycle lock release is idempotent and permits the next generation", asy
     const releaseFirst = acquireStateStartLock(stateDir);
     releaseFirst();
     releaseFirst();
-
     const releaseSecond = acquireStateStartLock(stateDir);
     assert.equal(typeof releaseSecond, "function");
     releaseSecond();

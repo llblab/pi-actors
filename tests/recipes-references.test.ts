@@ -49,7 +49,6 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
         template: [{ name: "child" }, "wc -c"],
       }),
     );
-
     const config = readResolvedRecipeConfig(parent)!;
     assert.deepEqual(config.template, [
       {
@@ -83,7 +82,6 @@ test("Template recipe context records preserve raw composition identity", async 
         template: [{ name: "child_alias" }],
       }),
     );
-
     const records = buildRecipeContextRecords(parent);
     assert.deepEqual(
       records.map((record) => ({
@@ -114,7 +112,6 @@ test("Template recipe context records preserve raw composition identity", async 
       defaults: { message: "hello" },
       template: "pi -p child",
     });
-
     const config = readResolvedRecipeConfig(parent, [], {
       includeActorRecipeContext: true,
     })!;
@@ -145,13 +142,11 @@ test("File-backed Recipes receive immutable recipe and Skill directories", async
       file,
       JSON.stringify({ template: "echo {recipe_dir} {skill_dir}" }),
     );
-
     const config = readResolvedRecipeConfig(file)!;
     assert.equal(config.recipe_dir, recipeDir);
     assert.equal(config.skill_dir, skillDir);
     assert.equal(config.values?.recipe_dir, recipeDir);
     assert.equal(config.values?.skill_dir, skillDir);
-
     await writeFile(
       file,
       JSON.stringify({
@@ -204,7 +199,6 @@ test("Qualified std and active-Skill Recipe references resolve without bare shad
     setActiveSkillRecipeSources([
       { name: "sample", filePath: join(skillDir, "SKILL.md") },
     ]);
-
     const parent = join(root, "parent.json");
     await writeFile(
       parent,
@@ -218,7 +212,6 @@ test("Qualified std and active-Skill Recipe references resolve without bare shad
       "skill:sample/nested/task",
     );
     assert.equal(JSON.stringify(config.template).includes("skill:sample"), false);
-
     const stdParent = join(root, "std.json");
     await writeFile(
       stdParent,
@@ -228,7 +221,6 @@ test("Qualified std and active-Skill Recipe references resolve without bare shad
       JSON.stringify(readResolvedRecipeConfig(stdParent)?.template),
       /recipe-utils\.mjs/,
     );
-
     assert.deepEqual(getActiveSkillRecipeNamespaces(), {
       sample: [join(skillDir, "recipes")],
     });
@@ -332,7 +324,6 @@ test("Template recipe imports resolve bare names by recipe-root priority", async
         template: { name: "utility" },
       }),
     );
-
     const config = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
     assert.deepEqual(config.template, {
       defaults: { recipe_dir: userRoot },
@@ -402,7 +393,6 @@ test("Template recipe direct delegation resolves by recipe priority", async () =
         template: "utility-package-summary",
       }),
     );
-
     const config = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
     assert.equal(config.async, true);
     assert.deepEqual(config.args, ["message:string"]);
@@ -456,7 +446,6 @@ test("Template recipe import and node values override defaults and inline defaul
         template: { name: "child", values: { mode: "node" } },
       }),
     );
-
     const config = readResolvedRecipeConfig(parent)!;
     assert.deepEqual(config.template, {
       args: ["mode:enum(inline,default,recipe,binding,node)=inline"],
@@ -480,7 +469,6 @@ test("Template recipes reject duplicate args, unknown defaults, and invalid enum
       () => readResolvedRecipeConfig(duplicate),
       /Duplicate argument name\(s\): mode/,
     );
-
     const conflictingType = join(root, "conflicting-type.json");
     await writeFile(
       conflictingType,
@@ -493,7 +481,6 @@ test("Template recipes reject duplicate args, unknown defaults, and invalid enum
       () => readResolvedRecipeConfig(conflictingType),
       /Conflicting argument type for mode/,
     );
-
     const unknownDefault = join(root, "unknown-default.json");
     await writeFile(
       unknownDefault,
@@ -507,7 +494,6 @@ test("Template recipes reject duplicate args, unknown defaults, and invalid enum
       () => readResolvedRecipeConfig(unknownDefault),
       /Unknown Recipe default argument: typo/,
     );
-
     const invalidDefault = join(root, "invalid-default.json");
     await writeFile(
       invalidDefault,
@@ -549,7 +535,6 @@ test("Template recipe imports reject invalid enum bindings", async () => {
       () => readResolvedRecipeConfig(invalid),
       /Argument mode must be one of: check, fix/,
     );
-
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -594,7 +579,6 @@ test("Template recipes derive recipe identity from filename", async () => {
         template: "echo ok",
       }),
     );
-
     const config = readResolvedRecipeConfig(recipe)!;
     assert.equal(getRecipeIdFromPath(recipe), "file-identity");
     assert.equal(config.name, "file-identity");
@@ -641,7 +625,6 @@ imports:
 \`\`\`
 `,
     );
-
     const config = readResolvedRecipeConfig(parent)!;
     assert.equal(getRecipeIdFromPath(child), "child");
     assert.deepEqual(config.imports, { child: "child" });
@@ -674,7 +657,6 @@ printf {word}{suffix}
 \`\`\`
 `,
     );
-
     const config = readResolvedRecipeConfig(recipe)!;
     assert.deepEqual(config.args, ["word:string", "suffix:string"]);
     assert.deepEqual(config.defaults, { suffix: "!", word: "hello" });
@@ -694,7 +676,6 @@ test("Template recipes reject unknown named import nodes", async () => {
         template: [{ name: "missing" }],
       }),
     );
-
     assert.throws(
       () => readResolvedRecipeConfig(parent),
       /Unknown recipe import: missing/,
@@ -739,7 +720,6 @@ test("Template recipes reference imported defaults and explicit values", async (
           "run {base.defaults.profile} {base.values.target} {base.defaults.missing=fallback} {base.values.empty?yes:no} {label}",
       }),
     );
-
     const config = readResolvedRecipeConfig(parent)!;
     assert.deepEqual(config.defaults, {
       inherited_profile: "safe",
@@ -789,7 +769,6 @@ test("Packaged library recipes parse and resolve imports", async () => {
   const files = (await readdir(recipeDir)).filter((file) =>
     file.endsWith(".json"),
   );
-
   assert.ok(files.length > 0);
   for (const file of files) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
@@ -836,7 +815,6 @@ test("Packaged recipes do not ship concrete model-version defaults", async () =>
   const modelLikeKey = /(^|_)models?$/;
   const concreteModelValue =
     /\b(openai|gpt|claude|deepseek|gemini|mistral|codex)\b/i;
-
   for (const file of files) {
     const config = readResolvedRecipeConfig(join(recipeDir, file));
     const defaults = config?.defaults ?? {};

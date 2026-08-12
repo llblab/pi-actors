@@ -65,7 +65,6 @@ async function runLocker(argv = process.argv.slice(2)) {
   const controlPath = join(stateDir, "control.fifo");
   let runInstanceId;
   mkdirSync(stateDir, { recursive: true });
-
   function readJson(path, fallback) {
     if (!existsSync(path)) return fallback;
     try {
@@ -74,11 +73,9 @@ async function runLocker(argv = process.argv.slice(2)) {
       return fallback;
     }
   }
-
   function writeJson(path, value) {
     writeJsonAtomic(path, value);
   }
-
   function getControlEndpoint() {
     if (process.platform !== "win32") return { path: controlPath, type: "fifo" };
     const hash = createHash("sha256")
@@ -87,7 +84,6 @@ async function runLocker(argv = process.argv.slice(2)) {
       .slice(0, 20);
     return { path: `\\\\.\\pipe\\pi-actors-locker-${hash}`, type: "named-pipe" };
   }
-
   function writeControlEndpoint(endpoint) {
     if (!runInstanceId) throw new Error("Run generation unavailable for Control endpoint");
     writeJson(join(stateDir, "control-endpoint.json"), {
@@ -96,7 +92,6 @@ async function runLocker(argv = process.argv.slice(2)) {
       run_instance_id: runInstanceId,
     });
   }
-
   function journal(event, data = {}) {
     const release = acquireFileMutationLock(journalPath);
     try {
@@ -111,11 +106,9 @@ async function runLocker(argv = process.argv.slice(2)) {
       writeTextAtomic(journalPath, content);
     } finally { release(); }
   }
-
   function encodeJournal(records) {
     return records.length ? `${records.map((record) => JSON.stringify(record)).join("\n")}\n` : "";
   }
-
   function emitTrace(kind, summary, data = {}, level = "info") {
     appendRunTraceEvent(stateDir, {
       attention: "followup",
@@ -125,11 +118,9 @@ async function runLocker(argv = process.argv.slice(2)) {
       summary,
     });
   }
-
   function now() {
     return Date.now();
   }
-
   function cleanExpiredLocks(locks) {
     const current = now();
     const kept = {};
@@ -139,7 +130,6 @@ async function runLocker(argv = process.argv.slice(2)) {
     }
     return kept;
   }
-
   function normalizeControl(line) {
     const trimmed = line.trim();
     if (!trimmed) return undefined;
@@ -160,8 +150,6 @@ async function runLocker(argv = process.argv.slice(2)) {
       );
     }
   }
-
-
   function tailJournal(count) {
     if (!existsSync(journalPath)) return [];
     return readFileSync(journalPath, "utf8")
@@ -177,7 +165,6 @@ async function runLocker(argv = process.argv.slice(2)) {
         }
       });
   }
-
   function printSnapshot() {
     const locks = cleanExpiredLocks(readJson(locksPath, {}));
     writeJson(locksPath, locks);
@@ -195,7 +182,6 @@ async function runLocker(argv = process.argv.slice(2)) {
       ),
     );
   }
-
   function nextTask(queue, locks) {
     const items = Array.isArray(queue.items) ? queue.items : [];
     const index = items.findIndex((item) => {
@@ -205,7 +191,6 @@ async function runLocker(argv = process.argv.slice(2)) {
     if (index < 0) return undefined;
     return items.splice(index, 1)[0];
   }
-
   function handle(control) {
     const action = control.action;
     const body =
@@ -333,18 +318,15 @@ async function runLocker(argv = process.argv.slice(2)) {
     journal("lock.unknown", { action, input: body });
     emitTrace("lock.unknown", `Unknown Control ${action}`, { action, input: body }, "warning");
   }
-
   if (mode === "snapshot") {
     printSnapshot();
     process.exit(0);
   }
-
   const startupRun = readJson(join(stateDir, "run.json"), undefined);
   if (!startupRun || typeof startupRun.run_instance_id !== "string") {
     throw new Error("Run generation unavailable for Control service");
   }
   runInstanceId = startupRun.run_instance_id;
-
   function handleLine(line) {
     const control = normalizeControl(line);
     if (!control) return false;
@@ -376,7 +358,6 @@ async function runLocker(argv = process.argv.slice(2)) {
       return false;
     }
   }
-
   async function serveFifo(endpoint) {
     if (!existsSync(endpoint.path)) {
       const result = spawnSync("mkfifo", [endpoint.path]);
@@ -403,7 +384,6 @@ async function runLocker(argv = process.argv.slice(2)) {
       fs.closeSync(fd);
     }
   }
-
   async function serveNamedPipe(endpoint) {
     let resolveStopped;
     const stopped = new Promise((resolve) => {
@@ -428,7 +408,6 @@ async function runLocker(argv = process.argv.slice(2)) {
     });
     await stopped;
   }
-
   const endpoint = getControlEndpoint();
   writeJson(queuePath, readJson(queuePath, { items: [] }));
   writeJson(locksPath, cleanExpiredLocks(readJson(locksPath, {})));

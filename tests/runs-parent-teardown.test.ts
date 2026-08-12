@@ -70,7 +70,6 @@ test("Kills every still-running exact-owner run and records each outcome", () =>
     listRunStatuses: () => statuses,
     recordAttempt: (attempt) => evidence.push(attempt),
   });
-
   assert.deepEqual(killed, ["/runs/a", "/runs/b"]);
   assert.deepEqual(result, {
     attempted: 2,
@@ -100,7 +99,6 @@ test("Revalidates ownership and terminal state before kill", () => {
     listRunStatuses: () => statuses,
     recordAttempt: (attempt) => evidence.push(attempt),
   });
-
   assert.equal(result.killed, 0);
   assert.equal(result.skipped, 2);
   assert.deepEqual(
@@ -121,7 +119,6 @@ test("Rejects same-owner replacement generations before canonical kill", () => {
     listRunStatuses: () => [initial],
     recordAttempt: () => undefined,
   });
-
   assert.deepEqual(result.attempts, [
     {
       ownerId: "session-a",
@@ -156,7 +153,6 @@ test("Continues after kill and evidence failures", () => {
       if (attempt.run === "evidence") throw new Error("disk full");
     },
   });
-
   assert.equal(result.attempted, 4);
   assert.equal(result.killed, 1);
   assert.equal(result.failed, 3);
@@ -182,7 +178,6 @@ test("Discovery failures remain visible while readable runs continue", () => {
     }),
     recordAttempt: () => undefined,
   });
-
   assert.equal(result.killed, 1);
   assert.equal(result.discoveryFailed, 1);
   assert.equal(result.failed, 1);
@@ -219,7 +214,6 @@ test("Persisted teardown summaries bound every string and collection", () => {
     huge,
     huge,
   );
-
   assert.equal(summary.attempts.length, 200);
   assert.equal(summary.attemptsOmitted, 1);
   assert.equal(summary.discoveryFailures.length, 200);
@@ -261,7 +255,6 @@ test("A second teardown is idempotent after runs become terminal", () => {
     listRunStatuses: () => statuses,
     recordAttempt: () => assert.fail("no terminal candidate should record"),
   });
-
   assert.equal(first.killed, 1);
   assert.deepEqual(second, {
     attempted: 0,

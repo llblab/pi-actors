@@ -84,7 +84,6 @@ test("Draft review projection exposes only value-free contract shape", () => {
   assert.equal((draft.contract as Record<string, unknown>).default_count, 3);
   assert.equal((draft.contract as Record<string, unknown>).control_action_count, 2);
   assert.equal(Object.hasOwn(draft.contract as object, "mailbox_accepts_count"), false);
-
   const restored = restoreDraftReviewResult(input, {
     batchId: input.batchId,
     createdAt: input.createdAt,
@@ -136,7 +135,6 @@ test("Tool review projection excludes raw recipes and filesystem identity", () =
   assert.equal(tool.name, "tool_01");
   assert.equal(tool.sha256, "content_group_01");
   assert.deepEqual(tool.usage, { lifetime_calls: 2, revision: 3, revision_calls: 1 });
-
   const restored = restoreToolReviewResult(input, {
     createdAt: input.createdAt,
     decisions: [{

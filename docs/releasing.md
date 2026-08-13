@@ -1,6 +1,6 @@
 # Release Operations
 
-Stable releases use one immutable tag workflow. The workflow runs the complete reusable Ubuntu, macOS, Windows, and dependency-audit boundary before any publication, publishes and verifies the exact npm package through Trusted Publisher, then creates or converges the GitHub Release from the matching changelog section.
+Stable releases use one immutable tag workflow. The workflow runs normal product validation on Ubuntu, macOS, and Windows plus the dependency audit before any publication, publishes and verifies the exact npm package through Trusted Publisher, then creates or converges the GitHub Release from the matching changelog section. Architecture review uses the project-local Domain DAG Skill during architecture-affecting development; release automation does not run policy, line-count, source-style, or Domain DAG gates.
 
 ## One-time npm Trusted Publisher setup
 
@@ -19,7 +19,7 @@ Do not create `NPM_TOKEN`, `NODE_AUTH_TOKEN`, or another long-lived npm publish 
 
 1. Merge the validated release tree through the repository's guarded `dev` to `main` flow.
 2. Create one immutable `v<package.version>` tag on the verified `main` commit.
-3. Let `.github/workflows/release.yml` invoke the complete reusable validation workflow.
+3. Let `.github/workflows/release.yml` invoke the reusable `npm run validate` and dependency-audit workflow.
 4. Let the publication job verify the tag commit, package manifests, and non-empty changelog section.
 5. Publish the exact public npm package through OIDC when the version does not exist.
 6. Verify npm version, `gitHead`, Pi extension/skill metadata, and packed runtime manifests.

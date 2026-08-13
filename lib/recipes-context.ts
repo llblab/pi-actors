@@ -96,7 +96,7 @@ function matchesActorContext(
   context: CommandTemplateActorRecipeContext | undefined,
 ): boolean {
   if (!context) return record.role === "entry";
-  if (context.file && context.file === record.file) return true;
+  if (context.file && context.file === record.source_file) return true;
   if (context.name && context.name === record.name) return true;
   if (context.alias && context.alias === record.alias) return true;
   return false;
@@ -131,7 +131,7 @@ export function formatRecipeContextJsonl(
   context?: CommandTemplateActorRecipeContext,
 ): string {
   return markRecipeContextRecords(records, context)
-    .map((record) => JSON.stringify(record))
+    .map(({ source_file: _sourceFile, ...record }) => JSON.stringify(record))
     .join("\n");
 }
 

@@ -11,12 +11,13 @@ import * as AsyncRuns from "./async-runs.ts";
 import { withFileMutationLock } from "./file-state.ts";
 import * as ModelContext from "./model-context.ts";
 import * as Paths from "./paths.ts";
-import * as RecipesDiscovery from "./recipes-discovery.ts";
+import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsResponse from "./tools-response.ts";
 
 export interface SpawnToolContext extends ModelContext.CurrentModelContext {
+  activeSkillRecipeContext?: RecipesReferences.ActiveSkillRecipeContext;
   cwd: string;
   sessionManager?: { getSessionId?: () => string };
 }
@@ -26,22 +27,6 @@ const maybeJsonText = ToolsResponse.maybeJsonText;
 
 function getRunOwnerId(ctx: SpawnToolContext): string | undefined {
   return ctx.sessionManager?.getSessionId?.();
-}
-
-function shadowedRecipeLaunchDiagnostic(
-  recipe: unknown,
-): Record<string, unknown> | undefined {
-  if (
-    typeof recipe !== "string" ||
-    recipe.includes("/") ||
-    recipe.includes("~")
-  )
-    return undefined;
-  const discovery = RecipesDiscovery.discoverRecipeSources([
-    { root: Paths.getRecipeRoot(), defaultTool: true, mutableUsage: true },
-    { root: Paths.getPackagedRecipeRoot(), defaultTool: false },
-  ]);
-  return RecipesDiscovery.getShadowedLaunchDiagnostic(discovery, recipe);
 }
 
 function draftRecipeName(run: string): string {
@@ -93,22 +78,6 @@ function writeSpawnDraftRecipe(
   return path;
 }
 
-function enhanceSpawnRecipeError(error: unknown, recipe: unknown): Error {
-  const diagnostic = shadowedRecipeLaunchDiagnostic(recipe);
-  if (!diagnostic)
-    return error instanceof Error ? error : new Error(String(error));
-  const original = error instanceof Error ? error.message : String(error);
-  return Object.assign(
-    new Error(
-      `${original} reason=${diagnostic.reason} active_path=${diagnostic.active_path} blocked_fallback=${diagnostic.blocked_fallback} hint=${diagnostic.hint}`,
-    ),
-    {
-      ...diagnostic,
-      original_error: original,
-    },
-  );
-}
-
 function runIdFromTarget(target: string | undefined): string | undefined {
   if (!target) return undefined;
   if (!target.startsWith("run:")) {
@@ -138,11 +107,9 @@ export function createSpawnToolDefinition<
           "Optional Run identity in exact run:<id> form.",
         ),
         file: Schema.stringSchema(
-          "Optional template Recipe reference. Supports paths, bare user/adjacent/std names, std:<name>, and skill:<skill>/<recipe>.",
+          "Optional Recipe reference as <skill>/<recipe> or an explicit .json/.md file path.",
         ),
-        recipe: Schema.stringSchema(
-          "Alias for file; qualified Skill/std or ordinary Recipe reference to spawn.",
-        ),
+        recipe: Schema.stringSchema("Alias for file."),
         template: Schema.unionSchema([
           Schema.stringSchema("Inline command template string"),
           Schema.arraySchema(
@@ -186,43 +153,39 @@ export function createSpawnToolDefinition<
           : typeof input.recipe === "string"
             ? input.recipe
             : undefined;
-      let meta: AsyncRuns.AsyncRunMeta;
-      try {
-        meta = AsyncRuns.startRun(
-          {
-            file: recipe,
-            launch_source: "spawn",
-            launch_correlation: { tool_call_id: toolCallId },
-            ownerId: getRunOwnerId(ctx),
-            ...(input.transport_context
-              ? { transport_context: asRecord(input.transport_context) } : {}),
-            run_id: runId,
-            ...(input.template !== undefined
-              ? {
-                  template:
-                    input.template as AsyncRuns.AsyncRunStartParams["template"],
-                }
-              : {}),
-            values: ModelContext.withCurrentModelValues(
-              asRecord(input.values),
-              ctx,
-            ),
-            ...(input.artifacts &&
-            typeof input.artifacts === "object" &&
-            !Array.isArray(input.artifacts)
-              ? {
-                  artifacts: input.artifacts as Record<
-                    string,
-                    AsyncRuns.RunArtifactDeclaration
-                  >,
-                }
-              : {}),
-          },
-          ctx.cwd,
-        );
-      } catch (error) {
-        throw enhanceSpawnRecipeError(error, recipe);
-      }
+      const meta = AsyncRuns.startRun(
+        {
+          file: recipe,
+          launch_source: "spawn",
+          launch_correlation: { tool_call_id: toolCallId },
+          ownerId: getRunOwnerId(ctx),
+          ...(input.transport_context
+            ? { transport_context: asRecord(input.transport_context) } : {}),
+          run_id: runId,
+          ...(input.template !== undefined
+            ? {
+                template:
+                  input.template as AsyncRuns.AsyncRunStartParams["template"],
+              }
+            : {}),
+          values: ModelContext.withCurrentModelValues(
+            asRecord(input.values),
+            ctx,
+          ),
+          ...(input.artifacts &&
+          typeof input.artifacts === "object" &&
+          !Array.isArray(input.artifacts)
+            ? {
+                artifacts: input.artifacts as Record<
+                  string,
+                  AsyncRuns.RunArtifactDeclaration
+                >,
+              }
+            : {}),
+        },
+        ctx.cwd,
+        { skillContext: ctx.activeSkillRecipeContext },
+      );
       const draftRecipe = writeSpawnDraftRecipe(input, meta);
       const nextActions = ToolsResponse.runNextActions(meta.run);
       const details = {

@@ -36,11 +36,11 @@ Pi host
      -> lib/observability.ts          terminal + Trace-attention observation
      -> lib/inspector*.ts             owner-filtered actor-instance inspection
      -> scripts/*.mjs                 process/service entrypoints
-     -> recipes/*.json                packaged Recipe library
+     -> skills/*/recipes/*            Skill-owned Recipe components
      -> skills/* + docs/*             agent and human guidance
 ```
 
-`index.ts` wires Pi ports and must not own domain behavior. Keep the local TypeScript import graph acyclic.
+`index.ts` wires Pi ports and must not own domain behavior. Keep the local TypeScript import graph acyclic. For architecture-affecting work, load and follow `.agents/skills/domain-dag/SKILL.md`; its validator is local agent tooling, not an npm, CI, or release gate.
 
 ## Key Domains
 
@@ -58,17 +58,20 @@ Pi host
 - `observability.ts`, `run-ui-runtime.ts`: Trace attention, terminal reconciliation, and Pi follow-up delivery.
 - automatic draft/tool review domains: structurally redacted model review, journaled mutation, lineage, recovery, and explicit retry/reset safety.
 
-Scripts remain self-contained when no non-script consumer justifies a TypeScript domain. Command-template script leaves infer `.js`/`.mjs` in order through Node, Bun, or `deno run` and `.sh` through Bash without shell evaluation. Helper-backed packaged Recipes self-locate their installed package root while explicit caller values remain authoritative. Recipes stay optional, composable, policy-light, and caller-configurable.
+The bundled Skill Recipe dependency DAG is `artifacts → actors, swarm`, `media → artifacts`, and `project-work → actors, artifacts, swarm`; `actors`, `swarm`, and `recipe-memory` have no cross-Skill Recipe dependencies.
+
+Scripts remain self-contained when no non-script consumer justifies a TypeScript domain. Command-template script leaves infer `.js`/`.mjs` in order through Node, Bun, or `deno run` and `.sh` through Bash without shell evaluation. Helper-backed Skill Recipes self-locate through runtime-owned `{skill_dir}`. Recipes stay optional, composable, policy-light, and caller-configurable.
 
 ## Operating Principles
 
 ### Recipe
 
+- Skill Recipe identity is `<active Skill name>/<Recipe filename stem>`; Recipe files have no top-level `name`. `SKILL.md` `name` is Pi host metadata matching the Skill directory, not a second pi-actors identity field.
 - Recipe files may define args/defaults, imports, artifacts, command-template flags, and `control`.
 - Declare actor-local actions only when a long-lived process implements them.
 - Actions are lowercase, unique, and cannot use runtime-reserved lifecycle names.
 - Removed communication-plane metadata fails explicitly; never translate it.
-- User Recipes shadow packaged definitions; invalid shadowing blocks fallback.
+- User Recipes are discovered only from the persistent user registry; Skill Recipes are exact components outside tool discovery. Explicit entry paths resolve from invocation `cwd`; relative imports resolve from their importing file.
 - Files over 1 MiB, import depth over 32, and import cycles fail closed.
 
 ### Trace
@@ -136,11 +139,10 @@ When a deferred Run result gates the next step, wait for its terminal follow-up.
 ## Documentation and Release Discipline
 
 - Keep published text portable: use `~`, `<repo>`, or relative paths.
-- Keep executable JavaScript and TypeScript blocks compact: no blank lines inside function bodies or control-flow blocks. Structural object, type, interface, class, and module bodies are exempt.
 - Update `skills/actors/SKILL.md` when durable operating mechanics change.
 - Keep `skills/swarm/SKILL.md` focused on multi-agent methodology rather than kernel internals.
-- Recipe `description` is optional because discovery supplies stable fallback tool copy; packaged Recipe QA must report zero diagnostics and zero release-blocking warnings without component boilerplate.
-- Before release run build, full tests, preservation tests, Recipe QA, Domain DAG validation, ABCd context validation, line-count gates, and release gates.
+- Recipe `description` is optional. Skill Recipe QA recursively validates direct filesystem-owned components and capability semantics with zero diagnostics or warnings; it does not enforce aesthetics or architecture policy.
+- Before release run the normal product validation and dependency audit. Use the project-local Domain DAG Skill during architecture-affecting development, not as publication automation.
 - `.github/workflows/release.yml` owns the immutable sequence reusable validation → npm Trusted Publisher publication/verification → GitHub Release convergence; follow [docs/releasing.md](docs/releasing.md).
 - Keep npm publication tokenless: use the exact npm Trusted Publisher binding and job-scoped OIDC permission, never a long-lived npm token or token fallback.
 - Until a stable version beyond `1.x`, prefer clean breaking simplification over compatibility aliases or renamed legacy abstractions.

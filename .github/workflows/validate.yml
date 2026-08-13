@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    name: Release validation (${{ matrix.os }})
+    name: Product validation (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -30,8 +30,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Run release validation
-        run: npm run release:validate
+      - name: Run product validation
+        run: npm run validate
 
   dependency-audit:
     name: Dependency audit (Ubuntu)

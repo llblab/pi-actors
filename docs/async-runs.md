@@ -123,8 +123,8 @@ Archive and prune apply only to terminal Runs and enforce path containment. Rete
 
 Packaged controlled services demonstrate the endpoint protocol:
 
-- `music-player` consumes playback Controls and emits playback Trace;
-- `resource-locker` consumes queue/lease actions, emits lock Trace, and atomically retains at most 512 valid journal records within 1 MiB.
+- `media/player` consumes playback Controls and emits playback Trace;
+- `actors/resource-locker` consumes queue/lease actions, emits lock Trace, and atomically retains at most 512 valid journal records within 1 MiB.
 
 Shared archive/prune evidence similarly retains at most 256 valid records within 1 MiB under its canonical lock. The obsolete advisory `wake.jsonl` notifier was removed; filesystem watchers and bounded reconciliation observe authoritative state directly.
 

@@ -1,6 +1,13 @@
 # Changelog
 
-> Each release keeps at most 8 outcome records of at most 512 characters.
+## 0.46.0: Skill-Owned Capability Packs
+
+- `Breaking Recipe Grammar`: File-backed identity now comes only from the filename; top-level Recipe `name`, nested Skill identities, JSON/Markdown stem collisions, bare references, and the old `std:` / `skill:` prefixes fail with migration guidance. Composition accepts exact `<active-skill>/<stem>` references or explicit `.json` / `.md` paths, with entry paths based at invocation cwd and relative imports based at their owning Recipe.
+- `Skill-Owned Distribution`: All 58 bundled components move from the root Recipe library into six flat Pi Skills—Actors, Artifacts, Media, Project Work, Recipe Memory, and Swarm—with 67 explicit imports and an acyclic cross-Skill graph. Root and `dist` Recipe libraries, package-root discovery, fallback/shadowing, wrapper installation, and obsolete root capability helpers are removed; Skill components never auto-register as tools.
+- `Scoped Resolution and Provenance`: Immutable active-Skill contexts are session-scoped and captured per Run. Recipe inspection distinguishes user registry capabilities, active Skill components, and explicit files while recording entry/import roles, filename stems, logical identities, Skill ownership, and alias ancestry without exposing private `source_file`, `{skill_dir}`, or `{recipe_dir}` values to model/Inspector surfaces.
+- `Capability Safety`: Automatic review resolves exact package-owned `recipe-memory/*` components so user files cannot redirect reviewers. Helpers self-locate through runtime-owned `{skill_dir}`; Control, Trace, lifecycle fencing, review transactions, and the public `spawn`, `message`, `inspect`, `register_tool` plus Recipe/Trace/Control view contracts remain unchanged.
+- `Validation and Architecture`: Recursive Skill QA validates direct identity, parse/import semantics, origins, Control, portable paths, and helper targets in source and installed packages. The custom release-gate and executable-style policy scanners are removed; CI runs product validation plus dependency audit, while a non-packaged project-local Domain DAG Skill supports architecture work without becoming a release gate.
+- `Dogfood and Migration`: Source and installed tests execute repository health, release readiness, quorum review, artifact bundle, media player, and package-owned draft review through qualified Skill references, plus relative/absolute file imports and all breaking failures. Migrate `std:foo` to `owning-skill/foo`, `skill:foo/bar` to `foo/bar`, root Recipes to their owning Skill filename, and delete Recipe `name` fields.
 
 ## 0.45.1: Entrypoint and Release Policy
 

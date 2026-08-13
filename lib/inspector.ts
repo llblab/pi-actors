@@ -102,17 +102,51 @@ export function readActorInspectorRecipe(
     !Array.isArray(primary.recipe)
       ? (primary.recipe as Record<string, unknown>)
       : undefined;
-  const redactedRecord = (value: Record<string, unknown>): Record<string, unknown> =>
-    SessionEvidence.redactSessionEvidenceValue(
-      Object.fromEntries(
-        Object.entries(value).filter(
+  const stripPrivateOrigins = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stripPrivateOrigins);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(
           ([key, entry]) =>
             entry !== undefined &&
             key !== "recipe_dir" &&
-            key !== "skill_dir",
-        ),
-      ),
+            key !== "skill_dir" &&
+            key !== "source_file",
+        )
+        .map(([key, entry]) => [
+          key,
+          key === "actorRecipeContext" && entry && typeof entry === "object"
+            ? stripPrivateOrigins(
+                Object.fromEntries(
+                  Object.entries(entry as Record<string, unknown>).filter(
+                    ([contextKey]) => contextKey !== "file",
+                  ),
+                ),
+              )
+            : stripPrivateOrigins(entry),
+        ]),
+    );
+  };
+  const redactedRecord = (value: Record<string, unknown>): Record<string, unknown> =>
+    SessionEvidence.redactSessionEvidenceValue(
+      stripPrivateOrigins(value),
     ) as Record<string, unknown>;
+  const primarySourceKind =
+    primary?.source_kind === "active_skill_component"
+      ? "active_skill_component"
+      : primary?.source_kind === "user_registry_capability" ||
+          meta.launch_source === "tool"
+        ? "user_registry_capability"
+        : "explicit_file_recipe";
+  const primaryLogicalReference =
+    typeof primary?.logical_reference === "string"
+      ? primary.logical_reference
+      : typeof primary?.name === "string"
+        ? primary.name
+        : typeof meta.recipe === "string"
+          ? meta.recipe
+          : "unknown";
   const launchValues =
     meta.values && typeof meta.values === "object" && !Array.isArray(meta.values)
       ? Object.fromEntries(
@@ -126,10 +160,18 @@ export function readActorInspectorRecipe(
       redactedRecord({
         ...(typeof entry.alias === "string" ? { alias: entry.alias } : {}),
         depth: entry.depth,
-        file: entry.file,
         import_path: entry.import_path,
-        name: entry.name,
-        qualified_name: entry.qualified_name,
+        logical_reference: entry.logical_reference ?? entry.name,
+        recipe_stem: entry.name,
+        role: entry.role,
+        ...(typeof entry.skill === "string" ? { skill: entry.skill } : {}),
+        source_kind:
+          entry.source_kind === "active_skill_component"
+            ? "active_skill_component"
+            : entry.source_kind === "user_registry_capability" ||
+                (entry.depth === 0 && meta.launch_source === "tool")
+              ? "user_registry_capability"
+              : "explicit_file_recipe",
       }),
     ),
     ...(definition ? { definition: redactedRecord(definition) } : {}),
@@ -137,7 +179,10 @@ export function readActorInspectorRecipe(
     identity: redactedRecord({
       run: meta.run,
       recipe: meta.recipe,
-      recipe_file: meta.recipe_file,
+      recipe_stem: primary?.name ?? meta.recipe,
+      logical_reference: primaryLogicalReference,
+      ...(typeof primary?.skill === "string" ? { skill: primary.skill } : {}),
+      source_kind: primarySourceKind,
       launch_source: meta.launch_source,
     }),
     launch: redactedRecord({

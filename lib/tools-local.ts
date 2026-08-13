@@ -18,6 +18,7 @@ import * as ToolsResponse from "./tools-response.ts";
 type JsonSchema = Schema.JsonSchema;
 
 export interface RuntimeToolContext extends ModelContext.CurrentModelContext {
+  activeSkillRecipeContext?: RecipesReferences.ActiveSkillRecipeContext;
   cwd: string;
   sessionManager?: { getSessionId?: () => string };
 }
@@ -243,6 +244,7 @@ export function createRuntimeToolDefinition(
               values: resolveRecipeToolValues(cfg, values, ctx),
             },
             ctx.cwd,
+            { skillContext: ctx.activeSkillRecipeContext },
           );
           return {
             content: [

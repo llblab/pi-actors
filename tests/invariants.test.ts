@@ -4,9 +4,8 @@
  */
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import test from "node:test";
 
 const indexSource = await readFile(
@@ -45,14 +44,6 @@ const reviewControlSource = await readFile(
   new URL("../lib/review-control.ts", import.meta.url),
   "utf8",
 );
-const changelogSource = await readFile(
-  new URL("../CHANGELOG.md", import.meta.url),
-  "utf8",
-);
-const releaseGatesSource = await readFile(
-  new URL("../scripts/release-gates.mjs", import.meta.url),
-  "utf8",
-);
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 ) as { scripts?: Record<string, string> };
@@ -68,17 +59,12 @@ const releaseWorkflowSource = normalizeNewlines(await readFile(
 const automaticReviewerRecipes = await Promise.all(
   ["draft-review.json", "tool-review.json"].map(async (name) => ({
     name,
-    source: await readFile(new URL(`../recipes/${name}`, import.meta.url), "utf8"),
+    source: await readFile(
+      new URL(`../skills/recipe-memory/recipes/${name}`, import.meta.url),
+      "utf8",
+    ),
   })),
 );
-
-function listFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) return listFiles(path);
-    return entry.isFile() ? [path] : [];
-  });
-}
 
 test("Entrypoint imports local domains through namespace imports", () => {
   const localImports = [
@@ -153,80 +139,12 @@ test("Internal runtime input adapters use only Control terminology", () => {
   assert.doesNotMatch(reviewControlSource, /\bsent\s*:/);
 });
 
-const publicGuidanceFiles = [
-  "AGENTS.md",
-  "BACKLOG.md",
-  "README.md",
-  ...listFiles("docs").filter((path) => path.endsWith(".md")),
-  ...listFiles("skills").filter((path) => path.endsWith(".md")),
-];
-
-const operatorGuidanceFiles = [
-  "README.md",
-  ...listFiles("docs").filter((path) => path.endsWith(".md")),
-  ...listFiles("skills").filter((path) => path.endsWith(".md")),
-];
-
-test("Public guidance avoids stale concrete model aliases", () => {
-  const files = publicGuidanceFiles;
-  const staleModelAliases = [
-    /openai-codex\/gpt-5\.5/i,
-    /deepseek\/deepseek-v4/i,
-    /\bgpt-5\.5\b/i,
-    /model:string=[^\s",`)]*gpt/i,
-    /model=[^\s",`)]*openai/i,
-  ];
-  for (const file of files) {
-    const content = readFileSync(file, "utf8");
-    for (const pattern of staleModelAliases) {
-      assert.doesNotMatch(
-        content,
-        pattern,
-        `${file} should not mention ${pattern}`,
-      );
-    }
-  }
-});
-
 test("Recipe installation guidance excludes internal reviewers from bulk install", () => {
   const content = readFileSync("docs/recipe-library.md", "utf8");
   assert.doesNotMatch(content, /cp\s+[^\n]*recipes\/\*\.json/);
-  assert.match(content, /Do not bulk-copy `recipes\/\*\.json`/);
-  assert.match(content, /`draft-review\.json` and `tool-review\.json`/);
+  assert.match(content, /Do not bulk-copy bundled Recipes/);
+  assert.match(content, /`recipe-memory\/draft-review` and `recipe-memory\/tool-review`/);
   assert.match(content, /must not become user-installed callable tools/);
-});
-
-test("Operator guidance uses snake_case docs review examples", () => {
-  for (const file of operatorGuidanceFiles) {
-    const content = readFileSync(file, "utf8");
-    assert.doesNotMatch(
-      content,
-      /docs-review/,
-      `${file} should use docs_review`,
-    );
-  }
-});
-
-test("Operator guidance avoids direct inbox and outbox wording", () => {
-  for (const file of operatorGuidanceFiles) {
-    const content = readFileSync(file, "utf8");
-    assert.doesNotMatch(
-      content,
-      /\binbox\/outbox\b|\bdirect inbox\b|\bdirect outbox\b/i,
-      `${file} should describe Control and Trace instead of legacy routing`,
-    );
-  }
-});
-
-test("Operator guidance avoids stale FIFO queue wording", () => {
-  for (const file of operatorGuidanceFiles) {
-    const content = readFileSync(file, "utf8");
-    assert.doesNotMatch(
-      content,
-      /FIFO queue|queued FIFO/i,
-      `${file} should avoid stale transport queue wording`,
-    );
-  }
 });
 
 test("README first-run actor uses a shell-free command template", () => {
@@ -258,35 +176,11 @@ test("CI runs the dependency audit once on Ubuntu", () => {
   assert.match(validateWorkflowSource, /dependency-audit:[\s\S]*runs-on: ubuntu-latest/);
 });
 
-test("release gates register every shipped append-only writer", () => {
-  assert.match(releaseGatesSource, /unregistered shipped append-only writer/);
-  assert.match(releaseGatesSource, /lib\/runs-trace\.ts/);
-  assert.match(releaseGatesSource, /lib\/runs-retention\.ts/);
-  assert.match(releaseGatesSource, /scripts\/locker\.mjs/);
-  assert.match(releaseGatesSource, /complete execution capture/);
-  assert.match(releaseGatesSource, /user-declared artifact/);
-});
-
-test("CI release validation includes exact-tree, Domain DAG, and ABCd gates", () => {
-  const releaseValidate = packageJson.scripts?.["release:validate"] ?? "";
-  assert.match(releaseValidate, /npm run validate/);
-  assert.match(releaseValidate, /node scripts\/release-gates\.mjs/);
-  assert.match(validateWorkflowSource, /npm run release:validate/);
-});
-
-test("Release gate enforces a fixed shipped-line limit", () => {
-  const declaration = releaseGatesSource.match(/const (\w*[Ss]hippedLines\w*) = ([\d_]+);/);
-  assert.ok(declaration);
-  assert.equal(Number(declaration[2].replaceAll("_", "")), 32_000);
-  assert.match(releaseGatesSource, new RegExp(`check\\(shippedLines <=? ${declaration[1]}`));
-});
-
-test("Release gate rejects blank lines inside executable blocks", () => {
-  assert.match(releaseGatesSource, /executableBlockBlankLines/);
-  assert.match(releaseGatesSource, /blank lines inside executable blocks/);
-  assert.match(releaseGatesSource, /executableSources/);
-  assert.match(releaseGatesSource, /\\\.\(\?:\[cm\]\?js\|ts\)\$/);
-  assert.match(releaseGatesSource, /!path\.startsWith\("dist\/"\)/);
+test("CI runs normal product validation without project-policy gates", () => {
+  assert.equal(packageJson.scripts?.["release:validate"], undefined);
+  assert.match(validateWorkflowSource, /run: npm run validate/);
+  assert.doesNotMatch(validateWorkflowSource, /release:validate|release-gates|domain-dag/);
+  assert.doesNotMatch(releaseWorkflowSource, /release:validate|release-gates|domain-dag/);
 });
 
 test("CI workflows use reusable validation and Node 24 action runtimes", () => {
@@ -370,36 +264,8 @@ test("Automatic recipe reviewers have no general filesystem tools", () => {
   }
 });
 
-test("Unreleased changelog items avoid version literals", () => {
-  const unreleased =
-    changelogSource.match(
-      /^## Unreleased\n(?<body>[\s\S]*?)(?=^## \d+\.\d+\.\d+)/m,
-    )?.groups?.body ?? "";
-  for (const line of unreleased
-    .split("\n")
-    .filter((line) => line.startsWith("- `"))) {
-    assert.doesNotMatch(
-      line,
-      /\b\d+\.\d+\.\d+\b/,
-      "Unreleased changelog item should rely on the section heading for versioning",
-    );
-  }
-});
-
-test("Every changelog release stays compact", () => {
-  for (const section of normalizeNewlines(changelogSource).split("\n## ").slice(1)) {
-    const [title, ...body] = section.split("\n");
-    if (!/^\d+\.\d+\.\d+(?::|$)/.test(title)) continue;
-    const records = body.filter((line) => /^(?:[-*+] |\d+\. )/.test(line));
-    assert.ok(records.length <= 8, `${title}: ${records.length} changelog records`);
-    for (const record of records) {
-      assert.ok([...record].length <= 512, `${title}: changelog record exceeds 512 characters`);
-    }
-  }
-});
-
 test("Music player helper uses only Control and Trace state", () => {
-  const script = readFileSync("scripts/music-player.mjs", "utf8");
+  const script = readFileSync("skills/media/scripts/music-player.mjs", "utf8");
   assert.match(script, /controls\.jsonl/);
   assert.match(script, /control-endpoint\.json/);
   assert.doesNotMatch(script, /inbox\.jsonl|outbox\.jsonl|message to=|player\.<command>/);
@@ -409,8 +275,8 @@ test("First-party scripts use only canonical Trace and Control journals", () => 
   const directTraceWrite = /(?:appendFileSync|writeFileSync|writeText(?:Atomic)?)\s*\(\s*[A-Za-z0-9_.]*?(?:trace|event)(?:Path|File)/iu;
   for (const file of [
     "scripts/async-runner.mjs",
-    "scripts/locker.mjs",
-    "scripts/music-player.mjs",
+    "skills/actors/scripts/resource-locker.mjs",
+    "skills/media/scripts/music-player.mjs",
   ]) {
     const source = readFileSync(file, "utf8");
     assert.match(source, /importRuntimeModule\("runs-trace"\)/, file);
@@ -421,14 +287,10 @@ test("First-party scripts use only canonical Trace and Control journals", () => 
     assert.match(source, /appendRunTraceEvent/, file);
     assert.doesNotMatch(source, directTraceWrite, file);
   }
-  assert.match(
-    readFileSync("scripts/release-gates.mjs", "utf8"),
-    /direct Trace writer outside canonical authority/,
-  );
 });
 
 test("Music player helper keeps player processes inside the run process group", () => {
-  const script = readFileSync("scripts/music-player.mjs", "utf8");
+  const script = readFileSync("skills/media/scripts/music-player.mjs", "utf8");
   assert.doesNotMatch(
     script,
     /detached:\s*process\.platform\s*!==\s*["']win32["']/,
@@ -447,7 +309,7 @@ test("Music player helper keeps player processes inside the run process group", 
 });
 
 test("Music player backend enum stays aligned across recipe docs and script", () => {
-  const recipe = JSON.parse(readFileSync("recipes/music-player.json", "utf8"));
+  const recipe = JSON.parse(readFileSync("skills/media/recipes/player.json", "utf8"));
   const recipePlayers = recipe.args
     .find((arg: string) => arg.startsWith("player:enum("))
     ?.match(/^player:enum\((?<values>[^)]+)\)$/)
@@ -466,7 +328,7 @@ test("Music player backend enum stays aligned across recipe docs and script", ()
     .match(/player:enum\((?<values>[^)]+)\)=auto/)
     ?.groups?.values.split(",");
   assert.deepEqual(docsPlayers, recipePlayers);
-  const script = readFileSync("scripts/music-player.mjs", "utf8");
+  const script = readFileSync("skills/media/scripts/music-player.mjs", "utf8");
   const usagePlayers = script
     .match(/Supported players: (?<values>[^.]+)\./)
     ?.groups?.values.split(", ");

@@ -14,17 +14,34 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const execFileAsync = promisify(execFile);
-const script = fileURLToPath(new URL("../scripts/recipe-utils.mjs", import.meta.url));
+const artifactScript = fileURLToPath(
+  new URL("../skills/artifacts/scripts/artifact-utils.mjs", import.meta.url),
+);
+const projectScript = fileURLToPath(
+  new URL("../skills/project-work/scripts/project-utils.mjs", import.meta.url),
+);
+const mediaScript = fileURLToPath(
+  new URL("../skills/media/scripts/media-utils.mjs", import.meta.url),
+);
+const actorScript = fileURLToPath(
+  new URL("../skills/actors/scripts/run-utils.mjs", import.meta.url),
+);
 
 function runScript(
   args: string[],
   options: SpawnSyncOptionsWithStringEncoding,
 ) {
-  return spawnSync(process.execPath, [script, ...args], options);
+  const script = args[0] === "artifact-write" ? artifactScript : projectScript;
+  const command = args[0] === "artifact-write" ? "write" : args[0];
+  return spawnSync(process.execPath, [script, command, ...args.slice(1)], options);
 }
 
 function runScriptAsync(args: string[]) {
-  return execFileAsync(process.execPath, [script, ...args]);
+  return execFileAsync(process.execPath, [projectScript, ...args]);
+}
+
+function runActorScriptAsync(args: string[]) {
+  return execFileAsync(process.execPath, [actorScript, ...args]);
 }
 
 async function writeRun(
@@ -55,7 +72,7 @@ async function writeRun(
   }
 }
 
-test("recipe-utils package-summary emits bounded package metadata", async () => {
+test("project-utils package-summary emits bounded package metadata", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     const file = join(root, "package.json");
@@ -83,7 +100,7 @@ test("recipe-utils package-summary emits bounded package metadata", async () => 
   }
 });
 
-test("recipe-utils skill-summary emits packaged skill metadata evidence", async () => {
+test("project-utils skill-summary emits packaged skill metadata evidence", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     const packageFile = join(root, "package.json");
@@ -105,7 +122,7 @@ test("recipe-utils skill-summary emits packaged skill metadata evidence", async 
   }
 });
 
-test("recipe-utils artifact-write writes stdin with explicit mode", async () => {
+test("artifact-utils writes stdin with explicit mode", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     const file = join(root, "artifacts", "report.md");
@@ -131,14 +148,34 @@ test("recipe-utils artifact-write writes stdin with explicit mode", async () => 
   }
 });
 
-test("recipe-utils run-ops-snapshot combines Runs, Trace, and recommendations", async () => {
+test("media-utils builds a filtered playlist", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-media-utils-"));
+  try {
+    await writeFile(join(root, "one.mp3"), "one");
+    await writeFile(join(root, "skip.txt"), "skip");
+    const { stdout } = await execFileAsync(process.execPath, [
+      mediaScript,
+      "playlist",
+      root,
+      ".mp3",
+      "1",
+      "paths",
+    ]);
+    assert.match(stdout, /one\.mp3/);
+    assert.doesNotMatch(stdout, /skip\.txt/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("actor run-utils snapshot combines Runs, Trace, and recommendations", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     await writeRun(root, "active", "running");
     await writeRun(root, "failed", "failed");
     const traceFile = join(root, "active", "trace.jsonl");
     await writeFile(traceFile, `${JSON.stringify({ id: "trace-1", kind: "demo", summary: "Demo", ts: new Date().toISOString() })}\n`);
-    const { stdout } = await runScriptAsync(["run-ops-snapshot", root, "active", "5", "1"]);
+    const { stdout } = await runActorScriptAsync(["run-ops-snapshot", root, "active", "5", "1"]);
     const snapshot = JSON.parse(stdout);
     assert.equal(snapshot.runs.length, 2);
     assert.equal(snapshot.inspectedRun, "active");
@@ -164,12 +201,12 @@ test("recipe-utils run-ops-snapshot combines Runs, Trace, and recommendations", 
   }
 });
 
-test("recipe-utils run-summary reads live progress status over static run status", async () => {
+test("actor run-utils summary reads live progress status over static run status", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
   try {
     await writeRun(root, "finished", "done");
     await writeRun(root, "active", "running");
-    const { stdout } = await runScriptAsync(["run-summary", root]);
+    const { stdout } = await runActorScriptAsync(["run-summary", root]);
     const rows = JSON.parse(stdout);
     assert.equal(
       rows.find((row: { run: string }) => row.run === "finished")?.status,

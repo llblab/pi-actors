@@ -2,7 +2,7 @@
 
 ![pi-actors banner](https://raw.githubusercontent.com/llblab/pi-actors/main/banner.jpg)
 
-Local Run kernel and persistent tool registry for [Pi](https://github.com/badlogic/pi-mono).
+Local Run kernel and persistent tool registry for [Pi](https://github.com/earendil-works/pi).
 
 ```text
 Recipe --spawn--> Run
@@ -23,17 +23,18 @@ For local development:
 pi install /path/to/pi-actors
 ```
 
-The package contributes the extension, packaged Recipes, and the `actors` and `swarm` skills.
+The package contributes the extension and six capability-owning Skills for actors, artifacts, media, project work, Recipe memory, and swarm orchestration.
 
 ## Public Tools
 
 ### `spawn`
 
-Create a Run from a packaged/local Recipe or an inline command template:
+Create a Run from an active-Skill Recipe, an explicit Recipe file, or an inline command template:
 
 ```text
 spawn template="sleep 30" as=run:demo
-spawn recipe=pipeline-repo-health values={"repo":"/work/project","model":"provider/model"}
+spawn recipe=project-work/repo-health values={"repo":"/work/project","model":"provider/model"}
+spawn recipe=media/player values={"source":"/music"} as=run:player
 spawn template="make test" as=run:test
 ```
 
@@ -99,13 +100,25 @@ Example controlled Recipe:
   "async": true,
   "control": ["pause", "resume", "stop"],
   "artifacts": { "state": "{state_dir}/player-state.json" },
-  "template": "{repo}/scripts/player.mjs --state-dir {state_dir}"
+  "template": "{skill_dir}/scripts/player.mjs --state-dir {state_dir}"
 }
 ```
 
 Ordinary one-shot Recipes should omit `control`. Recipe imports compose definitions inside one Run; they do not create peer actors.
 
-File-backed Recipes receive immutable `{recipe_dir}`; Recipes under a Pi-active Skill also receive `{skill_dir}`. Use `std:<recipe>` for an exact packaged component and `skill:<skill>/<recipe-path>` for an exact active-Skill component. Skill Recipes are namespaced reusable components and do not become tools automatically.
+```json
+{
+  "imports": {
+    "report": "artifacts/report",
+    "review": "swarm/quorum-review"
+  },
+  "template": [{ "name": "report" }, { "name": "review" }]
+}
+```
+
+Skill Recipe identity is `<active Skill name>/<Recipe filename stem>`. Recipe files have no top-level `name`; the filename is identity. `SKILL.md` `name` remains Pi host metadata and matches the Skill directory—pi-actors adds no second Skill identity field.
+
+References have two classes: exact active-Skill identities such as `project-work/repo-health`, and explicit `.json` / `.md` paths. Entry file paths resolve from invocation `cwd`; relative imports resolve from the importing Recipe's directory; absolute paths remain exact. File-backed Recipes receive immutable `{recipe_dir}` and Skill Recipes also receive `{skill_dir}`. Skill components never become tools automatically.
 
 String command-template leaves execute directly without shell interpretation. Use template arrays for sequencing or an explicit trusted shell/script when shell semantics matter.
 
@@ -175,15 +188,16 @@ Open the owner-filtered TUI:
 
 It presents actor instances through Recipe, Trace, and Control tabs, with source filtering, detail navigation, refresh, and generation-fenced Run kill.
 
-## Packaged Recipes
+## Skill Recipes
 
 Useful entry points include:
 
-- `pipeline-repo-health`
-- `pipeline-quorum-review`
-- `pipeline-artifact-bundle`
-- `music-player` — controlled playback service
-- `resource-locker` — optional controlled resource-lock service
+- `project-work/repo-health`
+- `project-work/release-readiness`
+- `swarm/quorum-review`
+- `artifacts/bundle`
+- `media/player` — controlled playback service
+- `actors/resource-locker` — optional controlled resource-lock service
 
 Validate Recipes with:
 

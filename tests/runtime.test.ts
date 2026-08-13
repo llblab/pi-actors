@@ -50,7 +50,6 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
       exec,
-      packagedRecipeRoot,
       recipeRoot,
       registerTool: () => assert.fail("invalid recipe should not register"),
       reservedToolNames: new Set(),
@@ -85,7 +84,6 @@ test("Runtime suppresses routine bash wrapper startup warnings", async () => {
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
       exec,
-      packagedRecipeRoot,
       recipeRoot,
       registerTool: () => {},
       reservedToolNames: new Set(),
@@ -125,7 +123,6 @@ test("Runtime treats same-id recipe shadowing as a normal override", async () =>
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
       exec,
-      packagedRecipeRoot,
       recipeRoot,
       registerTool: (definition) => registered.push(definition.name),
       reservedToolNames: new Set(),
@@ -164,7 +161,6 @@ test("Runtime keeps reserved tool names protected during recipe loading", async 
     const runtime = createAutoToolsRuntime({
       configPath: join(root, "tool-registry.json"),
       exec,
-      packagedRecipeRoot,
       recipeRoot,
       registerTool: () => assert.fail("reserved recipe should not register"),
       reservedToolNames: new Set(["read"]),
@@ -213,7 +209,6 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       configPath: join(root, "tool-registry.json"),
       exec,
       getActiveTools: () => activeTools,
-      packagedRecipeRoot,
       recipeRoot,
       registerTool: (definition) => {
         registered.push(definition.name);
@@ -267,7 +262,7 @@ test("Runtime loads tools from discovered user recipes by default", async () => 
       ui: { notify: (message) => warnings.push(message) },
     });
     assert.equal(runtime.getTools().has("fallback"), false);
-    assert.match(warnings.join("\n"), /blocks lower-priority recipes/);
+    assert.match(warnings.join("\n"), /Command template repeat/);
     await writeRecipe(recipeRoot, "fallback", {
       description: "Recovered user winner",
       template: "echo recovered {topic}",

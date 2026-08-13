@@ -12,7 +12,10 @@ import { fileURLToPath } from "node:url";
 import { execCommandTemplate } from "../lib/command-templates.ts";
 import { executeRegisteredTool } from "../lib/execution.ts";
 import type { RegisteredTool } from "../lib/config.ts";
-import { readResolvedRecipeConfig } from "../lib/recipes-references.ts";
+import {
+  createActiveSkillRecipeContext,
+  readResolvedRecipeConfig,
+} from "../lib/recipes-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const nativeWorkRoot = resolve("/work");
@@ -724,8 +727,15 @@ test("Registered tool execution fails branch fanout when every branch is unusabl
 });
 
 function createReviewCoordinatorTool(): RegisteredTool {
+  const swarmDir = join(__dirname, "..", "skills", "swarm");
   const recipe = readResolvedRecipeConfig(
-    join(__dirname, "..", "recipes", "subagent-review-coordinator.json"),
+    join(swarmDir, "recipes", "subagent-review-coordinator.json"),
+    [],
+    {
+      skillContext: createActiveSkillRecipeContext([
+        { name: "swarm", baseDir: swarmDir },
+      ]),
+    },
   )!;
   return {
     name: "review_coordinator_test",

@@ -40,12 +40,21 @@ writeFileSync(
   "utf8",
 );
 
-for (const dir of ["scripts", "recipes", "fixtures", "skills"]) {
+for (const dir of ["scripts", "fixtures", "skills"]) {
   cpSync(dir, join("dist", dir), { recursive: true });
 }
 
-const builtScripts = readdirSync(join("dist", "scripts"))
-  .filter((name) => name.endsWith(".mjs"))
-  .map((name) => join("dist", "scripts", name));
+function listModuleScripts(root) {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) return listModuleScripts(path);
+    return entry.isFile() && entry.name.endsWith(".mjs") ? [path] : [];
+  });
+}
+
+const builtScripts = [
+  ...listModuleScripts(join("dist", "scripts")),
+  ...listModuleScripts(join("dist", "skills")),
+];
 
 run(process.execPath, ["--check", ...builtScripts]);

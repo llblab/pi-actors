@@ -14,7 +14,6 @@ import {
   getDraftSleepBatchDir,
   getDraftSleepStatePath,
   getExtensionTmpDir,
-  getPackagedRecipeRoot,
   getRecipeDraftRoot,
   getRecipeRoot,
   getRunStateRoot,
@@ -98,9 +97,4 @@ test("Recipe root lives under the agent dir", () => {
 
 test("Recipe draft root lives below the recipe root", () => {
   assert.equal(getRecipeDraftRoot("/agent"), join("/agent", "recipes", "drafts"));
-});
-
-test("Packaged recipe root resolves to the repository recipes directory", () => {
-  assert.equal(basename(getPackagedRecipeRoot()), "recipes");
-  assert.equal(getPackagedRecipeRoot(), resolve("recipes"));
 });

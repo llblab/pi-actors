@@ -259,11 +259,23 @@ function assertNoActiveRunState(stateDir: string): void {
   RunsStart.assertNoActiveRunState(stateDir, readJson, RUNNER_PATH);
 }
 
-function resolveRecipeFile(file: string): string {
-  return (
-    RecipesReferences.resolveRecipeReferencePath(file, Paths.getRecipeRoot()) ??
-    RecipesReferences.getRecipePath(file, Paths.getRecipeRoot()) ??
-    RecipesReferences.resolveRecipePath(file, Paths.getRecipeRoot())
+export interface AsyncRunStartOptions {
+  skillContext?: RecipesReferences.ActiveSkillRecipeContext;
+}
+
+function resolveRecipeFile(
+  file: string,
+  cwd: string,
+  options: AsyncRunStartOptions,
+): string {
+  const path = RecipesReferences.resolveRecipeReferencePath(
+    file,
+    cwd,
+    options.skillContext,
+  );
+  if (path) return path;
+  throw new Error(
+    `Recipe reference not found. Use <skill>/<recipe> or an explicit .json/.md file path: ${file}`,
   );
 }
 
@@ -274,13 +286,18 @@ function isMutableUsageRecipeFile(file: string): boolean {
   return relation !== "" && !relation.startsWith("..") && !isAbsolute(relation);
 }
 
-function readRecipeFile(file: string): AsyncRunStartParams {
-  const path = resolveRecipeFile(file);
+function readRecipeFile(
+  file: string,
+  cwd: string,
+  options: AsyncRunStartOptions,
+): AsyncRunStartParams {
+  const path = resolveRecipeFile(file, cwd, options);
   const raw = RecipesReferences.readRawRecipeConfig(path);
   const includeActorRecipeContext =
     raw?.actor_context !== false && raw?.actor_context !== "off";
   const config = RecipesReferences.readResolvedRecipeConfig(path, [], {
     includeActorRecipeContext,
+    skillContext: options.skillContext,
   });
   if (!config) {
     throw new Error(`Template recipe must define template: ${path}`);
@@ -301,9 +318,13 @@ function getRunIdFromFile(file: string | undefined): string | undefined {
   return name || undefined;
 }
 
-function resolveStartParams(params: AsyncRunStartParams): AsyncRunStartParams {
+function resolveStartParams(
+  params: AsyncRunStartParams,
+  cwd: string,
+  options: AsyncRunStartOptions,
+): AsyncRunStartParams {
   if (!params.file) return params;
-  const fileParams = readRecipeFile(params.file);
+  const fileParams = readRecipeFile(params.file, cwd, options);
   return {
     ...fileParams,
     ...params,
@@ -468,25 +489,15 @@ function prepareStateDirForStart(stateDir: string): void {
 export function startRun(
   params: AsyncRunStartParams,
   cwd: string,
+  options: AsyncRunStartOptions = {},
 ): AsyncRunMeta {
-  const startParams = resolveStartParams(params);
+  const startParams = resolveStartParams(params, cwd, options);
   const resolved = resolveRunTemplate(startParams);
   const run = safeRunId(startParams.run_id);
   const stateDir = resolveStateDir(startParams, run);
   const recipeFile = startParams.file
-    ? resolveRecipeFile(startParams.file)
+    ? resolveRecipeFile(startParams.file, cwd, options)
     : undefined;
-  const packagedRecipeRoot = resolve(Paths.getPackagedRecipeRoot());
-  const recipeRelation = recipeFile
-    ? relative(packagedRecipeRoot, recipeFile)
-    : undefined;
-  const packagedRepo =
-    startParams.defaults?.repo === "~/.pi/agent/extensions/pi-actors" &&
-    recipeRelation &&
-    !recipeRelation.startsWith("..") &&
-    !isAbsolute(recipeRelation)
-      ? dirname(packagedRecipeRoot)
-      : undefined;
   const argSpec = Schema.parseToolArgDeclarationList(startParams.args ?? []);
   if (argSpec.error) throw new Error(argSpec.error);
   const declaredArgs = new Set(argSpec.args);
@@ -498,7 +509,6 @@ export function startRun(
     {
       ...argSpec.defaults,
       ...(startParams.defaults || {}),
-      ...(packagedRepo ? { repo: packagedRepo } : {}),
       ...(startParams.values || {}),
       run_id: run,
       state_dir: stateDir,
@@ -546,7 +556,20 @@ export function startRun(
       startParams.actor_context !== "off";
     const recipeContextRecords =
       recipeFile && includeActorRecipeContext
-        ? RecipesReferences.buildRecipeContextRecords(recipeFile)
+        ? RecipesReferences.buildRecipeContextRecords(
+            recipeFile,
+            options.skillContext,
+          ).map((record, index) =>
+            index === 0 &&
+            startParams.launch_source === "tool" &&
+            record.source_kind === "explicit_file_recipe"
+              ? {
+                  ...record,
+                  logical_reference: record.name,
+                  source_kind: "user_registry_capability" as const,
+                }
+              : record,
+          )
         : undefined;
     if (
       recipeFile &&

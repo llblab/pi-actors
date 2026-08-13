@@ -63,7 +63,7 @@ async function prepareInstalledPackage(root: string): Promise<string> {
   await cp(join(process.cwd(), "dist"), join(packageDir, "dist"), { recursive: true });
   await cp(join(process.cwd(), "lib"), join(packageDir, "lib"), { recursive: true });
   await cp(join(process.cwd(), "scripts"), join(packageDir, "scripts"), { recursive: true });
-  await cp(join(process.cwd(), "recipes"), join(packageDir, "recipes"), { recursive: true });
+  await cp(join(process.cwd(), "skills"), join(packageDir, "skills"), { recursive: true });
   return packageDir;
 }
 
@@ -107,7 +107,7 @@ test("package metadata exposes compiled and source extension entrypoints", async
 });
 
 test("build output mirrors JS runtime assets under dist", async () => {
-  for (const dir of ["scripts", "recipes", "fixtures", "skills"] as const) {
+  for (const dir of ["scripts", "fixtures", "skills"] as const) {
     const sourceEntries = await readdir(join(process.cwd(), dir));
     const distEntries = await readdir(join(process.cwd(), "dist", dir));
     assert.deepEqual(distEntries.sort(), sourceEntries.sort(), `dist/${dir} should mirror ${dir}`);
@@ -118,11 +118,13 @@ test("build output mirrors JS runtime assets under dist", async () => {
   );
   await access(join(process.cwd(), "dist", "scripts", "async-runner.mjs"));
   await access(join(process.cwd(), "dist", "scripts", "build-dist.mjs"));
-  await access(join(process.cwd(), "dist", "recipes", "utility-validate-recipe.json"));
+  await access(join(process.cwd(), "dist", "skills", "actors", "recipes", "recipe-validate.json"));
+  await access(join(process.cwd(), "dist", "skills", "actors", "scripts", "validate-recipe.mjs"));
   await access(join(process.cwd(), "dist", "fixtures", "protocol", "control-record.json"));
   await access(join(process.cwd(), "dist", "fixtures", "protocol", "trace-event.json"));
-  await access(join(process.cwd(), "dist", "skills", "actors", "SKILL.md"));
-  await access(join(process.cwd(), "dist", "skills", "swarm", "SKILL.md"));
+  for (const skill of ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]) {
+    await access(join(process.cwd(), "dist", "skills", skill, "SKILL.md"));
+  }
 });
 
 async function assertMissing(path: string): Promise<void> {
@@ -193,12 +195,12 @@ test("installed dist runtime reports exact package identity", async () => {
   }
 });
 
-test("installed dist resolves qualified std and active-Skill Recipes", async () => {
+test("installed dist resolves active-Skill and explicit file Recipes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-skill-recipes-"));
   try {
     const packageDir = await prepareInstalledPackage(root);
     const skillDir = join(root, "skill");
-    const recipeDir = join(skillDir, "recipes", "nested");
+    const recipeDir = join(skillDir, "recipes");
     await mkdir(recipeDir, { recursive: true });
     await writeFile(join(skillDir, "SKILL.md"), "# Skill\n");
     await writeFile(
@@ -212,15 +214,17 @@ test("installed dist resolves qualified std and active-Skill Recipes", async () 
        const packageDir = process.argv[1];
        const skillDir = process.argv[2];
        import(pathToFileURL(join(packageDir, "dist", "lib", "recipes-references.js")).href).then((mod) => {
-         mod.setActiveSkillRecipeSources([{ name: "sample", baseDir: skillDir }]);
-         const skill = mod.readResolvedRecipeConfig(mod.resolveRecipeReferencePath("skill:sample/nested/task"));
-         const std = mod.readResolvedRecipeConfig(mod.resolveRecipeReferencePath("std:utility-package-summary"));
-         const context = mod.buildRecipeContextRecords(join(skillDir, "recipes", "nested", "task.json"));
+         const skillContext = mod.createActiveSkillRecipeContext([{ name: "sample", baseDir: skillDir }]);
+         const skillPath = mod.resolveRecipeReferencePath("sample/task", process.cwd(), skillContext);
+         const skill = mod.readResolvedRecipeConfig(skillPath, [], { skillContext });
+         const file = mod.readResolvedRecipeConfig(mod.resolveRecipeReferencePath(join(packageDir, "skills", "project-work", "recipes", "package-summary.json")));
+         const context = mod.buildRecipeContextRecords(join(skillDir, "recipes", "task.json"), skillContext);
          console.log(JSON.stringify({
            skill_dir: skill.skill_dir,
            skill_template: skill.template,
-           std_ok: JSON.stringify(std.template).includes("recipe-utils.mjs"),
-           qualified_name: context[0].qualified_name,
+           file_ok: JSON.stringify(file.template).includes("project-utils.mjs"),
+           logical_reference: context[0].logical_reference,
+         source_kind: context[0].source_kind,
          }));
        }).catch((error) => { console.error(error); process.exitCode = 1; });`,
       packageDir,
@@ -230,8 +234,55 @@ test("installed dist resolves qualified std and active-Skill Recipes", async () 
     const result = JSON.parse(stdout);
     assert.equal(result.skill_dir, skillDir);
     assert.match(JSON.stringify(result.skill_template), /skill/);
-    assert.equal(result.std_ok, true);
-    assert.equal(result.qualified_name, "skill:sample/nested/task");
+    assert.equal(result.file_ok, true);
+    assert.equal(result.logical_reference, "sample/task");
+    assert.equal(result.source_kind, "active_skill_component");
+  } finally {
+    await removeTreeEventually(root);
+  }
+});
+
+test("installed dist resolves every representative capability pack by qualified identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-capabilities-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const identities = [
+      "project-work/repo-health",
+      "project-work/release-readiness",
+      "swarm/quorum-review",
+      "artifacts/bundle",
+      "media/player",
+      "recipe-memory/draft-review",
+    ];
+    const { stdout, stderr } = await execFileAsync(process.execPath, [
+      "-e",
+      `const { join } = require("node:path");
+       const { pathToFileURL } = require("node:url");
+       const packageDir = process.argv[1];
+       const identities = JSON.parse(process.argv[2]);
+       import(pathToFileURL(join(packageDir, "dist", "lib", "recipes-references.js")).href).then((mod) => {
+         const skillContext = mod.createActiveSkillRecipeContext(
+           ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]
+             .map((name) => ({ name, baseDir: join(packageDir, "skills", name) })),
+         );
+         const resolved = identities.map((identity) => {
+           const file = mod.resolveRecipeReferencePath(identity, process.cwd(), skillContext);
+           const config = mod.readResolvedRecipeConfig(file, [], { skillContext });
+           const context = mod.buildRecipeContextRecords(file, skillContext);
+           return { identity, ok: Boolean(config?.template), logical: context[0].logical_reference, source: context[0].source_kind };
+         });
+         console.log(JSON.stringify(resolved));
+       }).catch((error) => { console.error(error); process.exitCode = 1; });`,
+      packageDir,
+      JSON.stringify(identities),
+    ]);
+    assert.equal(stderr, "");
+    assert.deepEqual(JSON.parse(stdout), identities.map((identity) => ({
+      identity,
+      ok: true,
+      logical: identity,
+      source: "active_skill_component",
+    })));
   } finally {
     await removeTreeEventually(root);
   }
@@ -278,6 +329,15 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
            cwd: packageDir,
            sessionManager: { getSessionId: () => "packed-owner" },
          };
+         await handlers.get("before_agent_start")({
+           systemPrompt: "base",
+           systemPromptOptions: {
+             skills: [{
+               name: "actors",
+               filePath: join(packageDir, "dist", "skills", "actors", "SKILL.md"),
+             }],
+           },
+         }, context);
          const spawn = definitions.get("spawn");
          const inspect = definitions.get("inspect");
          const message = definitions.get("message");
@@ -287,7 +347,7 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
          try {
            started = await spawn.execute("packed-spawn", {
              as: "run:packed-locker",
-             recipe: "resource-locker",
+             recipe: "actors/resource-locker",
              values: { lease_ms: 1000 },
            }, undefined, undefined, context);
            for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -340,7 +400,7 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
            packedRun: {
              controlPending: control.details.pending,
              endpoint: control.details.endpoint?.type,
-             repo: started.details.values.repo,
+             skillDir: started.details.values.skill_dir,
              status: control.details.status,
              traceComplete: trace.details.summary.history_complete,
            },
@@ -364,7 +424,10 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
     const loaded = JSON.parse(stdout);
     assert.deepEqual(loaded.commands, ["actor-inspector"]);
     assert.equal(loaded.packedRun.endpoint, process.platform === "win32" ? "named-pipe" : "fifo");
-    assert.equal(await realpath(loaded.packedRun.repo), await realpath(packageDir));
+    assert.equal(
+      await realpath(loaded.packedRun.skillDir),
+      await realpath(join(packageDir, "dist", "skills", "actors")),
+    );
     assert.equal(loaded.packedRun.status, "done");
     assert.equal(loaded.packedRun.traceComplete, true);
     assert.equal(loaded.packedRun.controlPending, 0);
@@ -382,9 +445,9 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
       ["action", "input", "target", "verbose"],
       ["lines", "source", "status", "target", "verbose", "view"],
     ]);
-    for (const [name, skill] of [["actors", "actors"], ["swarm", "swarm"]]) {
+    for (const skill of ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]) {
       assert.match(
-        await readFile(join(packageDir, "dist", "skills", name, "SKILL.md"), "utf8"),
+        await readFile(join(packageDir, "dist", "skills", skill, "SKILL.md"), "utf8"),
         new RegExp(`^---\\r?\\nname: ${skill}\\r?$`, "m"),
       );
     }
@@ -477,7 +540,7 @@ test("music-player direct control queues canonical Controls", async () => {
       JSON.stringify({ run: "music", run_instance_id: "generation-a" }),
     );
     const { stdout } = await execFileAsync(process.execPath, [
-      join(process.cwd(), "scripts", "music-player.mjs"),
+      join(process.cwd(), "skills", "media", "scripts", "music-player.mjs"),
       "next",
       stateDir,
     ]);
@@ -527,7 +590,7 @@ test("music-player consumes publicly delivered Controls", async () => {
   let childOutput = "";
   const child = spawn(
     process.execPath,
-    [join(process.cwd(), "scripts", "music-player.mjs"), "play", source, "false", "70", "ffplay", stateDir],
+    [join(process.cwd(), "skills", "media", "scripts", "music-player.mjs"), "play", source, "false", "70", "ffplay", stateDir],
     {
       env: { ...process.env, PATH: `${root}${delimiter}${process.env.PATH ?? ""}` },
       stdio: ["ignore", "pipe", "pipe"],
@@ -628,7 +691,7 @@ test("installed validate-recipe avoids importing TypeScript from node_modules", 
     const recipe = join(root, "recipe.json");
     await writeFile(recipe, `${JSON.stringify({ template: "echo ok" })}\n`);
     const { stdout } = await execFileAsync(process.execPath, [
-      join(packageDir, "scripts", "validate-recipe.mjs"),
+      join(packageDir, "skills", "actors", "scripts", "validate-recipe.mjs"),
       recipe,
     ]);
     const report = JSON.parse(stdout);
@@ -639,7 +702,29 @@ test("installed validate-recipe avoids importing TypeScript from node_modules", 
   }
 });
 
-test("installed validate-recipe resolves bare imports from packaged recipes", async () => {
+test("installed Skill Recipe QA matches the source capability inventory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-validator-"));
+  try {
+    const packageDir = await prepareInstalledPackage(root);
+    const args = ["--skills", "--qa", "--summary"];
+    const source = await execFileAsync(process.execPath, [
+      join(process.cwd(), "skills", "actors", "scripts", "validate-recipe.mjs"),
+      join(process.cwd(), "skills"),
+      ...args,
+    ]);
+    const installed = await execFileAsync(process.execPath, [
+      join(packageDir, "skills", "actors", "scripts", "validate-recipe.mjs"),
+      join(packageDir, "skills"),
+      ...args,
+    ]);
+    assert.deepEqual(JSON.parse(installed.stdout), JSON.parse(source.stdout));
+    assert.equal(JSON.parse(installed.stdout).total, 58);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installed validate-recipe resolves explicit file imports", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-imports-"));
   try {
     const packageDir = await prepareInstalledPackage(root);
@@ -647,12 +732,12 @@ test("installed validate-recipe resolves bare imports from packaged recipes", as
     await writeFile(
       recipe,
       `${JSON.stringify({
-        imports: { status: "utility-git-status" },
+        imports: { status: join(packageDir, "skills", "project-work", "recipes", "git-status.json") },
         template: [{ name: "status" }],
       })}\n`,
     );
     const { stdout } = await execFileAsync(process.execPath, [
-      join(packageDir, "scripts", "validate-recipe.mjs"),
+      join(packageDir, "skills", "actors", "scripts", "validate-recipe.mjs"),
       recipe,
     ]);
     const report = JSON.parse(stdout);

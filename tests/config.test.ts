@@ -189,7 +189,6 @@ test("Stored tool normalization derives args from existing template recipe files
     await writeFile(
       path,
       JSON.stringify({
-        name: "derive-args-test",
         template: "review {scope} {mode=fast}",
       }),
     );
@@ -223,7 +222,6 @@ test("Stored tool normalization derives args from compact repeated template reci
     await writeFile(
       path,
       JSON.stringify({
-        name: "derive-repeat-args-test",
         parallel: true,
         repeat: 3,
         template:
@@ -262,7 +260,6 @@ test("Stored tool normalization derives args from template recipe recover fields
       path,
       JSON.stringify({
         failure: "branch",
-        name: "derive-recover-args-test",
         recover: "cleanup {work_dir}",
         retry: 2,
         template: "run {scope}",

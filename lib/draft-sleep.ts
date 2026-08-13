@@ -96,7 +96,6 @@ function readState(path: string): DraftSleepState | undefined {
 function defaultActiveTools(recipeRoot: string): DraftReviewActiveTool[] {
   const discovered = RecipesDiscovery.discoverRecipeSources([
     { root: recipeRoot, defaultTool: true, mutableUsage: true },
-    { root: Paths.getPackagedRecipeRoot() },
   ]);
   return [...discovered.active.values()]
     .filter((entry) => existsSync(entry.path))

@@ -1,0 +1,11 @@
+{
+  "args": [
+    "skill:path",
+    "package_json:path"
+  ],
+  "defaults": {
+    "skill": "skills/actors/SKILL.md",
+    "package_json": "package.json"
+  },
+  "template": "{skill_dir}/scripts/project-utils.mjs skill-summary {skill} {package_json}"
+}

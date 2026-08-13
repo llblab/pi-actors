@@ -20,6 +20,7 @@ export interface ActorExtensionRuntime {
   beforeAgentStart(
     systemPrompt: string,
     skills: RecipesReferences.ActiveSkillRecipeSource[],
+    ctx: Pi.ExtensionContext,
   ): { systemPrompt: string };
   discoverResources(metaUrl: string): { skillPaths: string[] } | undefined;
   getRunOwnerId(ctx: Pi.ExtensionContext): string;
@@ -33,7 +34,14 @@ export function createActorExtensionRuntime(
   pi: Pi.ExtensionAPI,
 ): ActorExtensionRuntime {
   let activeRunContext: Pi.ExtensionContext | undefined;
+  const skillContextsBySession = new Map<
+    string,
+    RecipesReferences.ActiveSkillRecipeContext
+  >();
   const getRunOwnerId = Pi.getSessionId;
+  const getSkillContext = (ctx: Pi.ExtensionContext) =>
+    skillContextsBySession.get(getRunOwnerId(ctx)) ??
+    RecipesReferences.EMPTY_ACTIVE_SKILL_RECIPE_CONTEXT;
   const automaticReview = AutomaticReviewRuntime.createAutomaticReviewRuntime({
     getActiveContext: () => activeRunContext,
     getRunOwnerId,
@@ -59,6 +67,9 @@ export function createActorExtensionRuntime(
         if (ctx && typeof ctx === "object") {
           nextArgs[4] = {
             ...(ctx as Record<string, unknown>),
+            activeSkillRecipeContext: getSkillContext(
+              ctx as Pi.ExtensionContext,
+            ),
             getThinkingLevel: () => pi.getThinkingLevel(),
           };
         }
@@ -84,8 +95,11 @@ export function createActorExtensionRuntime(
   });
   const recipeReload = Runtime.createRecipeToolReloadWatcher(runtime);
   return {
-    beforeAgentStart(systemPrompt, skills) {
-      RecipesReferences.setActiveSkillRecipeSources(skills);
+    beforeAgentStart(systemPrompt, skills, ctx) {
+      skillContextsBySession.set(
+        getRunOwnerId(ctx),
+        RecipesReferences.createActiveSkillRecipeContext(skills),
+      );
       return {
         systemPrompt: `${systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,
       };
@@ -99,12 +113,17 @@ export function createActorExtensionRuntime(
       if (activeRunContext === ctx) automaticReview.schedule();
     },
     onSessionShutdown(reason, ctx) {
+      skillContextsBySession.delete(getRunOwnerId(ctx));
       activeRunContext = undefined;
       automaticReview.close();
       recipeReload.close();
       runUiRuntime.shutdown(reason, ctx);
     },
     async onSessionStart(ctx) {
+      skillContextsBySession.set(
+        getRunOwnerId(ctx),
+        RecipesReferences.EMPTY_ACTIVE_SKILL_RECIPE_CONTEXT,
+      );
       ctx.ui.setWidget("zz-pi-actors-comms", undefined);
       activeRunContext = ctx;
       runUiRuntime.close();

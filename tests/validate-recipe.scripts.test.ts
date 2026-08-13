@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const execFileAsync = promisify(execFile);
-const script = fileURLToPath(new URL("../scripts/validate-recipe.mjs", import.meta.url));
+const script = fileURLToPath(new URL("../skills/actors/scripts/validate-recipe.mjs", import.meta.url));
 const nodeArgs = ["--experimental-strip-types", script];
 
 test("validate-recipe validates one recipe file", async () => {
@@ -23,7 +23,6 @@ test("validate-recipe validates one recipe file", async () => {
     await writeFile(
       file,
       JSON.stringify({
-        name: "demo",
         args: ["name:string"],
         control: ["continue"],
         template: "echo {name}",
@@ -80,6 +79,24 @@ test("validate-recipe fails invalid recipe files", async () => {
   }
 });
 
+test("validate-recipe rejects top-level Recipe names in favor of filename identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-"));
+  try {
+    const file = join(root, "actual.json");
+    await writeFile(file, JSON.stringify({ name: "declared", template: "echo bad" }));
+    await assert.rejects(
+      execFileAsync(process.execPath, [...nodeArgs, file]),
+      (error: unknown) => {
+        const report = JSON.parse((error as { stdout?: string }).stdout ?? "");
+        assert.match(report.results[0].error, /Recipe\.name was removed in pi-actors 0\.46/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("validate-recipe validates recipe directories with --all", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-"));
   try {
@@ -106,7 +123,7 @@ test("validate-recipe qa accepts component Recipes without optional descriptions
       JSON.stringify({
         async: true,
         artifacts: { report: "{state_dir}/report.md" },
-        template: "{repo}/scripts/validate-recipe.mjs {target}",
+        template: "echo ok",
       }),
     );
     const { stdout } = await execFileAsync(process.execPath, [
@@ -124,7 +141,102 @@ test("validate-recipe qa accepts component Recipes without optional descriptions
   }
 });
 
-test("validate-recipe qa fails exact packaged recipe diagnostics", async () => {
+test("validate-recipe Skill QA validates direct filesystem identities and imports", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-skills-"));
+  try {
+    await mkdir(join(root, "alpha", "recipes"), { recursive: true });
+    await mkdir(join(root, "beta", "recipes"), { recursive: true });
+    await writeFile(
+      join(root, "alpha", "recipes", "parent.json"),
+      JSON.stringify({ imports: { child: "beta/task" }, template: "{child}" }),
+    );
+    await writeFile(join(root, "beta", "recipes", "task.json"), JSON.stringify({ template: "echo ok" }));
+    const { stdout } = await execFileAsync(process.execPath, [
+      ...nodeArgs,
+      root,
+      "--skills",
+      "--qa",
+    ]);
+    const report = JSON.parse(stdout);
+    assert.equal(report.ok, true);
+    assert.equal(report.total, 2);
+    assert.deepEqual(report.results.map((result: { name: string }) => result.name), ["parent", "task"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validate-recipe Skill QA rejects nested Recipes and duplicate stems precisely", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-skills-"));
+  try {
+    await mkdir(join(root, "sample", "recipes", "nested"), { recursive: true });
+    await writeFile(join(root, "sample", "recipes", "task.json"), JSON.stringify({ template: "echo json" }));
+    await writeFile(join(root, "sample", "recipes", "task.md"), "```template\necho markdown\n```\n");
+    await writeFile(join(root, "sample", "recipes", "nested", "child.json"), JSON.stringify({ template: "echo nested" }));
+    await assert.rejects(
+      execFileAsync(process.execPath, [...nodeArgs, root, "--skills", "--qa"]),
+      (error: unknown) => {
+        const report = JSON.parse((error as { stdout?: string }).stdout ?? "");
+        const errors = report.results.map((result: { error?: string }) => result.error ?? "").join("\n");
+        assert.match(errors, /Nested Skill Recipe files are not allowed: nested[/\\]child\.json/);
+        assert.match(errors, /Skill Recipe stem collision: sample\/task has both \.json and \.md files/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validate-recipe Skill QA rejects removed prefixes and unknown Skill identities", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-skills-"));
+  try {
+    await mkdir(join(root, "sample", "recipes"), { recursive: true });
+    for (const [name, target] of [["std", "std:task"], ["skill", "skill:sample/task"], ["unknown", "missing/task"]]) {
+      await writeFile(
+        join(root, "sample", "recipes", `${name}.json`),
+        JSON.stringify({ imports: { child: target }, template: "{child}" }),
+      );
+    }
+    await assert.rejects(
+      execFileAsync(process.execPath, [...nodeArgs, root, "--skills", "--qa"]),
+      (error: unknown) => {
+        const report = JSON.parse((error as { stdout?: string }).stdout ?? "");
+        const errors = report.results.map((result: { error?: string }) => result.error ?? "").join("\n");
+        assert.match(errors, /std: Recipe references were removed in pi-actors 0\.46/);
+        assert.match(errors, /skill: Recipe references were removed in pi-actors 0\.46/);
+        assert.match(errors, /Active Skill Recipe not found: missing\/task/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validate-recipe Skill QA rejects missing {skill_dir} helper targets", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-skills-"));
+  try {
+    await mkdir(join(root, "sample", "recipes"), { recursive: true });
+    await writeFile(join(root, "sample", "SKILL.md"), "# Sample\n");
+    await writeFile(
+      join(root, "sample", "recipes", "task.json"),
+      JSON.stringify({ template: "{skill_dir}/scripts/missing.mjs" }),
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [...nodeArgs, root, "--skills", "--qa"]),
+      (error: unknown) => {
+        const report = JSON.parse((error as { stdout?: string }).stdout ?? "");
+        assert.match(report.results[0].qa.diagnostics.join("\n"), /referenced Skill helper not found: scripts\/missing\.mjs/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validate-recipe qa fails exact shipped Recipe diagnostics", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-recipe-qa-"));
   try {
     await mkdir(join(root, "recipes"));
@@ -149,7 +261,7 @@ test("validate-recipe qa fails exact packaged recipe diagnostics", async () => {
         const diagnostics = report.results[0].qa.diagnostics.join("\n");
         assert.deepEqual(report.results[0].qa.warnings, []);
         assert.match(diagnostics, /artifacts.report: must not use a machine-local absolute path/);
-        assert.match(diagnostics, /helper scripts must be referenced through \{repo\}\/scripts/);
+        assert.match(diagnostics, /helper scripts must be referenced through \{skill_dir\}\/scripts/);
         return true;
       },
     );

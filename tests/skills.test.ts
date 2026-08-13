@@ -40,6 +40,10 @@ test("Package extension entrypoint uses compiled dist output", () => {
 test("Packaged skills are registered through dist metadata", () => {
   assert.deepEqual(packagedSkillPaths, [
     "skills/actors/SKILL.md",
+    "skills/artifacts/SKILL.md",
+    "skills/media/SKILL.md",
+    "skills/project-work/SKILL.md",
+    "skills/recipe-memory/SKILL.md",
     "skills/swarm/SKILL.md",
   ]);
   assert.deepEqual(packageJson.pi.skills, ["./dist/skills"]);
@@ -54,6 +58,14 @@ test("Auto-discovered extension contributes co-located skills", () => {
   assert.match(extensionSource, /runtime\.discoverResources/);
   assert.match(extensionRuntimeSource, /Paths\.getExistingExtensionSkillPaths/);
   assert.match(pathsSource, /getExtensionSkillsDir/);
+});
+
+test("Packaged Skill identity matches its directory exactly", () => {
+  for (const skillPath of packagedSkillPaths) {
+    const frontmatter = readSkillFrontmatter(skillPath);
+    const declared = frontmatter.match(/^name:\s*(\S+)$/m)?.[1];
+    assert.equal(declared, dirname(skillPath).split(/[\\/]/).at(-1));
+  }
 });
 
 test("Packaged skill frontmatter scalar lines avoid extra colons", () => {
@@ -120,18 +132,12 @@ test("Packaged actors skill top recipes link prioritized recipes and deep invent
   assert.match(actorSkill, /docs\/async-runs\.md/);
   assert.match(actorSkill, /docs\/recipe-library\.md/);
   const linkedRecipes = [
-    ...topRecipes.matchAll(/\.\.\/\.\.\/recipes\/([^\)]+\.json)/g),
-  ]
-    .map((match) => match[1])
-    .sort();
+    ...topRecipes.matchAll(/\[[^\]]+\]\(([^\)]+\.json)\)/g),
+  ].map((match) => match[1]);
   assert.equal(linkedRecipes.length, 5, "top recipes should stay curated");
-  assert.ok(
-    linkedRecipes.length <
-      readdirSync("recipes").filter((name) => name.endsWith(".json")).length,
-  );
   for (const recipeFile of linkedRecipes) {
     assert.ok(
-      existsSync(join("recipes", recipeFile)),
+      existsSync(normalize(join("skills", "actors", recipeFile))),
       `${recipeFile} should exist`,
     );
   }

@@ -36,8 +36,8 @@ async function fixture(status = "done"): Promise<{ root: string; stateDir: strin
       recipe: "demo",
       recipe_context_records: [{
         depth: 0,
-        file: "/recipes/demo.json",
         import_path: [],
+        logical_reference: "demo.json",
         name: "demo",
         recipe: {
           artifacts: {
@@ -49,6 +49,9 @@ async function fixture(status = "done"): Promise<{ root: string; stateDir: strin
           prompt: "first\nsecond",
           template: "echo demo",
         },
+        role: "entry",
+        source_file: "/recipes/demo.json",
+        source_kind: "explicit_file_recipe",
       }],
       run: "demo",
       run_instance_id: "generation-a",

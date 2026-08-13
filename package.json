@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.45.1",
+  "version": "0.46.0",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -30,8 +30,7 @@
     "test": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
     "test:preservation": "node --experimental-strip-types --test --test-concurrency=1 tests/async-runs.test.ts tests/observability.test.ts tests/session-evidence.test.ts tests/inspector-security.test.ts tests/inspector-overlay.test.ts tests/review-control.test.ts",
     "pack:dry": "npm pack --dry-run",
-    "recipes:qa": "node scripts/validate-recipe.mjs recipes --all --qa --summary",
-    "release:validate": "npm run validate && node scripts/release-gates.mjs",
+    "recipes:qa": "node skills/actors/scripts/validate-recipe.mjs skills --skills --qa --summary",
     "validate": "npx tsc --noEmit && npm run recipes:qa && npm run build && npm run check && npm test && npm run conformance && npm run pack:dry",
     "audit:dependencies": "npm audit --audit-level=high --omit=peer",
     "build": "node scripts/build-dist.mjs",
@@ -42,7 +41,6 @@
     "dist",
     "lib",
     "scripts",
-    "recipes",
     "skills",
     "README.md",
     "AGENTS.md",

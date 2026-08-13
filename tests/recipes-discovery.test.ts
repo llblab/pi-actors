@@ -10,7 +10,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { getPackagedRecipeRoot } from "../lib/paths.ts";
 import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, hasBroadWindowsWriteAcl, listDraftRecipes, summarizeDiscovery, toRegisteredTool } from "../lib/recipes-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
@@ -21,7 +20,6 @@ test("Recipe discovery exposes tool recipes by location and filename identity", 
   const root = await mkdtemp(join(tmpdir(), "pi-actors-discovery-"));
   try {
     await writeRecipe(root, "docs-review", {
-      name: "ignored-docs-review",
       description: "Docs review",
       template: "echo review",
     });
@@ -76,26 +74,6 @@ test("Windows ACL parser flags broad write access without POSIX mode bits", () =
     hasBroadWindowsWriteAcl(String.raw`C:\Users\owner\.pi\agent\recipes Authenticated Users:(OI)(CI)(WD)`),
     true,
   );
-});
-
-test("Recipe discovery flags packaged validation wrapper as trusted shell boundary", () => {
-  const result = discoverRecipeSources([
-    { root: getPackagedRecipeRoot(), defaultTool: true },
-  ]);
-  const diagnostics =
-    result.active.get("utility-validation-wrapper")?.diagnostics.join("\n") ?? "";
-  assert.match(diagnostics, /invokes bash/);
-  assert.match(diagnostics, /trusted executable content/);
-});
-
-test("Recipe discovery loads packaged quorum review without repeat diagnostics", () => {
-  const result = discoverRecipeSources([
-    { root: getPackagedRecipeRoot(), defaultTool: true },
-  ]);
-  const recipe = result.active.get("pipeline-quorum-review");
-  assert.equal(recipe?.active, true);
-  assert.equal(recipe?.invalid, false);
-  assert.doesNotMatch(result.diagnostics.join("\n"), /pipeline-quorum-review|repeat must/);
 });
 
 test("Recipe discovery exposes an integrity manifest", async () => {

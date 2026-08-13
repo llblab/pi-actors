@@ -9,7 +9,7 @@ Subagent orchestration: delegated review, quorum consensus, scoped locks, clean-
 
 ## Purpose
 
-Run subagents safely and predictably through reusable orchestration contracts.
+Run subagents safely and predictably through reusable orchestration contracts. Skill Recipe identity is `<active Skill name>/<Recipe filename stem>`; Recipe files have no top-level `name`. Components are direct files under `recipes/` and use exact `swarm/<recipe>` identities, including `swarm/lens-review`, `swarm/quorum-review`, `swarm/research-synthesis`, and `swarm/development-tasking`; they remain components rather than automatic tools.
 
 Activation rule: load this skill before launching multiple independent actors or subagents, even when the work is creative artifact generation rather than code review. The coordinator owns decomposition, disjoint scopes, launch correctness, result integration, and final validation; participants may choose local content or implementation details independently inside their assigned boundaries.
 
@@ -31,7 +31,7 @@ Maintain this skill as a living orchestration standard. When real swarm work exp
 - `Lens`: A deliberately narrow cognitive role assigned to one subagent, such as security, tests, architecture, economics, or operator UX.
 - `Task Card`: A bounded implementation assignment with goal, allowed files, avoided files, expected output, and validation gates.
 - `Component Capability`: An abstract adapter operation such as launcher, reviewer, verifier, merger, quorum, checkpoint, follow-up, judge, or normalizer. Swarm may target these capabilities, but local adapters bind them to concrete tools, recipes, draft recipes, command templates, async runs, or services.
-- `Draft Recipe`: A reusable but non-registered recipe captured from a successful inline actor spawn under `~/.pi/agent/recipes/drafts`. It can be replayed by explicit file path and later promoted into the active tool recipe root after enough dogfood.
+- `Draft Recipe`: A reusable but non-registered recipe captured from a successful inline actor spawn under `~/.pi/agent/recipes/drafts`. It can be replayed by an explicit `.json` / `.md` path (relative entry paths use invocation `cwd`) and later promoted into the active tool Recipe root after enough dogfood.
 - `Coordinator Checkpoint`: A deliberate subagent pause where the subagent preserves its working context, sends a bounded question or status to the orchestrator, receives a coordinator reply, and continues in the same subagent context.
 - `Evidence Checkpoint`: A deliberate stop where a subagent records sources, assumptions, confidence, contradictions, or blocking evidence gaps before synthesis.
 - `Integrator`: The human or agent that merges isolated branches/worktrees into the shared target and owns conflict resolution.
@@ -162,7 +162,7 @@ Use [`references/development-swarm.md`](./references/development-swarm.md) for c
 
 Purpose: turn one result into many risk lenses and a decision-grade verdict.
 
-Use lens swarm for broad coverage, quorum for confidence on one critical judgement, or both for high-stakes releases. In adapters that expose current session model/thinking policy, default ordinary same-policy review swarms to that current policy and require explicit args only when intentionally varying models or thinking levels. Run a cheap model/tool preflight before launching expensive reviewer fanout; if it fails, use the `ACTOR_PREFLIGHT_FAILED` stage/model/error-class/prompt-file diagnostic to choose explicit override args instead of rerunning blindly. For packaged review swarms, tune `min_successful_reviewers`, `reviewer_concurrency`, `subagent_ttl_ms`, and `merge_policy` instead of manual reruns; preserve partial reports and label the outcome `complete`, `degraded`, or `insufficient_data`. The final report should separate consensus findings, minority findings, merger findings, risks, and recommended next actions.
+Use lens swarm for broad coverage, quorum for confidence on one critical judgement, or both for high-stakes releases. In adapters that expose current session model/thinking policy, default ordinary same-policy review swarms to that current policy and require explicit args only when intentionally varying models or thinking levels. Run a cheap model/tool preflight before launching expensive reviewer fanout; if it fails, use the `ACTOR_PREFLIGHT_FAILED` stage/model/error-class/prompt-file diagnostic to choose explicit override args instead of rerunning blindly. For Skill-owned review swarms, tune `min_successful_reviewers`, `reviewer_concurrency`, `subagent_ttl_ms`, and `merge_policy` instead of manual reruns; preserve partial reports and label the outcome `complete`, `degraded`, or `insufficient_data`. The final report should separate consensus findings, minority findings, merger findings, risks, and recommended next actions.
 
 A review swarm synthesis must not fabricate claims. Every final finding should trace to a reviewer note, checked artifact, command output, source, or explicit merger rationale. Devil's Advocate critical findings must be preserved or explicitly disproved with evidence.
 
@@ -345,7 +345,7 @@ Locks prevent subagents from interfering with shared scopes. Locks are optional 
 
 ## Validation
 
-After changing Swarm adapter contracts or packaged documentation, validate the local distribution with whatever checks the host project provides. At minimum, review the text for boundary drift:
+After changing Swarm adapter contracts or Skill documentation, validate the local distribution with whatever checks the host project provides. At minimum, review the text for boundary drift:
 
 - no dependency on a specific extension, actor runtime, registry, recipe store, or CLI runner;
 - no bundled broad coordinator or lock runtime as portable Swarm core;

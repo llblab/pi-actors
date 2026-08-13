@@ -19,20 +19,24 @@ import {
 const records = [
   {
     depth: 0,
-    file: "/recipes/parent.json",
     import_path: [],
+    logical_reference: "parent.json",
     name: "parent",
     recipe: { imports: { child: "child.json" }, template: [{ name: "child" }] },
     role: "entry" as const,
+    source_file: "/recipes/parent.json",
+    source_kind: "explicit_file_recipe" as const,
   },
   {
     alias: "child",
     depth: 1,
-    file: "/recipes/child.json",
     import_path: ["child"],
+    logical_reference: "child.json",
     name: "child-recipe",
     recipe: { template: "pi -p child prompt" },
     role: "import" as const,
+    source_file: "/recipes/child.json",
+    source_kind: "explicit_file_recipe" as const,
   },
 ];
 
@@ -49,6 +53,8 @@ test("Actor recipe context JSONL marks the current recipe node", () => {
   assert.equal(lines[1].you_are_here, true);
   assert.equal(lines[1].you_are_here_path, "child");
   assert.equal(lines[1].name, "child-recipe");
+  assert.equal(lines[1].logical_reference, "child.json");
+  assert.equal(lines[1].source_file, undefined);
   assert.deepEqual(lines[1].recipe, { template: "pi -p child prompt" });
 });
 

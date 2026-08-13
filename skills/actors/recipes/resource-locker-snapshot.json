@@ -1,0 +1,11 @@
+{
+  "args": [
+    "state_dir:path",
+    "lines:int"
+  ],
+  "defaults": {
+    "state_dir": "~/.pi/agent/tmp/pi-actors/runs/coordinator-locker",
+    "lines": "20"
+  },
+  "template": "{skill_dir}/scripts/resource-locker.mjs snapshot --state-dir {state_dir} --lines {lines}"
+}

@@ -10,7 +10,7 @@ import test from "node:test";
 import { deliverRunControl } from "../lib/runs-control-delivery.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 
-const script = fileURLToPath(new URL("../scripts/locker.mjs", import.meta.url));
+const script = fileURLToPath(new URL("../skills/actors/scripts/resource-locker.mjs", import.meta.url));
 const execFileAsync = promisify(execFile);
 
 async function waitForPath(path: string): Promise<void> {

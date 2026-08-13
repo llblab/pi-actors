@@ -1,0 +1,9 @@
+{
+  "args": [
+    "state_root:path"
+  ],
+  "defaults": {
+    "state_root": "~/.pi/agent/tmp/pi-actors/runs"
+  },
+  "template": "{skill_dir}/scripts/run-utils.mjs run-summary {state_root}"
+}

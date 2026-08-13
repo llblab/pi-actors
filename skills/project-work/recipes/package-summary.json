@@ -1,0 +1,9 @@
+{
+  "args": [
+    "package_json:path"
+  ],
+  "defaults": {
+    "package_json": "package.json"
+  },
+  "template": "{skill_dir}/scripts/project-utils.mjs package-summary {package_json}"
+}

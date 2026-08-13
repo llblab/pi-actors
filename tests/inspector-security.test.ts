@@ -45,6 +45,21 @@ test("inspector hides runtime-owned Recipe origins from model-facing launch valu
       join(stateDir, "run.json"),
       JSON.stringify({
         ownerId: "owner",
+        launch_source: "spawn",
+        recipe_context_records: [{
+          depth: 0,
+          import_path: [],
+          logical_reference: "sample/task",
+          name: "task",
+          recipe: {
+            defaults: { helper: "{skill_dir}/scripts/private.mjs" },
+            template: "{skill_dir}/scripts/private.mjs",
+          },
+          role: "entry",
+          skill: "sample",
+          source_file: "/private/skill/recipes/task.json",
+          source_kind: "active_skill_component",
+        }],
         recipe_file: "/private/skill/recipes/task.json",
         run: "owned",
         values: {
@@ -56,6 +71,50 @@ test("inspector hides runtime-owned Recipe origins from model-facing launch valu
     );
     const view = readActorInspectorRecipe(stateDir);
     assert.deepEqual(view.launch.values, { visible: "ok" });
+    assert.deepEqual(view.identity, {
+      run: "owned",
+      recipe_stem: "task",
+      logical_reference: "sample/task",
+      skill: "sample",
+      source_kind: "active_skill_component",
+      launch_source: "spawn",
+    });
+    assert.equal(view.composition[0].logical_reference, "sample/task");
+    assert.equal(view.composition[0].skill, "sample");
+    assert.doesNotMatch(JSON.stringify(view), /\/private\/skill|"source_file"|"recipe_dir"|"skill_dir"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("inspector labels user registry capability provenance without exposing its file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspector-user-recipe-"));
+  try {
+    const stateDir = await writeRun(root, "owned", "owner");
+    await writeFile(
+      join(stateDir, "run.json"),
+      JSON.stringify({
+        ownerId: "owner",
+        launch_source: "tool",
+        recipe: "transcribe",
+        recipe_context_records: [{
+          depth: 0,
+          import_path: [],
+          logical_reference: "transcribe",
+          name: "transcribe",
+          recipe: { template: "echo user" },
+          role: "entry",
+          source_file: "/private/agent/recipes/transcribe.json",
+          source_kind: "user_registry_capability",
+        }],
+        run: "owned",
+      }),
+    );
+    const view = readActorInspectorRecipe(stateDir);
+    assert.equal(view.identity.source_kind, "user_registry_capability");
+    assert.equal(view.identity.logical_reference, "transcribe");
+    assert.equal(view.composition[0].source_kind, "user_registry_capability");
+    assert.doesNotMatch(JSON.stringify(view), /\/private\/agent/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

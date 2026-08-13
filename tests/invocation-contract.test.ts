@@ -27,7 +27,7 @@ function maintainedInvocationFiles(): string[] {
     join(root, "AGENTS.md"),
     join(root, "README.md"),
     join(root, "index.ts"),
-    ...["docs", "fixtures", "lib", "recipes", "scripts", "skills"]
+    ...["docs", "fixtures", "lib", "scripts", "skills"]
       .flatMap((dir) => filesUnder(join(root, dir))),
   ];
 }
@@ -111,7 +111,7 @@ test("Maintained public examples pass current schemas and protocol fixtures pars
   assert.equal(control.action, "pause");
   for (const params of [
     { as: "run:demo", template: "sleep 30" },
-    { recipe: "pipeline-repo-health", values: { repo: "/work/project", model: "provider/model" } },
+    { recipe: "project-work/repo-health", values: { repo: "/work/project", model: "provider/model" } },
     { as: "run:test", template: "make test" },
   ]) {
     const unknown = Object.keys(params).filter((key) => !Object.hasOwn(spawn.parameters.properties, key));
@@ -125,16 +125,13 @@ test("Maintained public examples pass current schemas and protocol fixtures pars
 test("Canonical management inspect examples pass the real dispatcher", async () => {
   const stateRoot = await mkdtemp(join(tmpdir(), "pi-actors-invocation-contract-"));
   const recipeRoot = join(stateRoot, "recipes");
-  const packagedRecipeRoot = join(stateRoot, "packaged");
   try {
     await mkdir(join(recipeRoot, "drafts"), { recursive: true });
-    await mkdir(packagedRecipeRoot, { recursive: true });
     const inspect = createInspectToolDefinition({
       getTool: (name) => name === "demo"
         ? { description: "Demo", parameters: { type: "object" }, promptSnippet: "demo" }
         : undefined,
       listRuns: () => [],
-      packagedRecipeRoot,
       recipeRoot,
     });
     for (const params of [

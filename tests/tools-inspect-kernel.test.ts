@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 
 import * as Limits from "../lib/limits.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
-import { setActiveSkillRecipeSources } from "../lib/recipes-references.ts";
+import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 
 async function fixture(): Promise<{ root: string; status: Record<string, unknown> }> {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-kernel-"));
@@ -26,10 +26,13 @@ async function fixture(): Promise<{ root: string; status: Record<string, unknown
       recipe: "demo-recipe",
       recipe_context_records: [{
         depth: 0,
-        file: "/recipes/demo.json",
         import_path: [],
+        logical_reference: "demo.json",
         name: "demo-recipe",
         recipe: { control: ["pause"], template: "echo demo" },
+        role: "entry",
+        source_file: "/private/recipes/demo.json",
+        source_kind: "explicit_file_recipe",
       }],
       template: "echo demo",
       values: {},
@@ -61,6 +64,11 @@ test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () 
     const tool = createInspectToolDefinition({ getRunStatus: () => status });
     const recipe = await tool.execute("recipe", { target: "run:demo", view: "recipe", verbose: true }, undefined, undefined, {});
     assert.equal(recipe.details.identity.recipe, "demo-recipe");
+    assert.equal(recipe.details.identity.logical_reference, "demo.json");
+    assert.equal(recipe.details.identity.source_kind, "explicit_file_recipe");
+    assert.equal(recipe.details.composition[0].role, "entry");
+    assert.equal(recipe.details.composition[0].recipe_stem, "demo-recipe");
+    assert.doesNotMatch(JSON.stringify(recipe), /\/private\/recipes/);
     const trace = await tool.execute("trace", { target: "run:demo", view: "trace", source: "lifecycle", verbose: true }, undefined, undefined, {});
     assert.equal(trace.details.items[0].kind, "run.start");
     assert.deepEqual(trace.details.summary, {
@@ -144,34 +152,64 @@ test("Inspect rejects removed Run views on the canonical target", async () => {
   }
 });
 
-test("Inspect Recipe diagnostics expose active Skill namespaces and collisions", async () => {
+test("Inspect Recipe diagnostics distinguish user capabilities and active Skill components", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-recipes-"));
-  setActiveSkillRecipeSources([
-    { name: "sample", baseDir: "/skills/sample" },
-    { name: "duplicate", baseDir: "/skills/first" },
-    { name: "duplicate", baseDir: "/skills/second" },
-  ]);
+  const sampleSkill = join(root, "skills", "sample");
+  const recipeRoot = join(root, "recipes");
   try {
-    const tool = createInspectToolDefinition({
-      recipeRoot: join(root, "recipes"),
-      packagedRecipeRoot: join(root, "packaged"),
+    await import("node:fs/promises").then(async (fs) => {
+      await fs.mkdir(join(sampleSkill, "recipes"), { recursive: true });
+      await fs.mkdir(recipeRoot, { recursive: true });
+      await fs.writeFile(join(sampleSkill, "recipes", "task.json"), JSON.stringify({ template: "echo skill" }));
+      await fs.writeFile(join(recipeRoot, "user-tool.json"), JSON.stringify({ template: "echo user" }));
     });
+    const activeSkillRecipeContext = createActiveSkillRecipeContext([
+      { name: "sample", baseDir: sampleSkill },
+      { name: "duplicate", baseDir: "/skills/first" },
+      { name: "duplicate", baseDir: "/skills/second" },
+    ]);
+    const tool = createInspectToolDefinition({ recipeRoot });
     const result = await tool.execute(
       "recipes",
       { target: "recipes", view: "imports", verbose: true },
       undefined,
       undefined,
-      {},
+      { activeSkillRecipeContext },
     );
-    assert.deepEqual(result.details.skill_recipe_namespaces.sample, [
-      join(resolve("/skills/sample"), "recipes"),
+    assert.deepEqual(result.details.active_skill_recipe_identities, [
+      "duplicate",
+      "sample",
     ]);
+    assert.equal(result.details.skill_recipe_namespaces, undefined);
     assert.equal(
       result.details.skill_recipe_namespace_diagnostics[0].name,
       "duplicate",
     );
+    assert.equal(result.details.active[0].source_kind, "user_registry_capability");
+    assert.deepEqual(result.details.skill_recipe_components, []);
+    assert.match(
+      result.details.skill_recipe_component_diagnostics[0].error,
+      /Duplicate active Skill identity duplicate/,
+    );
+
+    const unambiguous = createActiveSkillRecipeContext([
+      { name: "sample", baseDir: sampleSkill },
+    ]);
+    const componentResult = await tool.execute(
+      "components",
+      { target: "recipes", view: "imports", verbose: true },
+      undefined,
+      undefined,
+      { activeSkillRecipeContext: unambiguous },
+    );
+    assert.deepEqual(componentResult.details.skill_recipe_components, [{
+      identity: "sample/task",
+      source_kind: "active_skill_component",
+      skill: "sample",
+      stem: "task",
+      imports: {},
+    }]);
   } finally {
-    setActiveSkillRecipeSources([]);
     await rm(root, { recursive: true, force: true });
   }
 });

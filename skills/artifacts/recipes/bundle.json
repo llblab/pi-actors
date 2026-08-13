@@ -1,0 +1,77 @@
+{
+  "async": true,
+  "imports": {
+    "artifactWrite": "artifacts/write",
+    "manifest": "artifacts/manifest",
+    "manifestWrite": "artifacts/file-write",
+    "validation": "actors/command-validate"
+  },
+  "args": [
+    "input:string",
+    "artifact_path:path",
+    "manifest_path:path",
+    "artifact_title:string",
+    "artifact_format:string",
+    "artifact_status:enum(draft,ready,blocked,accepted)",
+    "write_mode:enum(create,overwrite,append)",
+    "run_validation:bool",
+    "validation_command:string",
+    "validation_scope:string",
+    "validation_timeout_ms:int",
+    "model:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "artifact_title": "Artifact Bundle",
+    "artifact_format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
+    "artifact_status": "ready",
+    "write_mode": "create",
+    "run_validation": "false",
+    "validation_command": "true",
+    "validation_scope": ".",
+    "validation_timeout_ms": "300000",
+    "tools": ""
+  },
+  "artifacts": {
+    "artifact": "{artifact_path}",
+    "manifest": "{manifest_path}"
+  },
+  "template": [
+    {
+      "when": "run_validation",
+      "name": "validation",
+      "values": {
+        "command": "{validation_command}",
+        "scope": "{validation_scope}",
+        "timeout_ms": "{validation_timeout_ms}"
+      }
+    },
+    {
+      "name": "artifactWrite",
+      "values": {
+        "input": "{input}",
+        "artifact_path": "{artifact_path}",
+        "artifact_format": "{artifact_format}",
+        "write_mode": "{write_mode}",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "manifest",
+      "values": {
+        "artifact_path": "{artifact_path}",
+        "title": "{artifact_title}",
+        "status": "{artifact_status}",
+        "summary": "Artifact bundle manifest for {artifact_path}."
+      }
+    },
+    {
+      "name": "manifestWrite",
+      "values": {
+        "artifact_path": "{manifest_path}",
+        "mode": "{write_mode}"
+      }
+    }
+  ]
+}

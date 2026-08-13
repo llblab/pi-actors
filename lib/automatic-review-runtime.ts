@@ -4,13 +4,14 @@
  * Owns automatic-review lifecycle wiring without owning review decisions or filesystem transactions.
  */
 
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as DraftSleep from "./draft-sleep.ts";
 import * as ModelContext from "./model-context.ts";
 import * as Paths from "./paths.ts";
 import type * as Pi from "./pi.ts";
+import * as RecipesReferences from "./recipes-references.ts";
 import * as ReviewControl from "./review-control.ts";
 import * as ToolReviewScheduler from "./tool-review-scheduler.ts";
 
@@ -26,6 +27,16 @@ export interface AutomaticReviewRuntimeDeps {
   getRunOwnerId(ctx: Pi.ExtensionContext): string;
   getThinkingLevel(): unknown;
 }
+
+export const PACKAGE_RECIPE_MEMORY_CONTEXT =
+  RecipesReferences.createActiveSkillRecipeContext([
+    {
+      name: "recipe-memory",
+      filePath: fileURLToPath(
+        new URL("../skills/recipe-memory/SKILL.md", import.meta.url),
+      ),
+    },
+  ]);
 
 export function createAutomaticReviewRuntime(
   deps: AutomaticReviewRuntimeDeps,
@@ -88,7 +99,7 @@ export function createAutomaticReviewRuntime(
           }
           return AsyncRuns.startRun(
             {
-              file: join(Paths.getPackagedRecipeRoot(), "draft-review.json"),
+              file: "recipe-memory/draft-review",
               launch_source: "tool",
               notification_policy: "silent",
               ownerId: deps.getRunOwnerId(ctx),
@@ -97,6 +108,7 @@ export function createAutomaticReviewRuntime(
               values: { input_path: batch.reviewerInputPath },
             },
             ctx.cwd,
+            { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT },
           );
         },
         process: (state) =>
@@ -113,7 +125,7 @@ export function createAutomaticReviewRuntime(
           }
           return AsyncRuns.startRun(
             {
-              file: join(Paths.getPackagedRecipeRoot(), "tool-review.json"),
+              file: "recipe-memory/tool-review",
               launch_source: "tool",
               notification_policy: "silent",
               ownerId: deps.getRunOwnerId(ctx),
@@ -122,6 +134,7 @@ export function createAutomaticReviewRuntime(
               values: { input_path: batch.reviewerInputPath },
             },
             ctx.cwd,
+            { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT },
           );
         },
         process: (state) =>

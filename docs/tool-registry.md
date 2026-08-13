@@ -22,7 +22,7 @@ Promote an immutable captured draft only with its draft path and explicit target
 
 ## Resolution
 
-User Recipes take priority over packaged Recipes. Active invalid or disabled shadowing blocks fallback and reports both paths. Runtime reload watches the Recipe root and converges after atomic changes; stale watcher generations cannot replace current registration state.
+User Recipes are the only file-discovered tool source. Invalid or disabled user entries fail closed. Active Skill Recipes remain exact components outside tool discovery. Runtime reload watches the user Recipe root and converges after atomic changes; stale watcher generations cannot replace current registration state.
 
 Inspect registry state with:
 
@@ -61,7 +61,7 @@ Usage and lineage live in locked metadata ledgers rather than authored Recipe fi
 
 ## Wrapping Existing Recipes
 
-Prefer a small user-root wrapper that imports a maintained Recipe by exact `std:<recipe>` or `skill:<skill>/<recipe-path>` identity and delegates by alias. Skill Recipes remain components and are never exposed merely because their Skill is active. Do not duplicate executable templates, defaults, Control declarations, artifacts, or runtime-owned `{recipe_dir}`/`{skill_dir}`. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
+Prefer a small user-root wrapper that imports a maintained Recipe by exact `<skill>/<recipe>` identity and delegates by alias. Skill Recipes remain components and are never exposed merely because their Skill is active. Do not duplicate executable templates, defaults, Control declarations, artifacts, or runtime-owned `{recipe_dir}`/`{skill_dir}`. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
 
 ## Safety
 

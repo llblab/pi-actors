@@ -23,7 +23,6 @@ export interface RuntimeContext {
 export interface ToolRegistryRuntimeDeps {
   configPath: string;
   exec: RegisteredToolExec;
-  packagedRecipeRoot?: string;
   recipeRoot?: string;
   getActiveTools?: () => string[];
   registerTool: (
@@ -125,7 +124,7 @@ export function createAutoToolsRuntime(
     );
     const lines = ["pi-actors recipe registry warning"];
     if (shadowed.length > 0) {
-      lines.push("User recipes override packaged recipes:");
+      lines.push("User recipes shadow lower-priority user sources:");
       lines.push(...shadowed.map((warning) => `• ${warning}`));
     }
     if (skipped.length > 0) {
@@ -141,11 +140,8 @@ export function createAutoToolsRuntime(
   function loadTools(ctx: RuntimeContext) {
     const warnings: string[] = [];
     const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
-    const packagedRecipeRoot =
-      deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot();
     const discovered = RecipesDiscovery.discoverRecipeSources([
       { root: recipeRoot, defaultTool: true, mutableUsage: true },
-      { root: packagedRecipeRoot },
     ]);
     warnings.push(...discovered.diagnostics);
     tools.clear();

@@ -33,7 +33,6 @@ export interface InspectToolDeps<TContext = unknown> {
   getRunStatus?: (runOrDir: string) => Record<string, any>;
   getTool?: (name: string) => any | undefined;
   listRuns?: () => Array<Record<string, any>>;
-  packagedRecipeRoot?: string;
   recipeRoot?: string;
 }
 
@@ -195,6 +194,7 @@ function inspectRuntime(
 function inspectRecipes(
   view: string,
   deps: InspectToolDeps,
+  context: unknown,
 ): Record<string, unknown> {
   if (
     view !== "status" &&
@@ -213,18 +213,51 @@ function inspectRecipes(
   }
   const discovered = RecipesDiscovery.discoverRecipeSources([
     { root: recipeRoot, defaultTool: true, mutableUsage: true },
-    { root: deps.packagedRecipeRoot ?? Paths.getPackagedRecipeRoot() },
   ]);
-  const skillRecipeNamespaces =
-    RecipesReferences.getActiveSkillRecipeNamespaces();
+  const skillContext =
+    context && typeof context === "object" && "activeSkillRecipeContext" in context
+      ? (context as {
+          activeSkillRecipeContext?: RecipesReferences.ActiveSkillRecipeContext;
+        }).activeSkillRecipeContext
+      : undefined;
+  const activeSkillContext =
+    skillContext ?? RecipesReferences.EMPTY_ACTIVE_SKILL_RECIPE_CONTEXT;
+  const skillRecipeNamespaces = RecipesReferences.getActiveSkillRecipeNamespaces(
+    activeSkillContext,
+  );
+  let skillRecipeComponents: Array<Record<string, unknown>> = [];
+  const skillRecipeComponentDiagnostics: Array<Record<string, unknown>> = [];
+  try {
+    skillRecipeComponents = RecipesReferences.listActiveSkillRecipeComponents(
+      activeSkillContext,
+    ).map((component) => ({
+      identity: component.identity,
+      source_kind: "active_skill_component",
+      skill: component.skill,
+      stem: component.stem,
+      imports: component.imports,
+    }));
+  } catch (error) {
+    skillRecipeComponentDiagnostics.push({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const discoverySummary = RecipesDiscovery.summarizeDiscovery(discovered);
   const summary = {
-    ...RecipesDiscovery.summarizeDiscovery(discovered),
-    skill_recipe_namespaces: skillRecipeNamespaces,
+    ...discoverySummary,
+    active: Array.isArray(discoverySummary.active)
+      ? discoverySummary.active.map((entry) => ({
+          ...(entry as Record<string, unknown>),
+          source_kind: "user_registry_capability",
+        }))
+      : discoverySummary.active,
+    skill_recipe_components: skillRecipeComponents,
+    skill_recipe_component_diagnostics: skillRecipeComponentDiagnostics,
+    active_skill_recipe_identities: Object.keys(skillRecipeNamespaces).sort(),
     skill_recipe_namespace_diagnostics: Object.entries(skillRecipeNamespaces)
       .filter(([, roots]) => roots.length > 1)
-      .map(([name, roots]) => ({
+      .map(([name]) => ({
         name,
-        roots,
         error: `Ambiguous active Skill Recipe namespace ${name}`,
       })),
     drafts: RecipesDiscovery.listDraftRecipes(join(recipeRoot, "drafts")),
@@ -386,7 +419,7 @@ export function createInspectToolDefinition<TContext = unknown>(
       if (target === "runtime") {
         details = inspectRuntime(view, input, ctx, deps);
       } else if (target === "recipes") {
-        details = inspectRecipes(view, deps);
+        details = inspectRecipes(view, deps, ctx);
       } else {
         const run = parseRunTarget(target);
         if (run) details = inspectRun(run, view, input, ctx, deps);

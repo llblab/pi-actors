@@ -18,10 +18,11 @@ export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
   pi.on("session_shutdown", async (event, ctx) =>
     runtime.onSessionShutdown(event.reason, ctx),
   );
-  pi.on("before_agent_start", async (event) =>
+  pi.on("before_agent_start", async (event, ctx) =>
     runtime.beforeAgentStart(
       event.systemPrompt,
       event.systemPromptOptions.skills ?? [],
+      ctx,
     ),
   );
   InspectorCommand.registerActorInspectorCommand(pi, runtime.getRunOwnerId);

@@ -1,0 +1,11 @@
+{
+  "args": [
+    "target:path",
+    "all:bool"
+  ],
+  "defaults": {
+    "target": "recipes",
+    "all": "true"
+  },
+  "template": "{skill_dir}/scripts/validate-recipe.mjs {target} {all?--all:}"
+}

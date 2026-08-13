@@ -46,6 +46,7 @@ import * as Limits from "../lib/limits.ts";
 import { appendRunControlInStateDir } from "../lib/runs-controls.ts";
 import { appendRunTraceEvent, summarizeRunTraceJournal, readRunTraceJournal } from "../lib/runs-trace.ts";
 import { appendRunRetentionEvidence, pruneTerminalRun } from "../lib/runs-retention.ts";
+import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 
 async function waitForResult(
   stateDir: string,
@@ -684,7 +685,6 @@ test("Async runs can start from recipe files with overrides", async () => {
       file,
       JSON.stringify(
         {
-          name: "from-file",
           control: ["continue"],
           retire_when: "children_terminal",
           template: `${process.execPath} -e "console.log(process.argv[1] + ' ' + process.argv[2])" {greeting} {name}`,
@@ -695,8 +695,8 @@ test("Async runs can start from recipe files with overrides", async () => {
       ),
     );
     const meta = startRun(
-      { file, run_id: "override-run", state_dir: stateDir, values: { name: "override" } },
-      process.cwd(),
+      { file: "./say.json", run_id: "override-run", state_dir: stateDir, values: { name: "override" } },
+      root,
     );
     assert.equal(meta.run, "override-run");
     assert.equal(meta.recipe, "say");
@@ -895,17 +895,70 @@ test("Async runs persist recipe context bundles for file-backed recipes", async 
     assert.deepEqual(
       meta.recipe_context_records?.map((record) => ({
         alias: record.alias,
+        importPath: record.import_path,
+        logicalReference: record.logical_reference,
         name: record.name,
         role: record.role,
+        sourceKind: record.source_kind,
       })),
       [
-        { alias: undefined, name: "parent", role: "entry" },
-        { alias: "child_step", name: "child", role: "import" },
+        {
+          alias: undefined,
+          importPath: [],
+          logicalReference: "parent.json",
+          name: "parent",
+          role: "entry",
+          sourceKind: "explicit_file_recipe",
+        },
+        {
+          alias: "child_step",
+          importPath: ["child_step"],
+          logicalReference: "child.json",
+          name: "child",
+          role: "import",
+          sourceKind: "explicit_file_recipe",
+        },
       ],
     );
     assert.match(JSON.stringify(meta.template), /actorRecipeContext/);
     const result = await waitForResult(stateDir);
     assert.equal(result.code, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Async Skill Recipes capture logical provenance and private physical source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-skill-context-"));
+  const skillDir = join(root, "sample");
+  const recipeDir = join(skillDir, "recipes");
+  const stateDir = join(root, "skill-run");
+  try {
+    await mkdir(recipeDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), "# Sample\n");
+    await writeFile(join(recipeDir, "task.json"), JSON.stringify({ template: "echo ok" }));
+    const skillContext = createActiveSkillRecipeContext([
+      { name: "sample", baseDir: skillDir },
+    ]);
+    const meta = startRun(
+      { file: "sample/task", state_dir: stateDir },
+      process.cwd(),
+      { skillContext },
+    );
+    assert.deepEqual(meta.recipe_context_records?.map((record) => ({
+      logicalReference: record.logical_reference,
+      role: record.role,
+      skill: record.skill,
+      sourceFile: record.source_file,
+      sourceKind: record.source_kind,
+    })), [{
+      logicalReference: "sample/task",
+      role: "entry",
+      skill: "sample",
+      sourceFile: join(recipeDir, "task.json"),
+      sourceKind: "active_skill_component",
+    }]);
+    await waitForResult(stateDir);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1018,7 +1071,6 @@ test("Recipe imports execute under repeated parallel parent nodes", async () => 
       child,
       JSON.stringify(
         {
-          name: "child",
           args: ["word:string"],
           template: `${process.execPath} -e "console.log(process.argv[1])" {word}-{index}-{_index}`,
         },
@@ -1030,7 +1082,6 @@ test("Recipe imports execute under repeated parallel parent nodes", async () => 
       parent,
       JSON.stringify(
         {
-          name: "parent",
           imports: {
             node: {
               from: "child.json",

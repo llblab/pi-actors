@@ -10,7 +10,7 @@ A Recipe stores a reusable command-template definition as JSON or Markdown.
   "description": "Create a repository health artifact",
   "args": ["repo:path", "artifact_path:path", "model:string"],
   "defaults": { "artifact_path": "{state_dir}/health.md" },
-  "imports": { "review": "subagent-review.json" },
+  "imports": { "review": "swarm/quorum-review" },
   "artifacts": { "report": "{artifact_path}" },
   "template": {
     "name": "review",
@@ -39,11 +39,13 @@ summarize {file}
 
 Fences marked `template`, `command-template`, `json`, or `recipe` can define execution. Frontmatter supports Recipe metadata and command-template flags.
 
+Skill Recipe identity is `<active Skill name>/<Recipe filename stem>`. Recipe files have no top-level `name`; both JSON and Markdown fail with migration guidance when that removed field is present. `SKILL.md` `name` remains Pi host metadata and matches the Skill directory; pi-actors introduces no additional Skill identity field. The `name` field on a command-template node still selects an imported alias and is not Recipe self-identity.
+
 ## Fields
 
 Common Recipe fields:
 
-- `name`, `description`, `disabled`;
+- `description`, `disabled`;
 - `args`, typed arg declarations, inline defaults, `defaults`, and composition `values`;
 - `imports` with optional binding defaults/values;
 - `template`;
@@ -58,24 +60,38 @@ Common Recipe fields:
 ```json
 {
   "imports": {
-    "review": "subagent-review.json",
-    "verify": {
-      "from": "subagent-verify.json",
+    "review": "swarm/quorum-review",
+    "report": {
+      "from": "../shared/report.md",
       "defaults": { "thinking": "medium" }
     }
   },
   "template": [
     { "name": "review", "values": { "input": "{input}" } },
-    { "name": "verify", "values": { "input": "Use prior output" } }
+    { "name": "report", "values": { "input": "Use prior output" } }
   ]
 }
 ```
 
 Imports are local definitions. Named nodes call imported templates inside the same execution graph and Run. Effective values follow `caller > node/import/Recipe values > defaults > inline arg default > missing-value error`, then the selected value is checked against its declared type or enum.
 
-Bare references preserve user → adjacent → packaged resolution. `std:<name>` selects a packaged Recipe exactly. `skill:<skill-name>/<recipe-path>` selects a component under the `recipes/` tree of a Skill currently active through Pi resource discovery. Skill Recipes never become tools merely by existing, and duplicate active Skill names fail as ambiguous rather than shadowing silently.
+Imports accept exactly `<skill>/<recipe>` or an explicit `.json` / `.md` file path. A Skill reference selects one direct filename stem under the exact Skill currently active through Pi resource discovery; duplicate active Skill identities and JSON/Markdown stem collisions fail closed. Explicit paths may be relative (`./local-review.json`, `../shared/report.md`) or absolute (`/absolute/path/to/recipe.json`). An entry file path resolves from invocation `cwd`; a relative import resolves from the importing Recipe's directory. No bare or ambient lookup remains.
 
 Direct delegation can use another Recipe as the entire template. The delegated Recipe remains the source of truth while the wrapper may narrow args/defaults or override selected lifecycle metadata.
+
+A launched Run captures each entry/import role, filename-derived stem, logical reference, Skill identity when owned, and import alias ancestry. Private physical source paths remain execution provenance; Inspector and child-agent context expose logical identities rather than machine-local Skill locations.
+
+## Migration from pre-0.46 references
+
+```text
+std:foo              -> owning-skill/foo
+skill:foo/bar        -> foo/bar
+root packaged foo    -> owning-skill/new-file-stem
+Recipe name field    -> delete; filename is identity
+nested skill path    -> flatten filename or use explicit file path
+```
+
+Removed `std:` and `skill:` forms fail with migration guidance; they are not aliases. Root packaged Recipes no longer exist. Flatten a maintained Skill component to a direct filename, or reference a nested/local file explicitly when it is intentionally outside the Skill component namespace.
 
 ## Control
 
@@ -85,7 +101,7 @@ Only a process that consumes actor-local input declares actions:
 {
   "async": true,
   "control": ["pause", "resume", "stop"],
-  "template": "{repo}/scripts/service.mjs --state-dir {state_dir}"
+  "template": "{skill_dir}/scripts/service.mjs --state-dir {state_dir}"
 }
 ```
 
@@ -110,7 +126,7 @@ Every file-backed Recipe receives immutable `{recipe_dir}`. A Recipe under an ac
 
 ## Context and Provenance
 
-File-backed Runs capture Recipe context records for the entry and imports, including qualified `std:` or `skill:` identity when applicable. The captured bundle explains composition identity and remains generation-local evidence. Runtime origin paths remain in local Run provenance but are omitted from model-facing launch values. It does not override the authored task prompt.
+File-backed Runs capture Recipe context records for the entry and imports. File identity is the filename stem; a direct Recipe under an active Skill has the logical identity `<skill>/<stem>`. The captured bundle explains composition identity and remains generation-local evidence. Runtime origin paths remain in local Run provenance but are omitted from model-facing launch values. It does not override the authored task prompt.
 
 Recipes that need a minimal child prompt may opt out of injected Recipe context through the documented `actor_context` launch option.
 
@@ -129,18 +145,18 @@ Defaults can inherit current Pi policy:
 
 Resolution fails before launch when required current policy is unavailable. The Run persists whether values were inherited or explicit.
 
-## Resolution and Shadowing
+## Resolution Context
 
-User Recipes under `~/.pi/agent/recipes` take priority over adjacent and packaged Recipes for compatible bare lookup. Exact `std:` and `skill:` references bypass that ambiguous space. The active Skill namespace converges from Pi's loaded Skill metadata on startup/reload; pi-actors does not scan ambient Skill roots independently. An invalid active file blocks fallback and reports both paths. Disabled Recipes cannot launch. Registry watchers converge after atomic changes without executing partial definitions.
+User Recipes under `~/.pi/agent/recipes` remain intentionally registered tools, not an ambient import namespace. Each session receives an immutable active-Skill resolution context from Pi's loaded Skill metadata; pi-actors does not scan ambient Skill roots independently or keep a process-global mutable namespace. A launch captures its resolved graph, so later Skill changes affect only future launches. An invalid or missing exact target fails without fallback. Disabled Recipes cannot launch. Registry watchers converge after atomic changes without executing partial definitions.
 
 ## Validation
 
 ```bash
-node scripts/validate-recipe.mjs recipes/example.json --qa
-node scripts/validate-recipe.mjs recipes --all --qa --summary
+node skills/actors/scripts/validate-recipe.mjs path/to/recipe.json --qa
+node skills/actors/scripts/validate-recipe.mjs skills --skills --qa --summary
 ```
 
-Validation checks JSON/Markdown compilation, imports, Control, artifacts, helper paths, and platform notes. Files exceed 1 MiB or import depth 32 fail closed.
+Skill validation recursively inventories every direct `<skill>/recipes/*.json|*.md` component, rejects nested files and duplicate stems, and checks filename identity, JSON/Markdown compilation, origins, imports, Control, artifacts, portable paths, helper targets, and platform notes. Files exceeding 1 MiB or import depth 32 fail closed.
 
 ## Related
 

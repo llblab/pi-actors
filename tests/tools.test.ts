@@ -11,7 +11,7 @@ import { getRunStateRoot } from "../lib/paths.ts";
 import { createRegisterToolDefinition } from "../lib/tools-register.ts";
 import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
-import { setActiveSkillRecipeSources } from "../lib/recipes-references.ts";
+import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 
 function createRegistryDeps() {
   return {
@@ -74,20 +74,21 @@ test("Spawn launches a qualified active-Skill Recipe", async () => {
         template: `${process.execPath} -e "console.log(process.argv[1])" {skill_dir}`,
       }),
     );
-    setActiveSkillRecipeSources([{ name: "sample", baseDir: skillDir }]);
+    const activeSkillRecipeContext = createActiveSkillRecipeContext([
+      { name: "sample", baseDir: skillDir },
+    ]);
     const spawn = createSpawnToolDefinition();
     const result = await spawn.execute(
       "call-skill-spawn",
-      { as: `run:${runId}`, recipe: "skill:sample/task" },
+      { as: `run:${runId}`, recipe: "sample/task" },
       undefined,
       undefined,
-      { cwd: process.cwd() },
+      { activeSkillRecipeContext, cwd: process.cwd() },
     );
     assert.equal(result.details.recipe_file, join(recipeDir, "task.json"));
     assert.equal(result.details.values.skill_dir, skillDir);
     await waitForFile(join(stateDir, "result.json"));
   } finally {
-    setActiveSkillRecipeSources([]);
     await rm(stateDir, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }

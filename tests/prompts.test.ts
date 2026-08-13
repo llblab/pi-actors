@@ -59,7 +59,7 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /Prefer maintained packaged recipes\/pipelines/,
+    /Prefer maintained active-Skill Recipes/,
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,

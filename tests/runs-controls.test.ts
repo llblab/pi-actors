@@ -43,6 +43,25 @@ function runAdmissionWorker(stateDir: string, worker: number): Promise<boolean> 
   });
 }
 
+async function runAdmissionWorkers(
+  stateDir: string,
+  count: number,
+  concurrency = 12,
+): Promise<boolean[]> {
+  const results = new Array<boolean>(count);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(count, concurrency) }, async () => {
+      while (next < count) {
+        const worker = next;
+        next += 1;
+        results[worker] = await runAdmissionWorker(stateDir, worker);
+      }
+    }),
+  );
+  return results;
+}
+
 test("Run Control journal appends canonical generation-bound records", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-controls-"));
   try {
@@ -175,9 +194,9 @@ test("Run Control compaction keeps every active record and a bounded terminal ta
 test("Run Control admission is atomic at the exact pending limit", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-controls-race-"));
   try {
-    const results = await Promise.all(
-      Array.from({ length: Limits.RUN_CONTROL_PENDING_LIMIT + 12 }, (_, index) =>
-        runAdmissionWorker(root, index)),
+    const results = await runAdmissionWorkers(
+      root,
+      Limits.RUN_CONTROL_PENDING_LIMIT + 12,
     );
     assert.equal(results.filter(Boolean).length, Limits.RUN_CONTROL_PENDING_LIMIT);
     assert.equal(results.filter((value) => !value).length, 12);

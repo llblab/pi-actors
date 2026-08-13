@@ -12,13 +12,14 @@ The Inspector follows the kernel directly. It shows Runs owned by the current Pi
 
 Shows captured execution provenance:
 
-- Recipe name and source path;
+- file-derived Recipe stem and logical reference;
+- source kind (`user_registry_capability`, `active_skill_component`, or `explicit_file_recipe`) and Skill identity when owned;
 - resolved template and values;
-- imports/context records;
+- root/import roles plus alias ancestry;
 - declared artifacts and actor-local actions;
 - model/thinking policy and launch source.
 
-Captured Recipe evidence belongs to the Run generation and does not change when an active Recipe file later changes. Non-empty object values render as indented brace-delimited property lists rather than flattened inline strings.
+Captured Recipe evidence belongs to the Run generation and does not change when an active Recipe file later changes. Skill components display logical identities such as `artifacts/report`; private physical `source_file`, `skill_dir`, and `recipe_dir` stay out of Inspector and model-facing views. Non-empty object values render as indented brace-delimited property lists rather than flattened inline strings.
 
 ## Trace
 

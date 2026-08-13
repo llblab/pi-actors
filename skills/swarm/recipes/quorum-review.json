@@ -1,0 +1,65 @@
+{
+  "async": true,
+  "imports": {
+    "subagent": "swarm/subagent-prompt",
+    "merger": "swarm/subagent-merge",
+    "judge": "swarm/subagent-judge",
+    "normalizer": "swarm/subagent-normalize"
+  },
+  "args": [
+    "prompt:string",
+    "models:array",
+    "merge_mode:enum(consensus-first,risk-first)",
+    "merger_model:string",
+    "judge_model:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "merge_mode": "consensus-first",
+    "tools": ""
+  },
+  "template": [
+    {
+      "parallel": true,
+      "repeat": "{models.length}",
+      "failure": "branch",
+      "template": {
+        "name": "subagent",
+        "values": {
+          "prompt": "{prompt}",
+          "model": "{models[index]}",
+          "tools": "{tools}",
+          "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
+        }
+      }
+    },
+    {
+      "name": "merger",
+      "values": {
+        "inputs": "Use quorum outputs from stdin.",
+        "mode": "{merge_mode}",
+        "model": "{merger_model}",
+        "tools": "{tools}",
+        "risk_policy": "Preserve vote shape, minority severe findings, and confidence disagreements."
+      }
+    },
+    {
+      "name": "judge",
+      "values": {
+        "report": "Use merged quorum report from stdin.",
+        "evidence": "Use raw quorum outputs and merged report from stdin.",
+        "model": "{judge_model}",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use merged and judged quorum output from stdin.",
+        "format": "Markdown sections: Verdict, Vote Shape, Consensus, Minority Findings, Confidence, Required Action.",
+        "model": "{merger_model}",
+        "tools": "{tools}"
+      }
+    }
+  ]
+}

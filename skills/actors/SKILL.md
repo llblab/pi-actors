@@ -29,7 +29,7 @@ A Recipe defines execution. It may declare named typed args, inline fallbacks, c
 
 Do not declare Control for ordinary one-shot work. Runtime lifecycle actions such as `kill` stay runtime-owned and must not appear in Recipe Control declarations. Imported Recipes act as local definitions inside one Run; they do not create nested Runs unless execution explicitly spawns them.
 
-Prefer maintained packaged Recipes over ad hoc wrappers. Use `std:<recipe>` for exact packaged lookup and `skill:<skill>/<recipe-path>` for a component bundled with a Pi-active Skill. File-backed Recipes own `{recipe_dir}` and Skill Recipes own `{skill_dir}`; callers never pass or override these origins. Skill Recipes are components, not automatic tools. Keep model, thinking, mission, concurrency, quorum, and timeout choices caller-owned unless a Recipe documents a stable policy.
+Prefer maintained Skill-owned Recipes over ad hoc wrappers. Skill Recipe identity is `<active Skill name>/<Recipe filename stem>`; Recipe files have no top-level `name`. `SKILL.md` `name` is Pi host metadata matching its directory, not an additional pi-actors identity field. Use `<skill>/<recipe>` for an exact direct component or an explicit `.json` / `.md` path. Entry paths resolve from invocation `cwd`; relative imports resolve from the importing Recipe directory. File-backed Recipes own `{recipe_dir}` and Skill Recipes own `{skill_dir}`; callers never pass or override these origins. Skill Recipes are components, not automatic tools. Keep model, thinking, mission, concurrency, quorum, and timeout choices caller-owned unless a Recipe documents a stable policy.
 
 ## Trace
 
@@ -90,11 +90,11 @@ If work may outlive the current turn, needs steering, produces artifacts, fans o
 
 ## Top Recipes
 
-- [Repository health](../../recipes/pipeline-repo-health.json)
-- [Quorum review](../../recipes/pipeline-quorum-review.json)
-- [Artifact bundle](../../recipes/pipeline-artifact-bundle.json)
-- [Music player service](../../recipes/music-player.json)
-- [Resource locker service](../../recipes/resource-locker.json)
+- [Repository health](../project-work/recipes/repo-health.json)
+- [Quorum review](../swarm/recipes/quorum-review.json)
+- [Artifact bundle](../artifacts/recipes/bundle.json)
+- [Music player service](../media/recipes/player.json)
+- [Resource locker service](./recipes/resource-locker.json)
 
 ## Deep References
 

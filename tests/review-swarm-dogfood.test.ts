@@ -19,6 +19,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { getRunStatus, startRun } from "../lib/async-runs.ts";
+import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -58,11 +59,11 @@ function fakePiScript(): string {
     '  if (arg.startsWith("@")) promptFiles.push(arg.slice(1));',
     '  else if (!arg.startsWith("-")) fragmentedPrompts.push(arg);',
     "}",
-    "if (fragmentedPrompts.length > 0 || promptFiles.length !== 1) {",
+    "if (fragmentedPrompts.length > 0 || promptFiles.length < 1) {",
     '  console.error(`STRICT_PI_PROMPT_ARGV fragmented=${fragmentedPrompts.length} files=${promptFiles.length}`);',
     "  process.exit(64);",
     "}",
-    'const prompt = readFileSync(promptFiles[0], "utf8");',
+    'const prompt = promptFiles.map((file) => readFileSync(file, "utf8")).join("\\n");',
     'const stdin = readFileSync(0, "utf8");',
     "const full = `${prompt}\\n${stdin}`;",
     'const task = full.split("Actor recipe context bundle follows")[0];',
@@ -103,10 +104,106 @@ function fakePiScript(): string {
     "  process.exit(0);",
     "}",
     "",
-    'console.log(`GENERIC FAKE PI OUTPUT\\n${stdin}`);',
+    'if (task.includes("immutable pi-actors draft batch")) {',
+    '  console.log(`DRAFT_REVIEW_RESULT\\n{"batchId":"dogfood","createdAt":"2026-01-01T00:00:00.000Z","decisions":[]}`);',
+    "  process.exit(0);",
+    "}",
+    "",
+    'console.log(`ACTOR_REVIEW_RESULT\\nGENERIC FAKE PI OUTPUT\\n${stdin}`);',
     "",
   ].join("\n");
 }
+
+test("Skill capability packs execute qualified source workflows", {
+  skip: process.platform === "win32" ? "requires a POSIX fake pi executable" : false,
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-capability-packs-"));
+  const binDir = join(root, "bin");
+  const previousPath = process.env.PATH;
+  try {
+    await mkdir(binDir, { recursive: true });
+    const fakePi = join(binDir, "pi");
+    await writeFile(fakePi, fakePiScript(), "utf8");
+    await chmod(fakePi, 0o755);
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    const skillContext = createActiveSkillRecipeContext(
+      ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]
+        .map((name) => ({ name, baseDir: join(__dirname, "..", "skills", name) })),
+    );
+    const inputPath = join(root, "draft-input.json");
+    await writeFile(inputPath, "{}\n");
+    const workflows = [
+      {
+        recipe: "project-work/repo-health",
+        values: {
+          repo: process.cwd(), docs_dir: "docs", validation_command: "true",
+          artifact_path: join(root, "repo-health.md"), model: "fake/model",
+          current_model: "fake/model", current_thinking: "off",
+        },
+      },
+      {
+        recipe: "project-work/release-readiness",
+        values: {
+          scope: process.cwd(), version: "0.46.0", validation_command: "true",
+          artifact_path: join(root, "release-readiness.md"), lenses: ["release"],
+          reviewer_model: "fake/model", verifier_model: "fake/model",
+          merger_model: "fake/model", judge_model: "fake/model", thinking: "off",
+          min_successful_reviewers: 1, subagent_ttl_ms: 5000,
+          current_model: "fake/model", current_thinking: "off",
+        },
+      },
+      {
+        recipe: "swarm/quorum-review",
+        values: {
+          prompt: "Review capability pack dogfood", models: ["fake/model"],
+          merger_model: "fake/model", judge_model: "fake/model",
+          current_model: "fake/model", current_thinking: "off",
+        },
+      },
+      {
+        recipe: "artifacts/bundle",
+        values: {
+          input: "Capability pack dogfood evidence", artifact_path: join(root, "bundle.md"),
+          manifest_path: join(root, "bundle.json"), model: "fake/model",
+          write_mode: "overwrite", current_model: "fake/model", current_thinking: "off",
+        },
+      },
+      {
+        recipe: "media/player",
+        values: { command: "status", source: root, loop: false, volume: 70, player: "auto" },
+      },
+      {
+        recipe: "recipe-memory/draft-review",
+        values: { input_path: inputPath, model: "fake/model", thinking: "off" },
+      },
+    ];
+    for (const [index, workflow] of workflows.entries()) {
+      const stateDir = join(root, `run-${index}`);
+      const meta = startRun(
+        {
+          file: workflow.recipe,
+          launch_source: "spawn",
+          run_id: `capability-pack-${index}-${process.pid}-${Date.now()}`,
+          state_dir: stateDir,
+          values: workflow.values,
+        },
+        process.cwd(),
+        { skillContext },
+      );
+      await waitForFile(join(stateDir, "result.json"), 30000);
+      const status = getRunStatus(stateDir);
+      const stdout = await readFile(join(stateDir, "stdout.log"), "utf8");
+      const stderr = await readFile(join(stateDir, "stderr.log"), "utf8");
+      assert.equal(status.status, "done", `${workflow.recipe}\n${stdout}\n${stderr}`);
+      assert.equal(meta.recipe_context_records?.[0].logical_reference, workflow.recipe);
+      assert.equal(meta.recipe_context_records?.[0].source_kind, "active_skill_component");
+    }
+    assert.equal((await readFile(join(root, "bundle.md"), "utf8")).length > 0, true);
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
   skip: process.platform === "win32" ? "requires a POSIX fake pi executable" : false,
@@ -123,7 +220,7 @@ test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
     const meta = startRun(
       {
-        file: join(__dirname, "..", "recipes", "pipeline-review-readiness.json"),
+        file: "swarm/review-readiness",
         launch_source: "spawn",
         run_id: `review-dogfood-${process.pid}-${Date.now()}`,
         state_dir: stateDir,
@@ -138,6 +235,11 @@ test("Packaged review readiness pipeline dogfoods degraded reviewer fanout", {
         },
       },
       process.cwd(),
+      {
+        skillContext: createActiveSkillRecipeContext([
+          { name: "swarm", baseDir: join(__dirname, "..", "skills", "swarm") },
+        ]),
+      },
     );
     await waitForFile(join(stateDir, "result.json"), 20000);
     const status = getRunStatus(stateDir);

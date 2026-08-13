@@ -10,17 +10,30 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { getPackagedRecipeRoot } from "../lib/paths.ts";
 import {
   buildRecipeContextRecords,
+  createActiveSkillRecipeContext,
   getActiveSkillRecipeNamespaces,
   getRecipeIdFromPath,
+  listActiveSkillRecipeComponents,
   readResolvedRecipeConfig,
   resolveRecipePath,
-  setActiveSkillRecipeSources,
+  resolveRecipeReferencePath,
 } from "../lib/recipes-references.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageRoot = join(__dirname, "..");
+const packageSkillContext = createActiveSkillRecipeContext(
+  ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"].map(
+    (name) => ({ name, baseDir: join(packageRoot, "skills", name) }),
+  ),
+);
+
+function readPackageRecipe(file: string) {
+  return readResolvedRecipeConfig(file, [], {
+    skillContext: packageSkillContext,
+  });
+}
 
 test("Template recipes embed imported recipes as pipeline nodes", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
@@ -30,7 +43,6 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
     await writeFile(
       child,
       JSON.stringify({
-        name: "child",
         args: ["word:string", "suffix:string=!"],
         defaults: { suffix: "!" },
         template: "printf {word}{suffix}",
@@ -39,7 +51,6 @@ test("Template recipes embed imported recipes as pipeline nodes", async () => {
     await writeFile(
       parent,
       JSON.stringify({
-        name: "parent",
         imports: {
           child: {
             from: "child.json",
@@ -183,11 +194,11 @@ test("Recipes reject skill_dir outside an owning Skill", async () => {
   }
 });
 
-test("Qualified std and active-Skill Recipe references resolve without bare shadowing", async () => {
+test("Skill and file Recipe references resolve without ambient fallback", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-skill-recipes-"));
   try {
     const skillDir = join(root, "sample");
-    const recipeDir = join(skillDir, "recipes", "nested");
+    const recipeDir = join(skillDir, "recipes");
     await import("node:fs/promises").then((fs) =>
       fs.mkdir(recipeDir, { recursive: true }),
     );
@@ -196,42 +207,85 @@ test("Qualified std and active-Skill Recipe references resolve without bare shad
       join(recipeDir, "task.json"),
       JSON.stringify({ template: "echo {skill_dir}" }),
     );
-    setActiveSkillRecipeSources([
+    const skillContext = createActiveSkillRecipeContext([
       { name: "sample", filePath: join(skillDir, "SKILL.md") },
     ]);
     const parent = join(root, "parent.json");
-    await writeFile(
-      parent,
-      JSON.stringify({ template: "skill:sample/nested/task" }),
-    );
-    const config = readResolvedRecipeConfig(parent)!;
+    await writeFile(parent, JSON.stringify({ template: "sample/task" }));
+    const config = readResolvedRecipeConfig(parent, [], { skillContext })!;
     assert.match(JSON.stringify(config.template), /sample/);
     assert.equal(
-      buildRecipeContextRecords(join(recipeDir, "task.json"))[0]
-        .qualified_name,
-      "skill:sample/nested/task",
+      buildRecipeContextRecords(join(recipeDir, "task.json"), skillContext)[0]
+        .logical_reference,
+      "sample/task",
     );
-    assert.equal(JSON.stringify(config.template).includes("skill:sample"), false);
-    const stdParent = join(root, "std.json");
-    await writeFile(
-      stdParent,
-      JSON.stringify({ template: "std:utility-package-summary" }),
-    );
-    assert.match(
-      JSON.stringify(readResolvedRecipeConfig(stdParent)?.template),
-      /recipe-utils\.mjs/,
-    );
-    assert.deepEqual(getActiveSkillRecipeNamespaces(), {
-      sample: [join(skillDir, "recipes")],
+    assert.deepEqual(getActiveSkillRecipeNamespaces(skillContext), {
+      sample: [recipeDir],
     });
-    setActiveSkillRecipeSources([]);
-    assert.deepEqual(getActiveSkillRecipeNamespaces(), {});
+    assert.deepEqual(listActiveSkillRecipeComponents(skillContext), [
+      {
+        file: join(recipeDir, "task.json"),
+        identity: "sample/task",
+        imports: {},
+        skill: "sample",
+        stem: "task",
+      },
+    ]);
+    assert.equal(
+      resolveRecipeReferencePath("./parent.json", root, skillContext),
+      parent,
+    );
+    assert.throws(
+      () => resolveRecipeReferencePath("std:task"),
+      /std: Recipe references were removed in pi-actors 0\.46\.\nUse <skill>\/<recipe> or an explicit \.json\/\.md file path\./,
+    );
+    assert.throws(
+      () => resolveRecipeReferencePath("skill:sample/task"),
+      /skill: Recipe references were removed in pi-actors 0\.46\.\nUse <skill>\/<recipe> without a prefix\./,
+    );
     assert.throws(
       () => readResolvedRecipeConfig(parent),
-      /Active Skill Recipe namespace not found: sample/,
+      /Active Skill Recipe not found: sample\/task/,
     );
   } finally {
-    setActiveSkillRecipeSources([]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Nested and colliding active-Skill Recipe stems fail closed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-skill-stems-"));
+  try {
+    const skillDir = join(root, "sample");
+    const recipeDir = join(skillDir, "recipes");
+    await import("node:fs/promises").then((fs) =>
+      fs.mkdir(join(recipeDir, "nested"), { recursive: true }),
+    );
+    await writeFile(join(recipeDir, "task.json"), JSON.stringify({ template: "echo json" }));
+    await writeFile(join(recipeDir, "task.md"), "---\ntemplate: echo md\n---\n");
+    await writeFile(join(recipeDir, "nested", "task.json"), JSON.stringify({ template: "echo nested" }));
+    const skillContext = createActiveSkillRecipeContext([
+      { name: "sample", baseDir: skillDir },
+    ]);
+    assert.throws(
+      () => resolveRecipeReferencePath("sample/task", root, skillContext),
+      /Skill Recipe stem collision: sample\/task has both \.json and \.md files/,
+    );
+    assert.equal(
+      resolveRecipeReferencePath("sample/nested/task", root, skillContext),
+      undefined,
+    );
+    assert.equal(
+      buildRecipeContextRecords(
+        join(recipeDir, "nested", "task.json"),
+        skillContext,
+      )[0].source_kind,
+      "explicit_file_recipe",
+    );
+    assert.throws(
+      () => listActiveSkillRecipeComponents(skillContext),
+      /Nested Skill Recipe file is not addressable/,
+    );
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -247,178 +301,164 @@ test("Duplicate active Skill names fail with deterministic ambiguity", async () 
         fs.mkdir(join(second, "recipes"), { recursive: true }),
       ]),
     );
-    setActiveSkillRecipeSources([
+    const skillContext = createActiveSkillRecipeContext([
       { name: "duplicate", baseDir: first },
       { name: "duplicate", baseDir: second },
     ]);
-    const parent = join(root, "parent.json");
-    await writeFile(
-      parent,
-      JSON.stringify({ template: "skill:duplicate/task" }),
-    );
     assert.throws(
-      () => readResolvedRecipeConfig(parent),
-      /Ambiguous active Skill Recipe namespace duplicate/,
+      () => resolveRecipeReferencePath("duplicate/task", root, skillContext),
+      /Duplicate active Skill identity duplicate/,
     );
   } finally {
-    setActiveSkillRecipeSources([]);
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Recipe paths expand repo and agent placeholders", async () => {
+test("Immutable active-Skill contexts isolate concurrent sessions and captured graphs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-skill-sessions-"));
+  try {
+    const alpha = join(root, "alpha");
+    const beta = join(root, "beta");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(join(alpha, "recipes"), { recursive: true }),
+        fs.mkdir(join(beta, "recipes"), { recursive: true }),
+      ]),
+    );
+    const alphaRecipe = join(alpha, "recipes", "task.json");
+    const betaRecipe = join(beta, "recipes", "task.json");
+    await writeFile(alphaRecipe, JSON.stringify({ template: "echo alpha" }));
+    await writeFile(betaRecipe, JSON.stringify({ template: "echo beta" }));
+    const alphaContext = createActiveSkillRecipeContext([
+      { name: "alpha", baseDir: alpha },
+    ]);
+    const betaContext = createActiveSkillRecipeContext([
+      { name: "beta", baseDir: beta },
+    ]);
+    const [resolvedAlpha, resolvedBeta] = await Promise.all([
+      Promise.resolve(resolveRecipeReferencePath("alpha/task", root, alphaContext)),
+      Promise.resolve(resolveRecipeReferencePath("beta/task", root, betaContext)),
+    ]);
+    assert.equal(resolvedAlpha, alphaRecipe);
+    assert.equal(resolvedBeta, betaRecipe);
+    assert.throws(
+      () => resolveRecipeReferencePath("beta/task", root, alphaContext),
+      /Active Skill Recipe not found: beta\/task/,
+    );
+    assert.throws(
+      () => resolveRecipeReferencePath("alpha/task", root, betaContext),
+      /Active Skill Recipe not found: alpha\/task/,
+    );
+    const captured = buildRecipeContextRecords(alphaRecipe, alphaContext);
+    await writeFile(alphaRecipe, JSON.stringify({ template: "echo changed" }));
+    assert.equal(captured[0].recipe.template, "echo alpha");
+    assert.equal(captured[0].logical_reference, "alpha/task");
+    assert.equal(captured[0].skill, "alpha");
+    assert.equal(captured[0].source_kind, "active_skill_component");
+    assert.equal(Object.isFrozen(alphaContext.namespaces), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Recipe file paths resolve exactly from the supplied base", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const recipeRoot = join(root, "recipes");
     assert.equal(
-      resolveRecipePath("{repo}/recipes/base.json", recipeRoot),
-      join(root, "recipes", "base.json"),
+      resolveRecipePath("./base.json", recipeRoot),
+      join(recipeRoot, "base.json"),
     );
     assert.equal(
-      resolveRecipePath("{agent}/recipes/base.json", recipeRoot),
-      join(
-        process.env.PI_CODING_AGENT_DIR ??
-          join(process.env.HOME!, ".pi", "agent"),
-        "recipes",
-        "base.json",
-      ),
+      resolveRecipePath(join(root, "absolute.md"), recipeRoot),
+      join(root, "absolute.md"),
+    );
+    assert.throws(
+      () => resolveRecipePath("base", recipeRoot),
+      /explicit \.json or \.md path/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Template recipe imports resolve bare names by recipe-root priority", async () => {
+test("Template Recipe imports require explicit paths and never use user shadowing", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
-  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   try {
-    const agentDir = join(root, "agent");
-    const userRoot = join(agentDir, "recipes");
+    const userRoot = join(root, "user");
     const adHocRoot = join(root, "adhoc");
-    process.env.PI_CODING_AGENT_DIR = agentDir;
     await import("node:fs/promises").then((fs) =>
       Promise.all([
         fs.mkdir(userRoot, { recursive: true }),
         fs.mkdir(adHocRoot, { recursive: true }),
       ]),
     );
+    await writeFile(join(userRoot, "shared.json"), JSON.stringify({ template: "echo user" }));
+    await writeFile(join(adHocRoot, "shared.json"), JSON.stringify({ template: "echo adhoc" }));
+    const parent = join(adHocRoot, "parent.json");
     await writeFile(
-      join(userRoot, "shared.json"),
-      JSON.stringify({ template: "echo user" }),
+      parent,
+      JSON.stringify({
+        imports: { shared: "./shared.json" },
+        template: { name: "shared" },
+      }),
     );
+    const config = readResolvedRecipeConfig(parent)!;
+    assert.deepEqual(config.template, {
+      defaults: { recipe_dir: adHocRoot },
+      template: "echo adhoc",
+    });
     await writeFile(
-      join(adHocRoot, "shared.json"),
-      JSON.stringify({ template: "echo adhoc" }),
-    );
-    await writeFile(
-      join(adHocRoot, "parent.json"),
+      parent,
       JSON.stringify({
         imports: { shared: "shared" },
         template: { name: "shared" },
       }),
     );
-    await writeFile(
-      join(adHocRoot, "stdlib-parent.json"),
-      JSON.stringify({
-        imports: { utility: "utility-package-summary" },
-        template: { name: "utility" },
-      }),
+    assert.throws(
+      () => readResolvedRecipeConfig(parent),
+      /Recipe import must use <skill>\/<recipe> or an explicit \.json\/\.md file path/,
     );
-    const config = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
-    assert.deepEqual(config.template, {
-      defaults: { recipe_dir: userRoot },
-      template: "echo user",
-    });
-    await rm(join(userRoot, "shared.json"), { force: true });
-    const fallbackConfig = readResolvedRecipeConfig(
-      join(adHocRoot, "parent.json"),
-    )!;
-    assert.deepEqual(fallbackConfig.template, {
-      defaults: { recipe_dir: adHocRoot },
-      template: "echo adhoc",
-    });
-    const stdlibConfig = readResolvedRecipeConfig(
-      join(adHocRoot, "stdlib-parent.json"),
-    )!;
-    assert.match(JSON.stringify(stdlibConfig.template), /recipe-utils\.mjs/);
   } finally {
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("Template recipe direct delegation resolves by recipe priority", async () => {
+test("Template Recipe direct delegation uses only canonical references", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
-  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   try {
-    const agentDir = join(root, "agent");
-    const userRoot = join(agentDir, "recipes");
-    const adHocRoot = join(root, "adhoc");
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    await import("node:fs/promises").then((fs) =>
-      Promise.all([
-        fs.mkdir(userRoot, { recursive: true }),
-        fs.mkdir(adHocRoot, { recursive: true }),
-      ]),
-    );
+    const child = join(root, "shared.json");
+    const parent = join(root, "parent.json");
     await writeFile(
-      join(userRoot, "shared.json"),
+      child,
       JSON.stringify({
         async: true,
         args: ["message:string"],
-        defaults: { message: "user" },
+        defaults: { message: "child" },
         control: ["stop"],
         retire_when: "children_terminal",
         template: "echo {message}",
       }),
     );
     await writeFile(
-      join(adHocRoot, "shared.json"),
-      JSON.stringify({
-        defaults: { message: "adhoc" },
-        template: "echo {message}",
-      }),
-    );
-    await writeFile(
-      join(adHocRoot, "parent.json"),
+      parent,
       JSON.stringify({
         defaults: { message: "parent" },
-        template: "shared",
+        template: "./shared.json",
       }),
     );
-    await writeFile(
-      join(adHocRoot, "stdlib-parent.json"),
-      JSON.stringify({
-        template: "utility-package-summary",
-      }),
-    );
-    const config = readResolvedRecipeConfig(join(adHocRoot, "parent.json"))!;
+    const config = readResolvedRecipeConfig(parent)!;
     assert.equal(config.async, true);
     assert.deepEqual(config.args, ["message:string"]);
-    assert.deepEqual(config.defaults, { message: "parent" });
     assert.deepEqual(config.control, ["stop"]);
-    assert.equal(config.retire_when, "children_terminal");
     assert.deepEqual(config.template, {
       args: ["message:string"],
-      defaults: { message: "parent", recipe_dir: userRoot },
+      defaults: { message: "parent", recipe_dir: root },
       template: "echo {message}",
     });
-    await rm(join(userRoot, "shared.json"), { force: true });
-    const fallbackConfig = readResolvedRecipeConfig(
-      join(adHocRoot, "parent.json"),
-    )!;
-    assert.deepEqual(fallbackConfig.template, {
-      defaults: { message: "parent", recipe_dir: adHocRoot },
-      template: "echo {message}",
-    });
-    const stdlibConfig = readResolvedRecipeConfig(
-      join(adHocRoot, "stdlib-parent.json"),
-    )!;
-    assert.match(JSON.stringify(stdlibConfig.template), /recipe-utils\.mjs/);
+    await writeFile(parent, JSON.stringify({ template: "shared" }));
+    assert.equal(readResolvedRecipeConfig(parent)?.template, "shared");
   } finally {
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -540,7 +580,7 @@ test("Template recipe imports reject invalid enum bindings", async () => {
   }
 });
 
-test("Template recipe imports expand repo placeholders", async () => {
+test("Template Recipe imports resolve relative to the importing file", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {
     const recipeRoot = join(root, "recipes");
@@ -553,7 +593,7 @@ test("Template recipe imports expand repo placeholders", async () => {
     await writeFile(
       parent,
       JSON.stringify({
-        imports: { child: "{repo}/recipes/child.json" },
+        imports: { child: "./child.json" },
         template: { name: "child", values: { word: "ok" } },
       }),
     );
@@ -574,7 +614,6 @@ test("Template recipes derive recipe identity from filename", async () => {
     await writeFile(
       recipe,
       JSON.stringify({
-        name: "ignored-name",
         description: "File identity recipe",
         template: "echo ok",
       }),
@@ -583,6 +622,23 @@ test("Template recipes derive recipe identity from filename", async () => {
     assert.equal(getRecipeIdFromPath(recipe), "file-identity");
     assert.equal(config.name, "file-identity");
     assert.equal(config.description, "File identity recipe");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("JSON and Markdown Recipes reject a declared top-level name", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-name-"));
+  const guidance = /Recipe\.name was removed in pi-actors 0\.46\.\nFile-backed Recipe identity is derived from its file name\./;
+  try {
+    const json = join(root, "named.json");
+    const markdown = join(root, "named.md");
+    await writeFile(json, JSON.stringify({ name: "other", template: "echo json" }));
+    await writeFile(markdown, "---\nname: other\ntemplate: echo markdown\n---\n");
+    assert.throws(() => readResolvedRecipeConfig(json), guidance);
+    assert.throws(() => readResolvedRecipeConfig(markdown), guidance);
+    assert.throws(() => buildRecipeContextRecords(json), guidance);
+    assert.throws(() => buildRecipeContextRecords(markdown), guidance);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -615,7 +671,7 @@ printf {word}{suffix}
       parent,
       `---
 imports:
-  child: child
+  child: ./child.md
 ---
 
 \`\`\`json recipe
@@ -627,7 +683,7 @@ imports:
     );
     const config = readResolvedRecipeConfig(parent)!;
     assert.equal(getRecipeIdFromPath(child), "child");
-    assert.deepEqual(config.imports, { child: "child" });
+    assert.deepEqual(config.imports, { child: "./child.md" });
     assert.deepEqual(config.template, {
       args: ["word:string", "suffix:string=!"],
       defaults: { recipe_dir: root, suffix: "!", word: "hello" },
@@ -693,7 +749,6 @@ test("Template recipes reference imported defaults and explicit values", async (
     await writeFile(
       base,
       JSON.stringify({
-        name: "base-recipe",
         defaults: { profile: "safe", nested: { level: 3 }, enabled: true },
         template: "echo base",
       }),
@@ -764,26 +819,77 @@ test("Template recipes reject removed mailbox declarations", async () => {
   }
 });
 
-test("Packaged library recipes parse and resolve imports", async () => {
-  const recipeDir = join(__dirname, "..", "recipes");
-  const files = (await readdir(recipeDir)).filter((file) =>
-    file.endsWith(".json"),
-  );
-  assert.ok(files.length > 0);
-  for (const file of files) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
-    assert.ok(config, `${file} should resolve`);
-    assert.ok(config.template, `${file} should define a template`);
+test("Swarm capability pack exposes the exact migrated inventory", () => {
+  const identities = listActiveSkillRecipeComponents(packageSkillContext)
+    .map((component) => component.identity)
+    .filter((identity) => identity.startsWith("swarm/"));
+  assert.deepEqual(identities, [
+    "swarm/architect",
+    "swarm/checkpoint-continuation",
+    "swarm/development-tasking",
+    "swarm/lens-review",
+    "swarm/quorum-review",
+    "swarm/research-synthesis",
+    "swarm/review-readiness",
+    "swarm/subagent-artifact",
+    "swarm/subagent-checkpoint",
+    "swarm/subagent-conflict-report",
+    "swarm/subagent-contradiction-map",
+    "swarm/subagent-critic",
+    "swarm/subagent-evidence-map",
+    "swarm/subagent-followup",
+    "swarm/subagent-judge",
+    "swarm/subagent-merge",
+    "swarm/subagent-normalize",
+    "swarm/subagent-plan",
+    "swarm/subagent-preflight",
+    "swarm/subagent-prompt",
+    "swarm/subagent-prompts",
+    "swarm/subagent-quorum",
+    "swarm/subagent-review",
+    "swarm/subagent-review-coordinator",
+    "swarm/subagent-task-card",
+    "swarm/subagent-tools",
+    "swarm/subagent-verify",
+  ]);
+});
+
+test("Actors and Recipe-memory capability packs expose the exact migrated inventory", () => {
+  const identities = listActiveSkillRecipeComponents(packageSkillContext)
+    .map((component) => component.identity)
+    .filter((identity) =>
+      identity.startsWith("actors/") || identity.startsWith("recipe-memory/"),
+    );
+  assert.deepEqual(identities, [
+    "actors/command-validate",
+    "actors/jsonl-tail",
+    "actors/recipe-validate",
+    "actors/resource-locker",
+    "actors/resource-locker-snapshot",
+    "actors/run-ops-snapshot",
+    "actors/run-state-files",
+    "actors/run-summary",
+    "recipe-memory/draft-review",
+    "recipe-memory/tool-review",
+  ]);
+});
+
+test("Packaged Skill Recipes parse and resolve imports", () => {
+  const components = listActiveSkillRecipeComponents(packageSkillContext);
+  assert.equal(components.length, 58);
+  for (const component of components) {
+    const config = readPackageRecipe(component.file);
+    assert.ok(config, `${component.identity} should resolve`);
+    assert.ok(config.template, `${component.identity} should define a template`);
   }
 });
 
 test("Packaged async-run operations recipes expose actor run args", () => {
-  const recipeDir = join(__dirname, "..", "recipes");
   for (const file of [
-    "utility-run-ops-snapshot.json",
-    "pipeline-async-run-ops.json",
+    join(packageRoot, "skills", "actors", "recipes", "run-ops-snapshot.json"),
+    join(packageRoot, "skills", "project-work", "recipes", "run-ops.json"),
   ]) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    const config = readPackageRecipe(file);
     assert.ok(
       config?.args?.includes("run_id:string"),
       `${file} should expose run_id:string`,
@@ -799,96 +905,63 @@ test("Packaged async-run operations recipes expose actor run args", () => {
   }
 });
 
-test("Packaged recipes contain no removed mailbox declarations", async () => {
-  const recipeDir = join(__dirname, "..", "recipes");
-  const files = (await readdir(recipeDir)).filter((file) => file.endsWith(".json"));
-  for (const file of files) {
-    assert.doesNotMatch(await readFile(join(recipeDir, file), "utf8"), /\"mailbox\"\s*:/);
+test("Skill Recipes contain no removed mailbox declarations", async () => {
+  const components = listActiveSkillRecipeComponents(packageSkillContext);
+  for (const component of components) {
+    assert.doesNotMatch(await readFile(component.file, "utf8"), /\"mailbox\"\s*:/);
   }
 });
 
-test("Packaged recipes do not ship concrete model-version defaults", async () => {
-  const recipeDir = join(__dirname, "..", "recipes");
-  const files = (await readdir(recipeDir)).filter((file) =>
-    file.endsWith(".json"),
-  );
+test("Skill Recipes do not ship concrete model-version defaults", () => {
+  const components = listActiveSkillRecipeComponents(packageSkillContext);
   const modelLikeKey = /(^|_)models?$/;
   const concreteModelValue =
     /\b(openai|gpt|claude|deepseek|gemini|mistral|codex)\b/i;
-  for (const file of files) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
+  for (const component of components) {
+    const config = readPackageRecipe(component.file);
     const defaults = config?.defaults ?? {};
     for (const [key, value] of Object.entries(defaults)) {
       if (modelLikeKey.test(key)) {
         assert.equal(
           value,
           "{current_model}",
-          `${file} may default ${key} only through current-model inheritance`,
+          `${component.identity} may default ${key} only through current-model inheritance`,
         );
       }
       assert.ok(
         !concreteModelValue.test(JSON.stringify(value)),
-        `${file} should not ship concrete model provider/version defaults in ${key}`,
+        `${component.identity} should not ship concrete model provider/version defaults in ${key}`,
       );
     }
   }
 });
 
 test("Packaged review recipes inherit current model and thinking by default", () => {
-  const recipeDir = join(__dirname, "..", "recipes");
-  const expectedModelDefaults: Record<string, string[]> = {
-    "lens-swarm.json": ["model"],
-    "pipeline-review-readiness.json": [
-      "reviewer_model",
-      "verifier_model",
-      "merger_model",
-      "judge_model",
-    ],
-    "pipeline-release-readiness.json": [
-      "reviewer_model",
-      "verifier_model",
-      "merger_model",
-      "judge_model",
-    ],
-    "subagent-review-coordinator.json": [
-      "reviewer_model",
-      "verifier_model",
-      "merger_model",
-      "judge_model",
-    ],
-    "subagent-preflight.json": ["model"],
-    "subagent-review.json": ["model"],
-    "subagent-verify.json": ["model"],
-    "subagent-merge.json": ["model"],
-    "subagent-judge.json": ["model"],
-    "subagent-normalize.json": ["model"],
-  };
-  const expectedThinkingDefaults = [
-    "lens-swarm.json",
-    "pipeline-review-readiness.json",
-    "pipeline-release-readiness.json",
-    "subagent-review-coordinator.json",
-    "subagent-preflight.json",
-    "subagent-review.json",
-    "subagent-verify.json",
-    "subagent-merge.json",
-    "subagent-judge.json",
-    "subagent-normalize.json",
+  const swarmDir = join(packageRoot, "skills", "swarm", "recipes");
+  const projectDir = join(packageRoot, "skills", "project-work", "recipes");
+  const expectedModelDefaults: Array<[string, string[]]> = [
+    [join(swarmDir, "lens-review.json"), ["model"]],
+    [join(swarmDir, "review-readiness.json"), ["reviewer_model", "verifier_model", "merger_model", "judge_model"]],
+    [join(projectDir, "release-readiness.json"), ["reviewer_model", "verifier_model", "merger_model", "judge_model"]],
+    [join(swarmDir, "subagent-review-coordinator.json"), ["reviewer_model", "verifier_model", "merger_model", "judge_model"]],
+    [join(swarmDir, "subagent-preflight.json"), ["model"]],
+    [join(swarmDir, "subagent-review.json"), ["model"]],
+    [join(swarmDir, "subagent-verify.json"), ["model"]],
+    [join(swarmDir, "subagent-merge.json"), ["model"]],
+    [join(swarmDir, "subagent-judge.json"), ["model"]],
+    [join(swarmDir, "subagent-normalize.json"), ["model"]],
   ];
-  for (const [file, keys] of Object.entries(expectedModelDefaults)) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
+  for (const [file, keys] of expectedModelDefaults) {
+    const config = readPackageRecipe(file);
     for (const key of keys) {
       assert.equal(config?.defaults?.[key], "{current_model}", `${file}:${key}`);
     }
-  }
-  for (const file of expectedThinkingDefaults) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
     assert.equal(config?.defaults?.thinking, "{current_thinking}", `${file}:thinking`);
   }
 });
 
 test("Packaged review stages require marked semantic evidence", () => {
-  const recipeDir = join(__dirname, "..", "recipes");
+  const recipeDir = join(packageRoot, "skills", "swarm", "recipes");
   for (const file of [
     "subagent-review.json",
     "subagent-verify.json",
@@ -896,15 +969,15 @@ test("Packaged review stages require marked semantic evidence", () => {
     "subagent-judge.json",
     "subagent-normalize.json",
   ]) {
-    const config = readResolvedRecipeConfig(join(recipeDir, file));
+    const config = readPackageRecipe(join(recipeDir, file));
     assert.match(JSON.stringify(config?.template), /"accept_output":"review_evidence"/);
     assert.match(JSON.stringify(config?.template), /ACTOR_REVIEW_RESULT/);
   }
 });
 
 test("Packaged review coordinator preflights stage models before reviewer fanout", () => {
-  const config = readResolvedRecipeConfig(
-    join(__dirname, "..", "recipes", "subagent-review-coordinator.json"),
+  const config = readPackageRecipe(
+    join(packageRoot, "skills", "swarm", "recipes", "subagent-review-coordinator.json"),
   )!;
   const steps = (config.template as { template?: unknown }).template;
   assert.ok(Array.isArray(steps));
@@ -916,11 +989,10 @@ test("Packaged review coordinator preflights stage models before reviewer fanout
 });
 
 test("Packaged controlled services declare only actor-local actions", () => {
-  const recipeRoot = getPackagedRecipeRoot();
-  assert.deepEqual(readResolvedRecipeConfig(join(recipeRoot, "resource-locker.json"))?.control, [
+  assert.deepEqual(readPackageRecipe(join(packageRoot, "skills", "actors", "recipes", "resource-locker.json"))?.control, [
     "enqueue", "claim", "complete", "fail", "acquire", "renew", "release", "stop",
   ]);
-  assert.deepEqual(readResolvedRecipeConfig(join(recipeRoot, "music-player.json"))?.control, [
+  assert.deepEqual(readPackageRecipe(join(packageRoot, "skills", "media", "recipes", "player.json"))?.control, [
     "play", "pause", "resume", "toggle", "next", "previous", "stop", "status",
   ]);
 });

@@ -1468,7 +1468,11 @@ test("Parent teardown kills only exact-session runs through canonical run contro
     assert.equal(teardownSummary.ownerId, "session-a");
     assert.equal(teardownSummary.trigger, "session_shutdown:quit");
     assert.equal(teardownSummary.killed, 1);
-    assert.equal((await waitForStatus(ownedDir, "killed")).status, "killed");
+    assert.equal(
+      (await waitForStatus(ownedDir, "killed", process.platform === "win32" ? 200 : 40))
+        .status,
+      "killed",
+    );
     assert.equal(getRunStatus(otherDir).status, "running");
     const trace = await readFile(join(ownedDir, "trace.jsonl"), "utf8");
     assert.match(trace, /"kind":"run\.kill"/);

@@ -235,7 +235,7 @@ test("Agent UX report closure retains an owner and evidence for every failure", 
     "utf8",
   );
   const closedRows = closure
-    .split("\n")
+    .split(/\r?\n/)
     .filter((line) => line.startsWith("|") && line.endsWith("| Closed |"));
   assert.equal(closedRows.length, 14);
   for (const section of [

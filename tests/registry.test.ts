@@ -31,14 +31,16 @@ async function createHarness() {
       getToolNameBlocker: () => undefined,
       getTools: () => tools,
       notify: (_ctx: unknown, message: string) => notifications.push(message),
-      registerRuntimeTool: (cfg: RegisteredTool) =>
-        runtimeRegistered.push(cfg.name),
+      registerRuntimeTool: (cfg: RegisteredTool) => {
+        runtimeRegistered.push(cfg.name);
+      },
       reservedToolNames: new Set(["bash", "register_tool"]),
       setActiveTools: (toolNames: string[]) => {
         activeTools = toolNames;
       },
     },
     notifications,
+    root: join(dir, "recipes"),
     runtimeRegistered,
     tools,
   };
@@ -68,7 +70,10 @@ test("Registry mutations register template-backed tools", async () => {
       template: "~/bin/transcribe {file} {lang}",
     });
     assert.deepEqual(harness.runtimeRegistered, ["transcribe"]);
-    assert.match(result.content[0].text, /Registered tool "transcribe"/);
+    assert.match(
+      result.content[0].text,
+      /Persisted tool "transcribe"; current-session activation is unverified/,
+    );
   } finally {
     await harness.cleanup();
   }
@@ -214,10 +219,13 @@ test("Registry mutations register template recipe paths through template", async
       {},
       harness.deps,
     );
-    assert.equal(harness.tools.get("docs_review")?.template, "docs-review.json");
+    assert.equal(
+      harness.tools.get("docs_review")?.template,
+      join(harness.root, "docs_review.json"),
+    );
     assert.deepEqual(harness.tools.get("docs_review")?.args, ["scope", "model"]);
     assert.deepEqual(harness.runtimeRegistered, ["docs_review"]);
-    assert.equal(result.details.template, "docs-review.json");
+    assert.equal(result.details.template, join(harness.root, "docs_review.json"));
   } finally {
     await harness.cleanup();
   }
@@ -237,12 +245,12 @@ test("Registry mutations register co-located template recipes", async () => {
       {},
       harness.deps,
     );
-    assert.deepEqual(harness.tools.get("review_run")?.recipe, {
-      async: true,
-      name: "review_run",
-      template: "review {scope}",
-      values: { prompt: "Review risks." },
-    });
+    const registeredRecipe = harness.tools.get("review_run")?.recipe;
+    assert.equal(registeredRecipe?.async, true);
+    assert.equal(registeredRecipe?.name, "review_run");
+    assert.equal(registeredRecipe?.description, "Start review run");
+    assert.equal(registeredRecipe?.template, "review {scope}");
+    assert.equal(registeredRecipe?.values?.prompt, "Review risks.");
     assert.deepEqual(harness.tools.get("review_run")?.args, ["scope"]);
     assert.equal(result.details.async, true);
     assert.equal(result.details.recipeName, "review_run");
@@ -268,10 +276,17 @@ test("Registry mutations register command-template sequences", async () => {
       {},
       harness.deps,
     );
-    assert.deepEqual(harness.tools.get("voice_tool")?.template, [
-      "tts --text {text} --out {mp3}",
-      { template: "ffmpeg -i {mp3} {ogg}", timeout: 123 },
-    ]);
+    assert.equal(
+      harness.tools.get("voice_tool")?.template,
+      join(harness.root, "voice_tool.json"),
+    );
+    assert.deepEqual(harness.tools.get("voice_tool")?.recipe?.template, {
+      args: ["text", "mp3", "ogg"],
+      template: [
+        "tts --text {text} --out {mp3}",
+        { template: "ffmpeg -i {mp3} {ogg}", timeout: 123 },
+      ],
+    });
   } finally {
     await harness.cleanup();
   }
@@ -298,7 +313,11 @@ test("Registry mutations register object command templates", async () => {
       {},
       harness.deps,
     );
-    assert.deepEqual(harness.tools.get("object_tool")?.template, {
+    assert.equal(
+      harness.tools.get("object_tool")?.template,
+      join(harness.root, "object_tool.json"),
+    );
+    assert.deepEqual(harness.tools.get("object_tool")?.recipe?.template, {
       parallel: true,
       recover: "echo recovered",
       retry: 2,
@@ -329,6 +348,9 @@ test("Registry mutations reject invalid object command templates", async () => {
       ),
       /repeat must be a positive integer/,
     );
+    await assert.rejects(
+      readFile(join(harness.root, "bad_object_tool.json"), "utf8"),
+    );
   } finally {
     await harness.cleanup();
   }
@@ -356,6 +378,81 @@ test("Registry mutations reject overwrites without update=true", async () => {
       ),
       /already registered/,
     );
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("Registry activation failure restores prior bytes state and active tools", async () => {
+  const harness = await createHarness();
+  try {
+    await executeRegisterTool(
+      {
+        description: "Working tool",
+        name: "working_tool",
+        template: "echo working",
+      },
+      {},
+      harness.deps,
+    );
+    const path = join(harness.root, "working_tool.json");
+    const priorBytes = await readFile(path, "utf8");
+    const priorActive = harness.activeTools();
+    const failingDeps = {
+      ...harness.deps,
+      registerRuntimeTool: (cfg: RegisteredTool) =>
+        cfg.description === "Broken replacement"
+          ? {
+              active_tool: false,
+              activation: "unverified" as const,
+              callable_now: false,
+              host_registered: true,
+            }
+          : {
+              active_tool: true,
+              activation: "current_session" as const,
+              callable_now: true,
+              host_registered: true,
+            },
+    };
+    await assert.rejects(
+      executeRegisterTool(
+        {
+          description: "Broken replacement",
+          name: "working_tool",
+          template: "echo broken",
+          update: true,
+        },
+        {},
+        failingDeps,
+      ),
+      /Host activation verification failed/,
+    );
+    assert.equal(await readFile(path, "utf8"), priorBytes);
+    assert.equal(harness.tools.get("working_tool")?.description, "Working tool");
+    assert.deepEqual(harness.activeTools(), priorActive);
+    await assert.rejects(
+      executeRegisterTool(
+        {
+          description: "Broken new tool",
+          name: "broken_new",
+          template: "echo broken",
+        },
+        {},
+        {
+          ...harness.deps,
+          registerRuntimeTool: () => ({
+            active_tool: false,
+            activation: "unverified" as const,
+            callable_now: false,
+            host_registered: false,
+          }),
+        },
+      ),
+      /Host activation verification failed/,
+    );
+    await assert.rejects(readFile(join(harness.root, "broken_new.json"), "utf8"));
+    assert.equal(harness.tools.has("broken_new"), false);
   } finally {
     await harness.cleanup();
   }

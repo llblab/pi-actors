@@ -7,7 +7,7 @@ import { isAbsolute, join } from "node:path";
 import test from "node:test";
 
 import { PACKAGE_RECIPE_MEMORY_CONTEXT } from "../lib/automatic-review-runtime.ts";
-import { startRun } from "../lib/async-runs.ts";
+import { getRunStatus, killRun, startRun } from "../lib/async-runs.ts";
 import {
   buildRecipeContextRecords,
   createActiveSkillRecipeContext,
@@ -25,6 +25,23 @@ const packageContext = createActiveSkillRecipeContext(
 
 function noopExec() {
   return Promise.resolve({ code: 0, killed: false, stderr: "", stdout: "" });
+}
+
+async function waitForRunTerminal(stateDir: string): Promise<void> {
+  const terminal = new Set(["cancelled", "done", "failed", "killed"]);
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (terminal.has(String(getRunStatus(stateDir).status))) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  try {
+    killRun(stateDir);
+  } catch {
+    /* best effort cleanup */
+  }
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (terminal.has(String(getRunStatus(stateDir).status))) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 
 test("Capability packs cover same-Skill, cross-Skill, and explicit file imports", async () => {
@@ -135,8 +152,8 @@ test("Package reviewers, helpers, and tool discovery preserve Skill boundaries",
 
 test("Direct qualified spawn captures Skill identity", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-capability-spawn-"));
+  const stateDir = join(root, "run");
   try {
-    const stateDir = join(root, "run");
     const meta = startRun(
       {
         file: "media/player",
@@ -150,6 +167,7 @@ test("Direct qualified spawn captures Skill identity", async () => {
     assert.equal(meta.recipe_context_records?.[0].logical_reference, "media/player");
     assert.equal(meta.recipe_context_records?.[0].source_kind, "active_skill_component");
   } finally {
+    await waitForRunTerminal(stateDir);
     await rm(root, { recursive: true, force: true });
   }
 });

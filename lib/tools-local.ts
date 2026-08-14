@@ -10,6 +10,7 @@ import * as ModelContext from "./model-context.ts";
 import type { RegisteredTool } from "./config.ts";
 import * as Execution from "./execution.ts";
 import * as Prompts from "./prompts.ts";
+import type * as RecipeResolution from "./recipes-context.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as Schema from "./schema.ts";
@@ -18,7 +19,7 @@ import * as ToolsResponse from "./tools-response.ts";
 type JsonSchema = Schema.JsonSchema;
 
 export interface RuntimeToolContext extends ModelContext.CurrentModelContext {
-  activeSkillRecipeContext?: RecipesReferences.ActiveSkillRecipeContext;
+  recipeResolutionContext?: RecipeResolution.RecipeResolutionContext;
   cwd: string;
   sessionManager?: { getSessionId?: () => string };
 }
@@ -67,7 +68,11 @@ function formatRuntimeToolUsageHint(
   required: string[],
   includeRunId: boolean,
 ): string {
-  const optional = cfg.args.filter((arg) => !required.includes(arg));
+  const optional = cfg.args.filter(
+    (arg) =>
+      !RecipesReferences.isRuntimeOwnedRecipeInput(arg) &&
+      !required.includes(arg),
+  );
   const exampleDefaults = {
     ...Schema.getExplicitToolArgDefaults(cfg.recipe?.args),
     ...cfg.defaults,
@@ -176,6 +181,7 @@ export function createRuntimeToolDefinition(
         ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
         : Schema.getRequiredToolArgNames(requiredTemplateConfig);
   for (const arg of cfg.args) {
+    if (RecipesReferences.isRuntimeOwnedRecipeInput(arg)) continue;
     paramSchema[arg] = typedArgSchema(arg, cfg.argTypes?.[arg]);
     if (requiredArgs.has(arg)) required.push(arg);
   }
@@ -244,7 +250,7 @@ export function createRuntimeToolDefinition(
               values: resolveRecipeToolValues(cfg, values, ctx),
             },
             ctx.cwd,
-            { skillContext: ctx.activeSkillRecipeContext },
+            { skillContext: ctx.recipeResolutionContext?.activeSkills },
           );
           return {
             content: [

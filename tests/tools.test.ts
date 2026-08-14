@@ -8,6 +8,7 @@ import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
 import { getRunStateRoot } from "../lib/paths.ts";
+import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
 import { createRegisterToolDefinition } from "../lib/tools-register.ts";
 import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
@@ -77,14 +78,20 @@ test("Spawn launches a qualified active-Skill Recipe", async () => {
     const activeSkillRecipeContext = createActiveSkillRecipeContext([
       { name: "sample", baseDir: skillDir },
     ]);
+    const recipeResolutionContext = createRecipeResolutionContext(
+      "spawn-tool-session",
+      process.cwd(),
+      activeSkillRecipeContext,
+    );
     const spawn = createSpawnToolDefinition();
     const result = await spawn.execute(
       "call-skill-spawn",
       { as: `run:${runId}`, recipe: "sample/task" },
       undefined,
       undefined,
-      { activeSkillRecipeContext, cwd: process.cwd() },
+      { recipeResolutionContext, cwd: process.cwd() },
     );
+    assert.equal(result.details.launch_kind, "spawn");
     assert.equal(result.details.recipe_file, join(recipeDir, "task.json"));
     assert.equal(result.details.values.skill_dir, skillDir);
     await waitForFile(join(stateDir, "result.json"));
@@ -148,6 +155,7 @@ test("Runtime async tools persist inherited policy provenance", async () => {
     assert.deepEqual(runMeta.launch_correlation, {
       tool_call_id: "call-runtime-current-policy",
     });
+    assert.equal(result.details.launch_kind, "tool");
     assert.equal(result.details.model_policy.model.source, "inherited");
     assert.equal(result.details.model_policy.thinking.source, "inherited");
     await waitForFile(join(stateDir, "result.json"));
@@ -165,12 +173,21 @@ test("Runtime tool definition exposes typed arg schemas", () => {
         prompts: { kind: "array" },
         speed: { kind: "number" },
         request_timeout: { kind: "int" },
+        state_dir: { kind: "path" },
       },
-      args: ["file", "request_timeout", "speed", "dry_run", "mode", "prompts"],
+      args: [
+        "file",
+        "request_timeout",
+        "speed",
+        "dry_run",
+        "mode",
+        "prompts",
+        "state_dir",
+      ],
       defaults: { dry_run: "true", mode: "check" },
       description: "Run checker",
       name: "check_tool",
-      template: "check {file} {request_timeout} {speed} {dry_run} {mode} {prompts}",
+      template: "check {file} {request_timeout} {speed} {dry_run} {mode} {prompts} {state_dir}",
     },
     async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
   );
@@ -180,6 +197,7 @@ test("Runtime tool definition exposes typed arg schemas", () => {
   assert.equal(properties.dry_run.type, "boolean");
   assert.deepEqual(properties.mode.enum, ["check", "fix"]);
   assert.equal(properties.prompts.type, "array");
+  assert.equal(properties.state_dir, undefined);
   assert.deepEqual(definition.parameters.required, ["file", "request_timeout", "speed", "prompts"]);
 });
 

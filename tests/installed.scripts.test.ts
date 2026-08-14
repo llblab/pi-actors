@@ -295,33 +295,49 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
     const pkg = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"));
     const agentDir = join(root, "agent");
     const homeDir = join(root, "home");
+    const staleSkillDir = join(root, "stale-skill");
+    const sourceDir = join(root, "music");
     await mkdir(agentDir, { recursive: true });
     await mkdir(homeDir, { recursive: true });
+    await mkdir(join(staleSkillDir, "recipes"), { recursive: true });
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(staleSkillDir, "SKILL.md"), "---\nname: stale\n---\n");
+    await writeFile(join(staleSkillDir, "recipes", "broken.json"), JSON.stringify({
+      name: "removed-identity",
+      template: "echo broken",
+    }));
     const { stdout, stderr } = await execFileAsync(process.execPath, [
       "-e",
       `const { readFileSync } = require("node:fs");
        const { join } = require("node:path");
        const { pathToFileURL } = require("node:url");
        const packageDir = process.argv[1];
+       const staleSkillDir = process.argv[2];
+       const sourceDir = process.argv[3];
        import(pathToFileURL(join(packageDir, "dist", "pi-actors", "index.js")).href).then(async (mod) => {
          const tools = [];
          const definitions = new Map();
+         let activeTools = [];
          const commands = [];
          const handlers = new Map();
          const pi = {
-           getActiveTools: () => [],
+           getActiveTools: () => [...activeTools],
+           getAllTools: () => [...definitions.values()],
            getThinkingLevel: () => "off",
            on: (name, handler) => handlers.set(name, handler),
            registerCommand: (name) => commands.push(name),
            registerTool: (definition) => {
              definitions.set(definition.name, definition);
+             activeTools = [...new Set([...activeTools, definition.name])];
              tools.push({
                name: definition.name,
                properties: Object.keys(definition.parameters.properties).sort(),
                required: definition.parameters.required,
              });
            },
-           setActiveTools: () => undefined,
+           setActiveTools: (names) => {
+             activeTools = names.filter((name) => definitions.has(name));
+           },
          };
          mod.default(pi);
          const resources = await handlers.get("resources_discover")();
@@ -332,15 +348,74 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
          await handlers.get("before_agent_start")({
            systemPrompt: "base",
            systemPromptOptions: {
-             skills: [{
-               name: "actors",
-               filePath: join(packageDir, "dist", "skills", "actors", "SKILL.md"),
-             }],
+             skills: [
+               {
+                 name: "actors",
+                 filePath: join(packageDir, "dist", "skills", "actors", "SKILL.md"),
+               },
+               {
+                 name: "media",
+                 filePath: join(packageDir, "dist", "skills", "media", "SKILL.md"),
+               },
+               { name: "stale", filePath: join(staleSkillDir, "SKILL.md") },
+             ],
            },
          }, context);
+         const register = definitions.get("register_tool");
+         const registration = await register.execute("packed-register", {
+           name: "packed_ping",
+           description: "Return a packed integration marker.",
+           template: "printf packed-pong",
+         }, undefined, undefined, context);
+         const packedPing = definitions.get("packed_ping");
+         const invocation = await packedPing.execute(
+           "packed-ping-call",
+           {},
+           undefined,
+           undefined,
+           context,
+         );
          const spawn = definitions.get("spawn");
          const inspect = definitions.get("inspect");
          const message = definitions.get("message");
+         const musicRegistration = await register.execute("packed-music-register", {
+           args: "source:string=" + sourceDir,
+           name: "music_player",
+           description: "Control local music from the maintained media Recipe.",
+           template: "media/player",
+         }, undefined, undefined, context);
+         const musicPlayer = definitions.get("music_player");
+         const wrapperPath = join(process.env.PI_CODING_AGENT_DIR, "recipes", "music_player.json");
+         const authoredWrapper = JSON.parse(readFileSync(wrapperPath, "utf8"));
+         const mediaSpawn = await spawn.execute("packed-media-spawn", {
+           as: "run:packed-media-direct",
+           recipe: "media/player",
+           values: { command: "status", source: sourceDir },
+         }, undefined, undefined, context);
+         const wrapperSpawn = await spawn.execute("packed-wrapper-spawn", {
+           as: "run:packed-media-wrapper",
+           file: wrapperPath,
+           values: { command: "status" },
+         }, undefined, undefined, context);
+         const musicInvocation = await musicPlayer.execute("packed-music-call", {
+           command: "status",
+           run_id: "packed-media-tool",
+         }, undefined, undefined, context);
+         const musicStatus = await inspect.execute("packed-music-status", {
+           target: "tool:music_player",
+           view: "status",
+           verbose: true,
+         }, undefined, undefined, context);
+         const musicControl = await inspect.execute("packed-music-control", {
+           target: "run:packed-media-tool",
+           view: "control",
+           verbose: true,
+         }, undefined, undefined, context);
+         const recipeStatus = await inspect.execute("packed-recipes-status", {
+           target: "recipes",
+           view: "status",
+           verbose: true,
+         }, undefined, undefined, context);
          let started;
          let control;
          let trace;
@@ -404,11 +479,26 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
              status: control.details.status,
              traceComplete: trace.details.summary.history_complete,
            },
+           registration: registration.details,
+           invocation: invocation.content[0].text,
+           music: {
+             actorActions: musicControl.details.actor_actions,
+             authoredWrapper,
+             directLaunchKind: mediaSpawn.details.launch_kind,
+             invocationLaunchKind: musicInvocation.details.launch_kind,
+             registration: musicRegistration.details,
+             schemaProperties: Object.keys(musicPlayer.parameters.properties).sort(),
+             status: musicStatus.details,
+             wrapperLaunchKind: wrapperSpawn.details.launch_kind,
+           },
+           recipeCatalog: recipeStatus.details,
            resources,
            tools,
          }));
        }).catch((error) => { console.error(error); process.exit(1); });`,
       packageDir,
+      staleSkillDir,
+      sourceDir,
     ], {
       env: {
         ...process.env,
@@ -423,6 +513,86 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
     assert.deepEqual(pkg.pi.skills, ["./dist/skills"]);
     const loaded = JSON.parse(stdout);
     assert.deepEqual(loaded.commands, ["actor-inspector"]);
+    assert.deepEqual(
+      {
+        active_tool: loaded.registration.active_tool,
+        activation: loaded.registration.activation,
+        callable_now: loaded.registration.callable_now,
+        host_registered: loaded.registration.host_registered,
+        persisted: loaded.registration.persisted,
+        registry_active: loaded.registration.registry_active,
+        resolved: loaded.registration.resolved,
+        validated: loaded.registration.validated,
+      },
+      {
+        active_tool: true,
+        activation: "current_session",
+        callable_now: true,
+        host_registered: true,
+        persisted: true,
+        registry_active: true,
+        resolved: true,
+        validated: true,
+      },
+    );
+    assert.match(loaded.invocation, /packed-pong/);
+    assert.deepEqual(
+      {
+        active_tool: loaded.music.registration.active_tool,
+        activation: loaded.music.registration.activation,
+        callable_now: loaded.music.registration.callable_now,
+        host_registered: loaded.music.registration.host_registered,
+        persisted: loaded.music.registration.persisted,
+        registry_active: loaded.music.registration.registry_active,
+        resolved: loaded.music.registration.resolved,
+        validated: loaded.music.registration.validated,
+      },
+      {
+        active_tool: true,
+        activation: "current_session",
+        callable_now: true,
+        host_registered: true,
+        persisted: true,
+        registry_active: true,
+        resolved: true,
+        validated: true,
+      },
+    );
+    assert.equal(loaded.music.registration.async, true);
+    assert.deepEqual(loaded.music.actorActions, [
+      "play", "pause", "resume", "toggle", "next", "previous", "stop", "status",
+    ]);
+    assert.deepEqual(loaded.music.authoredWrapper, {
+      description: "Control local music from the maintained media Recipe.",
+      args: ["source"],
+      defaults: { source: sourceDir },
+      template: "media/player",
+    });
+    assert.deepEqual(loaded.music.schemaProperties, [
+      "command", "loop", "player", "run_id", "source", "transport_context", "volume",
+    ]);
+    assert.equal(loaded.music.directLaunchKind, "spawn");
+    assert.equal(loaded.music.wrapperLaunchKind, "spawn");
+    assert.equal(loaded.music.invocationLaunchKind, "tool");
+    assert.equal(loaded.music.status.callable_now, true);
+    assert.equal(loaded.music.status.launch_kind, "tool");
+    assert.equal(loaded.music.status.spawn_calls, 1);
+    assert.equal(loaded.music.status.tool_calls, 1);
+    assert.equal(loaded.recipeCatalog.skill_recipe_catalog_partial, true);
+    assert.equal(
+      loaded.recipeCatalog.skill_recipe_components.some(
+        (component: any) => component.identity === "media/player",
+      ),
+      true,
+    );
+    assert.match(
+      loaded.recipeCatalog.skill_recipe_component_diagnostics[0].error,
+      /Recipe\.name was removed/,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(loaded.music.authoredWrapper),
+      /skill_dir|state_dir|control|artifacts|bash -lc|risk\.shell|risk\.eval/,
+    );
     assert.equal(loaded.packedRun.endpoint, process.platform === "win32" ? "named-pipe" : "fifo");
     assert.equal(
       await realpath(loaded.packedRun.skillDir),
@@ -438,12 +608,16 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
       "spawn",
       "message",
       "inspect",
+      "packed_ping",
+      "music_player",
     ]);
     assert.deepEqual(loaded.tools.map((tool: any) => tool.properties), [
       ["args", "async", "description", "draft", "name", "template", "update", "values"],
       ["artifacts", "as", "file", "recipe", "template", "transport_context", "values", "verbose"],
       ["action", "input", "target", "verbose"],
       ["lines", "source", "status", "target", "verbose", "view"],
+      [],
+      ["command", "loop", "player", "run_id", "source", "transport_context", "volume"],
     ]);
     for (const skill of ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]) {
       assert.match(

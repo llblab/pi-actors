@@ -25,6 +25,7 @@ export interface CoreActorToolDefinitionDeps<
   configPath: string;
   getActiveTools: () => string[];
   getRuntimeTool: (name: string) => unknown;
+  getRuntimeToolStatus: (name: string) => Record<string, unknown> | undefined;
   handleRuntimeControl?: (
     action: string,
     input: unknown,
@@ -32,7 +33,7 @@ export interface CoreActorToolDefinitionDeps<
   registryRuntime: Pick<
     RegisterToolRuntimeDeps<TContext>,
     "getToolNameBlocker" | "getTools" | "notify" | "registerRuntimeTool"
-  >;
+  > & { getStatus(): import("./runtime.ts").RecipeRegistryStatus };
   setActiveTools: (toolNames: string[]) => void;
 }
 
@@ -78,6 +79,8 @@ export function createCoreActorToolDefinitions<
     }),
     ToolsInspect.createInspectToolDefinition<TContext>({
       getTool: (name) => deps.getRuntimeTool(name),
+      getToolStatus: deps.getRuntimeToolStatus,
+      registryStatus: deps.registryRuntime.getStatus,
     }),
   ];
 }

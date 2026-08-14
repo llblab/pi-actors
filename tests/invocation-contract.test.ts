@@ -45,10 +45,15 @@ test("Maintained invocation guidance uses complete current inspect and Control s
     source: readFileSync(path, "utf8"),
   }));
   const combined = sources.map(({ source }) => source).join("\n");
+  assert.doesNotMatch(combined, /new tool is immediately callable/);
   for (const expected of [
     "inspect target=runtime view=status",
     "inspect target=recipes view=status",
     "inspect target=tool:<name> view=status",
+    'launch_kind: "spawn"',
+    'launch_kind: "tool"',
+    "callable_now",
+    "catalog partial",
     "message target=runtime action=review.retry input={\"scope\":\"draft\"}",
     "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
     "message target=runtime action=review.reset input={\"scope\":\"draft\"}",

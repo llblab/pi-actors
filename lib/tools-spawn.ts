@@ -11,13 +11,14 @@ import * as AsyncRuns from "./async-runs.ts";
 import { withFileMutationLock } from "./file-state.ts";
 import * as ModelContext from "./model-context.ts";
 import * as Paths from "./paths.ts";
+import type * as RecipeResolution from "./recipes-context.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsResponse from "./tools-response.ts";
 
 export interface SpawnToolContext extends ModelContext.CurrentModelContext {
-  activeSkillRecipeContext?: RecipesReferences.ActiveSkillRecipeContext;
+  recipeResolutionContext?: RecipeResolution.RecipeResolutionContext;
   cwd: string;
   sessionManager?: { getSessionId?: () => string };
 }
@@ -184,7 +185,7 @@ export function createSpawnToolDefinition<
             : {}),
         },
         ctx.cwd,
-        { skillContext: ctx.activeSkillRecipeContext },
+        { skillContext: ctx.recipeResolutionContext?.activeSkills },
       );
       const draftRecipe = writeSpawnDraftRecipe(input, meta);
       const nextActions = ToolsResponse.runNextActions(meta.run);

@@ -14,7 +14,7 @@ export const REGISTER_TOOL_PROMPT_SNIPPET =
 
 export const REGISTER_TOOL_GUIDELINES = [
   "Use register_tool to wrap trusted local commands, scripts, programs, libraries, or template recipes as persistent pi tools.",
-  "After register_tool succeeds, the new tool is immediately callable and remains available after reload.",
+  "After register_tool succeeds, trust its callable_now and activation result; persisted definitions remain available for admission after reload.",
   'Set template=null or template="" in register_tool to delete a persisted tool.',
   "Set update=true in register_tool to overwrite an existing tool registration.",
 ];
@@ -24,7 +24,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
 - Layers: task -> command template -> recipe/tool -> spawn -> run:<id>; tool:<name> wraps registered capabilities.
 - Command templates stay sync and shell-free: string leaves split into executable + argv, infer .js/.mjs through node→bun→deno run and .sh through bash, and treat operators such as && as literal arguments; use template arrays for sequencing or an explicit trusted shell/script when shell semantics are required. Flags include args/defaults, parallel, concurrency, min_successful, when, timeout, delay, retry, failure, recover, repeat, accept_output, output.
 - Placeholders support typed/default args plus {value??fallback} and {flag?yes:no}.
-- ~/.pi/agent/recipes/*.json is actor muscle memory: every recipe there is auto-registered as an agent tool across sessions; register_tool writes there.
+- ~/.pi/agent/recipes/*.json is actor muscle memory: valid admitted recipes are reconciled as tools across sessions; register_tool writes there and reports current activation truth.
 - Recipes own template directly and may declare metadata/defaults/imports/control/artifacts; files >1 MiB or import depth >32 fail closed.
 - Recipe imports are local variables; imported recipes are definitions, not nested async runs; parent async:true creates one run.
 - Actor-mode trigger: if work may outlive this turn, need steering/follow-up/artifacts, run as a service, fan out, or be resumed/inspected later, use spawn -> message -> inspect instead of ad hoc shell backgrounding.

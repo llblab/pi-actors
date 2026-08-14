@@ -106,6 +106,8 @@ export function compactAsyncRunStatus(value: unknown): string {
   const result = asRecord(status.result);
   const run = String(status.run ?? "<unknown>");
   const tokens = [`run=${run}`, `status=${String(status.status ?? "unknown")}`];
+  if (status.launch_kind)
+    tokens.push(`launch_kind=${String(status.launch_kind)}`);
   tokens.push(...compactModelPolicy(status.model_policy ?? progress.model_policy));
   if (status.tool) tokens.push(`tool=${String(status.tool)}`);
   if (status.recipe) tokens.push(`recipe=${String(status.recipe)}`);

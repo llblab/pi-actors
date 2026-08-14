@@ -6,7 +6,7 @@
 ~/.pi/agent/recipes/*.json
 ```
 
-Each active valid Recipe becomes an agent-callable tool. `register_tool` creates, updates, promotes, or deletes these files through fenced mutation paths.
+Each valid Recipe admitted against the current session context can become an agent-callable tool. `register_tool` creates, updates, promotes, or deletes these files through fenced mutation paths and reports the resulting activation state.
 
 ## Registration
 
@@ -20,9 +20,13 @@ Register a typed/defaulted template or Recipe-backed definition when reuse justi
 
 Promote an immutable captured draft only with its draft path and explicit target name. Name collisions require `update=true`. Invalid content fails before active mutation.
 
+Registration resolves the effective delegated contract before persistence, then reports distinct `persisted`, `registry_active`, `host_registered`, `active_tool`, and `callable_now` states. Treat the tool as callable in the current session only when `callable_now` is true; persistence alone is not activation proof.
+
 ## Resolution
 
-User Recipes are the only file-discovered tool source. Invalid or disabled user entries fail closed. Active Skill Recipes remain exact components outside tool discovery. Runtime reload watches the user Recipe root and converges after atomic changes; stale watcher generations cannot replace current registration state.
+User Recipes are the only file-discovered tool source. Invalid or disabled user entries fail closed. Active Skill Recipes remain exact components outside tool discovery. Spawn, registration, registry admission, schema derivation, and live inspection resolve against one immutable session context containing the current working directory and active Skills. Runtime reload watches the user Recipe root using that current context and converges after atomic changes; stale watcher generations cannot replace current registration state.
+
+Skill component inventory is diagnostic and fail-soft: valid components remain listed and exactly resolvable when an unrelated component is rejected. Recipe inspection reports rejected components and marks the catalog partial instead of treating one bad component as an empty catalog.
 
 Inspect registry state with:
 
@@ -31,7 +35,9 @@ inspect target=recipes view=status
 inspect target=tool:<name> view=status
 ```
 
-Recipe inspection reports active, shadowed, invalid, disabled, diagnostic, risk, usage, and review evidence. Tool inspection reports the current capability definition/schema; a registered tool is not a running actor.
+Recipe inspection reports generation, scan/watch state, active, shadowed, invalid, disabled, component rejection, diagnostic, risk, usage, and review evidence. Tool status reports current activation plus separate `tool_calls` and `spawn_calls`; tool schema reports the caller-owned capability contract. A registered tool is not a running actor.
+
+`spawn recipe=<name>` executes a Recipe and reports `launch_kind: "spawn"`; it does not prove that a registered tool was exposed or invoked. Registered-tool execution reports `launch_kind: "tool"`.
 
 ## Automatic Review
 

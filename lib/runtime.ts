@@ -12,6 +12,7 @@ import type { RegisteredToolExec } from "./execution.ts";
 import * as Paths from "./paths.ts";
 import type { RecipeResolutionContext } from "./recipes-context.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
+import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as ToolsLocal from "./tools-local.ts";
 
@@ -111,6 +112,25 @@ export function createAutoToolsRuntime(
       template: cfg.template,
     });
   }
+  function registeredToolSource(cfg: Config.RegisteredTool): string {
+    const raw = cfg.sourcePath
+      ? RecipesReferences.readRawRecipeConfig(cfg.sourcePath)
+      : undefined;
+    const template = raw?.template;
+    if (
+      typeof template === "string" &&
+      /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(template)
+    ) {
+      return template;
+    }
+    if (
+      typeof template === "string" &&
+      (template.endsWith(".json") || template.endsWith(".md"))
+    ) {
+      return `<explicit-file:${basename(template)}>`;
+    }
+    return "template";
+  }
   function deactivateMissingRuntimeTools(activeNames: Set<string>): void {
     const stale = [...runtimeTools].filter((name) => !activeNames.has(name));
     if (stale.length === 0) return;
@@ -187,6 +207,7 @@ export function createAutoToolsRuntime(
       lines.push("Other registry diagnostics:");
       lines.push(...other.map((warning) => `• ${warning}`));
     }
+    lines.push("Next: inspect target=recipes view=doctor");
     return `${lines.join("\n")}\n`;
   }
   function loadTools(
@@ -248,9 +269,27 @@ export function createAutoToolsRuntime(
       const usage = cfg.sourcePath
         ? RecipesUsage.readRecipeUsage(cfg.sourcePath)
         : undefined;
+      const activation = activationFor(name);
+      const args = RecipesDiscovery.summarizeRegisteredToolArgs(cfg);
       return {
-        ...activationFor(name),
-        launch_kind: usage?.launch_kind,
+        ...activation,
+        activation_boundary: activation.callable_now
+          ? "current_session"
+          : !activation.host_registered
+            ? "host_registration"
+            : "active_tool_set",
+        persisted: Boolean(cfg.sourcePath),
+        registry_active: true,
+        source: registeredToolSource(cfg),
+        required_args: args.required,
+        optional_args: args.optional,
+        next_actions: activation.callable_now
+          ? [`call tool ${name}`]
+          : [
+              `register_tool name=${name} update=true`,
+              `inspect target=tool:${name} view=status`,
+            ],
+        ...(usage?.launch_kind ? { launch_kind: usage.launch_kind } : {}),
         spawn_calls: Number(usage?.spawn_calls ?? 0),
         tool_calls: Number(usage?.tool_calls ?? 0),
       };

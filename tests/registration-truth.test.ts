@@ -35,6 +35,7 @@ import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
 
 const playerRecipe = {
   async: true,
+  description: "Control local music.",
   args: [
     "command:enum(play,pause,status)",
     "source:path",
@@ -130,10 +131,9 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     const registered: RegisteredTool[] = [];
     const registration = await executeRegisterTool(
       {
-        args: "source:path=~/Music/1MIX",
-        description: "Play local music.",
+        defaults: { source: "~/Music/1MIX" },
+        from: "media/player",
         name: "music_player",
-        template: { template: "media/player" },
       },
       { recipeResolutionContext },
       {
@@ -184,13 +184,29 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
         validated: true,
       },
     );
+    assert.equal(registration.details.source, "media/player");
+    assert.equal(registration.details.activation_boundary, "current_session");
+    assert.deepEqual(registration.details.required_args, []);
+    assert.deepEqual(registration.details.optional_args, [
+      "command",
+      "source",
+      "loop",
+      "volume",
+      "run_id",
+      "transport_context",
+    ]);
+    assert.deepEqual(registration.details.next_actions, [
+      "call tool music_player",
+      "inspect target=tool:music_player view=status",
+    ]);
+    assert.equal("config" in registration.details, false);
+    assert.equal("template" in registration.details, false);
     const wrapperPath = join(recipeRoot, "music_player.json");
     const authoredWrapper = JSON.parse(await readFile(wrapperPath, "utf8"));
-    assert.deepEqual(authoredWrapper.template, {
-      template: "media/player",
-    });
+    assert.equal(authoredWrapper.template, "media/player");
+    assert.equal(authoredWrapper.description, undefined);
     assert.equal(authoredWrapper.async, undefined);
-    assert.deepEqual(authoredWrapper.args, ["source:path"]);
+    assert.equal(authoredWrapper.args, undefined);
     assert.deepEqual(authoredWrapper.defaults, {
       source: "~/Music/1MIX",
     });
@@ -222,6 +238,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     const discoveredWrapper = discovered.active.get("music_player")!;
     const discoveredTool = toRegisteredTool(discoveredWrapper)!;
     assert.equal(discoveredWrapper.invalid, false);
+    assert.equal(discoveredTool.description, playerRecipe.description);
     assert.deepEqual(discoveredTool.args, registration.details.args);
     assert.deepEqual(discoveredTool.argTypes, registered[0].argTypes);
     assert.equal(discoveredTool.recipe?.async, true);
@@ -287,9 +304,8 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     await assert.rejects(
       executeRegisterTool(
         {
-          description: "Missing delegated capability",
+          from: "missing/task",
           name: "missing_tool",
-          template: "missing/task",
         },
         { recipeResolutionContext },
         {
@@ -306,7 +322,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
           setActiveTools: () => undefined,
         },
       ),
-      /Active Skill Recipe not found: missing\/task/,
+      /Recipe source "missing\/task" validation failed: Active Skill Recipe not found: missing\/task.*Active Skills: media, stale.*Next: inspect target=recipes view=doctor identity=missing\/task/s,
     );
     await assert.rejects(
       readFile(join(recipeRoot, "missing_tool.json"), "utf8"),
@@ -370,7 +386,10 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
       wrapper,
     );
     assert.equal(inactive.validated, false);
-    assert.match(inactive.diagnostics[0], /Active Skill Recipe not found/);
+    assert.match(
+      inactive.diagnostics[0],
+      /Active Skill Recipe not found: media\/player.*Owning Skill "media" is not active.*Next: activate Skill media.*inspect target=recipes view=doctor identity=media\/player/s,
+    );
 
     const liveContext = createRecipeResolutionContext(
       "live-session",
@@ -404,7 +423,11 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
       wrapper,
     );
     assert.equal(ambiguous.validated, false);
-    assert.match(ambiguous.diagnostics[0], /Duplicate active Skill identity media/);
+    assert.match(
+      ambiguous.diagnostics[0],
+      /Duplicate active Skill identity media \(2 active definitions\).*Next: inspect target=recipes view=doctor identity=media\/player/s,
+    );
+    assert.doesNotMatch(ambiguous.diagnostics[0], new RegExp(root));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

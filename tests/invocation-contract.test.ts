@@ -49,6 +49,7 @@ test("Maintained invocation guidance uses complete current inspect and Control s
   for (const expected of [
     "inspect target=runtime view=status",
     "inspect target=recipes view=status",
+    "inspect target=recipes view=doctor identity=<skill>/<recipe>",
     "inspect target=tool:<name> view=status",
     'launch_kind: "spawn"',
     'launch_kind: "tool"',

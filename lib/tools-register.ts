@@ -36,7 +36,11 @@ export function createRegisterToolDefinition<TContext>(
         description: stringSchema(
           Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.description,
         ),
+        defaults: looseObjectSchema(
+          Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.defaults,
+        ),
         draft: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.draft),
+        from: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.from),
         name: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name),
         template: unionSchema([
           stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template),
@@ -45,9 +49,6 @@ export function createRegisterToolDefinition<TContext>(
           nullSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.templateNull),
         ]),
         update: booleanSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.update),
-        values: looseObjectSchema(
-          Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.values,
-        ),
       },
       [],
     ),

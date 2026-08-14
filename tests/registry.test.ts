@@ -5,13 +5,15 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
+import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
+import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 import { executeRegisterTool } from "../lib/registry.ts";
 
 const execFileAsync = promisify(execFile);
@@ -72,8 +74,17 @@ test("Registry mutations register template-backed tools", async () => {
     assert.deepEqual(harness.runtimeRegistered, ["transcribe"]);
     assert.match(
       result.content[0].text,
-      /Persisted tool "transcribe"; current-session activation is unverified/,
+      /Persisted tool "transcribe" from template; callable_now=false; activation_boundary=session_activation_unverified/,
     );
+    assert.deepEqual(result.details.required_args, ["file"]);
+    assert.deepEqual(result.details.optional_args, ["lang"]);
+    assert.equal(result.details.source, "template");
+    assert.equal(result.details.activation_boundary, "session_activation_unverified");
+    assert.deepEqual(result.details.next_actions, [
+      "inspect target=tool:transcribe view=status",
+    ]);
+    assert.equal("config" in result.details, false);
+    assert.equal("template" in result.details, false);
   } finally {
     await harness.cleanup();
   }
@@ -206,32 +217,195 @@ test("Registry mutations register typed command-template args progressively", as
   }
 });
 
-test("Registry mutations register template recipe paths through template", async () => {
+test("Registry mutations specialize active-Skill Recipes through from", async () => {
   const harness = await createHarness();
   try {
+    const skillDir = join(dirname(harness.root), "skills", "media");
+    await mkdir(join(skillDir, "recipes"), { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), "---\nname: media\n---\n");
+    await writeFile(
+      join(skillDir, "recipes", "player.json"),
+      JSON.stringify({
+        args: ["command:enum(play,status)", "volume:int", "state_dir:path"],
+        artifacts: { state: "{state_dir}/state.json" },
+        async: true,
+        control: ["play", "status"],
+        defaults: { command: "play", volume: 70 },
+        description: "Control local media.",
+        template: "echo {skill_dir} {command} {volume} {state_dir}",
+      }),
+    );
+    const recipeResolutionContext = createRecipeResolutionContext(
+      "registry-from",
+      dirname(harness.root),
+      createActiveSkillRecipeContext([{ name: "media", baseDir: skillDir }]),
+    );
     const result = await executeRegisterTool(
       {
-        args: "scope:path,model:string=selected-model",
-        description: "Start docs review actor",
-        name: "docs_review",
-        template: "docs-review.json",
+        defaults: { volume: 35 },
+        from: "media/player",
+        name: "music_player",
       },
-      {},
+      { recipeResolutionContext },
       harness.deps,
     );
-    assert.equal(
-      harness.tools.get("docs_review")?.template,
-      join(harness.root, "docs_review.json"),
+    const stored = JSON.parse(
+      await readFile(join(harness.root, "music_player.json"), "utf8"),
     );
-    assert.deepEqual(harness.tools.get("docs_review")?.args, ["scope", "model"]);
-    assert.deepEqual(harness.runtimeRegistered, ["docs_review"]);
-    assert.equal(result.details.template, join(harness.root, "docs_review.json"));
+    assert.deepEqual(stored, {
+      defaults: { volume: 35 },
+      template: "media/player",
+    });
+    const tool = harness.tools.get("music_player")!;
+    assert.equal(tool.description, "Control local media.");
+    assert.equal(tool.recipe?.async, true);
+    assert.deepEqual(tool.recipe?.control, ["play", "status"]);
+    assert.deepEqual(tool.recipe?.artifacts, { state: "{state_dir}/state.json" });
+    assert.deepEqual(tool.args, ["command", "volume"]);
+    assert.deepEqual(tool.argTypes?.command, {
+      kind: "enum",
+      values: ["play", "status"],
+    });
+    assert.deepEqual(tool.argTypes?.volume, { kind: "int" });
+    assert.deepEqual(result.details.defaults, { command: "play", volume: "35" });
+    assert.equal(result.details.async, true);
+    await assert.rejects(
+      executeRegisterTool(
+        {
+          defaults: { volume: "loud" },
+          from: "media/player",
+          name: "bad_volume",
+        },
+        { recipeResolutionContext },
+        harness.deps,
+      ),
+      /Recipe source "media\/player" validation failed:.*volume.*integer.*Next: inspect target=recipes view=doctor identity=media\/player/is,
+    );
+    await assert.rejects(
+      executeRegisterTool(
+        {
+          defaults: { unknown: "value" },
+          from: "media/player",
+          name: "bad_default",
+        },
+        { recipeResolutionContext },
+        harness.deps,
+      ),
+      /Recipe source "media\/player" validation failed:.*Unknown delegated Recipe default argument: unknown.*Next: inspect target=recipes view=doctor identity=media\/player/is,
+    );
+    await assert.rejects(
+      executeRegisterTool(
+        {
+          defaults: { state_dir: "/tmp/copied-state" },
+          from: "media/player",
+          name: "bad_origin",
+        },
+        { recipeResolutionContext },
+        harness.deps,
+      ),
+      /runtime-owned.*state_dir.*Next: remove that default and retry register_tool/is,
+    );
+    await assert.rejects(readFile(join(harness.root, "bad_volume.json"), "utf8"));
+    await assert.rejects(readFile(join(harness.root, "bad_default.json"), "utf8"));
+    await assert.rejects(readFile(join(harness.root, "bad_origin.json"), "utf8"));
   } finally {
     await harness.cleanup();
   }
 });
 
-test("Registry mutations register co-located template recipes", async () => {
+test("Registry mutations reject ambiguous or copied Recipe source modes", async () => {
+  const harness = await createHarness();
+  try {
+    for (const [params, pattern] of [
+      [
+        { description: "Mixed", from: "media/player", name: "mixed", template: "echo" },
+        /exactly one register_tool source mode.*Next: remove the extra source fields and retry register_tool/s,
+      ],
+      [
+        { args: "source:path", from: "media/player", name: "copied_args" },
+        /from inherits args and async behavior.*Next: retry register_tool with from and optional defaults only/s,
+      ],
+      [
+        { name: "missing_source" },
+        /requires exactly one source mode.*Next: retry register_tool with one source field/s,
+      ],
+      [
+        { from: "", name: "empty_from" },
+        /non-empty Recipe reference.*Next: retry register_tool with from=<skill>\/<recipe>/s,
+      ],
+      [
+        { from: "skill:media/player", name: "prefixed_from" },
+        /skill: Recipe references were removed.*Next: inspect target=recipes view=doctor identity=media\/player/s,
+      ],
+      [
+        { from: "std:player", name: "std_from" },
+        /std: Recipe references were removed.*Next: inspect target=recipes view=doctor/s,
+      ],
+      [
+        { description: "Nested", name: "nested", template: { template: "media/player" } },
+        /Nested Recipe-shaped templates.*Next: retry with from=<skill>\/<recipe> and defaults=/is,
+      ],
+      [
+        { description: "Legacy values", name: "legacy_values", template: "echo", values: { x: 1 } },
+        /values was removed.*Next: retry register_tool with defaults/is,
+      ],
+    ] as const) {
+      await assert.rejects(executeRegisterTool(params, {}, harness.deps), pattern);
+    }
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("Registry mutations specialize explicit Recipe paths through from", async () => {
+  const harness = await createHarness();
+  try {
+    const cwd = dirname(harness.root);
+    const sourceDir = join(cwd, "source");
+    const sourcePath = join(sourceDir, "docs-review.json");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(
+      sourcePath,
+      JSON.stringify({
+        args: ["scope:path", "model:string"],
+        description: "Start docs review actor",
+        template: "review {scope} {model}",
+      }),
+    );
+    const recipeResolutionContext = createRecipeResolutionContext(
+      "registry-file-from",
+      cwd,
+      createActiveSkillRecipeContext([]),
+    );
+    const result = await executeRegisterTool(
+      {
+        defaults: { model: "selected-model" },
+        from: "./source/docs-review.json",
+        name: "docs_review",
+      },
+      { recipeResolutionContext },
+      harness.deps,
+    );
+    assert.equal(
+      (harness.tools.get("docs_review")?.recipe?.template as { template: string })
+        .template,
+      "review {scope} {model}",
+    );
+    assert.deepEqual(harness.tools.get("docs_review")?.args, ["scope", "model"]);
+    assert.deepEqual(harness.runtimeRegistered, ["docs_review"]);
+    assert.equal(result.details.source, "./source/docs-review.json");
+    assert.deepEqual(result.details.required_args, ["scope"]);
+    assert.deepEqual(result.details.optional_args, ["model"]);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(harness.root, "docs_review.json"), "utf8")),
+      { defaults: { model: "selected-model" }, template: sourcePath },
+    );
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("Registry mutations apply defaults to co-located command Recipes", async () => {
   const harness = await createHarness();
   try {
     const result = await executeRegisterTool(
@@ -239,8 +413,8 @@ test("Registry mutations register co-located template recipes", async () => {
         async: true,
         description: "Start review run",
         name: "review_run",
-        template: "review {scope}",
-        values: { prompt: "Review risks." },
+        defaults: { prompt: "Review risks." },
+        template: "review {scope} {prompt}",
       },
       {},
       harness.deps,
@@ -249,11 +423,25 @@ test("Registry mutations register co-located template recipes", async () => {
     assert.equal(registeredRecipe?.async, true);
     assert.equal(registeredRecipe?.name, "review_run");
     assert.equal(registeredRecipe?.description, "Start review run");
-    assert.equal(registeredRecipe?.template, "review {scope}");
-    assert.equal(registeredRecipe?.values?.prompt, "Review risks.");
-    assert.deepEqual(harness.tools.get("review_run")?.args, ["scope"]);
+    assert.equal(
+      (registeredRecipe?.template as { template: string }).template,
+      "review {scope} {prompt}",
+    );
+    const stored = JSON.parse(
+      await readFile(join(harness.root, "review_run.json"), "utf8"),
+    );
+    assert.equal(stored.values, undefined);
+    assert.deepEqual(stored.defaults, { prompt: "Review risks." });
+    assert.deepEqual(registeredRecipe?.defaults, { prompt: "Review risks." });
+    assert.deepEqual(harness.tools.get("review_run")?.args, ["scope", "prompt"]);
     assert.equal(result.details.async, true);
-    assert.equal(result.details.recipeName, "review_run");
+    assert.deepEqual(result.details.required_args, ["scope"]);
+    assert.deepEqual(result.details.optional_args, [
+      "prompt",
+      "run_id",
+      "transport_context",
+    ]);
+    assert.equal("recipeName" in result.details, false);
     assert.equal("state_dir" in result.details, false);
   } finally {
     await harness.cleanup();
@@ -426,7 +614,7 @@ test("Registry activation failure restores prior bytes state and active tools", 
         {},
         failingDeps,
       ),
-      /Host activation verification failed/,
+      /Tool "working_tool" activation failed at active_tool_set.*callable_now=false.*Registration was rolled back.*Next: inspect target=runtime view=status; do not use spawn as proof/s,
     );
     assert.equal(await readFile(path, "utf8"), priorBytes);
     assert.equal(harness.tools.get("working_tool")?.description, "Working tool");
@@ -449,7 +637,7 @@ test("Registry activation failure restores prior bytes state and active tools", 
           }),
         },
       ),
-      /Host activation verification failed/,
+      /Tool "broken_new" activation failed at host_registration.*callable_now=false.*Registration was rolled back.*Next: inspect target=runtime view=status; do not use spawn as proof/s,
     );
     await assert.rejects(readFile(join(harness.root, "broken_new.json"), "utf8"));
     assert.equal(harness.tools.has("broken_new"), false);

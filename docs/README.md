@@ -12,9 +12,9 @@ Living index of all documentation in the `/docs` directory.
 - [recipe-library.md](./recipe-library.md) — Packaged standard recipe library such as async subagents, coordinator pipelines, utilities, and music playback
 - [releasing.md](./releasing.md) — Guarded tag validation, npm Trusted Publisher setup, registry verification, and GitHub Release convergence
 
-## Root Context
+## Project Surfaces
 
-- [Project Context](../AGENTS.md)
-- [Open Backlog](../BACKLOG.md)
-- [Changelog](../CHANGELOG.md)
-- [Root README](../README.md)
+- [Human product entrypoint](../README.md)
+- [Implementation protocol](../AGENTS.md)
+- [Future work](../BACKLOG.md)
+- [Completed delivery history](../CHANGELOG.md)

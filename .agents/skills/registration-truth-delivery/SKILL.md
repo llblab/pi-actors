@@ -2,17 +2,15 @@
 name: registration-truth-delivery
 description: Preserve one live Recipe resolution and admission contract across registration, registry, schema, activation, and Inspect surfaces.
 title: Registration Truth Delivery
-status: draft
+status: stable
 fss: true
 ---
 
 # Registration Truth Delivery
 
-Canonical open work: ../../../BACKLOG.md
-
 ## Mission and Scope
 
-Deliver the `0.46.1` registration-truth repair without copying delegated Recipe contracts or widening the public Run model. Support only the session resolution, user Recipe admission, registry reconciliation, schema ownership, Skill inventory, activation, launch-kind, and report-regression loop.
+Preserve the released `0.46.1` registration-truth contract without copying delegated Recipe contracts or widening the public Run model. Support only the session resolution, user Recipe admission, registry reconciliation, schema ownership, Skill inventory, activation, launch-kind, and report-regression loop.
 
 ## Truth Owners
 
@@ -25,12 +23,11 @@ Deliver the `0.46.1` registration-truth repair without copying delegated Recipe 
 ## Operating Protocol
 
 1. Honor the repository FSS opt-out before loading or changing this skill.
-2. Select only eligible `RGT-*` work from `BACKLOG.md` and preserve its dependency order.
+2. Apply this support lens only when later work touches registration truth, resolution, admission, activation, or related Inspect evidence.
 3. Keep one immutable session resolution context explicit at every live consumer before unifying admission or activation behavior.
 4. Resolve and validate the effective delegated contract before persistence or host mutation.
 5. Preserve exact resolution when Skill inventory is partial; diagnostics must not become resolver authority.
-6. Prove each boundary with focused tests, then run the smallest shared registry/resolution validation.
-7. Reconcile completed work out of `BACKLOG.md`; route release outcomes to `CHANGELOG.md` only when they become user-meaningful.
+6. Prove each affected boundary with focused tests, then run the smallest shared registry/resolution validation.
 
 ## Knowledge Routing
 

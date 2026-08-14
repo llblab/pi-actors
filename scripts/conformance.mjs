@@ -12,6 +12,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const conformanceSuites = [
+  "tests/agent-journeys.test.ts",
   "tests/control.test.ts",
   "tests/runs-controls.test.ts",
   "tests/runs-trace.test.ts",

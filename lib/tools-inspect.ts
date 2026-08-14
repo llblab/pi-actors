@@ -4,7 +4,7 @@
  * Owns exact inspect target/view dispatch; source projection stays in domain modules.
  */
 
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
@@ -208,8 +208,135 @@ function portableSkillRecipePath(
     : `<active-skill:${skill}>`;
 }
 
+function portableSkillRecipeDiagnosticReason(
+  diagnostic: RecipesReferences.SkillRecipeComponentDiagnostic,
+  namespaces: Record<string, string[]>,
+): string {
+  let reason = diagnostic.reason;
+  if (diagnostic.file) {
+    reason = reason.replaceAll(
+      diagnostic.file,
+      portableSkillRecipePath(
+        diagnostic.file,
+        diagnostic.skill,
+        namespaces,
+      ),
+    );
+  }
+  for (const root of namespaces[diagnostic.skill] ?? []) {
+    reason = reason.replaceAll(root, `<active-skill:${diagnostic.skill}>`);
+  }
+  return reason;
+}
+
+function inspectRecipeIdentity(
+  identity: string,
+  resolutionContext: RecipeResolution.RecipeResolutionContext | undefined,
+  namespaces: Record<string, string[]>,
+  inventory: RecipesReferences.SkillRecipeComponentInventory,
+  registryStatus: Runtime.RecipeRegistryStatus | undefined,
+): Record<string, unknown> {
+  const match = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)$/u.exec(identity);
+  const skill = match?.[1] ?? "";
+  const roots = skill ? namespaces[skill] ?? [] : [];
+  const skillActive = roots.length === 1;
+  const matchingComponent = inventory.components.find(
+    (component) => component.identity === identity,
+  );
+  const matchingRejection = inventory.rejected.find(
+    (diagnostic) =>
+      diagnostic.skill === skill &&
+      (diagnostic.stem === undefined || diagnostic.stem === match?.[2]),
+  );
+  let sourceLocation: string | undefined;
+  let rejectedReason: string | undefined;
+  let resolvable = false;
+  if (!match) {
+    rejectedReason =
+      "Identity must use canonical <skill>/<recipe> syntax.";
+  } else if (roots.length === 0) {
+    rejectedReason = `Active Skill Recipe not found: ${identity}`;
+  } else if (roots.length > 1) {
+    rejectedReason = matchingRejection
+      ? portableSkillRecipeDiagnosticReason(matchingRejection, namespaces)
+      : `Duplicate active Skill identity ${skill}`;
+  } else if (matchingRejection) {
+    rejectedReason = portableSkillRecipeDiagnosticReason(
+      matchingRejection,
+      namespaces,
+    );
+    if (matchingRejection.file) {
+      sourceLocation = portableSkillRecipePath(
+        matchingRejection.file,
+        skill,
+        namespaces,
+      );
+    }
+  } else {
+    try {
+      const file = RecipesReferences.resolveRecipeReferencePath(
+        identity,
+        resolutionContext?.cwd,
+        resolutionContext?.activeSkills,
+      );
+      if (!file || !existsSync(file)) {
+        rejectedReason = `Skill Recipe component not found: ${identity}`;
+      } else {
+        sourceLocation = portableSkillRecipePath(file, skill, namespaces);
+        const recipe = RecipesReferences.readResolvedRecipeConfig(file, [], {
+          skillContext: resolutionContext?.activeSkills,
+        });
+        if (recipe) resolvable = true;
+        else {
+          rejectedReason =
+            RecipesReferences.diagnoseRawRecipeConfigFailure(file) ??
+            `Recipe could not be resolved: ${identity}`;
+        }
+      }
+    } catch (error) {
+      rejectedReason = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const componentStatus = resolvable
+    ? "available"
+    : !match
+      ? "invalid_identity"
+      : roots.length === 0
+        ? "skill_inactive"
+        : roots.length > 1
+          ? "ambiguous_skill"
+          : matchingRejection
+            ? "rejected"
+            : matchingComponent
+              ? "unresolvable"
+              : "missing";
+  return {
+    identity,
+    skill_active: skillActive,
+    resolvable,
+    catalog_partial: inventory.partial,
+    component_status: componentStatus,
+    ...(sourceLocation ? { source_location: sourceLocation } : {}),
+    resolution_generation:
+      resolutionContext?.generation ?? registryStatus?.resolution_generation ?? "unavailable",
+    ...(rejectedReason ? { rejected_reason: rejectedReason } : {}),
+    next_actions: resolvable
+      ? [
+          `spawn recipe=${identity}`,
+          `register_tool name=<tool-name> from=${identity}`,
+        ]
+      : roots.length === 0 && skill
+        ? [
+            `activate Skill ${skill}`,
+            `inspect target=recipes view=doctor identity=${identity}`,
+          ]
+        : ["inspect target=recipes view=imports verbose=true"],
+  };
+}
+
 function inspectRecipes(
   view: string,
+  input: Record<string, unknown>,
   deps: InspectToolDeps,
   context: unknown,
 ): Record<string, unknown> {
@@ -245,6 +372,21 @@ function inspectRecipes(
   );
   const skillInventory =
     RecipesReferences.inventoryActiveSkillRecipeComponents(activeSkillContext);
+  const registryStatus = deps.registryStatus?.();
+  const identity =
+    typeof input.identity === "string" ? input.identity.trim() : "";
+  if (identity && view !== "doctor") {
+    throw new Error("inspect recipes identity is supported only with view=doctor.");
+  }
+  if (view === "doctor" && identity) {
+    return inspectRecipeIdentity(
+      identity,
+      resolutionContext,
+      skillRecipeNamespaces,
+      skillInventory,
+      registryStatus,
+    );
+  }
   const skillRecipeComponents = skillInventory.components.map((component) => ({
     identity: component.identity,
     source_kind: "active_skill_component",
@@ -254,7 +396,10 @@ function inspectRecipes(
   }));
   const skillRecipeComponentDiagnostics = skillInventory.rejected.map(
     (diagnostic) => ({
-      error: diagnostic.reason,
+      error: portableSkillRecipeDiagnosticReason(
+        diagnostic,
+        skillRecipeNamespaces,
+      ),
       ...(diagnostic.file
         ? {
             file: portableSkillRecipePath(
@@ -271,9 +416,9 @@ function inspectRecipes(
   const discoverySummary = RecipesDiscovery.summarizeDiscovery(discovered);
   const summary = {
     ...discoverySummary,
-    ...(deps.registryStatus
+    ...(registryStatus
       ? {
-          ...deps.registryStatus(),
+          ...registryStatus,
           watched_root: "~/.pi/agent/recipes",
         }
       : {}),
@@ -399,19 +544,63 @@ function inspectTool(
     throw new Error("inspect tool:<name> supports view=status or view=schema.");
   }
   const tool = deps.getTool?.(name);
-  if (!tool) throw new Error(`registered tool not found: ${name}`);
+  const status = deps.getToolStatus?.(name);
+  if (!tool && !status) {
+    throw new Error(
+      `Registered tool not found: ${name}. Next: inspect target=recipes view=doctor; do not substitute spawn for tool invocation.`,
+    );
+  }
+  if (view === "schema" && !tool) {
+    throw new Error(
+      `Tool "${name}" is registered but its callable schema is unavailable; callable_now=${String(status?.callable_now ?? false)}, activation_boundary=${String(status?.activation_boundary ?? "host_registration")}. Next: inspect target=tool:${name} view=status.`,
+    );
+  }
   return {
     name,
-    ...(view === "status" ? deps.getToolStatus?.(name) : {}),
-    description: tool.description,
-    parameters: tool.parameters,
-    promptSnippet: tool.promptSnippet,
+    ...(view === "status" ? status : {}),
+    ...(tool
+      ? {
+          description: tool.description,
+          parameters: tool.parameters,
+          promptSnippet: tool.promptSnippet,
+        }
+      : {}),
   };
 }
 
 function compactResult(target: string, view: string, details: Record<string, unknown>): string {
   if (target === "runtime") return compactRuntime(view, details);
+  if (target === "recipes" && typeof details.identity === "string") {
+    const lines = [
+      `recipes doctor identity=${details.identity} skill_active=${String(details.skill_active)} resolvable=${String(details.resolvable)} catalog_partial=${String(details.catalog_partial)} component_status=${String(details.component_status)}`,
+      ...(details.source_location
+        ? [`source=${String(details.source_location)}`]
+        : []),
+      `resolution_generation=${String(details.resolution_generation)}`,
+      ...(details.rejected_reason
+        ? [`rejected_reason=${String(details.rejected_reason)}`]
+        : []),
+      ...((details.next_actions as unknown[] | undefined) ?? []).map(
+        (action) => `next=${String(action)}`,
+      ),
+    ];
+    return `\n${lines.join("\n")}`;
+  }
   if (target === "recipes") return ToolsResponse.compactRecipeRegistry(details);
+  if (target.startsWith("tool:") && view === "status") {
+    const required = Array.isArray(details.required_args)
+      ? details.required_args.map(String).join(",") || "none"
+      : "unknown";
+    const optional = Array.isArray(details.optional_args)
+      ? details.optional_args.map(String).join(",") || "none"
+      : "unknown";
+    const next = Array.isArray(details.next_actions) && details.next_actions.length > 0
+      ? String(details.next_actions[0])
+      : details.callable_now === true
+        ? `call tool ${target.slice(5)}`
+        : `register_tool name=${target.slice(5)} update=true`;
+    return `\ntool=${target.slice(5)} source=${String(details.source ?? "unknown")} callable_now=${String(details.callable_now ?? false)} activation_boundary=${String(details.activation_boundary ?? "unknown")} required=${required} optional=${optional} launch_kind=${String(details.launch_kind ?? "none")} spawn_calls=${Number(details.spawn_calls ?? 0)} tool_calls=${Number(details.tool_calls ?? 0)} next=${next}`;
+  }
   if (target.startsWith("tool:")) return `\ntool=${target.slice(5)} view=${view}`;
   return `\nrun=${target.slice(4)} view=${view}`;
 }
@@ -426,6 +615,9 @@ export function createInspectToolDefinition<TContext = unknown>(
       "Inspect a Run's Recipe, Trace, or Control evidence, or runtime/recipe/tool diagnostics.",
     parameters: Schema.objectSchema(
       {
+        identity: Schema.stringSchema(
+          "Optional canonical <skill>/<recipe> identity for focused Recipe doctor diagnosis.",
+        ),
         lines: Schema.stringSchema("Bounded item count for Trace or recent Controls."),
         source: Schema.stringSchema(
           "Optional Trace source: all, lifecycle, control, process, agent, artifact, or runtime.",
@@ -453,7 +645,7 @@ export function createInspectToolDefinition<TContext = unknown>(
       if (target === "runtime") {
         details = inspectRuntime(view, input, ctx, deps);
       } else if (target === "recipes") {
-        details = inspectRecipes(view, deps, ctx);
+        details = inspectRecipes(view, input, deps, ctx);
       } else {
         const run = parseRunTarget(target);
         if (run) details = inspectRun(run, view, input, ctx, deps);

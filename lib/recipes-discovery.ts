@@ -243,7 +243,7 @@ function readDiscoveredRecipe(
       mutableUsage,
       resolutionContext,
       diagnostics: [
-        `Failed to load recipe ${file}: ${error instanceof Error ? error.message : String(error)}`,
+        `Recipe ${id} rejected: ${error instanceof Error ? error.message : String(error)}`,
       ],
       riskLabels: [],
       shadows: [],
@@ -939,6 +939,27 @@ function projectRegisteredTool(
         }
       : {}),
   };
+}
+
+export function summarizeRegisteredToolArgs(tool: RegisteredTool): {
+  optional: string[];
+  required: string[];
+} {
+  const publicArgs = tool.args.filter(
+    (arg) => !RecipesReferences.isRuntimeOwnedRecipeInput(arg),
+  );
+  const inlineDefaults = Schema.getExplicitToolArgDefaults(tool.recipe?.args);
+  const required = publicArgs.filter(
+    (arg) =>
+      !Object.hasOwn(tool.defaults, arg) &&
+      !Object.hasOwn(inlineDefaults, arg),
+  );
+  const requiredSet = new Set(required);
+  const optional = publicArgs.filter((arg) => !requiredSet.has(arg));
+  if (tool.recipe?.async === true) {
+    optional.push("run_id", "transport_context");
+  }
+  return { optional, required };
 }
 
 function boundedAdmissionDiagnostic(error: unknown): string {

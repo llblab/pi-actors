@@ -1,14 +1,59 @@
 /**
- * Recipe context prompt assembly.
- * Zones: async runner prompt context, recipe provenance, LLM child launches
- * Owns compact actor recipe context records appended to child-agent prompts.
+ * Recipe context contracts and prompt assembly.
+ * Zones: live session resolution, async runner prompt context, recipe provenance, LLM child launches
+ * Owns the immutable live Recipe environment and compact actor context appended to child-agent prompts.
  */
 
+import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 
 import type { CommandTemplateActorRecipeContext } from "./command-templates.ts";
+import * as RecipesReferences from "./recipes-references.ts";
 import type { TemplateRecipeContextRecord } from "./recipes-references.ts";
+
+export interface RecipeResolutionContext {
+  readonly activeSkills: RecipesReferences.ActiveSkillRecipeContext;
+  readonly cwd: string;
+  readonly generation: string;
+  readonly sessionId: string;
+}
+
+export function createRecipeResolutionContext(
+  sessionId: string,
+  cwd: string,
+  activeSkills: RecipesReferences.ActiveSkillRecipeContext,
+): RecipeResolutionContext {
+  const normalizedSessionId = sessionId.trim();
+  if (!normalizedSessionId) throw new Error("Recipe resolution session id is required.");
+  const normalizedCwd = resolve(cwd);
+  const generation = createHash("sha256")
+    .update(
+      JSON.stringify({
+        activeSkills: RecipesReferences.getActiveSkillRecipeNamespaces(activeSkills),
+        cwd: normalizedCwd,
+        sessionId: normalizedSessionId,
+      }),
+    )
+    .digest("hex");
+  return Object.freeze({
+    activeSkills,
+    cwd: normalizedCwd,
+    generation,
+    sessionId: normalizedSessionId,
+  });
+}
+
+export function createEmptyRecipeResolutionContext(
+  sessionId: string,
+  cwd: string,
+): RecipeResolutionContext {
+  return createRecipeResolutionContext(
+    sessionId,
+    cwd,
+    RecipesReferences.EMPTY_ACTIVE_SKILL_RECIPE_CONTEXT,
+  );
+}
 
 export interface MarkedRecipeContextRecord extends TemplateRecipeContextRecord {
   you_are_here?: true;

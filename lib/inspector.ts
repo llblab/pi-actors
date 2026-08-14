@@ -183,6 +183,7 @@ export function readActorInspectorRecipe(
       logical_reference: primaryLogicalReference,
       ...(typeof primary?.skill === "string" ? { skill: primary.skill } : {}),
       source_kind: primarySourceKind,
+      launch_kind: meta.launch_kind ?? meta.launch_source,
       launch_source: meta.launch_source,
     }),
     launch: redactedRecord({

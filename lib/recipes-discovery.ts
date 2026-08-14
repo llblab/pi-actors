@@ -12,6 +12,7 @@ import { join } from "node:path";
 import * as CommandTemplates from "./command-templates.ts";
 import type { RegisteredTool } from "./config.ts";
 import * as ModelContext from "./model-context.ts";
+import type { RecipeResolutionContext } from "./recipes-context.ts";
 import type { TemplateRecipeConfig } from "./recipes-references.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
@@ -29,6 +30,7 @@ export interface DiscoveredRecipe {
   disabled: boolean;
   tool: boolean;
   mutableUsage: boolean;
+  resolutionContext?: RecipeResolutionContext;
   diagnostics: string[];
   riskLabels: CommandTemplates.CommandTemplateRiskLabel[];
   shadows: string[];
@@ -58,6 +60,22 @@ export interface RecipesDiscoverySource {
   file?: string;
   defaultTool?: boolean;
   mutableUsage?: boolean;
+  resolutionContext?: RecipeResolutionContext;
+}
+
+export interface UserRecipeAdmission {
+  args?: string[];
+  argTypes?: RegisteredTool["argTypes"];
+  artifacts?: Record<string, string>;
+  async?: boolean;
+  control?: string[];
+  defaults?: Record<string, unknown>;
+  diagnostics: string[];
+  effectiveRecipe?: TemplateRecipeConfig;
+  identity: string;
+  sourcePath: string;
+  tool?: RegisteredTool;
+  validated: boolean;
 }
 
 function assertToolSafeRepeatConfig(
@@ -185,10 +203,13 @@ function readDiscoveredRecipe(
   priority: number,
   defaultTool = false,
   mutableUsage = false,
+  resolutionContext?: RecipeResolutionContext,
 ): DiscoveredRecipe {
   const id = RecipesReferences.getRecipeIdFromPath(file);
   try {
-    const config = RecipesReferences.readResolvedRecipeConfig(file);
+    const config = RecipesReferences.readResolvedRecipeConfig(file, [], {
+      skillContext: resolutionContext?.activeSkills,
+    });
     const invalid = !config;
     const disabled = config?.disabled === true;
     return {
@@ -203,6 +224,7 @@ function readDiscoveredRecipe(
       disabled,
       tool: defaultTool && !disabled && !invalid,
       mutableUsage,
+      resolutionContext,
       diagnostics: getRecipeConfigDiagnostics(file, config),
       riskLabels: getRecipeRiskLabels(config),
       shadows: [],
@@ -219,6 +241,7 @@ function readDiscoveredRecipe(
       disabled: false,
       tool: false,
       mutableUsage,
+      resolutionContext,
       diagnostics: [
         `Failed to load recipe ${file}: ${error instanceof Error ? error.message : String(error)}`,
       ],
@@ -233,6 +256,7 @@ function filesForSource(source: RecipesDiscoverySource): Array<{
   file: string;
   defaultTool: boolean;
   mutableUsage: boolean;
+  resolutionContext?: RecipeResolutionContext;
 }> {
   const defaultTool = source.defaultTool === true;
   const mutableUsage = source.mutableUsage === true;
@@ -243,6 +267,7 @@ function filesForSource(source: RecipesDiscoverySource): Array<{
         file: source.file,
         defaultTool,
         mutableUsage,
+        resolutionContext: source.resolutionContext,
       },
     ];
   return source.root
@@ -251,6 +276,7 @@ function filesForSource(source: RecipesDiscoverySource): Array<{
         file,
         defaultTool,
         mutableUsage,
+        resolutionContext: source.resolutionContext,
       }))
     : [];
 }
@@ -338,8 +364,16 @@ export function discoverRecipeSources(
   sources: RecipesDiscoverySource[],
 ): RecipesDiscoveryResult {
   const entries = sources.flatMap((source, priority) =>
-    filesForSource(source).map(({ root, file, defaultTool, mutableUsage }) =>
-      readDiscoveredRecipe(root, file, priority, defaultTool, mutableUsage),
+    filesForSource(source).map(
+      ({ root, file, defaultTool, mutableUsage, resolutionContext }) =>
+        readDiscoveredRecipe(
+          root,
+          file,
+          priority,
+          defaultTool,
+          mutableUsage,
+          resolutionContext,
+        ),
     ),
   );
   const byId = new Map<string, DiscoveredRecipe[]>();
@@ -836,14 +870,13 @@ export function summarizeDiscovery(
   };
 }
 
-export function toRegisteredTool(
-  entry: DiscoveredRecipe,
-): RegisteredTool | undefined {
-  if (!entry.tool || entry.invalid || entry.disabled || !entry.config)
-    return undefined;
-  const cfg = entry.config;
-  const template = entry.path;
-  const description = cfg.description ?? `Execute template recipe: ${entry.id}`;
+function projectRegisteredTool(
+  identity: string,
+  path: string,
+  cfg: TemplateRecipeConfig,
+  mutableUsage: boolean,
+): RegisteredTool {
+  const description = cfg.description ?? `Execute template recipe: ${identity}`;
   const argTemplate = cfg.template;
   const argTemplateConfig =
     typeof argTemplate === "object" && !Array.isArray(argTemplate)
@@ -867,27 +900,38 @@ export function toRegisteredTool(
     explicitArgTypes,
     { ...(cfg.defaults ?? {}), ...(cfg.values ?? {}) },
   );
-  const argTypes = Schema.getTemplateArgTypes(argTemplateConfig);
-  Schema.assertCompatibleToolArgTypes(explicitArgTypes, argTypes);
+  const inferredArgTypes = Schema.getTemplateArgTypes(argTemplateConfig);
+  Schema.assertCompatibleToolArgTypes(explicitArgTypes, inferredArgTypes);
+  const effectiveArgTypes = { ...inferredArgTypes, ...explicitArgTypes };
+  const args = Schema.getToolArgNames(argTemplateConfig).filter(
+    (arg) => !RecipesReferences.isRuntimeOwnedRecipeInput(arg),
+  );
+  const callerArgSet = new Set(args);
+  const argTypes = Object.fromEntries(
+    Object.entries(effectiveArgTypes).filter(([arg]) => callerArgSet.has(arg)),
+  );
+  const defaults = Object.fromEntries(
+    Object.entries(cfg.defaults ?? {}).filter(([arg]) => callerArgSet.has(arg)),
+  );
+  const storedArgs = cfg.args?.filter((arg) =>
+    callerArgSet.has(Schema.parseToolArgToken(String(arg)).arg),
+  );
   return {
-    name: entry.id,
+    name: identity,
     description,
-    template,
+    template: path,
     recipe: cfg,
-    args: Schema.getToolArgNames(argTemplateConfig),
+    args,
     defaults: Object.fromEntries(
-      Object.entries(cfg.defaults ?? {}).map(([key, value]) => [
-        key,
-        String(value),
-      ]),
+      Object.entries(defaults).map(([key, value]) => [key, String(value)]),
     ),
     ...(Object.keys(argTypes).length > 0 ? { argTypes } : {}),
-    ...(entry.mutableUsage ? { sourcePath: entry.path } : {}),
-    ...(cfg.args ? { storedArgs: cfg.args } : {}),
-    ...(cfg.defaults
+    ...(mutableUsage ? { sourcePath: path } : {}),
+    ...(storedArgs ? { storedArgs } : {}),
+    ...(Object.keys(defaults).length > 0
       ? {
           storedDefaults: Object.fromEntries(
-            Object.entries(cfg.defaults).map(([key, value]) => [
+            Object.entries(defaults).map(([key, value]) => [
               key,
               String(value),
             ]),
@@ -895,4 +939,100 @@ export function toRegisteredTool(
         }
       : {}),
   };
+}
+
+function boundedAdmissionDiagnostic(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length <= 4096 ? message : `${message.slice(0, 4095)}…`;
+}
+
+export function admitUserRecipe(
+  sourcePath: string,
+  resolutionContext: RecipeResolutionContext,
+  authoredRecipe?: Record<string, unknown>,
+  mutableUsage = true,
+): UserRecipeAdmission {
+  const identity = RecipesReferences.getRecipeIdFromPath(sourcePath);
+  try {
+    const effectiveRecipe = RecipesReferences.readResolvedRecipeConfig(
+      sourcePath,
+      [],
+      {
+        ...(authoredRecipe
+          ? { authoredEntry: { path: sourcePath, recipe: authoredRecipe } }
+          : {}),
+        skillContext: resolutionContext.activeSkills,
+      },
+    );
+    if (!effectiveRecipe) {
+      return {
+        diagnostics: [
+          authoredRecipe
+            ? "Recipe must define a valid template."
+            : RecipesReferences.diagnoseRawRecipeConfigFailure(sourcePath) ??
+              "Recipe must define a valid template.",
+        ],
+        identity,
+        sourcePath,
+        validated: false,
+      };
+    }
+    if (effectiveRecipe.disabled === true) {
+      return {
+        diagnostics: ["Recipe is disabled."],
+        effectiveRecipe,
+        identity,
+        sourcePath,
+        validated: false,
+      };
+    }
+    const tool = projectRegisteredTool(
+      identity,
+      sourcePath,
+      effectiveRecipe,
+      mutableUsage,
+    );
+    return {
+      args: tool.args,
+      argTypes: tool.argTypes,
+      artifacts: effectiveRecipe.artifacts,
+      async: effectiveRecipe.async === true,
+      control: effectiveRecipe.control,
+      defaults: effectiveRecipe.defaults,
+      diagnostics: [],
+      effectiveRecipe,
+      identity,
+      sourcePath,
+      tool,
+      validated: true,
+    };
+  } catch (error) {
+    return {
+      diagnostics: [boundedAdmissionDiagnostic(error)],
+      identity,
+      sourcePath,
+      validated: false,
+    };
+  }
+}
+
+export function toRegisteredTool(
+  entry: DiscoveredRecipe,
+): RegisteredTool | undefined {
+  if (!entry.tool || entry.invalid || entry.disabled || !entry.config)
+    return undefined;
+  if (entry.resolutionContext) {
+    return admitUserRecipe(
+      entry.path,
+      entry.resolutionContext,
+      undefined,
+      entry.mutableUsage,
+    ).tool;
+  }
+  return projectRegisteredTool(
+    entry.id,
+    entry.path,
+    entry.config,
+    entry.mutableUsage,
+  );
 }

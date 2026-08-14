@@ -161,6 +161,7 @@ export interface AsyncRunMeta {
   argv: string[];
   createdAt: string;
   cwd: string;
+  launch_kind?: AsyncRunLaunchSource;
   launch_source?: AsyncRunLaunchSource;
   launch_correlation?: {
     correlation_id?: string;
@@ -600,7 +601,10 @@ export function startRun(
       createdAt: new Date().toISOString(),
       cwd,
       ...(startParams.launch_source
-        ? { launch_source: startParams.launch_source }
+        ? {
+            launch_kind: startParams.launch_source,
+            launch_source: startParams.launch_source,
+          }
         : {}),
       ...(startParams.launch_correlation
         ? { launch_correlation: startParams.launch_correlation } : {}),

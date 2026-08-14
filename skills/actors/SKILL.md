@@ -19,9 +19,9 @@ Use the swarm skill separately for decomposition, quorum design, reviewer lenses
 - `spawn`: create one Run from a Recipe or inline command template.
 - `message`: send one actor-local Control to `run:<id>`, or the reserved review actions to `runtime`.
 - `inspect`: inspect `run:<id>`, `runtime`, `recipes`, or `tool:<name>`.
-- `register_tool`: persist a trusted capability; it does not address a running actor.
+- `register_tool`: persist a trusted capability; it does not address a running actor. Trust current-session callability only when its result says `callable_now: true`.
 
-A Run target exposes exactly three inspect views: `recipe`, `trace`, and `control`.
+A Run target exposes exactly three inspect views: `recipe`, `trace`, and `control`. Spawning a user Recipe is still a Recipe launch (`launch_kind: "spawn"`), not evidence that its registered tool was exposed or invoked; registered-tool execution reports `launch_kind: "tool"`, and `inspect target=tool:<name> view=status` separates both usage counts.
 
 ## Recipe
 
@@ -29,7 +29,7 @@ A Recipe defines execution. It may declare named typed args, inline fallbacks, c
 
 Do not declare Control for ordinary one-shot work. Runtime lifecycle actions such as `kill` stay runtime-owned and must not appear in Recipe Control declarations. Imported Recipes act as local definitions inside one Run; they do not create nested Runs unless execution explicitly spawns them.
 
-Prefer maintained Skill-owned Recipes over ad hoc wrappers. Skill Recipe identity is `<active Skill name>/<Recipe filename stem>`; Recipe files have no top-level `name`. `SKILL.md` `name` is Pi host metadata matching its directory, not an additional pi-actors identity field. Use `<skill>/<recipe>` for an exact direct component or an explicit `.json` / `.md` path. Entry paths resolve from invocation `cwd`; relative imports resolve from the importing Recipe directory. File-backed Recipes own `{recipe_dir}` and Skill Recipes own `{skill_dir}`; callers never pass or override these origins. Skill Recipes are components, not automatic tools. Keep model, thinking, mission, concurrency, quorum, and timeout choices caller-owned unless a Recipe documents a stable policy.
+Prefer maintained Skill-owned Recipes over ad hoc wrappers. Skill Recipe identity is `<active Skill name>/<Recipe filename stem>`; Recipe files have no top-level `name`. `SKILL.md` `name` is Pi host metadata matching its directory, not an additional pi-actors identity field. Use `<skill>/<recipe>` for an exact direct component or an explicit `.json` / `.md` path. Entry paths resolve from invocation `cwd`; relative imports resolve from the importing Recipe directory. File-backed Recipes own `{recipe_dir}` and Skill Recipes own `{skill_dir}`; callers never pass or override these origins. Skill Recipes are components, not automatic tools. A rejected component makes catalog inspection partial without blocking exact resolution of unrelated valid components in the same live session context. Keep model, thinking, mission, concurrency, quorum, and timeout choices caller-owned unless a Recipe documents a stable policy.
 
 ## Trace
 

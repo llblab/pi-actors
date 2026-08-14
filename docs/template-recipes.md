@@ -147,7 +147,9 @@ Resolution fails before launch when required current policy is unavailable. The 
 
 ## Resolution Context
 
-User Recipes under `~/.pi/agent/recipes` remain intentionally registered tools, not an ambient import namespace. Each session receives an immutable active-Skill resolution context from Pi's loaded Skill metadata; pi-actors does not scan ambient Skill roots independently or keep a process-global mutable namespace. A launch captures its resolved graph, so later Skill changes affect only future launches. An invalid or missing exact target fails without fallback. Disabled Recipes cannot launch. Registry watchers converge after atomic changes without executing partial definitions.
+User Recipes under `~/.pi/agent/recipes` remain intentionally registered tools, not an ambient import namespace. Each session receives one immutable resolution context from Pi's loaded Skill metadata; spawn, user-Recipe admission, registration, schema derivation, live inspection, and watcher reconciliation consume that same context rather than scanning ambient Skill roots or keeping a process-global mutable namespace. A launch captures its resolved graph, so later Skill changes affect only future launches. An invalid or missing exact target fails without fallback. Disabled Recipes cannot launch. Registry watchers converge after atomic changes without executing partial definitions.
+
+Active-Skill catalog inventory is fail-soft diagnostic state, not exact-resolution authority. Invalid components are reported individually and make the catalog partial while unrelated valid `<skill>/<recipe>` references remain exactly resolvable.
 
 ## Validation
 

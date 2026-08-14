@@ -81,7 +81,7 @@ A Run exposes exactly `recipe`, `trace`, and `control` views.
 
 ### `register_tool`
 
-Persist a trusted command template or Recipe-backed capability under `~/.pi/agent/recipes`. Registration remains separate from running Control.
+Persist a trusted command template or Recipe-backed capability under `~/.pi/agent/recipes`. Registration remains separate from running Control. Treat it as callable in the current session only when the result reports `callable_now: true`; persistence, Recipe spawning, and registered-tool invocation are distinct states.
 
 ## Recipe
 

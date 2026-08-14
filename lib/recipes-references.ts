@@ -87,11 +87,34 @@ export interface TemplateRecipeContextRecord {
 }
 
 export interface ReadResolvedRecipeConfigOptions {
+  authoredEntry?: { path: string; recipe: Record<string, unknown> };
   includeActorRecipeContext?: boolean;
   skillContext?: ActiveSkillRecipeContext;
 }
 
-const RUNTIME_RECIPE_VALUE_NAMES = new Set(["recipe_dir", "skill_dir"]);
+const RESERVED_AUTHORED_RECIPE_VALUE_NAMES = new Set([
+  "recipe_dir",
+  "skill_dir",
+]);
+
+export const RUNTIME_OWNED_RECIPE_INPUT_NAMES = Object.freeze([
+  "owner_id",
+  "recipe_dir",
+  "run_instance_id",
+  "runtime_state_root",
+  "session_id",
+  "skill_dir",
+  "state_dir",
+  "trace_file",
+]);
+
+const RUNTIME_OWNED_RECIPE_INPUT_SET = new Set(
+  RUNTIME_OWNED_RECIPE_INPUT_NAMES,
+);
+
+export function isRuntimeOwnedRecipeInput(name: string): boolean {
+  return RUNTIME_OWNED_RECIPE_INPUT_SET.has(name);
+}
 
 export interface ActiveSkillRecipeSource {
   name: string;
@@ -149,6 +172,19 @@ export interface ActiveSkillRecipeComponent {
   stem: string;
 }
 
+export interface SkillRecipeComponentDiagnostic {
+  file?: string;
+  reason: string;
+  skill: string;
+  stem?: string;
+}
+
+export interface SkillRecipeComponentInventory {
+  components: ActiveSkillRecipeComponent[];
+  partial: boolean;
+  rejected: SkillRecipeComponentDiagnostic[];
+}
+
 function nestedRecipeFiles(root: string): string[] {
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -158,20 +194,32 @@ function nestedRecipeFiles(root: string): string[] {
   });
 }
 
-export function listActiveSkillRecipeComponents(
+export function inventoryActiveSkillRecipeComponents(
   context: ActiveSkillRecipeContext,
-): ActiveSkillRecipeComponent[] {
+): SkillRecipeComponentInventory {
   const components: ActiveSkillRecipeComponent[] = [];
+  const rejected: SkillRecipeComponentDiagnostic[] = [];
   for (const [skill, roots] of Object.entries(context.namespaces)) {
-    if (roots.length > 1)
-      throw new Error(`Duplicate active Skill identity ${skill}: ${roots.join(", ")}`);
+    if (roots.length > 1) {
+      rejected.push({
+        reason: `Duplicate active Skill identity ${skill}: ${roots.join(", ")}`,
+        skill,
+      });
+      continue;
+    }
     const root = roots[0];
     if (!root || !existsSync(root)) continue;
     const direct = readdirSync(root, { withFileTypes: true });
     for (const entry of direct.filter((candidate) => candidate.isDirectory())) {
       const nested = nestedRecipeFiles(join(root, entry.name));
-      if (nested.length > 0)
-        throw new Error(`Nested Skill Recipe file is not addressable: ${nested[0]}`);
+      for (const file of nested) {
+        rejected.push({
+          file,
+          reason: `Nested Skill Recipe file is not addressable: ${file}`,
+          skill,
+          stem: getRecipeIdFromPath(file),
+        });
+      }
     }
     const files = direct
       .filter(
@@ -186,30 +234,62 @@ export function listActiveSkillRecipeComponents(
       byStem.set(stem, matches);
     }
     for (const [stem, matches] of [...byStem].sort(([a], [b]) => a.localeCompare(b))) {
-      if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(stem))
-        throw new Error(`Invalid Skill Recipe filename stem: ${stem}`);
-      if (matches.length > 1)
-        throw new Error(`Skill Recipe stem collision: ${skill}/${stem} has both .json and .md files`);
+      if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(stem)) {
+        rejected.push({
+          file: matches[0],
+          reason: `Invalid Skill Recipe filename stem: ${stem}`,
+          skill,
+          stem,
+        });
+        continue;
+      }
+      if (matches.length > 1) {
+        rejected.push({
+          file: matches[0],
+          reason: `Skill Recipe stem collision: ${skill}/${stem} has both .json and .md files`,
+          skill,
+          stem,
+        });
+        continue;
+      }
       const file = matches[0];
-      const raw = readRawRecipeConfig(file);
-      if (!raw || !Object.hasOwn(raw, "template"))
-        throw new Error(`Invalid Skill Recipe component: ${skill}/${stem}`);
-      assertRecipeHasNoDeclaredName(raw);
-      components.push({
-        file,
-        identity: `${skill}/${stem}`,
-        imports: Object.fromEntries(
-          Object.entries(getRecipeImports(raw)).map(([alias, value]) => [
-            alias,
-            getImportFrom(value),
-          ]),
-        ),
-        skill,
-        stem,
-      });
+      try {
+        const raw = readRawRecipeConfig(file);
+        if (!raw || !Object.hasOwn(raw, "template"))
+          throw new Error(`Invalid Skill Recipe component: ${skill}/${stem}`);
+        assertRecipeHasNoDeclaredName(raw);
+        components.push({
+          file,
+          identity: `${skill}/${stem}`,
+          imports: Object.fromEntries(
+            Object.entries(getRecipeImports(raw)).map(([alias, value]) => [
+              alias,
+              getImportFrom(value),
+            ]),
+          ),
+          skill,
+          stem,
+        });
+      } catch (error) {
+        rejected.push({
+          file,
+          reason: error instanceof Error ? error.message : String(error),
+          skill,
+          stem,
+        });
+      }
     }
   }
-  return components;
+  return { components, partial: rejected.length > 0, rejected };
+}
+
+export function listActiveSkillRecipeComponents(
+  context: ActiveSkillRecipeContext,
+): ActiveSkillRecipeComponent[] {
+  const inventory = inventoryActiveSkillRecipeComponents(context);
+  if (inventory.rejected.length > 0)
+    throw new Error(inventory.rejected[0].reason);
+  return inventory.components;
 }
 
 const SKILL_RECIPE_REFERENCE =
@@ -311,7 +391,7 @@ function assertRuntimeRecipeValuesNotDeclared(raw: Record<string, unknown>): voi
   const args = Array.isArray(raw.args)
     ? Schema.getExplicitToolArgNames(raw.args.map(String))
     : [];
-  for (const name of RUNTIME_RECIPE_VALUE_NAMES) {
+  for (const name of RESERVED_AUTHORED_RECIPE_VALUE_NAMES) {
     if (
       args.includes(name) ||
       (isRecord(raw.defaults) && Object.hasOwn(raw.defaults, name)) ||
@@ -1068,6 +1148,46 @@ function getDirectDelegatedRecipe(
   return undefined;
 }
 
+function resolveDirectDelegationArgs(
+  delegated: TemplateRecipeConfig,
+  wrapperArgs: unknown,
+  wrapperDefaults: Record<string, unknown> | undefined,
+): string[] | undefined {
+  if (!Array.isArray(delegated.args))
+    return Array.isArray(wrapperArgs) ? wrapperArgs.map(String) : undefined;
+  const delegatedSpec = Schema.parseToolArgDeclarationList(delegated.args);
+  if (delegatedSpec.error) throw new Error(delegatedSpec.error);
+  const wrapperDeclarations = Array.isArray(wrapperArgs)
+    ? wrapperArgs.map(String)
+    : [];
+  const wrapperSpec = Schema.parseToolArgDeclarationList(wrapperDeclarations);
+  if (wrapperSpec.error) throw new Error(wrapperSpec.error);
+  const declared = new Set(delegatedSpec.args);
+  for (const arg of wrapperSpec.args) {
+    if (!declared.has(arg))
+      throw new Error(`Unknown delegated Recipe argument: ${arg}`);
+  }
+  Schema.assertCompatibleToolArgTypes(
+    delegatedSpec.argTypes,
+    wrapperSpec.argTypes,
+  );
+  assertRecipeDefaultsDeclared(
+    delegated.args,
+    wrapperDefaults,
+    "delegated Recipe default",
+  );
+  Schema.normalizeRuntimeValues(
+    Object.fromEntries(
+      Object.entries(wrapperDefaults ?? {}).filter(
+        ([, value]) =>
+          typeof value !== "string" || !/\{[^{}]+\}/.test(value),
+      ),
+    ),
+    delegatedSpec.argTypes,
+  );
+  return delegated.args;
+}
+
 function expandImportNodes(
   value: CommandTemplateValue,
   imports: Record<string, ImportedRecipe>,
@@ -1157,7 +1277,10 @@ export function readResolvedRecipeConfig(
       `Recipe import depth exceeds limit ${MAX_RECIPE_IMPORT_DEPTH}: ${[...stack, path].join(" -> ")}`,
     );
   }
-  const raw = readRawRecipeConfig(path);
+  const raw =
+    options.authoredEntry?.path === path
+      ? options.authoredEntry.recipe
+      : readRawRecipeConfig(path);
   if (!raw || !Object.hasOwn(raw, "template")) return undefined;
   assertRecipeHasNoDeclaredName(raw);
   RecipeControl.assertRecipeHasNoMailbox(raw);
@@ -1244,10 +1367,15 @@ export function readResolvedRecipeConfig(
         role: stack.length > 0 ? "import" : "entry",
       })
     : expandedTemplate;
-  const mergedDefaults = mergeDefaults(
-    delegated?.defaults,
-    isRecord(substituted.defaults) ? substituted.defaults : undefined,
-  );
+  const wrapperDefaults = isRecord(substituted.defaults)
+    ? substituted.defaults
+    : undefined;
+  const mergedDefaults = mergeDefaults(delegated?.defaults, wrapperDefaults);
+  const effectiveArgs = delegated
+    ? resolveDirectDelegationArgs(delegated, substituted.args, wrapperDefaults)
+    : Array.isArray(substituted.args)
+      ? (substituted.args as string[])
+      : undefined;
   const artifactSource = isRecord(substituted.artifacts)
     ? substituted.artifacts
     : delegated?.artifacts;
@@ -1284,11 +1412,7 @@ export function readResolvedRecipeConfig(
       ? { imports: getRecipeImports(raw) }
       : {}),
     template: templateWithContext,
-    ...(Array.isArray(substituted.args)
-      ? { args: substituted.args as string[] }
-      : Array.isArray(delegated?.args)
-        ? { args: delegated.args }
-        : {}),
+    ...(effectiveArgs ? { args: effectiveArgs } : {}),
     ...(mergedDefaults ? { defaults: mergedDefaults } : {}),
     ...(typeof substituted.parallel === "boolean"
       ? { parallel: substituted.parallel }

@@ -10,7 +10,9 @@ import { basename, dirname } from "node:path";
 import * as Config from "./config.ts";
 import type { RegisteredToolExec } from "./execution.ts";
 import * as Paths from "./paths.ts";
+import type { RecipeResolutionContext } from "./recipes-context.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
+import * as RecipesUsage from "./recipes-usage.ts";
 import * as ToolsLocal from "./tools-local.ts";
 
 export interface RuntimeContext {
@@ -20,11 +22,19 @@ export interface RuntimeContext {
   };
 }
 
+export interface RuntimeToolActivation {
+  active_tool: boolean;
+  activation: "current_session" | "unverified";
+  callable_now: boolean;
+  host_registered: boolean;
+}
+
 export interface ToolRegistryRuntimeDeps {
   configPath: string;
   exec: RegisteredToolExec;
   recipeRoot?: string;
   getActiveTools?: () => string[];
+  getAllTools?: () => Array<{ name: string }>;
   registerTool: (
     definition: ReturnType<typeof ToolsLocal.createRuntimeToolDefinition>,
   ) => void;
@@ -32,16 +42,32 @@ export interface ToolRegistryRuntimeDeps {
   setActiveTools?: (toolNames: string[]) => void;
 }
 
+export interface RecipeRegistryStatus {
+  active_tool_count: number;
+  last_scan_counts: { active: number; rejected: number; scanned: number };
+  last_scan_at?: string;
+  registry_generation: number;
+  resolution_generation?: string;
+  watch_status: "closed" | "failed" | "watching_parent" | "watching_root";
+  watched_root: string;
+}
+
 export interface ToolRegistryRuntime {
+  getStatus(): RecipeRegistryStatus;
+  getToolStatus(name: string): Record<string, unknown> | undefined;
   getToolNameBlocker(name: string): string | undefined;
   getTools(): Map<string, Config.RegisteredTool>;
-  loadTools(ctx: RuntimeContext): void;
+  loadTools(
+    ctx: RuntimeContext,
+    resolutionContext?: RecipeResolutionContext,
+  ): void;
   notify(
     ctx: RuntimeContext,
     message: string,
     type: "info" | "warning" | "error",
   ): void;
-  registerRuntimeTool(cfg: Config.RegisteredTool): void;
+  registerRuntimeTool(cfg: Config.RegisteredTool): RuntimeToolActivation;
+  setWatchStatus(status: RecipeRegistryStatus["watch_status"]): void;
 }
 
 export interface RecipeToolReloadWatcher {
@@ -55,6 +81,14 @@ export function createAutoToolsRuntime(
   const tools = new Map<string, Config.RegisteredTool>();
   const runtimeToolFingerprints = new Map<string, string>();
   const runtimeTools = new Set<string>();
+  const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
+  const status: RecipeRegistryStatus = {
+    active_tool_count: 0,
+    last_scan_counts: { active: 0, rejected: 0, scanned: 0 },
+    registry_generation: 0,
+    watch_status: "closed",
+    watched_root: recipeRoot,
+  };
   function notify(
     ctx: RuntimeContext,
     message: string,
@@ -90,12 +124,30 @@ export function createAutoToolsRuntime(
       deps.getActiveTools().filter((name) => !staleSet.has(name)),
     );
   }
-  function registerRuntimeTool(cfg: Config.RegisteredTool) {
+  function activationFor(name: string): RuntimeToolActivation {
+    const hostRegistered = deps.getAllTools?.().some((tool) => tool.name === name) ?? false;
+    const activeTool = deps.getActiveTools?.().includes(name) ?? false;
+    return {
+      active_tool: activeTool,
+      activation:
+        hostRegistered && activeTool ? "current_session" : "unverified",
+      callable_now: hostRegistered && activeTool,
+      host_registered: hostRegistered,
+    };
+  }
+  function registerRuntimeTool(cfg: Config.RegisteredTool): RuntimeToolActivation {
     const fingerprint = getToolFingerprint(cfg);
-    if (runtimeToolFingerprints.get(cfg.name) === fingerprint) return;
-    deps.registerTool(ToolsLocal.createRuntimeToolDefinition(cfg, deps.exec));
-    runtimeTools.add(cfg.name);
-    runtimeToolFingerprints.set(cfg.name, fingerprint);
+    if (runtimeToolFingerprints.get(cfg.name) !== fingerprint) {
+      deps.registerTool(ToolsLocal.createRuntimeToolDefinition(cfg, deps.exec));
+      runtimeTools.add(cfg.name);
+      runtimeToolFingerprints.set(cfg.name, fingerprint);
+    }
+    if (deps.getActiveTools && deps.setActiveTools) {
+      deps.setActiveTools([
+        ...new Set([...deps.getActiveTools(), cfg.name]),
+      ]);
+    }
+    return activationFor(cfg.name);
   }
   function isStartupActionableRegistryWarning(warning: string): boolean {
     if (warning.includes(" shadows ")) return false;
@@ -137,11 +189,18 @@ export function createAutoToolsRuntime(
     }
     return `${lines.join("\n")}\n`;
   }
-  function loadTools(ctx: RuntimeContext) {
+  function loadTools(
+    ctx: RuntimeContext,
+    resolutionContext?: RecipeResolutionContext,
+  ) {
     const warnings: string[] = [];
-    const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
     const discovered = RecipesDiscovery.discoverRecipeSources([
-      { root: recipeRoot, defaultTool: true, mutableUsage: true },
+      {
+        root: recipeRoot,
+        defaultTool: true,
+        mutableUsage: true,
+        resolutionContext,
+      },
     ]);
     warnings.push(...discovered.diagnostics);
     tools.clear();
@@ -164,28 +223,59 @@ export function createAutoToolsRuntime(
       }
       registerRuntimeTool(cfg);
     }
+    status.active_tool_count = tools.size;
+    status.last_scan_at = new Date().toISOString();
+    status.last_scan_counts = {
+      active: tools.size,
+      rejected: discovered.entries.filter((entry) => entry.invalid).length,
+      scanned: discovered.entries.length,
+    };
+    status.registry_generation += 1;
+    status.resolution_generation = resolutionContext?.generation;
     const startupWarnings = warnings.filter(isStartupActionableRegistryWarning);
     if (startupWarnings.length > 0) {
       notify(ctx, formatRecipeToolWarnings(startupWarnings), "warning");
     }
   }
   return {
+    getStatus: () => ({
+      ...status,
+      last_scan_counts: { ...status.last_scan_counts },
+    }),
+    getToolStatus: (name) => {
+      const cfg = tools.get(name);
+      if (!cfg) return undefined;
+      const usage = cfg.sourcePath
+        ? RecipesUsage.readRecipeUsage(cfg.sourcePath)
+        : undefined;
+      return {
+        ...activationFor(name),
+        launch_kind: usage?.launch_kind,
+        spawn_calls: Number(usage?.spawn_calls ?? 0),
+        tool_calls: Number(usage?.tool_calls ?? 0),
+      };
+    },
     getToolNameBlocker,
     getTools: () => tools,
     loadTools,
     notify,
     registerRuntimeTool,
+    setWatchStatus: (watchStatus) => {
+      status.watch_status = watchStatus;
+    },
   };
 }
 
 export interface RecipeToolReloadWatcherDeps {
   exists?: (path: string) => boolean;
+  getResolutionContext?: () => RecipeResolutionContext | undefined;
   recipeRoot?: string;
   watchPath?: typeof watch;
 }
 
 export function createRecipeToolReloadWatcher(
-  runtime: Pick<ToolRegistryRuntime, "loadTools">,
+  runtime: Pick<ToolRegistryRuntime, "loadTools"> &
+    Partial<Pick<ToolRegistryRuntime, "setWatchStatus">>,
   deps: RecipeToolReloadWatcherDeps = {},
 ): RecipeToolReloadWatcher {
   const pathExists = deps.exists ?? existsSync;
@@ -194,6 +284,8 @@ export function createRecipeToolReloadWatcher(
   let rootWatcher: FSWatcher | undefined;
   let parentWatcher: FSWatcher | undefined;
   let failureNotified = false;
+  const setWatchStatus = (watchStatus: RecipeRegistryStatus["watch_status"]): void =>
+    runtime.setWatchStatus?.(watchStatus);
   const close = (): void => {
     const closingRoot = rootWatcher;
     rootWatcher = undefined;
@@ -203,10 +295,12 @@ export function createRecipeToolReloadWatcher(
     closingParent?.close();
     if (reloadTimeout) clearTimeout(reloadTimeout);
     reloadTimeout = undefined;
+    setWatchStatus("closed");
   };
   const notifyFailure = (ctx: RuntimeContext): void => {
     if (failureNotified) return;
     failureNotified = true;
+    setWatchStatus("failed");
     ctx.ui.notify(
       "Recipe live reload watcher failed; restart the session or use register_tool again to refresh recipe tools.",
       "warning",
@@ -216,7 +310,7 @@ export function createRecipeToolReloadWatcher(
     failureNotified = false;
     if (reloadTimeout) clearTimeout(reloadTimeout);
     reloadTimeout = setTimeout(() => {
-      runtime.loadTools(ctx);
+      runtime.loadTools(ctx, deps.getResolutionContext?.());
       ctx.ui.notify("Recipe tools refreshed from ~/.pi/agent/recipes", "info");
     }, 150);
     reloadTimeout.unref?.();
@@ -245,6 +339,7 @@ export function createRecipeToolReloadWatcher(
         scheduleReload(ctx);
       });
       parentWatcher = watcher;
+      setWatchStatus("watching_parent");
       watcher.on("error", () => {
         if (parentWatcher !== watcher) return;
         parentWatcher = undefined;
@@ -274,6 +369,7 @@ export function createRecipeToolReloadWatcher(
         scheduleReload(ctx);
       });
       rootWatcher = watcher;
+      setWatchStatus("watching_root");
       watcher.on("error", () => {
         if (rootWatcher !== watcher) return;
         rootWatcher = undefined;

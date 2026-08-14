@@ -83,6 +83,7 @@ export interface RegisteredToolExecutionResult {
     command: string;
     fullOutputPath?: string;
     killed: boolean;
+    launch_kind: "tool";
     stderrBytes?: number;
     stderrCapturedBytes?: number;
     stderrFile?: string;
@@ -1136,6 +1137,7 @@ export async function executeRegisteredTool(
       command,
       fullOutputPath: result.stdoutFile ?? formatted.fullOutputPath,
       killed: result.killed,
+      launch_kind: "tool",
       ...getCaptureDetails(result),
       ...(executed.branches.length > 0 ? { branches: executed.branches } : {}),
       ...(executed.failures.length > 0

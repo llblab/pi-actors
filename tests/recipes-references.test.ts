@@ -15,6 +15,7 @@ import {
   createActiveSkillRecipeContext,
   getActiveSkillRecipeNamespaces,
   getRecipeIdFromPath,
+  inventoryActiveSkillRecipeComponents,
   listActiveSkillRecipeComponents,
   readResolvedRecipeConfig,
   resolveRecipePath,
@@ -290,6 +291,48 @@ test("Nested and colliding active-Skill Recipe stems fail closed", async () => {
   }
 });
 
+test("Active-Skill inventory quarantines invalid components while exact resolution stays independent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-skill-inventory-"));
+  try {
+    const validSkill = join(root, "valid");
+    const brokenSkill = join(root, "broken");
+    await import("node:fs/promises").then((fs) =>
+      Promise.all([
+        fs.mkdir(join(validSkill, "recipes"), { recursive: true }),
+        fs.mkdir(join(brokenSkill, "recipes", "nested"), { recursive: true }),
+      ]),
+    );
+    const validRecipe = join(validSkill, "recipes", "task.json");
+    await writeFile(validRecipe, JSON.stringify({ template: "echo valid" }));
+    await writeFile(
+      join(brokenSkill, "recipes", "stale.json"),
+      JSON.stringify({ name: "stale", template: "echo stale" }),
+    );
+    await writeFile(
+      join(brokenSkill, "recipes", "nested", "hidden.json"),
+      JSON.stringify({ template: "echo hidden" }),
+    );
+    const context = createActiveSkillRecipeContext([
+      { name: "valid", baseDir: validSkill },
+      { name: "broken", baseDir: brokenSkill },
+    ]);
+    const inventory = inventoryActiveSkillRecipeComponents(context);
+    assert.equal(inventory.partial, true);
+    assert.deepEqual(
+      inventory.components.map((component) => component.identity),
+      ["valid/task"],
+    );
+    assert.equal(inventory.rejected.length, 2);
+    assert.equal(inventory.rejected.every((item) => item.skill === "broken"), true);
+    assert.equal(
+      resolveRecipeReferencePath("valid/task", root, context),
+      validRecipe,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Duplicate active Skill names fail with deterministic ambiguity", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-skill-collision-"));
   try {
@@ -458,6 +501,81 @@ test("Template Recipe direct delegation uses only canonical references", async (
     });
     await writeFile(parent, JSON.stringify({ template: "shared" }));
     assert.equal(readResolvedRecipeConfig(parent)?.template, "shared");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Direct delegation preserves the inherited contract and validates wrapper overrides", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-delegation-contract-"));
+  try {
+    const child = join(root, "worker.json");
+    const parent = join(root, "wrapper.json");
+    await writeFile(
+      child,
+      JSON.stringify({
+        async: true,
+        args: [
+          "mode:enum(check,fix)",
+          "attempts:int",
+          "dry_run:bool",
+        ],
+        artifacts: { report: "report.md" },
+        control: ["status"],
+        template: "worker {mode} {attempts} {dry_run}",
+      }),
+    );
+    await writeFile(
+      parent,
+      JSON.stringify({
+        args: ["attempts:int"],
+        defaults: { attempts: "3" },
+        template: { template: "./worker.json" },
+      }),
+    );
+    const resolved = readResolvedRecipeConfig(parent)!;
+    assert.equal(resolved.async, true);
+    assert.deepEqual(resolved.args, [
+      "mode:enum(check,fix)",
+      "attempts:int",
+      "dry_run:bool",
+    ]);
+    assert.deepEqual(resolved.defaults, { attempts: "3" });
+    assert.deepEqual(resolved.artifacts, { report: "report.md" });
+    assert.deepEqual(resolved.control, ["status"]);
+    await writeFile(
+      parent,
+      JSON.stringify({
+        args: ["attempts:bool"],
+        template: "./worker.json",
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(parent),
+      /Conflicting argument type for attempts/,
+    );
+    await writeFile(
+      parent,
+      JSON.stringify({
+        defaults: { missing: "value" },
+        template: "./worker.json",
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(parent),
+      /Unknown delegated Recipe default argument: missing/,
+    );
+    await writeFile(
+      parent,
+      JSON.stringify({
+        defaults: { attempts: "many" },
+        template: "./worker.json",
+      }),
+    );
+    assert.throws(
+      () => readResolvedRecipeConfig(parent),
+      /Argument attempts must be an integer/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

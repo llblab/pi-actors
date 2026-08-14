@@ -5,7 +5,7 @@
  */
 
 import { statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import * as ControlProjection from "./control-projection.ts";
@@ -13,12 +13,14 @@ import * as Inspector from "./inspector.ts";
 import * as Limits from "./limits.ts";
 import { computeRunControlCapacity } from "./run-evidence-policy.ts";
 import * as Paths from "./paths.ts";
+import type * as RecipeResolution from "./recipes-context.ts";
 import * as RecipesDiscovery from "./recipes-discovery.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as ReviewDiagnostics from "./review-diagnostics.ts";
 import * as RunsControls from "./runs-controls.ts";
 import * as RunControlDelivery from "./runs-control-delivery.ts";
 import * as RunsTrace from "./runs-trace.ts";
+import * as Runtime from "./runtime.ts";
 import * as RuntimeIdentity from "./runtime-identity.ts";
 import * as RuntimeTriage from "./runtime-triage.ts";
 import * as Schema from "./schema.ts";
@@ -32,8 +34,10 @@ const maybeJsonText = ToolsResponse.maybeJsonText;
 export interface InspectToolDeps<TContext = unknown> {
   getRunStatus?: (runOrDir: string) => Record<string, any>;
   getTool?: (name: string) => any | undefined;
+  getToolStatus?: (name: string) => Record<string, unknown> | undefined;
   listRuns?: () => Array<Record<string, any>>;
   recipeRoot?: string;
+  registryStatus?: () => Runtime.RecipeRegistryStatus;
 }
 
 function runtimeStatus(): Record<string, unknown> {
@@ -191,6 +195,19 @@ function inspectRuntime(
   throw new Error("inspect runtime supports view=status, view=runs, or view=triage.");
 }
 
+function portableSkillRecipePath(
+  file: string,
+  skill: string,
+  namespaces: Record<string, string[]>,
+): string {
+  const root = namespaces[skill]?.[0];
+  if (!root) return `<active-skill:${skill}>`;
+  const relation = relative(root, file);
+  return !relation.startsWith("..") && !isAbsolute(relation)
+    ? `<active-skill:${skill}>/${relation.replaceAll("\\", "/")}`
+    : `<active-skill:${skill}>`;
+}
+
 function inspectRecipes(
   view: string,
   deps: InspectToolDeps,
@@ -214,37 +231,52 @@ function inspectRecipes(
   const discovered = RecipesDiscovery.discoverRecipeSources([
     { root: recipeRoot, defaultTool: true, mutableUsage: true },
   ]);
-  const skillContext =
-    context && typeof context === "object" && "activeSkillRecipeContext" in context
+  const resolutionContext =
+    context && typeof context === "object" && "recipeResolutionContext" in context
       ? (context as {
-          activeSkillRecipeContext?: RecipesReferences.ActiveSkillRecipeContext;
-        }).activeSkillRecipeContext
+          recipeResolutionContext?: RecipeResolution.RecipeResolutionContext;
+        }).recipeResolutionContext
       : undefined;
   const activeSkillContext =
-    skillContext ?? RecipesReferences.EMPTY_ACTIVE_SKILL_RECIPE_CONTEXT;
+    resolutionContext?.activeSkills ??
+    RecipesReferences.EMPTY_ACTIVE_SKILL_RECIPE_CONTEXT;
   const skillRecipeNamespaces = RecipesReferences.getActiveSkillRecipeNamespaces(
     activeSkillContext,
   );
-  let skillRecipeComponents: Array<Record<string, unknown>> = [];
-  const skillRecipeComponentDiagnostics: Array<Record<string, unknown>> = [];
-  try {
-    skillRecipeComponents = RecipesReferences.listActiveSkillRecipeComponents(
-      activeSkillContext,
-    ).map((component) => ({
-      identity: component.identity,
-      source_kind: "active_skill_component",
-      skill: component.skill,
-      stem: component.stem,
-      imports: component.imports,
-    }));
-  } catch (error) {
-    skillRecipeComponentDiagnostics.push({
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  const skillInventory =
+    RecipesReferences.inventoryActiveSkillRecipeComponents(activeSkillContext);
+  const skillRecipeComponents = skillInventory.components.map((component) => ({
+    identity: component.identity,
+    source_kind: "active_skill_component",
+    skill: component.skill,
+    stem: component.stem,
+    imports: component.imports,
+  }));
+  const skillRecipeComponentDiagnostics = skillInventory.rejected.map(
+    (diagnostic) => ({
+      error: diagnostic.reason,
+      ...(diagnostic.file
+        ? {
+            file: portableSkillRecipePath(
+              diagnostic.file,
+              diagnostic.skill,
+              skillRecipeNamespaces,
+            ),
+          }
+        : {}),
+      skill: diagnostic.skill,
+      ...(diagnostic.stem ? { stem: diagnostic.stem } : {}),
+    }),
+  );
   const discoverySummary = RecipesDiscovery.summarizeDiscovery(discovered);
   const summary = {
     ...discoverySummary,
+    ...(deps.registryStatus
+      ? {
+          ...deps.registryStatus(),
+          watched_root: "~/.pi/agent/recipes",
+        }
+      : {}),
     active: Array.isArray(discoverySummary.active)
       ? discoverySummary.active.map((entry) => ({
           ...(entry as Record<string, unknown>),
@@ -253,6 +285,7 @@ function inspectRecipes(
       : discoverySummary.active,
     skill_recipe_components: skillRecipeComponents,
     skill_recipe_component_diagnostics: skillRecipeComponentDiagnostics,
+    skill_recipe_catalog_partial: skillInventory.partial,
     active_skill_recipe_identities: Object.keys(skillRecipeNamespaces).sort(),
     skill_recipe_namespace_diagnostics: Object.entries(skillRecipeNamespaces)
       .filter(([, roots]) => roots.length > 1)
@@ -369,6 +402,7 @@ function inspectTool(
   if (!tool) throw new Error(`registered tool not found: ${name}`);
   return {
     name,
+    ...(view === "status" ? deps.getToolStatus?.(name) : {}),
     description: tool.description,
     parameters: tool.parameters,
     promptSnippet: tool.promptSnippet,

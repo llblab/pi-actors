@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.46.1: Registration Truth
+
+- `Live Resolution`: Spawn, registration, registry admission/reload, schema derivation, and Inspect now consume one immutable session Recipe context. Skill-dependent user wrappers reconcile only after Pi supplies active Skills, watcher reloads retain the current generation, and stale session consumers fail closed.
+- `Effective Admission`: One user-Recipe admission path resolves direct delegation before persistence, inheriting async behavior, typed arguments/defaults, artifacts, Control, and runtime origins without copying maintained contracts. Malformed or mistyped wrappers fail before mutation, and failed updates roll back prior bytes, registry state, host definitions, and active tools.
+- `Schema Ownership`: Caller schemas preserve enum, bool, integer, number, path, and array types while centrally excluding runtime-owned inputs such as `recipe_dir`, `skill_dir`, `state_dir`, Trace/run identity, and runtime state roots. The intentional async `run_id` override remains public.
+- `Fail-Soft Catalog`: Active-Skill inventory returns valid components alongside bounded per-component rejections and an explicit partial state. Invalid unrelated Recipes and duplicate namespaces remain diagnosable without poisoning exact resolution of valid components.
+- `Activation and Observability`: Registration reports resolved, validated, persisted, registry, host, active-tool, and callable states from Pi host evidence. Recipe inspection adds generation, scan, watcher, portable-root, and partial-catalog state; tool status reports current activation and separate spawn/tool usage.
+- `Launch Truth and Dogfood`: Spawn and registered-tool launches expose distinct `launch_kind` evidence. Source and packed-package regressions activate `media/player`, quarantine an unrelated stale component, register and invoke a compact `music_player` in the same session, preserve inherited Control/schema, exercise repair reloads and negative cases, and reject shell/copy workarounds.
+
 ## 0.46.0: Skill-Owned Capability Packs
 
 - `Breaking Recipe Grammar`: File-backed identity now comes only from the filename; top-level Recipe `name`, nested Skill identities, JSON/Markdown stem collisions, bare references, and the old `std:` / `skill:` prefixes fail with migration guidance. Composition accepts exact `<active-skill>/<stem>` references or explicit `.json` / `.md` paths, with entry paths based at invocation cwd and relative imports based at their owning Recipe.

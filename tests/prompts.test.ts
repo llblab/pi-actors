@@ -17,6 +17,11 @@ test("Register tool prompt copy names the register_tool tool explicitly", () => 
     ),
     true,
   );
+  assert.match(Prompts.REGISTER_TOOL_GUIDELINES.join("\n"), /callable_now/);
+  assert.doesNotMatch(
+    Prompts.REGISTER_TOOL_GUIDELINES.join("\n"),
+    /immediately callable/,
+  );
 });
 
 test("Register tool parameter descriptions cover public input fields", () => {
@@ -60,6 +65,10 @@ test("Onboarding system prompt explains recipe and async run model compactly", (
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,
     /Prefer maintained active-Skill Recipes/,
+  );
+  assert.match(
+    Prompts.ONBOARDING_SYSTEM_PROMPT,
+    /reports current activation truth/,
   );
   assert.match(
     Prompts.ONBOARDING_SYSTEM_PROMPT,

@@ -9,6 +9,7 @@ import * as CommandTemplates from "./command-templates.ts";
 import * as Paths from "./paths.ts";
 import * as Pi from "./pi.ts";
 import * as Prompts from "./prompts.ts";
+import * as RecipeResolution from "./recipes-context.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as RunUiRuntime from "./run-ui-runtime.ts";
 import * as Runtime from "./runtime.ts";
@@ -34,14 +35,21 @@ export function createActorExtensionRuntime(
   pi: Pi.ExtensionAPI,
 ): ActorExtensionRuntime {
   let activeRunContext: Pi.ExtensionContext | undefined;
-  const skillContextsBySession = new Map<
+  const recipeResolutionContextsBySession = new Map<
     string,
-    RecipesReferences.ActiveSkillRecipeContext
+    RecipeResolution.RecipeResolutionContext
   >();
   const getRunOwnerId = Pi.getSessionId;
-  const getSkillContext = (ctx: Pi.ExtensionContext) =>
-    skillContextsBySession.get(getRunOwnerId(ctx)) ??
-    RecipesReferences.EMPTY_ACTIVE_SKILL_RECIPE_CONTEXT;
+  const getRecipeResolutionContext = (ctx: Pi.ExtensionContext) => {
+    const sessionId = getRunOwnerId(ctx);
+    const resolutionContext = recipeResolutionContextsBySession.get(sessionId);
+    if (!resolutionContext) {
+      throw new Error(
+        `Recipe resolution context is unavailable for session ${sessionId}.`,
+      );
+    }
+    return resolutionContext;
+  };
   const automaticReview = AutomaticReviewRuntime.createAutomaticReviewRuntime({
     getActiveContext: () => activeRunContext,
     getRunOwnerId,
@@ -67,7 +75,7 @@ export function createActorExtensionRuntime(
         if (ctx && typeof ctx === "object") {
           nextArgs[4] = {
             ...(ctx as Record<string, unknown>),
-            activeSkillRecipeContext: getSkillContext(
+            recipeResolutionContext: getRecipeResolutionContext(
               ctx as Pi.ExtensionContext,
             ),
             getThinkingLevel: () => pi.getThinkingLevel(),
@@ -85,6 +93,7 @@ export function createActorExtensionRuntime(
     configPath: Paths.EXTENSION_RUNTIME_PATHS.configPath,
     exec: CommandTemplates.execCommandTemplate,
     getActiveTools: () => pi.getActiveTools(),
+    getAllTools: () => pi.getAllTools(),
     registerTool: (definition) => {
       const wrapped = withCurrentThinkingContext(definition);
       actorToolDefinitions.set(wrapped.name, wrapped);
@@ -93,13 +102,22 @@ export function createActorExtensionRuntime(
     reservedToolNames: Tools.RESERVED_TOOL_NAMES,
     setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
   });
-  const recipeReload = Runtime.createRecipeToolReloadWatcher(runtime);
+  const recipeReload = Runtime.createRecipeToolReloadWatcher(runtime, {
+    getResolutionContext: () =>
+      activeRunContext
+        ? getRecipeResolutionContext(activeRunContext)
+        : undefined,
+  });
   return {
     beforeAgentStart(systemPrompt, skills, ctx) {
-      skillContextsBySession.set(
-        getRunOwnerId(ctx),
+      const sessionId = getRunOwnerId(ctx);
+      const resolutionContext = RecipeResolution.createRecipeResolutionContext(
+        sessionId,
+        ctx.cwd,
         RecipesReferences.createActiveSkillRecipeContext(skills),
       );
+      recipeResolutionContextsBySession.set(sessionId, resolutionContext);
+      runtime.loadTools(ctx, resolutionContext);
       return {
         systemPrompt: `${systemPrompt}\n\n${Prompts.ONBOARDING_SYSTEM_PROMPT}`,
       };
@@ -113,16 +131,17 @@ export function createActorExtensionRuntime(
       if (activeRunContext === ctx) automaticReview.schedule();
     },
     onSessionShutdown(reason, ctx) {
-      skillContextsBySession.delete(getRunOwnerId(ctx));
+      recipeResolutionContextsBySession.delete(getRunOwnerId(ctx));
       activeRunContext = undefined;
       automaticReview.close();
       recipeReload.close();
       runUiRuntime.shutdown(reason, ctx);
     },
     async onSessionStart(ctx) {
-      skillContextsBySession.set(
-        getRunOwnerId(ctx),
-        RecipesReferences.EMPTY_ACTIVE_SKILL_RECIPE_CONTEXT,
+      const sessionId = getRunOwnerId(ctx);
+      recipeResolutionContextsBySession.set(
+        sessionId,
+        RecipeResolution.createEmptyRecipeResolutionContext(sessionId, ctx.cwd),
       );
       ctx.ui.setWidget("zz-pi-actors-comms", undefined);
       activeRunContext = ctx;
@@ -132,7 +151,6 @@ export function createActorExtensionRuntime(
       await Temp.prepareExtensionTempDir(Paths.EXTENSION_RUNTIME_PATHS.tempDir);
       if (activeRunContext !== ctx) return;
       automaticReview.start(ctx);
-      runtime.loadTools(ctx);
       runUiRuntime.start(ctx);
       recipeReload.watch(ctx);
     },
@@ -148,6 +166,7 @@ export function createActorExtensionRuntime(
               runtime.getTools(),
               (activeName) => actorToolDefinitions.get(activeName),
             ),
+          getRuntimeToolStatus: runtime.getToolStatus,
           handleRuntimeControl: automaticReview.handleControl,
           registryRuntime: runtime,
           setActiveTools: (toolNames) => pi.setActiveTools(toolNames),

@@ -77,6 +77,7 @@ test("inspector hides runtime-owned Recipe origins from model-facing launch valu
       logical_reference: "sample/task",
       skill: "sample",
       source_kind: "active_skill_component",
+      launch_kind: "spawn",
       launch_source: "spawn",
     });
     assert.equal(view.composition[0].logical_reference, "sample/task");

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import * as Limits from "../lib/limits.ts";
+import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 
@@ -168,13 +169,29 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
       { name: "duplicate", baseDir: "/skills/first" },
       { name: "duplicate", baseDir: "/skills/second" },
     ]);
-    const tool = createInspectToolDefinition({ recipeRoot });
+    const recipeResolutionContext = createRecipeResolutionContext(
+      "inspect-ambiguous-session",
+      root,
+      activeSkillRecipeContext,
+    );
+    const tool = createInspectToolDefinition({
+      recipeRoot,
+      registryStatus: () => ({
+        active_tool_count: 1,
+        last_scan_at: "2026-03-22T00:00:00.000Z",
+        last_scan_counts: { active: 1, rejected: 0, scanned: 1 },
+        registry_generation: 3,
+        resolution_generation: "resolution-3",
+        watch_status: "watching_root",
+        watched_root: recipeRoot,
+      }),
+    });
     const result = await tool.execute(
       "recipes",
       { target: "recipes", view: "imports", verbose: true },
       undefined,
       undefined,
-      { activeSkillRecipeContext },
+      { recipeResolutionContext },
     );
     assert.deepEqual(result.details.active_skill_recipe_identities, [
       "duplicate",
@@ -186,7 +203,23 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
       "duplicate",
     );
     assert.equal(result.details.active[0].source_kind, "user_registry_capability");
-    assert.deepEqual(result.details.skill_recipe_components, []);
+    assert.equal(result.details.registry_generation, 3);
+    assert.equal(result.details.resolution_generation, "resolution-3");
+    assert.equal(result.details.watch_status, "watching_root");
+    assert.equal(result.details.watched_root, "~/.pi/agent/recipes");
+    assert.deepEqual(result.details.last_scan_counts, {
+      active: 1,
+      rejected: 0,
+      scanned: 1,
+    });
+    assert.deepEqual(result.details.skill_recipe_components, [{
+      identity: "sample/task",
+      source_kind: "active_skill_component",
+      skill: "sample",
+      stem: "task",
+      imports: {},
+    }]);
+    assert.equal(result.details.skill_recipe_catalog_partial, true);
     assert.match(
       result.details.skill_recipe_component_diagnostics[0].error,
       /Duplicate active Skill identity duplicate/,
@@ -195,13 +228,19 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
     const unambiguous = createActiveSkillRecipeContext([
       { name: "sample", baseDir: sampleSkill },
     ]);
+    const unambiguousResolutionContext = createRecipeResolutionContext(
+      "inspect-unambiguous-session",
+      root,
+      unambiguous,
+    );
     const componentResult = await tool.execute(
       "components",
       { target: "recipes", view: "imports", verbose: true },
       undefined,
       undefined,
-      { activeSkillRecipeContext: unambiguous },
+      { recipeResolutionContext: unambiguousResolutionContext },
     );
+    assert.equal(componentResult.details.skill_recipe_catalog_partial, false);
     assert.deepEqual(componentResult.details.skill_recipe_components, [{
       identity: "sample/task",
       source_kind: "active_skill_component",
@@ -452,6 +491,15 @@ test("Inspect treats tools as capability definitions, not runtime actors", async
       name === "demo"
         ? { description: "Demo capability", parameters: { properties: {}, required: [] } }
         : undefined,
+    getToolStatus: () => ({
+      active_tool: true,
+      activation: "current_session",
+      callable_now: true,
+      host_registered: true,
+      launch_kind: "tool",
+      spawn_calls: 2,
+      tool_calls: 3,
+    }),
   });
   const result = await tool.execute(
     "tool",
@@ -461,6 +509,11 @@ test("Inspect treats tools as capability definitions, not runtime actors", async
     {},
   );
   assert.equal(result.details.name, "demo");
+  assert.equal(result.details.activation, "current_session");
+  assert.equal(result.details.callable_now, true);
+  assert.equal(result.details.launch_kind, "tool");
+  assert.equal(result.details.spawn_calls, 2);
+  assert.equal(result.details.tool_calls, 3);
   await assert.rejects(
     tool.execute("runtime", { target: "tool:pi-actors", view: "triage" }, undefined, undefined, {}),
     /supports view=status or view=schema/,

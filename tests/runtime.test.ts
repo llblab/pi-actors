@@ -12,6 +12,11 @@ import test from "node:test";
 
 import type { CommandTemplateExecResult } from "../lib/command-templates.ts";
 import {
+  createEmptyRecipeResolutionContext,
+  createRecipeResolutionContext,
+} from "../lib/recipes-context.ts";
+import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
+import {
   createAutoToolsRuntime,
   createRecipeToolReloadWatcher,
 } from "../lib/runtime.ts";
@@ -60,6 +65,87 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
     });
     assert.equal(runtime.getTools().has("bad-repeat"), false);
     assert.match(notifications.join("\n"), /Command template repeat/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime reconciles Skill-dependent user tools only with the supplied live context", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-live-context-"));
+  try {
+    const recipeRoot = join(root, "recipes");
+    const mediaSkill = join(root, "skills", "media");
+    await Promise.all([
+      mkdir(recipeRoot, { recursive: true }),
+      mkdir(join(mediaSkill, "recipes"), { recursive: true }),
+    ]);
+    await writeRecipe(recipeRoot, "music_player", {
+      description: "Play local music",
+      template: "media/player",
+    });
+    await writeFile(
+      join(mediaSkill, "recipes", "player.json"),
+      JSON.stringify({
+        async: true,
+        args: ["source:path"],
+        control: ["play", "stop"],
+        template: "echo {source}",
+      }),
+    );
+    const registered: Array<{ name: string; required: string[] }> = [];
+    let activeTools = ["read"];
+    const runtime = createAutoToolsRuntime({
+      configPath: join(root, "registry.json"),
+      exec,
+      getActiveTools: () => activeTools,
+      recipeRoot,
+      registerTool: (definition) => {
+        registered.push({
+          name: definition.name,
+          required: definition.parameters.required,
+        });
+        activeTools = [...new Set([...activeTools, definition.name])];
+      },
+      reservedToolNames: new Set(),
+      setActiveTools: (names) => {
+        activeTools = names;
+      },
+    });
+    const runtimeContext = { hasUI: false, ui: { notify() {} } };
+    runtime.loadTools(runtimeContext);
+    assert.equal(runtime.getTools().has("music_player"), false);
+    assert.deepEqual(registered, []);
+    assert.equal(runtime.getStatus().registry_generation, 1);
+    assert.equal(runtime.getStatus().resolution_generation, undefined);
+    const resolutionContext = createRecipeResolutionContext(
+      "runtime-live-session",
+      root,
+      createActiveSkillRecipeContext([{ name: "media", baseDir: mediaSkill }]),
+    );
+    runtime.loadTools(runtimeContext, resolutionContext);
+    assert.equal(runtime.getTools().get("music_player")?.recipe?.async, true);
+    assert.deepEqual(runtime.getTools().get("music_player")?.recipe?.control, [
+      "play",
+      "stop",
+    ]);
+    assert.deepEqual(registered, [
+      { name: "music_player", required: ["source"] },
+    ]);
+    assert.equal(runtime.getStatus().registry_generation, 2);
+    assert.equal(
+      runtime.getStatus().resolution_generation,
+      resolutionContext.generation,
+    );
+    assert.deepEqual(runtime.getStatus().last_scan_counts, {
+      active: 1,
+      rejected: 0,
+      scanned: 1,
+    });
+    runtime.loadTools(runtimeContext, resolutionContext);
+    assert.equal(registered.length, 1);
+    runtime.loadTools(runtimeContext);
+    assert.equal(runtime.getTools().has("music_player"), false);
+    assert.deepEqual(activeTools, ["read"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -305,11 +391,22 @@ test("Stale recipe watcher callbacks cannot close a replacement watcher", async 
   const recipeRoot = "/agent/recipes";
   let rootExists = true;
   let loads = 0;
+  const resolutionContext = createEmptyRecipeResolutionContext(
+    "watcher-session",
+    "/agent",
+  );
+  const loadedContexts: unknown[] = [];
   const watchers: FakeWatcher[] = [];
   const watcher = createRecipeToolReloadWatcher(
-    { loadTools: () => { loads += 1; } },
+    {
+      loadTools: (_ctx, context) => {
+        loads += 1;
+        loadedContexts.push(context);
+      },
+    },
     {
       exists: (path) => path === "/agent" || (path === recipeRoot && rootExists),
+      getResolutionContext: () => resolutionContext,
       recipeRoot,
       watchPath: ((path: string, listener: FakeWatcher["listener"]) => {
         const created = new FakeWatcher(path, listener);
@@ -333,6 +430,7 @@ test("Stale recipe watcher callbacks cannot close a replacement watcher", async 
   replacementRoot.change("tool.json");
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(loads, 1);
+  assert.deepEqual(loadedContexts, [resolutionContext]);
   assert.equal(replacementRoot.closed, false);
   watcher.close();
 });

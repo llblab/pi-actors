@@ -2,13 +2,14 @@
 
 ## Meta-Protocol Principles
 
-- `README.md`: human product entrypoint.
-- `AGENTS.md`: durable implementation protocol.
+- `README.md` and `docs/`: human-facing product entrypoint, concepts, and reference.
+- `skills/`: agent-facing operating protocols and Skill-local operational references.
+- injected system prompt: routing-only meta-protocol that selects the owning Skill.
+- `AGENTS.md`, source, and tests: implementation protocol and executable evidence.
 - `BACKLOG.md`: canonical future-only work.
 - `CHANGELOG.md`: completed delivery history.
-- `docs/README.md`: documentation index.
 
-Keep these surfaces distinct and reconcile them after meaningful changes. Every release section, historical or new, keeps at most 8 outcome records of at most 512 characters.
+Do not make normal-use Skills depend on README/docs, do not copy Skill operating manuals into the system prompt, and do not present implementation evidence as the agent operating path. Keep these surfaces distinct and reconcile them after meaningful changes. Every release section, historical or new, keeps at most 8 outcome records of at most 512 characters.
 
 ## Concept
 
@@ -37,7 +38,8 @@ Pi host
      -> lib/inspector*.ts             owner-filtered actor-instance inspection
      -> scripts/*.mjs                 process/service entrypoints
      -> skills/*/recipes/*            Skill-owned Recipe components
-     -> skills/* + docs/*             agent and human guidance
+     -> skills/*                      agent operating protocols
+     -> README.md / docs/*            human product guidance
 ```
 
 `index.ts` wires Pi ports and must not own domain behavior. Keep the local TypeScript import graph acyclic. For architecture-affecting work, load and follow `.agents/skills/domain-dag/SKILL.md`; its validator is local agent tooling, not an npm, CI, or release gate.

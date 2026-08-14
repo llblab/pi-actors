@@ -27,28 +27,30 @@ export interface RegisterToolInput {
   description?: string;
   async?: boolean;
   template?: CommandTemplates.CommandTemplateValue | null;
+  from?: string;
+  defaults?: Record<string, unknown>;
   draft?: string;
   args?: string;
   update?: boolean;
-  values?: Record<string, unknown>;
 }
 
 export interface RegisterToolResultDetails {
   active_tool?: boolean;
   activation?: "current_session" | "unverified";
+  activation_boundary?: string;
   args?: string[];
   async?: boolean;
   callable_now?: boolean;
-  config?: string;
   defaults?: Record<string, string>;
-  draft?: string;
   host_registered?: boolean;
+  next_actions?: string[];
+  optional_args?: string[];
   persisted?: boolean;
   promoted?: boolean;
   registry_active?: boolean;
+  required_args?: string[];
   resolved?: boolean;
-  recipeName?: string;
-  template?: CommandTemplates.CommandTemplateValue;
+  source?: string;
   templateWarnings?: string[];
   tool: string;
   validated?: boolean;
@@ -57,6 +59,13 @@ export interface RegisterToolResultDetails {
 export interface RegisterToolResult {
   content: Array<{ type: "text"; text: string }>;
   details: RegisterToolResultDetails;
+}
+
+interface RuntimeActivation {
+  active_tool: boolean;
+  activation: "current_session" | "unverified";
+  callable_now: boolean;
+  host_registered: boolean;
 }
 
 export interface RegisterToolRuntimeDeps<TContext> {
@@ -70,14 +79,7 @@ export interface RegisterToolRuntimeDeps<TContext> {
     message: string,
     type: "info" | "warning" | "error",
   ) => void;
-  registerRuntimeTool: (cfg: Config.RegisteredTool) =>
-    | {
-        active_tool: boolean;
-        activation: "current_session" | "unverified";
-        callable_now: boolean;
-        host_registered: boolean;
-      }
-    | void;
+  registerRuntimeTool: (cfg: Config.RegisteredTool) => RuntimeActivation | void;
   reservedToolNames: Set<string>;
   setActiveTools: (toolNames: string[]) => void;
 }
@@ -115,6 +117,54 @@ function getToolRecipePath<TContext>(
   name: string,
 ): string {
   return join(getRecipeRoot(deps), `${name}.json`);
+}
+
+function activationBoundary(
+  activation: RuntimeActivation | undefined,
+): string {
+  if (activation?.callable_now) return "current_session";
+  if (!activation) return "session_activation_unverified";
+  if (!activation.host_registered) return "host_registration";
+  if (!activation.active_tool) return "active_tool_set";
+  return "callability_verification";
+}
+
+function recipeDoctorAction(source: string): string {
+  return /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(source)
+    ? `inspect target=recipes view=doctor identity=${source}`
+    : "inspect target=recipes view=doctor";
+}
+
+function registrationNextActions(
+  tool: string,
+  source: string,
+  callableNow: boolean,
+): string[] {
+  if (callableNow) {
+    return [
+      `call tool ${tool}`,
+      `inspect target=tool:${tool} view=status`,
+    ];
+  }
+  return [
+    `inspect target=tool:${tool} view=status`,
+    ...(source === "template" || source === "draft"
+      ? []
+      : [recipeDoctorAction(source)]),
+  ];
+}
+
+function activeSkillSummary(
+  resolutionContext: RecipesContext.RecipeResolutionContext,
+): string {
+  const names = Object.keys(
+    RecipesReferences.getActiveSkillRecipeNamespaces(
+      resolutionContext.activeSkills,
+    ),
+  )
+    .sort()
+    .slice(0, 20);
+  return names.length > 0 ? names.join(", ") : "<none>";
 }
 
 function assertDraftPath<TContext>(
@@ -199,23 +249,38 @@ function promoteDraftRecipe<TContext>(
     resolutionContext,
   ).tool!;
   tools.set(name, promoted);
-  deps.registerRuntimeTool(promoted);
+  const activation = deps.registerRuntimeTool(promoted) ?? undefined;
+  const argSummary = RecipesDiscovery.summarizeRegisteredToolArgs(promoted);
+  const callableNow = activation?.callable_now ?? false;
+  const nextActions = registrationNextActions(name, "draft", callableNow);
   deps.notify(ctx, `Promoted draft recipe: ${name}`, "info");
   return {
     content: [
       textContent(
         ExecutionOutput.formatToolText(
-          `${existing ? "Updated" : "Registered"} tool "${name}" from draft recipe.`,
+          `${existing ? "Updated" : "Registered"} tool "${name}" from draft; callable_now=${callableNow}; next=${nextActions[0]}.`,
         ),
       ),
     ],
     details: {
+      active_tool: activation?.active_tool ?? false,
+      activation: activation?.activation ?? "unverified",
+      activation_boundary: activationBoundary(activation),
       args: promoted.args,
-      config: targetPath,
-      draft: draftPath,
+      callable_now: callableNow,
+      defaults: promoted.defaults,
+      host_registered: activation?.host_registered ?? false,
+      next_actions: nextActions,
+      optional_args: argSummary.optional,
+      persisted: true,
       promoted: true,
+      registry_active: tools.get(name) === promoted,
+      required_args: argSummary.required,
+      resolved: true,
+      source: "draft",
       tool: name,
-    } as RegisterToolResultDetails & Record<string, unknown>,
+      validated: true,
+    },
   };
 }
 
@@ -261,7 +326,7 @@ function deleteTool<TContext>(
         ),
       ),
     ],
-    details: { config: recipePath, tool: name },
+    details: { tool: name },
   };
 }
 
@@ -296,9 +361,38 @@ function readAuthoritativeStoredTool<TContext>(
   }
 }
 
+function looksLikeRecipeReference(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.endsWith(".json") ||
+    trimmed.endsWith(".md") ||
+    /^[^/:\\]+\/[^/:\\]+$/.test(trimmed)
+  );
+}
+
+function assertTemplateIsNotNestedRecipe(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.template === "string" &&
+    looksLikeRecipeReference(record.template) &&
+    (Object.keys(record).length === 1 ||
+      ["artifacts", "async", "control", "description", "imports", "values"].some(
+        (key) => Object.hasOwn(record, key),
+      ))
+  ) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        "Nested Recipe-shaped templates are not a register_tool source mode. Next: retry with from=<skill>/<recipe> and defaults={...}.",
+      ),
+    );
+  }
+}
+
 function getInputTemplate(
   value: CommandTemplates.CommandTemplateValue | null | undefined,
 ): CommandTemplates.CommandTemplateValue | null | undefined {
+  assertTemplateIsNotNestedRecipe(value);
   if (typeof value === "string") return value.trim();
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) {
@@ -344,6 +438,55 @@ function getRegistrationResolutionContext<TContext>(
   );
 }
 
+function normalizeDefaults(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      ExecutionOutput.formatToolText("Tool defaults must be an object."),
+    );
+  }
+  return { ...(value as Record<string, unknown>) };
+}
+
+function normalizeFromReference(
+  value: string,
+  resolutionContext: RecipesContext.RecipeResolutionContext,
+): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        "Tool from must be a non-empty Recipe reference. Next: retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path.",
+      ),
+    );
+  }
+  if (trimmed.startsWith("std:")) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        "std: Recipe references were removed; use <skill>/<recipe> or an explicit .json/.md file path.",
+      ),
+    );
+  }
+  if (trimmed.startsWith("skill:")) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        `skill: Recipe references were removed; use ${trimmed.slice("skill:".length)} without a prefix.`,
+      ),
+    );
+  }
+  if (trimmed.endsWith(".json") || trimmed.endsWith(".md")) {
+    return resolve(resolutionContext.cwd, trimmed);
+  }
+  if (!looksLikeRecipeReference(trimmed)) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        "Tool from must use <skill>/<recipe> or an explicit .json/.md file path.",
+      ),
+    );
+  }
+  return trimmed;
+}
+
 function buildAuthoredRecipe(
   input: RegisterToolInput,
   existing: Config.RegisteredTool | undefined,
@@ -355,13 +498,39 @@ function buildAuthoredRecipe(
       : Schema.parseToolArgDeclarations(input.args);
   if (explicitArgs?.error)
     throw new Error(ExecutionOutput.formatToolText(explicitArgs.error));
+  const from = typeof input.from === "string" ? input.from.trim() : "";
   const description = (input.description ?? existing?.description ?? "").trim();
-  if (!description) {
+  if (!description && !from) {
     throw new Error(
       ExecutionOutput.formatToolText(
-        "Tool description is required unless deleting.",
+        "Tool description is required for command-template registration.",
       ),
     );
+  }
+  const inputDefaults = normalizeDefaults(input.defaults);
+  if (from) {
+    const runtimeOwnedDefault = Object.keys(inputDefaults ?? {}).find((key) =>
+      RecipesReferences.isRuntimeOwnedRecipeInput(key),
+    );
+    if (runtimeOwnedDefault) {
+      throw new Error(
+        ExecutionOutput.formatToolText(
+          `Tool defaults cannot set runtime-owned input: ${runtimeOwnedDefault}. Next: remove that default and retry register_tool; the runtime supplies it.`,
+        ),
+      );
+    }
+    const authored: Record<string, unknown> = {
+      ...(description ? { description } : {}),
+      template: from,
+    };
+    const retainedDefaults =
+      inputDefaults ??
+      (existingRecipe?.defaults && typeof existingRecipe.defaults === "object"
+        ? (existingRecipe.defaults as Record<string, unknown>)
+        : undefined);
+    if (retainedDefaults && Object.keys(retainedDefaults).length > 0)
+      authored.defaults = retainedDefaults;
+    return authored;
   }
   const template = getInputTemplate(input.template);
   if (template === null) {
@@ -386,13 +555,58 @@ function buildAuthoredRecipe(
   if (typeof input.async === "boolean") authored.async = input.async;
   if (explicitArgs) {
     authored.args = explicitArgs.declarations;
-    if (Object.keys(explicitArgs.defaults).length > 0)
-      authored.defaults = explicitArgs.defaults;
+    const defaults = { ...explicitArgs.defaults, ...(inputDefaults ?? {}) };
+    if (Object.keys(defaults).length > 0) authored.defaults = defaults;
+    else delete authored.defaults;
+  } else if (inputDefaults !== undefined) {
+    if (Object.keys(inputDefaults).length > 0) authored.defaults = inputDefaults;
     else delete authored.defaults;
   }
-  if (input.values && typeof input.values === "object")
-    authored.values = input.values;
   return authored;
+}
+
+function assertRegisterToolInputModes(input: RegisterToolInput): void {
+  const record = input as RegisterToolInput & Record<string, unknown>;
+  if (Object.hasOwn(record, "values")) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        "register_tool values was removed. Next: retry register_tool with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition.",
+      ),
+    );
+  }
+  const fromProvided = Object.hasOwn(record, "from");
+  if (
+    fromProvided &&
+    (typeof input.from !== "string" || input.from.trim().length === 0)
+  ) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        "Tool from must be a non-empty Recipe reference. Next: retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path.",
+      ),
+    );
+  }
+  const draftProvided =
+    typeof input.draft === "string" && input.draft.trim().length > 0;
+  const templateProvided = Object.hasOwn(record, "template");
+  const modeCount =
+    Number(fromProvided) + Number(draftProvided) + Number(templateProvided);
+  if (modeCount > 1) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        "Use exactly one register_tool source mode: from, template, or draft. Next: remove the extra source fields and retry register_tool.",
+      ),
+    );
+  }
+  if (
+    fromProvided &&
+    (Object.hasOwn(record, "args") || Object.hasOwn(record, "async"))
+  ) {
+    throw new Error(
+      ExecutionOutput.formatToolText(
+        "register_tool from inherits args and async behavior. Next: retry register_tool with from and optional defaults only; omit args and async.",
+      ),
+    );
+  }
 }
 
 function executeRegisterToolUnlocked<TContext>(
@@ -400,7 +614,12 @@ function executeRegisterToolUnlocked<TContext>(
   ctx: TContext,
   deps: RegisterToolRuntimeDeps<TContext>,
 ): RegisterToolResult {
-  const input = params as RegisterToolInput;
+  const rawInput =
+    params && typeof params === "object"
+      ? (params as RegisterToolInput)
+      : ({} as RegisterToolInput);
+  assertRegisterToolInputModes(rawInput);
+  let input = rawInput;
   if (!input.name) return listTools(deps);
   const name = Identity.normalizeToolName(input.name);
   if (!name)
@@ -412,6 +631,27 @@ function executeRegisterToolUnlocked<TContext>(
   }
   if (typeof input.draft === "string" && input.draft.trim()) {
     return promoteDraftRecipe(name, input, ctx, deps);
+  }
+  const resolutionContext = getRegistrationResolutionContext(ctx, deps);
+  const requestedSource =
+    typeof rawInput.from === "string" ? rawInput.from.trim() : undefined;
+  if (typeof input.from === "string") {
+    try {
+      input = {
+        ...input,
+        from: normalizeFromReference(input.from, resolutionContext),
+      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : String(error);
+      const diagnosticSource = requestedSource?.startsWith("skill:")
+        ? requestedSource.slice("skill:".length)
+        : requestedSource ?? "";
+      throw new Error(
+        ExecutionOutput.formatToolText(
+          `Recipe source "${requestedSource}" is invalid: ${reason}. Active Skills: ${activeSkillSummary(resolutionContext)}. Next: ${recipeDoctorAction(diagnosticSource)}`,
+        ),
+      );
+    }
   }
   const templateProvided = Object.hasOwn(input, "template");
   const template = getInputTemplate(input.template);
@@ -429,10 +669,10 @@ function executeRegisterToolUnlocked<TContext>(
       ),
     );
   }
-  if (template === undefined && !existing) {
+  if (template === undefined && !input.from && !existing) {
     throw new Error(
       ExecutionOutput.formatToolText(
-        "Tool template is required for new registrations.",
+        "New registration requires exactly one source mode: from, template, or draft. Next: retry register_tool with one source field.",
       ),
     );
   }
@@ -442,29 +682,20 @@ function executeRegisterToolUnlocked<TContext>(
     existing,
     authoritative.recipe,
   );
-  const resolutionContext = getRegistrationResolutionContext(ctx, deps);
   const candidate = RecipesDiscovery.admitUserRecipe(
     recipePath,
     resolutionContext,
     authoredRecipe,
   );
   if (!candidate.validated || !candidate.tool) {
-    throw new Error(
-      ExecutionOutput.formatToolText(
-        `Tool recipe validation failed: ${candidate.diagnostics.join("; ")}`,
-      ),
-    );
+    const sourceDiagnostic = requestedSource
+      ? `Recipe source "${requestedSource}" validation failed: ${candidate.diagnostics.join("; ")}. Active Skills: ${activeSkillSummary(resolutionContext)}. Next: ${recipeDoctorAction(requestedSource)}`
+      : `Tool recipe validation failed: ${candidate.diagnostics.join("; ")}`;
+    throw new Error(ExecutionOutput.formatToolText(sourceDiagnostic));
   }
   const activeBefore = deps.getActiveTools();
   let persisted = false;
-  let activation:
-    | {
-        active_tool: boolean;
-        activation: "current_session" | "unverified";
-        callable_now: boolean;
-        host_registered: boolean;
-      }
-    | undefined;
+  let activation: RuntimeActivation | undefined;
   let cfg: Config.RegisteredTool;
   try {
     persistToolRecipe(deps, name, authoredRecipe);
@@ -488,7 +719,7 @@ function executeRegisterToolUnlocked<TContext>(
         !activation.callable_now)
     ) {
       throw new Error(
-        `Host activation verification failed: ${JSON.stringify(activation)}`,
+        `Tool "${name}" activation failed at ${activationBoundary(activation)}; host_registered=${activation.host_registered}, active_tool=${activation.active_tool}, callable_now=${activation.callable_now}. Registration was rolled back. Next: inspect target=runtime view=status; do not use spawn as proof of tool invocation.`,
       );
     }
   } catch (error) {
@@ -520,31 +751,37 @@ function executeRegisterToolUnlocked<TContext>(
     templateWarnings.length > 0
       ? `\nWarnings:\n${templateWarnings.map((warning) => `- ${warning}`).join("\n")}`
       : "";
-  const outcomeText = activation?.callable_now
-    ? `${existing ? "Updated" : "Registered"} and activated tool "${name}"`
-    : `Persisted tool "${name}"; current-session activation is unverified`;
+  const callableNow = activation?.callable_now ?? false;
+  const source = requestedSource ?? "template";
+  const argSummary = RecipesDiscovery.summarizeRegisteredToolArgs(cfg);
+  const nextActions = registrationNextActions(name, source, callableNow);
+  const outcomeText = callableNow
+    ? `${existing ? "Updated" : "Registered"} tool "${name}" from ${source}; callable_now=true`
+    : `Persisted tool "${name}" from ${source}; callable_now=false; activation_boundary=${activationBoundary(activation)}`;
   return {
     content: [
       textContent(
         ExecutionOutput.formatToolText(
-          `${outcomeText} (args: ${Schema.formatToolArgs(cfg.args)}).${warningText}`,
+          `${outcomeText}; required=${Schema.formatToolArgs(argSummary.required)}; optional=${Schema.formatToolArgs(argSummary.optional)}; next=${nextActions[0]}.${warningText}`,
         ),
       ),
     ],
     details: {
       active_tool: activation?.active_tool ?? false,
       activation: activation?.activation ?? "unverified",
+      activation_boundary: activationBoundary(activation),
       args: cfg.args,
-      callable_now: activation?.callable_now ?? false,
-      config: recipePath,
+      callable_now: callableNow,
       defaults: cfg.defaults,
       host_registered: activation?.host_registered ?? false,
+      next_actions: nextActions,
+      optional_args: argSummary.optional,
       persisted: true,
       registry_active: tools.get(name) === cfg,
+      required_args: argSummary.required,
       resolved: true,
+      source,
       ...(cfg.recipe?.async !== undefined ? { async: cfg.recipe.async } : {}),
-      ...(cfg.recipe?.name ? { recipeName: cfg.recipe.name } : {}),
-      ...(cfg.template ? { template: cfg.template } : {}),
       ...(templateWarnings.length > 0 ? { templateWarnings } : {}),
       tool: name,
       validated: true,

@@ -16,11 +16,17 @@ Register a command template:
 register_tool name=repo_check template="make check" description="Run repository checks"
 ```
 
-Register a typed/defaulted template or Recipe-backed definition when reuse justifies it. String templates execute directly without shell semantics; use arrays or an explicit trusted script for sequencing.
+Specialize a maintained Recipe without copying its contract:
+
+```text
+register_tool name=music_player from=media/player defaults={"source":"~/Music/1MIX"}
+```
+
+`from`, `template`, and `draft` are distinct source modes. `from` accepts exact `<skill>/<recipe>` identity or an explicit `.json` / `.md` path and inherits async behavior, args/types, source defaults, artifacts, Control, and runtime-owned origins. `defaults` may set only effective caller-owned args and must satisfy their types. `template` is only for trusted command definitions; public `values` authoring has been removed in favor of caller defaults or an authored Recipe file.
 
 Promote an immutable captured draft only with its draft path and explicit target name. Name collisions require `update=true`. Invalid content fails before active mutation.
 
-Registration resolves the effective delegated contract before persistence, then reports distinct `persisted`, `registry_active`, `host_registered`, `active_tool`, and `callable_now` states. Treat the tool as callable in the current session only when `callable_now` is true; persistence alone is not activation proof.
+Registration resolves the effective delegated contract before persistence, then reports logical `source`, effective `required_args` / `optional_args`, and distinct `persisted`, `registry_active`, `host_registered`, `active_tool`, and `callable_now` states. A callable result points to the actual generated tool as the next action. An uncallable result names its `activation_boundary` and status/doctor action without suggesting spawn as a substitute. Diagnose one maintained source with `inspect target=recipes view=doctor identity=<skill>/<recipe>`; diagnose final activation, source, schema summary, and separate spawn/tool usage with `inspect target=tool:<name> view=status`. Treat the tool as callable in the current session only when `callable_now` is true; persistence alone is not activation proof. Registration results omit raw persisted paths and executable template/config payloads.
 
 ## Resolution
 
@@ -65,9 +71,9 @@ Set `PI_ACTORS_AUTOMATIC_REVIEW=off` to disable scheduling and safe-boundary act
 
 Usage and lineage live in locked metadata ledgers rather than authored Recipe files. Launch accounting briefly shares the portfolio transaction fence so quarantine cannot invalidate an already-authorized launch. Revision snapshots, rollback, demotion, rename, and identical-source deduplication retain CAS/hash evidence.
 
-## Wrapping Existing Recipes
+## Specializing Existing Recipes
 
-Prefer a small user-root wrapper that imports a maintained Recipe by exact `<skill>/<recipe>` identity and delegates by alias. Skill Recipes remain components and are never exposed merely because their Skill is active. Do not duplicate executable templates, defaults, Control declarations, artifacts, or runtime-owned `{recipe_dir}`/`{skill_dir}`. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
+Use `register_tool from=<skill>/<recipe> defaults={...}` for one maintained capability under a persistent name or narrower defaults. The stored user Recipe remains compact direct delegation; it does not copy async, args/types, Control, artifacts, helpers, or runtime-owned `{recipe_dir}`/`{skill_dir}`. Named imports remain for multi-node Recipe composition, not one-source specialization. Skill Recipes remain components and are never exposed merely because their Skill is active. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
 
 ## Safety
 

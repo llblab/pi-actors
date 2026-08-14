@@ -1,104 +1,115 @@
 ---
 name: actors
-description: Required practical guide for non-trivial pi-actors use and Run-kernel work. Read before using or changing spawn, message, inspect, Runs, tools, Recipes, command templates, Control, Trace, artifacts, or lifecycle mechanics.
+description: Use for any non-trivial pi-actors operation, diagnosis, or development involving Recipes, persistent tools, Runs, spawn, message, inspect, Trace, Control, capability specialization, or activation.
 ---
 
-# Actors (pi-actors)
+# Actors
 
-`pi-actors` treats any runnable local capability—a script, tool, service, pipeline, or subagent—as an actor. A Recipe is its reusable executable definition; a Run is one concrete actor instance:
+## Choose the operation
+
+Start from the intended outcome:
+
+```text
+Run a maintained capability once
+→ use spawn recipe=<skill>/<recipe>
+
+Make a maintained capability a persistent agent-callable tool
+→ use register_tool from=<skill>/<recipe>
+
+Keep the same capability but narrow caller defaults
+→ use register_tool from=<skill>/<recipe> defaults={...}
+
+Register a trusted command directly
+→ use register_tool template="..."
+
+Build a reusable multi-node execution graph
+→ author a Recipe with named imports
+
+Run a long-lived controlled process
+→ spawn its async Recipe, then use message and inspect
+
+Coordinate several independent actors or subagents
+→ also read the swarm Skill
+
+Choose capability-specific behavior
+→ read the owning capability Skill
+
+Diagnose resolution, registration, or activation
+→ use Inspect status/doctor flows and stop on contradictory evidence
+```
+
+Use [persistent tools](./references/persistent-tools.md), [Recipes](./references/recipes.md), [Runs](./references/runs.md), or [diagnostics](./references/diagnostics.md) only when the selected operation needs that detail.
+
+## Core distinctions
+
+Keep these boundaries explicit:
+
+```text
+Skill Recipe ≠ registered tool
+spawn ≠ registered-tool invocation
+persisted ≠ callable
+direct delegation ≠ named import composition
+Run Control ≠ actor chat
+```
+
+A Skill Recipe is a maintained component addressed by `<skill>/<recipe>`. `spawn` creates a Run from a Recipe. `register_tool` creates or updates a persistent user tool. A tool is callable in the current session only when activation evidence says `callable_now: true`.
+
+`actors` owns generic Recipe/tool/Run mechanics. The owning capability Skill owns capability-specific selection and constraints. `swarm` owns multi-actor decomposition and integration methodology.
+
+## Persistent capability workflow
+
+To make `media/player` callable as `music_player` with a default source:
+
+```text
+register_tool
+  name=music_player
+  from=media/player
+  defaults={"source":"~/Music/1MIX"}
+```
+
+Then:
+
+1. Require registration to report successful resolution, validation, persistence, registry admission, host registration, activation, and `callable_now: true`.
+2. Call the actual `music_player` tool. Do not call `spawn` and describe that as tool invocation.
+3. Verify agent-facing evidence reports `launch_kind: "tool"`; use `inspect target=tool:music_player view=status` when usage or activation needs confirmation.
+4. If callability is false, stop at the reported activation boundary. Preserve the logical source and diagnose it; do not substitute a Recipe spawn as proof.
+
+Use direct delegation for the same maintained capability under a persistent name or narrower defaults. Use named imports only when one Recipe graph contains reusable child nodes. See [persistent tools](./references/persistent-tools.md) and [Recipes](./references/recipes.md).
+
+## Run workflow
+
+A Run is one concrete execution of a Recipe:
 
 ```text
 Recipe --spawn--> Run
 Run = Recipe + Trace + Control
 ```
 
-Use the swarm skill separately for decomposition, quorum design, reviewer lenses, and consensus methodology.
+1. Spawn with the exact logical Recipe identity and caller-owned values.
+2. Retain the returned `run:<id>` and normally wait for terminal follow-up instead of polling.
+3. Inspect `view=trace` when retained observations or attention matter.
+4. Inspect `view=control` before diagnosing service readiness, stale work, or saturation.
+5. Send `message` only for an action declared and consumed by that controlled Recipe.
+6. Use terminal state, result, declared artifacts, and execution evidence to prove completion.
 
-## Public Verbs
+A Run exposes only `recipe`, `trace`, and `control` views. Control is bounded actor-local input, not peer messaging or chat. See [Runs](./references/runs.md).
 
-- `spawn`: create one Run from a Recipe or inline command template.
-- `message`: send one actor-local Control to `run:<id>`, or the reserved review actions to `runtime`.
-- `inspect`: inspect `run:<id>`, `runtime`, `recipes`, or `tool:<name>`.
-- `register_tool`: persist a trusted capability; it does not address a running actor. Trust current-session callability only when its result says `callable_now: true`.
+## Diagnosis and stop rules
 
-A Run target exposes exactly three inspect views: `recipe`, `trace`, and `control`. Spawning a user Recipe is still a Recipe launch (`launch_kind: "spawn"`), not evidence that its registered tool was exposed or invoked; registered-tool execution reports `launch_kind: "tool"`, and `inspect target=tool:<name> view=status` separates both usage counts.
+When a pi-actors operation fails:
 
-## Recipe
+1. Keep the intended logical Recipe or tool identity.
+2. Inspect the existing `recipes`, `tool:<name>`, `runtime`, or `run:<id>` surface that owns the failure.
+3. Report resolver, registry, activation, Run, Trace, or Control truth exactly.
+4. Retry only after the owning state is healthy.
 
-A Recipe defines execution. It may declare named typed args, inline fallbacks, configuration `defaults`, composition `values`, imports, artifacts, command-template flags, and `control: ["action"]` when a long-lived service actually consumes actor-local inputs.
+Stop if spawn and registry resolve the same Recipe differently. Stop if registration persists but is not callable. Stop if an operation cannot be proven through pi-actors surfaces.
 
-Do not declare Control for ordinary one-shot work. Runtime lifecycle actions such as `kill` stay runtime-owned and must not appear in Recipe Control declarations. Imported Recipes act as local definitions inside one Run; they do not create nested Runs unless execution explicitly spawns them.
+Never recover by copying maintained Recipe args, defaults, Control, artifacts, or helper commands. Never hard-code a `{skill_dir}` replacement path. Never introduce `bash -lc`, `eval`, direct bundled-helper execution, or shell backgrounding to bypass resolution. Never call `spawn` and claim a tool call. Use [diagnostics](./references/diagnostics.md) for the safe next action.
 
-Prefer maintained Skill-owned Recipes over ad hoc wrappers. Skill Recipe identity is `<active Skill name>/<Recipe filename stem>`; Recipe files have no top-level `name`. `SKILL.md` `name` is Pi host metadata matching its directory, not an additional pi-actors identity field. Use `<skill>/<recipe>` for an exact direct component or an explicit `.json` / `.md` path. Entry paths resolve from invocation `cwd`; relative imports resolve from the importing Recipe directory. File-backed Recipes own `{recipe_dir}` and Skill Recipes own `{skill_dir}`; callers never pass or override these origins. Skill Recipes are components, not automatic tools. A rejected component makes catalog inspection partial without blocking exact resolution of unrelated valid components in the same live session context. Keep model, thinking, mission, concurrency, quorum, and timeout choices caller-owned unless a Recipe documents a stable policy.
+## When to read another Skill
 
-## Trace
-
-Trace records bounded structured observations in `trace.jsonl`:
-
-```json
-{
-  "id": "…",
-  "ts": "…",
-  "kind": "progress.update",
-  "summary": "…",
-  "data": {},
-  "level": "info",
-  "attention": "notify"
-}
-```
-
-Trace never carries sender, recipient, route, reply, or message-envelope fields. It is a bounded retained suffix: the canonical lock appends within 2,048 events and 4 MiB or atomically keeps the newest suffix plus one warning-only `runtime.trace_compacted` marker. That marker means older history was discarded; terminal/result/execution/artifact evidence stays independently authoritative. `inspect view=trace` reports completeness. Equal timestamps use same-source physical order, fixed source rank, then stable id without exposing an ordinal or claiming cross-source causality. Attention is a wake hint, not a queue: persist durable state or an artifact first, use `notify` for visible status, and reserve `followup` for needed coordinator context. Compaction may discard old hints.
-
-## Control
-
-The public Control request is exact:
-
-```json
-{ "target": "run:<id>", "action": "pause", "input": {}, "verbose": false }
-```
-
-Valid Controls persist in `controls.jsonl` before delivery; invalid envelopes remain outside it. One token-owned lock rejects a 65th pending Control or 1 MiB rewrite before admission, fails closed on malformed or stale-generation evidence, and atomically admits one queued record. Exact-id claims/finalization preserve a 128-terminal tail, expected-state fencing, and 4 KiB errors. Admitted nonterminal Controls never expire automatically. `inspect view=control` reports capacity, saturation, stale work, bytes, and diagnostics. Endpoints carry immutable startup `run_instance_id`; FIFO and named pipe share limits of 64 action characters, 380 serialized input bytes, and 512 newline-terminated wire bytes. Partial writes fail. Put larger data in an artifact and send only its reference. Delivery revalidates owner, generation, state, and process identity.
-
-`kill` remains the runtime recovery path for a stuck saturated Run: it bypasses actor-local Control capacity and adds no synthetic Control. Use actor-local `stop` only when declared and implemented. Restart clears generation-local evidence; archive preserves the bounded terminal tree, while prune preserves only requested artifacts.
-
-## Run State and Safety
-
-Run state lives under `~/.pi/agent/tmp/pi-actors/runs/<run>/`. Important evidence includes:
-
-- `run.json`: captured Run identity, Recipe, owner, generation, process identity, and policy.
-- `trace.jsonl`: structured observations.
-- `controls.jsonl`: durable actor-local inputs and outcomes.
-- `control-endpoint.json`: generation-fenced service readiness.
-- `execution.json`: command/session provenance and bounded complete-capture references.
-- `result.json`, logs, and declared artifacts.
-
-Trace/Control quotas do not constrain user-declared artifacts, repositories, media sources, complete captures, or actor-owned workload state. No public noun, tool, target, or view is added by bounded retention.
-
-Never bypass owner filtering, immutable generation fencing, process-identity verification, path containment, redaction, terminal reconciliation, or shutdown kill behavior. Do not edit active Run state to force a result.
-
-## Operating Pattern
-
-1. Inspect the Recipe before launch when its contract or policy matters.
-2. Spawn with explicit values and retain the returned `run:<id>`.
-3. Let short Runs finish; avoid polling.
-4. Inspect Trace when evidence or attention requires it; its summary states whether retained history is complete.
-5. Inspect Control capacity before diagnosing stale work or saturation, then send only declared actor-local Controls.
-6. Use runtime kill/cancel behavior for lifecycle termination.
-7. Inspect artifacts and execution evidence for final validation.
-
-If work may outlive the current turn, needs steering, produces artifacts, fans out, or must remain inspectable, use a Run rather than shell backgrounding.
-
-## Top Recipes
-
-- [Repository health](../project-work/recipes/repo-health.json)
-- [Quorum review](../swarm/recipes/quorum-review.json)
-- [Artifact bundle](../artifacts/recipes/bundle.json)
-- [Music player service](../media/recipes/player.json)
-- [Resource locker service](./recipes/resource-locker.json)
-
-## Deep References
-
-- [Recipe library](../../docs/recipe-library.md)
-- [Async Runs](../../docs/async-runs.md)
-
-Read repository source and tests for exact contracts when changing pi-actors itself. Update this skill whenever durable Run mechanics change.
+- Read the owning capability Skill when choosing or operating that capability pack.
+- Read `swarm` in addition to `actors` for multiple actors/subagents, parallel scopes, reviewer lenses, quorum, conflict handling, or integration.
+- For generic mechanics, this Skill outranks capability Skills and `swarm`. Report a stale Skill if it contradicts Recipe identity, registration, activation, spawn, Inspect, Trace, or Control semantics here.
+- When changing the extension implementation itself, apply project implementation instructions after this operating protocol.

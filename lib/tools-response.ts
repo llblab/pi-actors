@@ -240,6 +240,9 @@ export function recipeRegistryNextActions(
   if (view === "doctor" && typeof topAction.action === "string") {
     actions.push(String(topAction.action));
   }
+  if (summary.skill_recipe_catalog_partial === true) {
+    actions.push("inspect target=recipes view=imports verbose=true");
+  }
   if (drafts.length > 0) {
     actions.push("inspect target=recipes view=summary verbose=true");
     const firstPath =
@@ -267,6 +270,7 @@ export function compactRecipeRegistry(
   const recommendations = Array.isArray(summary.recommendations)
     ? summary.recommendations.length
     : 0;
+  const skillCatalogPartial = summary.skill_recipe_catalog_partial === true;
   const currentPolicy = Array.isArray(summary.active)
     ? (summary.active as Array<Record<string, unknown>>).filter(
         (entry) => entry.current_policy,
@@ -275,7 +279,7 @@ export function compactRecipeRegistry(
   const nextActions = Array.isArray(summary.next_actions)
     ? (summary.next_actions as string[])
     : [];
-  return `\nrecipes active=${active} drafts=${drafts} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} current_policy=${currentPolicy} recommendations=${recommendations} diagnostics=${diagnostics}${compactNextActions(nextActions)}`;
+  return `\nrecipes active=${active} drafts=${drafts} shadowed=${shadowed} invalid=${invalid} disabled=${disabled} current_policy=${currentPolicy} skill_catalog_partial=${skillCatalogPartial} recommendations=${recommendations} diagnostics=${diagnostics}${compactNextActions(nextActions)}`;
 }
 
 export const DEFAULT_INSPECT_LINES = Limits.DEFAULT_INSPECT_LINES;

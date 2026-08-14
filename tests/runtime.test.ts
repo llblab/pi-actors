@@ -64,7 +64,14 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
       ui: { notify: (message) => notifications.push(message) },
     });
     assert.equal(runtime.getTools().has("bad-repeat"), false);
-    assert.match(notifications.join("\n"), /Command template repeat/);
+    assert.match(
+      notifications.join("\n"),
+      /Recipe bad-repeat rejected:.*Command template repeat/s,
+    );
+    assert.match(
+      notifications.join("\n"),
+      /Next: inspect target=recipes view=doctor/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -256,6 +263,10 @@ test("Runtime keeps reserved tool names protected during recipe loading", async 
       ui: { notify: (message) => notifications.push(message) },
     });
     assert.match(notifications.join("\n"), /Reserved tool name: read/);
+    assert.match(
+      notifications.join("\n"),
+      /Next: inspect target=recipes view=doctor/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -26,69 +26,44 @@ test("Register tool prompt copy names the register_tool tool explicitly", () => 
 
 test("Register tool parameter descriptions cover public input fields", () => {
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name, /snake_case/);
-  assert.match(
-    Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template,
-    /template recipe/,
-  );
+  assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.from, /<skill>\/<recipe>/);
+  assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.defaults, /caller-owned/);
+  assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.template, /Trusted command/);
   assert.match(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.args, /file,lang/);
+  assert.equal("values" in Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS, false);
 });
 
-test("Onboarding system prompt explains recipe and async run model compactly", () => {
-  const lines = Prompts.ONBOARDING_SYSTEM_PROMPT.split("\n");
-  assert.equal(lines.length <= 14, true);
-  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Local-first actor memory/);
-  assert.match(Prompts.ONBOARDING_SYSTEM_PROMPT, /Command templates stay sync/);
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /Actor-mode trigger: if work may outlive this turn/,
+test("Onboarding system prompt routes agents to authoritative Skills", () => {
+  const prompt = Prompts.ONBOARDING_SYSTEM_PROMPT;
+  assert.match(prompt, /active bundled Skills as the operating authority/);
+  assert.match(prompt, /non-trivial pi-actors operation, diagnosis, or development.*actors Skill/);
+  assert.match(prompt, /multiple actors or subagents.*additionally.*swarm Skill/);
+  assert.match(prompt, /capability-specific selection or constraints.*owning capability Skill/);
+  assert.match(prompt, /actors owns generic mechanics/);
+  assert.match(prompt, /swarm owns multi-actor methodology/);
+  assert.match(prompt, /Skill Recipe distinct from a registered tool/);
+  assert.match(prompt, /Recipe spawn distinct from registered-tool invocation/);
+  assert.match(prompt, /persistence or registration as distinct from current callability/);
+  assert.match(prompt, /failure or disagreement, preserve the logical Recipe identity, stop, and follow actors diagnosis/);
+  assert.match(prompt, /never bypass.*copied contracts, helper paths, shell evaluation, or background-process workarounds/);
+  assert.match(prompt, /conflicts with actors.*follow actors.*stale capability guidance/);
+  assert.match(prompt, /README and docs are human-facing references.*not the normal agent operating path/);
+  assert.match(prompt, /AGENTS, source, and tests are implementation protocol and evidence/);
+});
+
+test("Onboarding system prompt does not duplicate product manuals", () => {
+  const prompt = Prompts.ONBOARDING_SYSTEM_PROMPT;
+  assert.doesNotMatch(
+    prompt,
+    /min_successful|accept_output|retire_when|\bfailure\s*[:=]|\brecover\s*[:=]|\brepeat\s*[:=]/,
   );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /spawn -> message -> inspect instead of ad hoc shell backgrounding/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /Recipe imports are local variables/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /parent async:true creates one run/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /read the bundled actors skill first/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /README\/docs are not automatically in context/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /Prefer maintained active-Skill Recipes/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /reports current activation truth/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /avoid internal transport vocabulary/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /wait for its terminal follow-up; do not schedule continuation loops/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /Terminal follow-up content stays minimal: run, status, one base path, and relative artifact names only/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /shell-free: string leaves split into executable \+ argv/,
-  );
-  assert.match(
-    Prompts.ONBOARDING_SYSTEM_PROMPT,
-    /also read the bundled swarm skill; the coordinator owns decomposition/,
+  assert.doesNotMatch(prompt, /\{value|\{flag|\?\?|placeholder/i);
+  assert.doesNotMatch(prompt, /trace\.jsonl|controls\.jsonl|run\.json|state root/i);
+  assert.doesNotMatch(prompt, /\b(?:380|512|1,?024|2,?048|4 MiB)\b/);
+  assert.doesNotMatch(prompt, /watcher|review threshold|scheduler threshold/i);
+  assert.doesNotMatch(
+    prompt,
+    /message|inspect|Trace|Control|callable_now|activation boundary|bash -lc|\beval\b|run\.json|trace\.jsonl|controls\.jsonl/i,
   );
 });
 

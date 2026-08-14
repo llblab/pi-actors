@@ -6,34 +6,39 @@ Active Skills provide maintained execution graphs and service definitions. Skill
 
 ### Repository and delivery
 
-- `project-work/repo-health` — repository inspection and bounded health artifact.
-- `project-work/docs-maintenance` — documentation analysis and artifact preparation.
-- `project-work/release-readiness` — release checks and readiness artifact.
-- `project-work/release-summary` — release-summary artifact.
-- `swarm/development-tasking` — task-card and implementation planning pipeline.
+- `project-work/repo-health` — repository status, recent history, docs surface, trusted validation, and bounded report content.
+- `project-work/docs-maintenance` — documentation consistency evidence and a maintenance plan; it does not edit documentation.
+- `project-work/release-readiness` — multi-lens readiness verdict and blockers; it does not publish.
+- `project-work/release-summary` — evidence-only release summary and PR-body draft with no external release side effect.
+- `project-work/run-ops` — read-only report over existing Run state; it does not send Control.
+- `swarm/development-tasking` — bounded task-card and scope-critique pipeline.
 
 ### Review and synthesis
 
 - `swarm/quorum-review` — parallel reviewers with quorum-oriented synthesis.
 - `swarm/review-readiness` — review plus readiness stages.
-- `swarm/research-synthesis` — evidence-oriented research synthesis.
-- `swarm/lens-review` — configurable repeated review lenses.
+- `swarm/research-synthesis` — evidence map, contradiction analysis, and risk-first research synthesis.
+- `swarm/lens-review` — different independent risk lenses for breadth.
+- `swarm/architect` — competing architecture directions and one validated smallest next slice.
 - `swarm/subagent-review-coordinator` — lower-level review/verify/merge/judge composition.
 
 Callers should own model, thinking, concurrency, quorum, and mission policy. Review pipelines preflight provider/model availability before expensive fanout.
 
 ### Artifacts
 
-- `artifacts/report` — prepare one artifact body.
-- `artifacts/write` — prepare and deterministically write an artifact.
+- `artifacts/report` — prepare normalized report content without committing a filesystem write.
+- `artifacts/write` — prepare and deterministically write one artifact with explicit create/overwrite/append policy.
 - `artifacts/bundle` — optional validation, artifact write, manifest generation, and manifest write.
 - `artifacts/file-write` — deterministic create/overwrite/append helper.
 - `artifacts/manifest` — artifact manifest generation.
 
 Artifact pipelines terminate in files/manifests and result evidence; they do not fabricate communication events.
 
-### Controlled services
+### Media and controlled services
 
+- `media/playlist-scan` — shallow unfiltered path inventory.
+- `media/playlist-build` — extension-filtered `paths`, `m3u`, or `inline` playlist output; it does not create a playlist file.
+- `media/library` — filtered playlist plus bounded library-report content; `artifact_path` alone is not durable-write proof.
 - `media/player` — playback service with declared playback actions, `controls.jsonl`, generation-fenced endpoint readiness, state artifact, and playback Trace. Player selection is `player:enum(auto,mpv,afplay,ffplay,cvlc,play,wmp)=auto`.
 - `actors/resource-locker` — optional queue/lease-lock service with explicit owner/resource input, lock Trace, and a 512-record/1 MiB atomically retained journal.
 

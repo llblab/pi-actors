@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.47.0: Agent-Native Actor UX
+
+- `Skill-First Operation`: Replaced the injected product manual with a compact Skill-routing meta-protocol. `actors` is now the decision-first authority for generic Recipe/tool/Run mechanics, capability Skills own capability choice, and `swarm` owns only multi-actor methodology.
+- `Persistent Capability Authoring`: Added explicit, mutually exclusive `register_tool from`, `template`, and `draft` modes; public caller `defaults`; canonical Skill/file resolution; compact direct delegation; inherited descriptions, async contracts, typed args, artifacts, Control, and runtime origins; and removal of public `values`.
+- `Registration Truth UX`: Registration now reports logical source, effective required/optional args, persistence, registry/host/active-tool state, callability, activation boundary, and bounded next actions without raw config or executable template payloads. Failed activation retains rollback guarantees.
+- `Focused Diagnosis`: Added `inspect target=recipes view=doctor identity=<skill>/<recipe>` with active ownership, exact resolvability, partial-catalog state, portable source, generation, rejection, and next actions. Tool status now includes source, effective args, activation boundary, and separate spawn/tool usage.
+- `Capability Protocols`: Rewrote all six Skill descriptions as routing triggers and made Media, Artifacts, Project Work, and Recipe Memory compact agent operating guides. Human installation, product, catalog, development, and release guidance remains independently owned by README/docs.
+- `Swarm Methodology`: Reduced Swarm to overhead admission, decomposition, disjoint ownership, lenses, quorum, conflict evidence, integration, and stop rules; moved deep review/development methods to Skill-local references and delegated all generic Run/Recipe mechanics to `actors`.
+- `Safe Recovery`: Inactive, missing, duplicate, removed, malformed, rejected, partial-catalog, and inactive-tool failures now preserve logical identity, redact physical Skill paths, and teach bounded public diagnosis/retry actions without copied contracts, helper paths, shell evaluation, backgrounding, or spawn substitution.
+- `Journey and Package Evidence`: Added deterministic Journeys A-G, reviewed fresh-agent Journey B evidence, and packed first-session parity for final Skills/prompt/references, `from` registration, source-equivalent schema, same-session activation, focused doctor, actual tool invocation, and unshipped `.agents/` evidence.
+
 ## 0.46.1: Registration Truth
 
 - `Live Resolution`: Spawn, registration, registry admission/reload, schema derivation, and Inspect now consume one immutable session Recipe context. Skill-dependent user wrappers reconcile only after Pi supplies active Skills, watcher reloads retain the current generation, and stale session consumers fail closed.

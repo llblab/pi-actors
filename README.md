@@ -74,6 +74,7 @@ inspect target=run:test view=trace source=lifecycle lines=40
 inspect target=run:test view=control
 inspect target=runtime view=status
 inspect target=recipes view=status
+inspect target=recipes view=doctor identity=media/player
 inspect target=tool:my_tool view=status
 ```
 
@@ -81,7 +82,7 @@ A Run exposes exactly `recipe`, `trace`, and `control` views.
 
 ### `register_tool`
 
-Persist a trusted command template or Recipe-backed capability under `~/.pi/agent/recipes`. Registration remains separate from running Control. Treat it as callable in the current session only when the result reports `callable_now: true`; persistence, Recipe spawning, and registered-tool invocation are distinct states.
+Persist a maintained Recipe with `register_tool name=<tool> from=<skill>/<recipe> defaults={...}`, or register a trusted command through the separate `template` mode. Definitions live under `~/.pi/agent/recipes`. Treat a tool as callable in the current session only when the result reports `callable_now: true`; persistence, Recipe spawning, and registered-tool invocation are distinct states.
 
 ## Recipe
 

@@ -45,8 +45,11 @@ test("Register tool definition exposes an optional exact schema", () => {
   assert.deepEqual(definition.parameters.required, []);
   const properties = definition.parameters.properties as Record<string, { type?: string }>;
   assert.equal(properties.name.type, "string");
+  assert.equal(properties.from.type, "string");
+  assert.equal(properties.defaults.type, "object");
   assert.equal(properties.template.type, undefined);
   assert.equal(properties.update.type, "boolean");
+  assert.equal(properties.values, undefined);
 });
 
 test("Spawn tool definition exposes Run creation without communication fields", () => {

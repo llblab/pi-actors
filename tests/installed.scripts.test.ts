@@ -288,7 +288,7 @@ test("installed dist resolves every representative capability pack by qualified 
   }
 });
 
-test("packed artifact imports compiled extension, skills, and public schemas", async () => {
+test("packed artifact first session preserves agent-native Skill and tool parity", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-packed-artifact-"));
   try {
     const packageDir = await preparePackedPackage(root);
@@ -299,6 +299,7 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
     const sourceDir = join(root, "music");
     await mkdir(agentDir, { recursive: true });
     await mkdir(homeDir, { recursive: true });
+    assert.deepEqual(await readdir(agentDir), []);
     await mkdir(join(staleSkillDir, "recipes"), { recursive: true });
     await mkdir(sourceDir, { recursive: true });
     await writeFile(join(staleSkillDir, "SKILL.md"), "---\nname: stale\n---\n");
@@ -345,7 +346,7 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
            cwd: packageDir,
            sessionManager: { getSessionId: () => "packed-owner" },
          };
-         await handlers.get("before_agent_start")({
+         const startup = await handlers.get("before_agent_start")({
            systemPrompt: "base",
            systemPromptOptions: {
              skills: [
@@ -379,10 +380,10 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
          const inspect = definitions.get("inspect");
          const message = definitions.get("message");
          const musicRegistration = await register.execute("packed-music-register", {
-           args: "source:string=" + sourceDir,
+           defaults: { source: sourceDir },
            name: "music_player",
            description: "Control local music from the maintained media Recipe.",
-           template: "media/player",
+           from: "media/player",
          }, undefined, undefined, context);
          const musicPlayer = definitions.get("music_player");
          const wrapperPath = join(process.env.PI_CODING_AGENT_DIR, "recipes", "music_player.json");
@@ -414,6 +415,12 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
          const recipeStatus = await inspect.execute("packed-recipes-status", {
            target: "recipes",
            view: "status",
+           verbose: true,
+         }, undefined, undefined, context);
+         const focusedDoctor = await inspect.execute("packed-recipes-doctor", {
+           target: "recipes",
+           view: "doctor",
+           identity: "media/player",
            verbose: true,
          }, undefined, undefined, context);
          let started;
@@ -492,7 +499,9 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
              wrapperLaunchKind: wrapperSpawn.details.launch_kind,
            },
            recipeCatalog: recipeStatus.details,
+           focusedDoctor: focusedDoctor.details,
            resources,
+           systemPrompt: startup.systemPrompt,
            tools,
          }));
        }).catch((error) => { console.error(error); process.exit(1); });`,
@@ -512,6 +521,18 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
     assert.deepEqual(pkg.pi.extensions, ["./dist/pi-actors/index.js"]);
     assert.deepEqual(pkg.pi.skills, ["./dist/skills"]);
     const loaded = JSON.parse(stdout);
+    assert.match(loaded.systemPrompt, /^base\n\npi-actors Skill routing:/);
+    assert.match(loaded.systemPrompt, /load and read the actors Skill/);
+    assert.match(loaded.systemPrompt, /multiple actors or subagents.*swarm Skill/);
+    assert.match(loaded.systemPrompt, /Skill Recipe distinct from a registered tool/);
+    assert.match(loaded.systemPrompt, /Recipe spawn distinct from registered-tool invocation/);
+    assert.match(loaded.systemPrompt, /persistence or registration as distinct from current callability/);
+    assert.match(loaded.systemPrompt, /preserve the logical Recipe identity, stop, and follow actors diagnosis/);
+    assert.match(loaded.systemPrompt, /never bypass.*copied contracts, helper paths, shell evaluation, or background-process workarounds/);
+    assert.doesNotMatch(
+      loaded.systemPrompt,
+      /min_successful|accept_output|retire_when|trace\.jsonl|controls\.jsonl|run\.json|\b(?:380|512|1,?024|2,?048|4 MiB)\b/,
+    );
     assert.deepEqual(loaded.commands, ["actor-inspector"]);
     assert.deepEqual(
       {
@@ -559,12 +580,23 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
       },
     );
     assert.equal(loaded.music.registration.async, true);
+    assert.equal(loaded.music.registration.source, "media/player");
+    assert.equal(loaded.music.registration.activation_boundary, "current_session");
+    assert.deepEqual(loaded.music.registration.required_args, []);
+    assert.deepEqual(loaded.music.registration.optional_args, [
+      "command", "source", "loop", "volume", "player", "run_id", "transport_context",
+    ]);
+    assert.deepEqual(loaded.music.registration.next_actions, [
+      "call tool music_player",
+      "inspect target=tool:music_player view=status",
+    ]);
+    assert.equal("config" in loaded.music.registration, false);
+    assert.equal("template" in loaded.music.registration, false);
     assert.deepEqual(loaded.music.actorActions, [
       "play", "pause", "resume", "toggle", "next", "previous", "stop", "status",
     ]);
     assert.deepEqual(loaded.music.authoredWrapper, {
       description: "Control local music from the maintained media Recipe.",
-      args: ["source"],
       defaults: { source: sourceDir },
       template: "media/player",
     });
@@ -575,9 +607,30 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
     assert.equal(loaded.music.wrapperLaunchKind, "spawn");
     assert.equal(loaded.music.invocationLaunchKind, "tool");
     assert.equal(loaded.music.status.callable_now, true);
+    assert.equal(loaded.music.status.activation_boundary, "current_session");
+    assert.equal(loaded.music.status.source, "media/player");
+    assert.equal(loaded.music.status.persisted, true);
+    assert.equal(loaded.music.status.registry_active, true);
+    assert.deepEqual(loaded.music.status.required_args, []);
+    assert.deepEqual(loaded.music.status.optional_args, [
+      "command", "source", "loop", "volume", "player", "run_id", "transport_context",
+    ]);
+    assert.deepEqual(loaded.music.status.next_actions, ["call tool music_player"]);
     assert.equal(loaded.music.status.launch_kind, "tool");
     assert.equal(loaded.music.status.spawn_calls, 1);
     assert.equal(loaded.music.status.tool_calls, 1);
+    assert.equal(loaded.focusedDoctor.identity, "media/player");
+    assert.equal(loaded.focusedDoctor.skill_active, true);
+    assert.equal(loaded.focusedDoctor.resolvable, true);
+    assert.equal(loaded.focusedDoctor.catalog_partial, true);
+    assert.equal(loaded.focusedDoctor.component_status, "available");
+    assert.equal(loaded.focusedDoctor.source_location, "<active-skill:media>/player.json");
+    assert.equal(typeof loaded.focusedDoctor.resolution_generation, "string");
+    assert.deepEqual(loaded.focusedDoctor.next_actions, [
+      "spawn recipe=media/player",
+      "register_tool name=<tool-name> from=media/player",
+    ]);
+    assert.equal(loaded.recipeCatalog.registry_generation, 1);
     assert.equal(loaded.recipeCatalog.skill_recipe_catalog_partial, true);
     assert.equal(
       loaded.recipeCatalog.skill_recipe_components.some(
@@ -612,19 +665,48 @@ test("packed artifact imports compiled extension, skills, and public schemas", a
       "music_player",
     ]);
     assert.deepEqual(loaded.tools.map((tool: any) => tool.properties), [
-      ["args", "async", "description", "draft", "name", "template", "update", "values"],
+      ["args", "async", "defaults", "description", "draft", "from", "name", "template", "update"],
       ["artifacts", "as", "file", "recipe", "template", "transport_context", "values", "verbose"],
       ["action", "input", "target", "verbose"],
-      ["lines", "source", "status", "target", "verbose", "view"],
+      ["identity", "lines", "source", "status", "target", "verbose", "view"],
       [],
       ["command", "loop", "player", "run_id", "source", "transport_context", "volume"],
     ]);
-    for (const skill of ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]) {
-      assert.match(
-        await readFile(join(packageDir, "dist", "skills", skill, "SKILL.md"), "utf8"),
-        new RegExp(`^---\\r?\\nname: ${skill}\\r?$`, "m"),
-      );
+    const expectedDescriptions: Record<string, string> = {
+      actors: "Use for any non-trivial pi-actors operation, diagnosis, or development involving Recipes, persistent tools, Runs, spawn, message, inspect, Trace, Control, capability specialization, or activation.",
+      artifacts: "Use when an actor workflow must write reusable files, reports, manifests, or bundles with deterministic paths and declared outputs.",
+      media: "Use for local media discovery, filtering, library summaries, playlist construction, or controllable playback.",
+      "project-work": "Use for repository health inspection, project summaries, documentation maintenance, release-readiness evidence, or bounded run-operation reports.",
+      "recipe-memory": "Use only for internal automatic Recipe-memory review, diagnosis, or recovery; do not use for normal Recipe creation, registration, or invocation.",
+      swarm: "Use when work needs multiple actors or subagents for independent implementation, artifact generation, review, delegated audit, research, or coordinated decomposition and integration.",
+    };
+    for (const [skill, description] of Object.entries(expectedDescriptions)) {
+      const body = await readFile(join(packageDir, "dist", "skills", skill, "SKILL.md"), "utf8");
+      assert.match(body, new RegExp(`^---\\r?\\nname: ${skill}\\r?$`, "m"));
+      assert.equal(body.match(/^description:\s*(.+)$/m)?.[1], description);
     }
+    for (const reference of [
+      "actors/references/diagnostics.md",
+      "actors/references/persistent-tools.md",
+      "actors/references/recipes.md",
+      "actors/references/runs.md",
+      "swarm/references/development-swarm.md",
+      "swarm/references/review-swarms.md",
+    ]) {
+      await access(join(packageDir, "dist", "skills", reference));
+    }
+    await assert.rejects(access(join(packageDir, ".agents")));
+    const sourcePlayer = JSON.parse(
+      await readFile(join(process.cwd(), "skills", "media", "recipes", "player.json"), "utf8"),
+    );
+    const expectedSchema = [
+      ...sourcePlayer.args
+        .map((arg: string) => arg.split(":", 1)[0])
+        .filter((arg: string) => arg !== "state_dir"),
+      "run_id",
+      "transport_context",
+    ].sort();
+    assert.deepEqual(loaded.music.schemaProperties, expectedSchema);
     assert.doesNotMatch(stderr, /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/);
   } finally {
     await removeTreeEventually(root);

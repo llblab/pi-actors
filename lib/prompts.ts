@@ -5,52 +5,52 @@
  */
 
 export const REGISTER_TOOL_DESCRIPTION =
-  "Register a persistent custom tool from a command template, template recipe path, or co-located template recipe. " +
-  "Definitions are stored as recipe files under ~/.pi/agent/recipes across reloads. " +
-  "Use update=true to overwrite an existing tool, template=null/empty to delete.";
+  "Register a persistent custom tool from one maintained Recipe, command template, or captured draft. " +
+  "Use from for Recipe specialization, template for trusted commands, or draft for promotion. " +
+  "Definitions persist under ~/.pi/agent/recipes; activation is reported separately.";
 
 export const REGISTER_TOOL_PROMPT_SNIPPET =
-  "Register persistent command templates as agent-callable tools";
+  "Register persistent Recipes or command templates as agent-callable tools";
 
 export const REGISTER_TOOL_GUIDELINES = [
-  "Use register_tool to wrap trusted local commands, scripts, programs, libraries, or template recipes as persistent pi tools.",
-  "After register_tool succeeds, trust its callable_now and activation result; persisted definitions remain available for admission after reload.",
+  "Use register_tool from=<skill>/<recipe> with defaults={...} to specialize a maintained Recipe without copying its contract.",
+  "Use register_tool template only for trusted command templates, and use register_tool draft only for captured draft promotion.",
+  "After register_tool succeeds, trust its callable_now and activation result; persistence alone is not callability.",
   'Set template=null or template="" in register_tool to delete a persisted tool.',
   "Set update=true in register_tool to overwrite an existing tool registration.",
 ];
 
-export const ONBOARDING_SYSTEM_PROMPT = `pi-actors quick model:
-- Local-first actor memory: persist trusted local capabilities instead of rebuilding shell recipes.
-- Layers: task -> command template -> recipe/tool -> spawn -> run:<id>; tool:<name> wraps registered capabilities.
-- Command templates stay sync and shell-free: string leaves split into executable + argv, infer .js/.mjs through node→bun→deno run and .sh through bash, and treat operators such as && as literal arguments; use template arrays for sequencing or an explicit trusted shell/script when shell semantics are required. Flags include args/defaults, parallel, concurrency, min_successful, when, timeout, delay, retry, failure, recover, repeat, accept_output, output.
-- Placeholders support typed/default args plus {value??fallback} and {flag?yes:no}.
-- ~/.pi/agent/recipes/*.json is actor muscle memory: valid admitted recipes are reconciled as tools across sessions; register_tool writes there and reports current activation truth.
-- Recipes own template directly and may declare metadata/defaults/imports/control/artifacts; files >1 MiB or import depth >32 fail closed.
-- Recipe imports are local variables; imported recipes are definitions, not nested async runs; parent async:true creates one run.
-- Actor-mode trigger: if work may outlive this turn, need steering/follow-up/artifacts, run as a service, fan out, or be resumed/inspected later, use spawn -> message -> inspect instead of ad hoc shell backgrounding.
-- Use spawn/message/inspect for actor-level start/send/observe; short foreground checks can stay ordinary tools/templates; avoid internal transport vocabulary in public guidance.
-- Run state lives under ~/.pi/agent/tmp/pi-actors/runs. Inspect intentionally and avoid busy-polling. Terminal and coordinator-bound notifications queue as Pi follow-ups so concurrently completed actors can reach the coordinator after current work instead of steering between tool calls. Terminal follow-up content stays minimal: run, status, one base path, and relative artifact names only; semantic output stays in non-LLM details and run state. When a deferred actor result gates the next step, wait for its terminal follow-up; do not schedule continuation loops, repeatedly inspect, or mutate its reviewed scope while it runs. Inspect early only for an operator request, a meaningful actor event, or diagnosis of an overdue/stuck run.
-- Maintain ~/.pi/agent/recipes like MEMORY.md for capabilities: keep useful tools, curate stale ones, and fix/remove/disable invalid recipes flagged by registry warnings; active-Skill and explicit file Recipes remain components outside user tool discovery; offer to save successful recurring patterns only after confirmation.
-- Prefer maintained active-Skill Recipes with spawn recipe=<skill>/<recipe> before ad hoc scripts/wrappers; explicit file Recipes use exact .json/.md paths; review swarms inherit current model/thinking, preflight before fanout, and expose quorum/concurrency/TTL knobs unless explicit args are passed.
-- For any non-trivial actor use or pi-actors change, read the bundled actors skill first. Before launching multiple actors/subagents for parallel implementation, independent artifact generation, delegated audit, or review, also read the bundled swarm skill; the coordinator owns decomposition, disjoint scopes, launch correctness, integration, and final validation. For deeper guidance, inspect installed extension sources/docs/recipes because README/docs are not automatically in context.`;
+export const ONBOARDING_SYSTEM_PROMPT = `pi-actors Skill routing:
+- Treat active bundled Skills as the operating authority.
+- For non-trivial pi-actors operation, diagnosis, or development, load and read the actors Skill before acting.
+- For work requiring multiple actors or subagents, additionally load and read the swarm Skill.
+- For capability-specific selection or constraints, load the owning capability Skill; actors owns generic mechanics and swarm owns multi-actor methodology.
+- Keep a Skill Recipe distinct from a registered tool and a Recipe spawn distinct from registered-tool invocation; actors owns the proof rules.
+- Treat persistence or registration as distinct from current callability; actors owns activation proof.
+- On failure or disagreement, preserve the logical Recipe identity, stop, and follow actors diagnosis; never bypass the owning Skills with copied contracts, helper paths, shell evaluation, or background-process workarounds.
+- If a capability Skill conflicts with actors about generic mechanics, follow actors and report the stale capability guidance.
+- README and docs are human-facing references, not the normal agent operating path.
+- AGENTS, source, and tests are implementation protocol and evidence; use them when changing or debugging the extension, not as substitutes for operating Skills.`;
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
   name: "Tool name in snake_case (e.g., 'transcribe')",
   description:
     "Describe what the tool does for the LLM. Required unless deleting; omitted updates keep the old description.",
+  from:
+    "Recipe to specialize by canonical <skill>/<recipe> identity or explicit .json/.md path. Inherits async, args/types, source defaults, artifacts, Control, and runtime origins.",
+  defaults:
+    "Optional caller-owned defaults. Keys and values must satisfy the effective source or command-template argument contract.",
   draft:
-    "Promote a draft recipe path from ~/.pi/agent/recipes/drafts into an active named recipe under ~/.pi/agent/recipes. Requires name; use update=true to overwrite.",
+    "Promote a captured draft Recipe path from ~/.pi/agent/recipes/drafts. This is a source mode; do not combine it with from or template.",
   async:
     "Set true for a co-located async template recipe. Omit for ordinary command templates or file-backed recipe references.",
   template:
-    "Command template with {arg} or {arg=default} placeholders, or a template recipe JSON path/name. With async, this is the co-located recipe body. Bare recipe names resolve under ~/.pi/agent/recipes. Omitted updates keep the old template. Empty string deletes the tool.",
+    "Trusted command template with {arg} or {arg=default} placeholders. To specialize a Recipe, use from instead. Omitted updates keep the old template; empty string deletes the tool.",
   templateArray:
     "Sequential command-template composition array. Leaves may be strings or objects with template/defaults/timeout/retry/failure/recover.",
   templateNull: "Delete the tool when template is null.",
   args: "Optional comma-separated placeholder declarations. Usually omit because args are derived from template placeholders. Interactive shorthand defaults are accepted and normalized. Example: file,lang,mode=fast",
   update: "Set to true to overwrite an existing tool registration.",
-  values:
-    "Optional default runtime placeholder values for a co-located template recipe.",
 } as const;
 
 export function formatRegisteredToolPromptSnippet(template: unknown): string {

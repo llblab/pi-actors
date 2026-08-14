@@ -159,9 +159,11 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
   const recipeRoot = join(root, "recipes");
   try {
     await import("node:fs/promises").then(async (fs) => {
-      await fs.mkdir(join(sampleSkill, "recipes"), { recursive: true });
+      await fs.mkdir(join(sampleSkill, "recipes", "nested"), { recursive: true });
       await fs.mkdir(recipeRoot, { recursive: true });
       await fs.writeFile(join(sampleSkill, "recipes", "task.json"), JSON.stringify({ template: "echo skill" }));
+      await fs.writeFile(join(sampleSkill, "recipes", "bad.json"), JSON.stringify({ description: "missing template" }));
+      await fs.writeFile(join(sampleSkill, "recipes", "nested", "hidden.json"), JSON.stringify({ template: "echo hidden" }));
       await fs.writeFile(join(recipeRoot, "user-tool.json"), JSON.stringify({ template: "echo user" }));
     });
     const activeSkillRecipeContext = createActiveSkillRecipeContext([
@@ -224,7 +226,108 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
       result.details.skill_recipe_component_diagnostics[0].error,
       /Duplicate active Skill identity duplicate/,
     );
+    const compactCatalog = await tool.execute(
+      "compact-catalog",
+      { target: "recipes", view: "status" },
+      undefined,
+      undefined,
+      { recipeResolutionContext },
+    );
+    assert.match(compactCatalog.content[0].text, /skill_catalog_partial=true/);
+    assert.match(
+      compactCatalog.content[0].text,
+      /next=inspect_target=recipes_view=imports_verbose=true/,
+    );
 
+    const focused = await tool.execute(
+      "focused-component",
+      { target: "recipes", view: "doctor", identity: "sample/task" },
+      undefined,
+      undefined,
+      { recipeResolutionContext },
+    );
+    assert.deepEqual(focused.details, {
+      identity: "sample/task",
+      skill_active: true,
+      resolvable: true,
+      catalog_partial: true,
+      component_status: "available",
+      source_location: "<active-skill:sample>/task.json",
+      resolution_generation: recipeResolutionContext.generation,
+      next_actions: [
+        "spawn recipe=sample/task",
+        "register_tool name=<tool-name> from=sample/task",
+      ],
+    });
+    assert.match(
+      focused.content[0].text,
+      /identity=sample\/task skill_active=true resolvable=true catalog_partial=true component_status=available/,
+    );
+    assert.doesNotMatch(focused.content[0].text, new RegExp(root));
+
+    const inactive = await tool.execute(
+      "inactive-component",
+      { target: "recipes", view: "doctor", identity: "absent/task" },
+      undefined,
+      undefined,
+      { recipeResolutionContext },
+    );
+    assert.equal(inactive.details.component_status, "skill_inactive");
+    assert.equal(inactive.details.skill_active, false);
+    assert.equal(inactive.details.resolvable, false);
+    assert.match(inactive.details.rejected_reason, /Active Skill Recipe not found/);
+    assert.deepEqual(inactive.details.next_actions, [
+      "activate Skill absent",
+      "inspect target=recipes view=doctor identity=absent/task",
+    ]);
+
+    const nestedDiagnostic = result.details.skill_recipe_component_diagnostics.find(
+      (diagnostic: Record<string, unknown>) => String(diagnostic.error).includes("Nested Skill Recipe"),
+    );
+    assert.equal(
+      nestedDiagnostic.file,
+      "<active-skill:sample>/nested/hidden.json",
+    );
+    assert.match(
+      nestedDiagnostic.error,
+      /<active-skill:sample>\/nested\/hidden\.json/,
+    );
+    assert.doesNotMatch(nestedDiagnostic.error, new RegExp(root));
+
+    const rejected = await tool.execute(
+      "rejected-component",
+      { target: "recipes", view: "doctor", identity: "sample/bad" },
+      undefined,
+      undefined,
+      { recipeResolutionContext },
+    );
+    assert.equal(rejected.details.component_status, "rejected");
+    assert.equal(rejected.details.source_location, "<active-skill:sample>/bad.json");
+    assert.match(rejected.details.rejected_reason, /Invalid Skill Recipe component/);
+
+    const ambiguous = await tool.execute(
+      "ambiguous-component",
+      { target: "recipes", view: "doctor", identity: "duplicate/task" },
+      undefined,
+      undefined,
+      { recipeResolutionContext },
+    );
+    assert.equal(ambiguous.details.component_status, "ambiguous_skill");
+    assert.match(ambiguous.details.rejected_reason, /Duplicate active Skill identity duplicate/);
+
+    await assert.rejects(
+      tool.execute(
+        "misplaced-identity",
+        { target: "recipes", view: "imports", identity: "sample/task" },
+        undefined,
+        undefined,
+        { recipeResolutionContext },
+      ),
+      /identity is supported only with view=doctor/,
+    );
+
+    await rm(join(sampleSkill, "recipes", "bad.json"));
+    await rm(join(sampleSkill, "recipes", "nested"), { recursive: true });
     const unambiguous = createActiveSkillRecipeContext([
       { name: "sample", baseDir: sampleSkill },
     ]);
@@ -494,16 +597,22 @@ test("Inspect treats tools as capability definitions, not runtime actors", async
     getToolStatus: () => ({
       active_tool: true,
       activation: "current_session",
+      activation_boundary: "current_session",
       callable_now: true,
       host_registered: true,
       launch_kind: "tool",
+      optional_args: ["mode"],
+      persisted: true,
+      registry_active: true,
+      required_args: ["file"],
+      source: "sample/task",
       spawn_calls: 2,
       tool_calls: 3,
     }),
   });
   const result = await tool.execute(
     "tool",
-    { target: "tool:demo", view: "status", verbose: true },
+    { target: "tool:demo", view: "status" },
     undefined,
     undefined,
     {},
@@ -514,15 +623,80 @@ test("Inspect treats tools as capability definitions, not runtime actors", async
   assert.equal(result.details.launch_kind, "tool");
   assert.equal(result.details.spawn_calls, 2);
   assert.equal(result.details.tool_calls, 3);
+  assert.equal(result.details.source, "sample/task");
+  assert.deepEqual(result.details.required_args, ["file"]);
+  assert.deepEqual(result.details.optional_args, ["mode"]);
+  assert.match(
+    result.content[0].text,
+    /tool=demo source=sample\/task callable_now=true activation_boundary=current_session required=file optional=mode launch_kind=tool spawn_calls=2 tool_calls=3/,
+  );
   await assert.rejects(
     tool.execute("runtime", { target: "tool:pi-actors", view: "triage" }, undefined, undefined, {}),
     /supports view=status or view=schema/,
   );
 });
 
-test("Inspect schema documents only kernel targets and Trace source", () => {
+test("Inspect diagnoses registered but inactive and unknown tools without spawn substitution", async () => {
+  const tool = createInspectToolDefinition({
+    getTool: () => undefined,
+    getToolStatus: (name) =>
+      name === "dormant"
+        ? {
+            active_tool: false,
+            activation: "unverified",
+            activation_boundary: "active_tool_set",
+            callable_now: false,
+            host_registered: true,
+            optional_args: ["mode"],
+            persisted: true,
+            registry_active: true,
+            required_args: ["file"],
+            source: "sample/task",
+            spawn_calls: 1,
+            tool_calls: 0,
+          }
+        : undefined,
+  });
+  const status = await tool.execute(
+    "inactive-status",
+    { target: "tool:dormant", view: "status" },
+    undefined,
+    undefined,
+    {},
+  );
+  assert.equal(status.details.callable_now, false);
+  assert.equal(status.details.activation_boundary, "active_tool_set");
+  assert.match(
+    status.content[0].text,
+    /tool=dormant source=sample\/task callable_now=false activation_boundary=active_tool_set.*next=register_tool name=dormant update=true/,
+  );
+  assert.doesNotMatch(status.content[0].text, /next=spawn|spawn recipe=/);
+  await assert.rejects(
+    tool.execute(
+      "inactive-schema",
+      { target: "tool:dormant", view: "schema" },
+      undefined,
+      undefined,
+      {},
+    ),
+    /registered but its callable schema is unavailable; callable_now=false, activation_boundary=active_tool_set.*Next: inspect target=tool:dormant view=status/s,
+  );
+  await assert.rejects(
+    tool.execute(
+      "unknown-status",
+      { target: "tool:missing", view: "status" },
+      undefined,
+      undefined,
+      {},
+    ),
+    /Registered tool not found: missing.*Next: inspect target=recipes view=doctor; do not substitute spawn/s,
+  );
+});
+
+test("Inspect schema documents kernel targets, focused Recipe identity, and Trace source", () => {
   const tool = createInspectToolDefinition();
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
+    "identity",
     "lines",
     "source",
     "status",

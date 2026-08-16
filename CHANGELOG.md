@@ -2,9 +2,9 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
-## Unreleased
+## 0.48.1: Persistent Skill Composition
 
-- `Persistent Skill Composition`: Made `register_tool from=<skill>/<recipe>` consume the extension runtime's authoritative active-session Recipe context rather than relying on invocation-context augmentation, so registration, persisted admission, activation, and Recipe doctor resolve the same installed Skill component without copying contracts or symlinking external files.
+- `Persistent Skill Composition`: Made `register_tool from=<skill>/<recipe>` use Pi's authoritative active-session Skill snapshot across every admitted Skill location and activate synchronous or asynchronous tools from the resolved effective contract. Compact user Recipes retain logical delegation without copied contracts, absolute helper paths, symlinks, or ambient runtime re-resolution.
 
 ## 0.48.0: Host-Coordinated Swarms
 

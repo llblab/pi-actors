@@ -73,7 +73,7 @@ Usage and lineage live in locked metadata ledgers rather than authored Recipe fi
 
 ## Specializing Existing Recipes
 
-Use `register_tool from=<skill>/<recipe> defaults={...}` for one maintained capability under a persistent name or narrower defaults. The stored user Recipe remains compact direct delegation; it does not copy async, args/types, Control, artifacts, helpers, or runtime-owned `{recipe_dir}`/`{skill_dir}`. Named imports remain for multi-node Recipe composition, not one-source specialization. Skill Recipes remain components and are never exposed merely because their Skill is active. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
+Use `register_tool from=<skill>/<recipe> defaults={...}` for one maintained capability under a persistent name or narrower defaults. Pi supplies one authoritative active-session Skill snapshot across global, project, package, settings, CLI, and extension-contributed locations. Registration resolves the source from that snapshot, stores only the logical direct-delegation reference plus caller specialization, and activates the tool from the already-resolved effective contract without ambient re-resolution. It does not copy async, args/types, Control, artifacts, helpers, or runtime-owned `{recipe_dir}`/`{skill_dir}`; symlinks and absolute helper paths are not substitutes. Named imports remain for multi-node Recipe composition, not one-source specialization. Skill Recipes remain components and are never exposed merely because their Skill is active. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
 
 ## Safety
 

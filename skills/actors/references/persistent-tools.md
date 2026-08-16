@@ -28,6 +28,8 @@ register_tool
 
 `from` means logical direct delegation. The source remains authoritative for async behavior, caller args and types, source defaults, artifacts, Control, and runtime-owned origins. The persistent user Recipe stores only the compact specialization; do not copy inherited fields.
 
+Resolution uses Pi's authoritative active-session Skill snapshot across every Skill location Pi admits. Registration resolves and validates the maintained source, persists only its logical `<skill>/<recipe>` reference plus caller specialization, and projects the already-resolved effective contract into the runtime tool. Never replace this composition with a copied Recipe, absolute helper path, symlink, or ambient runtime re-resolution.
+
 Use `description` to narrow agent-facing intent when useful. Every supplied default must name a caller-owned source arg and satisfy its type or enum. Never default runtime-owned origins.
 
 ## Prove registration

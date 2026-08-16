@@ -147,9 +147,9 @@ export function createRuntimeToolDefinition(
   const paramSchema: Record<string, JsonSchema> = {};
   const required: string[] = [];
   const isRecipe = RecipesReferences.isRecipeTool(cfg.template, cfg.recipe);
-  const isAsyncRecipe =
-    cfg.recipe?.async === true ||
-    RecipesReferences.isAsyncRecipeReference(cfg.template);
+  const isAsyncRecipe = cfg.recipe
+    ? cfg.recipe.async === true
+    : RecipesReferences.isAsyncRecipeReference(cfg.template);
   const recipeTemplate =
     cfg.recipe?.template ?? RecipesReferences.getRecipeTemplate(cfg.template);
   const requiredTemplate = recipeTemplate ?? cfg.template!;
@@ -177,7 +177,7 @@ export function createRuntimeToolDefinition(
               !Object.hasOwn(recipeInlineDefaults, arg),
           ),
         )
-      : RecipesReferences.isRecipeReference(cfg.template) && !recipeTemplate
+      : !cfg.recipe && RecipesReferences.isRecipeReference(cfg.template) && !recipeTemplate
         ? new Set(cfg.args.filter((arg) => !Object.hasOwn(cfg.defaults, arg)))
         : Schema.getRequiredToolArgNames(requiredTemplateConfig);
   for (const arg of cfg.args) {

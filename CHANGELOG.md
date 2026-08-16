@@ -2,6 +2,10 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.48.1: Persistent Skill Composition
+
+- `Persistent Skill Composition`: Made `register_tool from=<skill>/<recipe>` use Pi's authoritative active-session Skill snapshot across every admitted Skill location and activate synchronous or asynchronous tools from the resolved effective contract. Compact user Recipes retain logical delegation without copied contracts, absolute helper paths, symlinks, or ambient runtime re-resolution.
+
 ## 0.48.0: Host-Coordinated Swarms
 
 - `Coordinator And Swarm Methodology`: Defined gatewayless host coordination with companion transports as presence only; the coordinator accepts declarative outcomes, creates explicit Runs, stays available, and owns integration/final validation. Reasoning is role-allocated: bounded authors default off, independent reviewers/integrators use medium, and the coordinator selects evidence-worthy fanout. Swarm retains overhead admission, disjoint ownership, isolation, mutation freeze, and event/timer observation.

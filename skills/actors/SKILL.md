@@ -52,7 +52,7 @@ direct delegation ≠ named import composition
 Run Control ≠ actor chat
 ```
 
-A Skill Recipe is a maintained component addressed by `<skill>/<recipe>`. `spawn` creates a Run from a Recipe. `register_tool` creates or updates a persistent user tool. A tool is callable in the current session only when activation evidence says `callable_now: true`.
+A Skill Recipe is a maintained component addressed by `<skill>/<recipe>`. `spawn` creates a Run from a Recipe. `register_tool from=<skill>/<recipe>` persists compact logical delegation and activates from the resolved effective contract without copying, symlinking, or ambient re-resolution. A tool is callable in the current session only when activation evidence says `callable_now: true`.
 
 `actors` owns generic Recipe/tool/Run mechanics. The owning capability Skill owns capability-specific selection and constraints. `swarm` owns multi-actor decomposition and integration methodology.
 

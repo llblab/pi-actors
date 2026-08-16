@@ -135,13 +135,14 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
         from: "media/player",
         name: "music_player",
       },
-      { recipeResolutionContext },
+      {},
       {
         configPath: join(root, "registry.json"),
         recipeRoot,
         getActiveTools: () => [],
         getToolNameBlocker: () => undefined,
         getTools: () => tools,
+        getRecipeResolutionContext: () => recipeResolutionContext,
         notify: () => undefined,
         registerRuntimeTool: (tool) => {
           registered.push(tool);

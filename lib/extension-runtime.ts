@@ -160,6 +160,10 @@ export function createActorExtensionRuntime(
         Tools.createCoreActorToolDefinitions<Pi.ExtensionContext>({
           configPath: Paths.EXTENSION_RUNTIME_PATHS.configPath,
           getActiveTools: () => pi.getActiveTools(),
+          getRecipeResolutionContext: () =>
+            activeRunContext
+              ? getRecipeResolutionContext(activeRunContext)
+              : undefined,
           getRuntimeTool: (name) =>
             Tools.resolveActiveRuntimeTool(
               name,

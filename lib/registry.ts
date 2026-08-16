@@ -73,6 +73,7 @@ export interface RegisterToolRuntimeDeps<TContext> {
   recipeRoot?: string;
   getToolNameBlocker: (name: string) => string | undefined;
   getTools: () => Map<string, Config.RegisteredTool>;
+  getRecipeResolutionContext?: () => RecipesContext.RecipeResolutionContext | undefined;
   getActiveTools: () => string[];
   notify: (
     ctx: TContext,
@@ -422,11 +423,9 @@ function getRegistrationResolutionContext<TContext>(
   ctx: TContext,
   deps: RegisterToolRuntimeDeps<TContext>,
 ): RecipesContext.RecipeResolutionContext {
-  if (
-    ctx &&
-    typeof ctx === "object" &&
-    "recipeResolutionContext" in ctx
-  ) {
+  const runtimeContext = deps.getRecipeResolutionContext?.();
+  if (runtimeContext) return runtimeContext;
+  if (ctx && typeof ctx === "object" && "recipeResolutionContext" in ctx) {
     const resolutionContext = (ctx as {
       recipeResolutionContext?: RecipesContext.RecipeResolutionContext;
     }).recipeResolutionContext;
@@ -697,9 +696,11 @@ function executeRegisterToolUnlocked<TContext>(
   let persisted = false;
   let activation: RuntimeActivation | undefined;
   let cfg: Config.RegisteredTool;
+  let transactionStage = "persist";
   try {
     persistToolRecipe(deps, name, authoredRecipe);
     persisted = true;
+    transactionStage = "persisted_admission";
     const admitted = RecipesDiscovery.admitUserRecipe(
       recipePath,
       resolutionContext,
@@ -711,6 +712,7 @@ function executeRegisterToolUnlocked<TContext>(
     }
     cfg = admitted.tool;
     tools.set(name, cfg);
+    transactionStage = "runtime_activation";
     activation = deps.registerRuntimeTool(cfg) ?? undefined;
     if (
       activation &&
@@ -737,7 +739,7 @@ function executeRegisterToolUnlocked<TContext>(
     deps.setActiveTools(activeBefore);
     throw new Error(
       ExecutionOutput.formatToolText(
-        `Tool registration transaction failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Tool registration transaction failed at ${transactionStage} (${resolutionContext.generation}; active Skills: ${activeSkillSummary(resolutionContext)}): ${error instanceof Error ? error.message : String(error)}`,
       ),
     );
   }

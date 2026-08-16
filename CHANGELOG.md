@@ -2,6 +2,10 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## Unreleased
+
+- `Persistent Skill Composition`: Made `register_tool from=<skill>/<recipe>` consume the extension runtime's authoritative active-session Recipe context rather than relying on invocation-context augmentation, so registration, persisted admission, activation, and Recipe doctor resolve the same installed Skill component without copying contracts or symlinking external files.
+
 ## 0.48.0: Host-Coordinated Swarms
 
 - `Coordinator And Swarm Methodology`: Defined gatewayless host coordination with companion transports as presence only; the coordinator accepts declarative outcomes, creates explicit Runs, stays available, and owns integration/final validation. Reasoning is role-allocated: bounded authors default off, independent reviewers/integrators use medium, and the coordinator selects evidence-worthy fanout. Swarm retains overhead admission, disjoint ownership, isolation, mutation freeze, and event/timer observation.

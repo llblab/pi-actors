@@ -122,6 +122,28 @@ test("Runtime async Recipe tools expose optional run_id", () => {
   assert.match(definition.promptSnippet, /Start async template recipe: review/);
 });
 
+test("Runtime sync delegated Recipe tools use the resolved contract without ambient Skill lookup", () => {
+  const definition = createRuntimeToolDefinition(
+    {
+      args: ["path"],
+      defaults: { path: "." },
+      description: "Validate context",
+      recipe: {
+        args: ["path:path=."],
+        defaults: { path: "." },
+        name: "validate_context",
+        template: "validate {path}",
+      },
+      name: "validate_context",
+      template: "abcd-context/validate-context",
+    },
+    async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
+  );
+  assert.deepEqual(definition.parameters.required, []);
+  assert.equal(definition.parameters.properties.run_id, undefined);
+  assert.match(definition.promptSnippet, /Execute template recipe: validate_context/);
+});
+
 test("Runtime async tools persist inherited policy provenance", async () => {
   const definition = createRuntimeToolDefinition(
     {

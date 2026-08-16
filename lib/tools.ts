@@ -24,6 +24,7 @@ export interface CoreActorToolDefinitionDeps<
 > {
   configPath: string;
   getActiveTools: () => string[];
+  getRecipeResolutionContext: () => import("./recipes-context.ts").RecipeResolutionContext | undefined;
   getRuntimeTool: (name: string) => unknown;
   getRuntimeToolStatus: (name: string) => Record<string, unknown> | undefined;
   handleRuntimeControl?: (
@@ -68,6 +69,7 @@ export function createCoreActorToolDefinitions<
       getActiveTools: deps.getActiveTools,
       getToolNameBlocker: deps.registryRuntime.getToolNameBlocker,
       getTools: deps.registryRuntime.getTools,
+      getRecipeResolutionContext: deps.getRecipeResolutionContext,
       notify: deps.registryRuntime.notify,
       registerRuntimeTool: deps.registryRuntime.registerRuntimeTool,
       reservedToolNames: RESERVED_TOOL_NAMES,

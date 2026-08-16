@@ -1,5 +1,11 @@
 # Changelog
 
+> Each release keeps at most 8 outcome records of at most 512 characters.
+
+## 0.48.0: Host-Coordinated Swarms
+
+- `Coordinator And Swarm Methodology`: Defined gatewayless host coordination with companion transports as presence only; the coordinator accepts declarative outcomes, creates explicit Runs, stays available, and owns integration/final validation. Reasoning is role-allocated: bounded authors default off, independent reviewers/integrators use medium, and the coordinator selects evidence-worthy fanout. Swarm retains overhead admission, disjoint ownership, isolation, mutation freeze, and event/timer observation.
+
 ## 0.47.0: Agent-Native Actor UX
 
 - `Skill-First Operation`: Replaced the injected product manual with a compact Skill-routing meta-protocol. `actors` is now the decision-first authority for generic Recipe/tool/Run mechanics, capability Skills own capability choice, and `swarm` owns only multi-actor methodology.
@@ -7,7 +13,6 @@
 - `Registration Truth UX`: Registration now reports logical source, effective required/optional args, persistence, registry/host/active-tool state, callability, activation boundary, and bounded next actions without raw config or executable template payloads. Failed activation retains rollback guarantees.
 - `Focused Diagnosis`: Added `inspect target=recipes view=doctor identity=<skill>/<recipe>` with active ownership, exact resolvability, partial-catalog state, portable source, generation, rejection, and next actions. Tool status now includes source, effective args, activation boundary, and separate spawn/tool usage.
 - `Capability Protocols`: Rewrote all six Skill descriptions as routing triggers and made Media, Artifacts, Project Work, and Recipe Memory compact agent operating guides. Human installation, product, catalog, development, and release guidance remains independently owned by README/docs.
-- `Swarm Methodology`: Reduced Swarm to overhead admission, decomposition, disjoint ownership, lenses, quorum, conflict evidence, integration, and stop rules; moved deep review/development methods to Skill-local references and delegated all generic Run/Recipe mechanics to `actors`.
 - `Safe Recovery`: Inactive, missing, duplicate, removed, malformed, rejected, partial-catalog, and inactive-tool failures now preserve logical identity, redact physical Skill paths, and teach bounded public diagnosis/retry actions without copied contracts, helper paths, shell evaluation, backgrounding, or spawn substitution.
 - `Journey and Package Evidence`: Added deterministic Journeys A-G, reviewed fresh-agent Journey B evidence, and packed first-session parity for final Skills/prompt/references, `from` registration, source-equivalent schema, same-session activation, focused doctor, actual tool invocation, and unshipped `.agents/` evidence.
 

@@ -76,6 +76,17 @@ Then:
 
 Use direct delegation for the same maintained capability under a persistent name or narrower defaults. Use named imports only when one Recipe graph contains reusable child nodes. See [persistent tools](./references/persistent-tools.md) and [Recipes](./references/recipes.md).
 
+## Local coordinator topology
+
+There are two distinct multi-instance shapes:
+
+- A gateway-centric system owns ingress, agent-instance creation, routing, and lifecycle outside the agents.
+- A host-coordinator system keeps the current Pi instance as the control plane; companion extensions such as Telegram provide presence, while pi-actors creates explicit local Runs for delegated work.
+
+In host-coordinator mode, the top-level agent receives declarative outcomes, preserves user authority and global context, delegates bounded concrete execution, and owns integration plus final validation. It is not merely another worker after delegation begins. One bounded implementation worker normally runs with reasoning off; consequential output receives a separate reasoning-enabled review. Several independent participants or reviewers additionally use `swarm`.
+
+Delegation is not mandatory for every prompt. Work inline when one short bounded act has one natural validation boundary and spawning would add more coordination than isolation, latency hiding, clean context, or continued coordinator availability can repay. For admitted delegation, prefer terminal follow-up and durable Trace/artifacts; inspect on meaningful attention, operator request, or an evidence-based overdue timer rather than busy polling.
+
 ## Run workflow
 
 A Run is one concrete execution of a Recipe:

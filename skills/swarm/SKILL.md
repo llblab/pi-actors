@@ -9,6 +9,25 @@ Use multi-actor execution only when at least two scopes or evidence lenses are m
 
 Read `actors` first for generic Recipe, spawn, Run, Trace, Control, artifact, and lifecycle operation. This Skill owns only multi-actor methodology: decomposition, scope ownership, independence, synthesis, integration, and completion proof.
 
+## Coordinator topology
+
+A swarm can be coordinated without an external gateway. In this model the current host agent is the declarative control plane, the actor kernel creates explicit participant Runs, and companion transports provide ingress or presence without owning hidden agent creation. The coordinator retains user authority, global context, decomposition, shared-surface ownership, integration, and final validation; participants own bounded concrete tasks and report evidence.
+
+This resembles gateway orchestration in dependency direction but not in ownership: the coordinator is itself an agent instance with inspectable Runs, not an infrastructure service that implicitly creates sessions. Preserve that distinction in prompts, docs, recovery, and target routing.
+
+Once work is delegated, keep the coordinator available for decisions and integration instead of duplicating participant implementation. Wait for terminal follow-up by default; use meaningful attention or evidence-based timers for overdue work rather than a tight inspection loop.
+
+## Reasoning allocation
+
+Allocate reasoning by role instead of making one long thread implement and judge itself:
+
+- Bounded implementation/authorship participants default to reasoning off when the task card fixes scope, invariants, checks, and escalation. Enable reasoning only when unresolved diagnosis or local design judgement is part of their assignment.
+- Reviewers default to independent medium reasoning and clean context. For consequential work, several reviewers with distinct lenses or repeated independent judgement usually provide better error discovery than increasing one author's reasoning and relying on self-review.
+- Synthesizers and integrators use medium reasoning because they reconcile evidence, conflicts, shared contracts, and retained state.
+- The coordinator decides whether review fanout is worth its cost, preserves dissent, and never treats reviewer count as evidence quality by itself.
+
+Do not change a running participant's profile merely because policy changed. Replace or add a later independent review only when fresh evidence is still needed.
+
 ## Choose the shape
 
 | Need | Shape | Primary Recipe |
@@ -29,18 +48,22 @@ The coordinator owns the whole result even when participants choose local implem
 1. State the goal, non-goals, evidence standard, integration owner, and stop condition.
 2. Partition work into disjoint read or write scopes. Give shared contracts one owner.
 3. Give each participant a bounded task card with allowed scope, avoided scope, expected artifact, checks, and escalation rule.
-4. Preflight required model/tool access before expensive fanout.
-5. Launch independent work without cross-contaminating lenses. Do not let participants silently expand scope.
-6. Preserve every terminal result, including failures, disagreements, and partial evidence.
-7. Merge through one named synthesizer or integrator. Resolve conflicts from explicit intent and invariants, not textual convenience.
-8. Run fresh integrated validation and, for consequential outputs, an independent post-merge review.
-9. Report complete, degraded, or insufficient-data status honestly; name residual owners and next actions.
+4. Assign each participant an explicit execution profile and isolation mode under the reasoning-allocation contract.
+5. Preflight required model/tool access before expensive fanout.
+6. Launch independent work without cross-contaminating lenses. Do not let participants silently expand scope.
+7. Preserve every terminal result, including failures, disagreements, and partial evidence; avoid doing participant work in the coordinator while a valid owner remains active.
+8. Merge through one named synthesizer or integrator. Resolve conflicts from explicit intent and invariants, not textual convenience.
+9. Run fresh integrated validation and, for consequential outputs, an independent post-merge review.
+10. Report complete, degraded, or insufficient-data status honestly; name residual owners and next actions.
 
 ## Scope and coordination rules
 
 - One writable scope has one owner. Parallel readers may share a stable target.
 - Public contracts, schemas, central configuration, and integration surfaces require exclusive ownership.
-- Participants record out-of-scope needs instead of opportunistically editing them.
+- Concurrent writers use disjoint paths, isolated worktrees, or declared patch/artifact outputs.
+- Shared ledgers, lockfiles, generated contracts, metadata, schemas, release surfaces, and cross-domain configuration belong to one named integrator unless a task card transfers one surface to another exclusive owner.
+- Participants record shared-surface and other out-of-scope needs in handoff instead of editing them opportunistically.
+- Reasoning and model profiles are task-card inputs, not implicit properties of the whole swarm.
 - Coordinator checkpoints are bounded decision requests, not free-form actor chat.
 - Locks support scope ownership but do not replace coordinator judgement. Every lock must be bounded and releasable.
 - One integrator owns merge order, conflict resolution, and final validation.

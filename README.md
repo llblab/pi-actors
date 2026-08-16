@@ -11,6 +11,12 @@ Run = Recipe + Trace + Control
 
 An **actor** is any runnable local capability: a script, tool, service, pipeline, or subagent. A **Recipe** is its reusable executable definition. `spawn` creates a **Run**—one concrete actor instance—which captures its Recipe, appends observable **Trace**, and may consume actor-local **Control**.
 
+## Local Coordinator Model
+
+Multi-instance systems commonly put instance creation and routing in an external gateway. pi-actors supports a different topology: the current Pi instance remains the coordinator, companion extensions such as Telegram provide presence, and explicit Runs perform bounded delegated work. The coordinator receives high-level outcomes, decomposes them, stays available for decisions, and owns integration plus final validation instead of becoming another undifferentiated worker.
+
+This topology does not require every task to become a subagent. Short work with one natural validation boundary stays inline; delegation pays when clean context, asynchronous execution, independent judgement, parallel ownership, or coordinator availability exceeds its coordination cost. Bounded implementation can run with reasoning off while the coordinator selectively launches clean-context reasoning-enabled reviewers; several independent reviews can provide broader evidence than one author self-review. Terminal follow-ups, durable Trace, and declared artifacts replace tight polling loops.
+
 ## Install
 
 ```bash

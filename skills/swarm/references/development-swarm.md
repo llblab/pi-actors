@@ -14,6 +14,39 @@ Use a development swarm only when all are true:
 
 Do not parallelize implementation when tasks need the same central files, semantic ordering dominates wall-clock time, or the likely conflicts would invalidate the decomposition. Use planning or review first.
 
+## Coordinator role separation
+
+In a host-coordinator topology, the current Pi instance owns the declarative outcome and participant graph rather than acting as the default implementation worker. It may receive intent through Telegram or another companion extension, but transport does not become a gateway or gain hidden instance-creation authority; participant creation remains an explicit actor-kernel Run.
+
+The coordinator should:
+
+- Translate high-level intent into bounded task cards and dependency edges.
+- Keep user authority, shared contracts, integration order, and final validation local.
+- Remain available for checkpoints, permissions, conflicts, and changing evidence.
+- Consume terminal handoffs, durable artifacts, and Trace attention instead of mirroring participant work.
+- Check overdue work on an evidence-based timer; never replace event-driven completion with a rapid polling loop.
+
+A participant should:
+
+- Own one concrete execution or evidence boundary.
+- Avoid global orchestration and undeclared participant creation.
+- Return a bounded handoff that lets the coordinator decide without replaying the entire task.
+
+Use one ordinary Run under `actors` when only one worker is delegated. Activate this development-swarm protocol when two or more participants, parallel ownership, or explicit integration edges exist. Keep trivial single-boundary work inline when delegation overhead has no compensating value.
+
+## Reasoning profiles
+
+| Role | Default | Raise or fan out when |
+| --- | --- | --- |
+| Bounded implementation author | Reasoning off | The card explicitly owns unresolved diagnosis or design judgement |
+| Reviewer | Medium reasoning, clean context | Stakes require independent lenses or repeated judges |
+| Synthesizer / integrator | Medium reasoning | Evidence conflicts, shared contracts move, or merge order is semantic |
+| Coordinator | Sufficient for decomposition and decisions | Scope, authority, or architecture remains unresolved |
+
+Prefer independent review after implementation over asking one author thread to implement, retain all local assumptions, and then certify itself. When risk justifies the cost, use multiple independent reviewers: different lenses increase breadth, while repeated judges increase confidence. Preserve minority high-impact findings and merge only evidence-backed conclusions.
+
+More reviewers are not automatically better. Do not fan out when they would inspect unstable code, share contaminated context, repeat one unsupported claim, or exceed the value of the decision. Never change an already-running participant solely to enforce a newer profile; add a fresh review boundary if evidence remains open.
+
 ## Decompose by ownership
 
 Prefer mutation-zone ownership over broad feature labels.
@@ -38,6 +71,9 @@ Goal:
 Non-goals:
 Allowed files or logical scope:
 Avoided files or shared contracts:
+Execution profile:
+Isolation mode: exclusive paths | isolated worktree | artifact-only
+Shared surfaces reserved for integrator:
 Expected artifact or patch:
 Required evidence:
 Checks:
@@ -59,6 +95,14 @@ A useful task card names the smallest scope that can independently reach a valid
 - Release ownership at terminal handoff or explicitly transfer it through the integrator.
 
 If a participant discovers that another scope must change, it emits a dependency or conflict report and stops that edge. The coordinator either transfers ownership, serializes the work, or replans.
+
+## Isolation modes
+
+- `Exclusive paths`: Writers share one worktree only when their complete writable path sets are disjoint and the shared baseline remains stable.
+- `Isolated worktree`: Use when compilation, generated files, imports, or likely dependencies can touch shared repository state.
+- `Artifact-only`: Use for reports, inventories, proposed patches, fixtures, or reviews that the integrator applies later.
+
+The integrator exclusively owns `BACKLOG.md`, `CHANGELOG.md`, lockfiles, generated metadata, public schemas, release manifests, and cross-domain configuration by default. A task card may transfer one of these surfaces to another participant, but never create concurrent ownership. Authors report required shared-surface changes in handoff instead of applying them outside scope.
 
 ## Coordinator checkpoints
 
@@ -129,13 +173,14 @@ The integrator resolves from both reports. Architecture conflicts stop affected 
 
 The named integrator:
 
-1. reads task cards, handoffs, dependency edges, and conflict reports;
-2. verifies each result stayed within scope;
-3. integrates in dependency order, one ownership edge at a time;
-4. resolves conflicts while preserving stated invariants;
-5. runs checks after risky edges and the full agreed validation at the end;
-6. obtains fresh review for conflict-resolved or shared-contract changes;
-7. reports integrated tasks, rejected or deferred work, checks, and residual risks.
+1. freezes new author mutations and preserves every terminal handoff before integration;
+2. reads task cards, handoffs, dependency edges, and conflict reports;
+3. verifies each result stayed within scope;
+4. integrates in dependency order, one ownership edge at a time;
+5. resolves conflicts while preserving stated invariants;
+6. runs checks after risky edges and the full agreed validation at the end;
+7. obtains fresh review for conflict-resolved or shared-contract changes;
+8. reports integrated tasks, rejected or deferred work, checks, and residual risks.
 
 Do not treat a clean merge, participant-local tests, or a collection of terminal Runs as integrated completion. Completion requires retained shared state plus coordinator-owned validation evidence.
 

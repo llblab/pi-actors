@@ -252,6 +252,20 @@ test("Agent UX report closure retains an owner and evidence for every failure", 
   assert.match(closure, /No row is deferred to a hypothetical `0\.48` cleanup release/);
 });
 
+test("Music Player routes Telegram control intent to its maintained Generative App", () => {
+  const music = readFileSync("skills/music-player/SKILL.md", "utf8");
+
+  assert.match(
+    music,
+    /Telegram-originated turn.*prefer the maintained Telegram view.*one-shot prompt buttons/s,
+  );
+  assert.match(
+    music,
+    /`telegram_bind` is available.*operating guidance that owns Generative Apps.*capability-owned adapter/s,
+  );
+  assert.match(music, /do not re-author it or move playback authority into the view/);
+});
+
 test("Agent Journeys E-G route multi-actor, project, and artifact intent to owning Skills", () => {
   const prompt = readFileSync("lib/prompts.ts", "utf8");
   const actors = readFileSync("skills/actors/SKILL.md", "utf8");

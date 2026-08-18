@@ -10,6 +10,8 @@ spawn recipe=<skill>/<recipe> values={...} as=run:<id>
 
 Use the owning capability Skill to choose the Recipe and capability-specific values. Retain the returned Run id. A spawn result reports `launch_kind: "spawn"`; it is never evidence of registered-tool invocation.
 
+A rare Skill Recipe may declare `singleton: true`. Do not pass `as`: the runtime derives `run:<skill>` plus the canonical `<skill>/<recipe>` identity, allows at most one singleton Recipe per Skill, and returns the same compatible healthy active Run instead of launching a duplicate. Contradictory Recipe identity, startup values, Control, or ownership fails closed. Delegation inherits both singleton identities instead of retargeting them. A terminal result is never reused; after its runner exits, restart keeps the logical Run id but creates a new fenced generation. Continuity still depends on actor-owned validated state, not the Run id alone.
+
 ## Observe
 
 Normally wait for terminal follow-up. Inspect only when requested, when meaningful attention arrives, or when the Run is overdue or blocked:

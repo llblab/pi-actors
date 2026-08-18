@@ -2,6 +2,18 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## Unreleased
+
+## 0.49.0: Skill-Scoped Music Player
+
+- `Skill-Scoped Singletons`: Added one optional async singleton Recipe per active Skill with canonical `run:<skill>` and `<skill>/<recipe>` identities, idempotent compatible reuse, lifecycle/process fencing, terminal-generation replacement, delegation-safe identity inheritance, persistent actor-owned state directories, focused inspection, and fail-closed conflicts across Recipe, owner, startup values, and Control.
+- `Terminal Attention Dedupe`: Retains seen Trace-attention identities while terminal Runs remain observable, preventing periodic reconciliation from replaying the same command follow-ups after the terminal transition.
+- `Focused Music Player`: Replaces broad Media with one `music-player/playback` singleton for files, directories, URLs, and playlists. It checkpoints queue and paused intent, reports structured status/Trace, rejects Actor/standalone ownership collisions, and recovers malformed checkpoints explicitly. Live Generative App validation confirmed fresh status and exact terminal Controls across the complete action set.
+- `Absolute Volume Control`: Adds generation-fenced `volume` with `{ "percent": 0..100 }`, direct helper parity, structured status/checkpoint/Trace evidence, and fail-before-admission invalid-input handling. Linux WirePlumber resolves the exact playback stream by process identity and changes it in place; unsupported environments retain the restart fallback. UIs resolve relative steps to one absolute percentage.
+- `Percentage Seeking`: Adds generation-fenced `seek` with `{ "percent": 0..100 }`, bounded duration probing, read-time progress percentage, structured status/checkpoint/Trace evidence, and supported-backend restart at the resolved offset while preserving track and paused/playing intent; unavailable duration or backend support fails explicitly.
+- `Portable Playback Protocol`: Adds actor-neutral foreground `serve` and a pure generation-fenced `playback-client.mjs` for structured status and bounded controls. The Recipe remains the sole managed lifecycle owner; standalone foreground ownership is explicit and mutually exclusive, with no hidden daemon start, adoption, or supervisor handoff.
+- `Optional Generative App`: Ships a ready `genapps/music-player.mjs` adapter for a co-installed generic Generative App runtime. It reports Actor availability and waits for the exact terminal canonical Actor Control for every mutation, including failed-action propagation; Pi remains the lifecycle composition root. Progress and volume use symmetric seven-button `0..90` scales in steps of 15.
+
 ## 0.48.1: Persistent Skill Composition
 
 - `Persistent Skill Composition`: Made `register_tool from=<skill>/<recipe>` use Pi's authoritative active-session Skill snapshot across every admitted Skill location and activate synchronous or asynchronous tools from the resolved effective contract. Compact user Recipes retain logical delegation without copied contracts, absolute helper paths, symlinks, or ambient runtime re-resolution.

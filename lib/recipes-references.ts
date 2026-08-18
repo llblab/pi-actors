@@ -30,6 +30,7 @@ export type TemplateRecipeImport = string | TemplateRecipeImportBinding;
 export interface TemplateRecipeDefinition {
   description?: string;
   disabled?: boolean;
+  singleton?: boolean;
   imports?: Record<string, TemplateRecipeImport>;
   template: CommandTemplateValue;
   args?: string[];
@@ -59,6 +60,8 @@ export interface TemplateRecipeConfig extends TemplateRecipeDefinition {
   async?: boolean;
   recipe_dir?: string;
   skill_dir?: string;
+  singleton_run_id?: string;
+  singleton_recipe_id?: string;
 }
 
 interface ImportedRecipe {
@@ -1416,6 +1419,23 @@ export function readResolvedRecipeConfig(
           : delegated?.async === false
             ? { async: false }
             : {}),
+    ...(substituted.singleton === true || delegated?.singleton === true
+      ? {
+          singleton: true,
+          singleton_run_id:
+            delegated?.singleton === true
+              ? delegated.singleton_run_id
+              : skillDir
+                ? basename(skillDir)
+                : undefined,
+          singleton_recipe_id:
+            delegated?.singleton === true
+              ? delegated.singleton_recipe_id
+              : skillDir
+                ? `${basename(skillDir)}/${recipeName}`
+                : undefined,
+        }
+      : {}),
     ...(Object.keys(imports).length > 0
       ? { imports: getRecipeImports(raw) }
       : {}),

@@ -22,7 +22,7 @@ Do not mix source modes.
 ```text
 register_tool
   name=music_player
-  from=media/player
+  from=music-player/playback
   defaults={"source":"~/Music/1MIX"}
 ```
 

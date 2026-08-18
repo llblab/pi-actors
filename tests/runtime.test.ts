@@ -81,17 +81,17 @@ test("Runtime reconciles Skill-dependent user tools only with the supplied live 
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-live-context-"));
   try {
     const recipeRoot = join(root, "recipes");
-    const mediaSkill = join(root, "skills", "media");
+    const mediaSkill = join(root, "skills", "music-player");
     await Promise.all([
       mkdir(recipeRoot, { recursive: true }),
       mkdir(join(mediaSkill, "recipes"), { recursive: true }),
     ]);
     await writeRecipe(recipeRoot, "music_player", {
       description: "Play local music",
-      template: "media/player",
+      template: "music-player/playback",
     });
     await writeFile(
-      join(mediaSkill, "recipes", "player.json"),
+      join(mediaSkill, "recipes", "playback.json"),
       JSON.stringify({
         async: true,
         args: ["source:path"],
@@ -127,7 +127,7 @@ test("Runtime reconciles Skill-dependent user tools only with the supplied live 
     const resolutionContext = createRecipeResolutionContext(
       "runtime-live-session",
       root,
-      createActiveSkillRecipeContext([{ name: "media", baseDir: mediaSkill }]),
+      createActiveSkillRecipeContext([{ name: "music-player", baseDir: mediaSkill }]),
     );
     runtime.loadTools(runtimeContext, resolutionContext);
     assert.equal(runtime.getTools().get("music_player")?.recipe?.async, true);

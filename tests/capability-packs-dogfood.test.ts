@@ -18,7 +18,7 @@ import {
 import { createAutoToolsRuntime } from "../lib/runtime.ts";
 
 const packageRoot = process.cwd();
-const skillNames = ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"];
+const skillNames = ["actors", "artifacts", "music-player", "project-work", "recipe-memory", "swarm"];
 const packageContext = createActiveSkillRecipeContext(
   skillNames.map((name) => ({ name, baseDir: join(packageRoot, "skills", name) })),
 );
@@ -83,16 +83,16 @@ test("Capability reference failures remain exact with no fallback aliases", asyn
   const root = await mkdtemp(join(tmpdir(), "pi-actors-capability-failures-"));
   try {
     assert.throws(
-      () => resolveRecipeReferencePath("media/player", root, createActiveSkillRecipeContext([])),
-      /Active Skill Recipe not found: media\/player/,
+      () => resolveRecipeReferencePath("music-player/playback", root, createActiveSkillRecipeContext([])),
+      /Active Skill Recipe not found: music-player\/playback/,
     );
     const duplicate = createActiveSkillRecipeContext([
-      { name: "media", baseDir: join(root, "first") },
-      { name: "media", baseDir: join(root, "second") },
+      { name: "music-player", baseDir: join(root, "first") },
+      { name: "music-player", baseDir: join(root, "second") },
     ]);
     assert.throws(
-      () => resolveRecipeReferencePath("media/player", root, duplicate),
-      /Duplicate active Skill identity media/,
+      () => resolveRecipeReferencePath("music-player/playback", root, duplicate),
+      /Duplicate active Skill identity music-player/,
     );
     const collisionSkill = join(root, "collision");
     await mkdir(join(collisionSkill, "recipes"), { recursive: true });
@@ -104,7 +104,7 @@ test("Capability reference failures remain exact with no fallback aliases", asyn
       /stem collision/,
     );
     assert.throws(() => resolveRecipeReferencePath("std:task"), /std: Recipe references were removed/);
-    assert.throws(() => resolveRecipeReferencePath("skill:media\/player"), /skill: Recipe references were removed/);
+    assert.throws(() => resolveRecipeReferencePath("skill:music-player\/playback"), /skill: Recipe references were removed/);
     const named = join(root, "named.json");
     await writeFile(named, JSON.stringify({ name: "declared", template: "echo bad" }));
     assert.throws(() => readResolvedRecipeConfig(named), /Recipe\.name was removed/);
@@ -121,12 +121,12 @@ test("Package reviewers, helpers, and tool discovery preserve Skill boundaries",
   );
   assert.match(reviewer ?? "", /skills[/\\]recipe-memory[/\\]recipes[/\\]draft-review\.json$/);
   const player = readResolvedRecipeConfig(
-    resolveRecipeReferencePath("media/player", packageRoot, packageContext)!,
+    resolveRecipeReferencePath("music-player/playback", packageRoot, packageContext)!,
     [],
     { skillContext: packageContext },
   );
-  assert.match(JSON.stringify(player?.template), /\{skill_dir\}\/scripts\/music-player\.mjs/);
-  assert.match(player?.skill_dir ?? "", /skills[/\\]media$/);
+  assert.match(JSON.stringify(player?.template), /\{skill_dir\}\/scripts\/playback\.mjs/);
+  assert.match(player?.skill_dir ?? "", /skills[/\\]music-player$/);
 
   const root = await mkdtemp(join(tmpdir(), "pi-actors-capability-tools-"));
   try {
@@ -143,8 +143,8 @@ test("Package reviewers, helpers, and tool discovery preserve Skill boundaries",
     });
     runtime.loadTools({ hasUI: false, ui: { notify() {} } });
     assert.deepEqual(registered, ["user-tool"]);
-    assert.equal(runtime.getTools().has("media/player"), false);
-    assert.equal(listActiveSkillRecipeComponents(packageContext).length, 58);
+    assert.equal(runtime.getTools().has("music-player/playback"), false);
+    assert.equal(listActiveSkillRecipeComponents(packageContext).length, 55);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -156,15 +156,14 @@ test("Direct qualified spawn captures Skill identity", async () => {
   try {
     const meta = startRun(
       {
-        file: "media/player",
-        run_id: `capability-direct-${process.pid}-${Date.now()}`,
+        file: "music-player/playback",
         state_dir: stateDir,
         values: { command: "status", loop: false, player: "auto", source: root, volume: 70 },
       },
       packageRoot,
       { skillContext: packageContext },
     );
-    assert.equal(meta.recipe_context_records?.[0].logical_reference, "media/player");
+    assert.equal(meta.recipe_context_records?.[0].logical_reference, "music-player/playback");
     assert.equal(meta.recipe_context_records?.[0].source_kind, "active_skill_component");
   } finally {
     await waitForRunTerminal(stateDir);

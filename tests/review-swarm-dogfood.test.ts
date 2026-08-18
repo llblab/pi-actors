@@ -123,11 +123,16 @@ test("Skill capability packs execute qualified source workflows", {
   try {
     await mkdir(binDir, { recursive: true });
     const fakePi = join(binDir, "pi");
+    const fakeFfplay = join(binDir, "ffplay");
+    const musicSource = join(root, "track.wav");
     await writeFile(fakePi, fakePiScript(), "utf8");
+    await writeFile(fakeFfplay, "#!/bin/sh\nexit 0\n", "utf8");
+    await writeFile(musicSource, "audio fixture", "utf8");
     await chmod(fakePi, 0o755);
+    await chmod(fakeFfplay, 0o755);
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
     const skillContext = createActiveSkillRecipeContext(
-      ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]
+      ["actors", "artifacts", "music-player", "project-work", "recipe-memory", "swarm"]
         .map((name) => ({ name, baseDir: join(__dirname, "..", "skills", name) })),
     );
     const inputPath = join(root, "draft-input.json");
@@ -169,8 +174,8 @@ test("Skill capability packs execute qualified source workflows", {
         },
       },
       {
-        recipe: "media/player",
-        values: { command: "status", source: root, loop: false, volume: 70, player: "auto" },
+        recipe: "music-player/playback",
+        values: { source: musicSource, loop: false, volume: 70, player: "ffplay" },
       },
       {
         recipe: "recipe-memory/draft-review",
@@ -183,7 +188,9 @@ test("Skill capability packs execute qualified source workflows", {
         {
           file: workflow.recipe,
           launch_source: "spawn",
-          run_id: `capability-pack-${index}-${process.pid}-${Date.now()}`,
+          ...(workflow.recipe === "music-player/playback"
+            ? {}
+            : { run_id: `capability-pack-${index}-${process.pid}-${Date.now()}` }),
           state_dir: stateDir,
           values: workflow.values,
         },

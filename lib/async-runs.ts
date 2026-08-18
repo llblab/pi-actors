@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import type {
   CommandTemplateFailureScope,
@@ -124,6 +125,9 @@ export interface AsyncRunStartParams {
   name?: string;
   ownerId?: string;
   run_id?: string;
+  singleton?: boolean;
+  singleton_run_id?: string;
+  singleton_recipe_id?: string;
   state_dir?: string;
   tool?: string;
   template?: CommandTemplateValue;
@@ -187,6 +191,10 @@ export interface AsyncRunMeta {
   process_identity?: RunProcessIdentity;
   recipe_context_records?: RecipesReferences.TemplateRecipeContextRecord[];
   retire_when?: "children_terminal";
+  reused?: boolean;
+  singleton?: boolean;
+  singleton_recipe_id?: string;
+  singleton_values?: Record<string, unknown>;
   transport_context?: Record<string, unknown>;
 }
 
@@ -260,6 +268,43 @@ function assertNoActiveRunState(stateDir: string): void {
   RunsStart.assertNoActiveRunState(stateDir, readJson, RUNNER_PATH);
 }
 
+function reuseCompatibleSingletonRun(
+  stateDir: string,
+  startParams: AsyncRunStartParams,
+  singletonValues: Record<string, unknown>,
+): AsyncRunMeta | undefined {
+  const existing = RunsStart.readActiveOwnedRunState(
+    stateDir,
+    readJson,
+    RUNNER_PATH,
+  );
+  if (!existing) return undefined;
+  const compatible =
+    existing.singleton === true &&
+    existing.singleton_recipe_id === startParams.singleton_recipe_id &&
+    existing.ownerId === startParams.ownerId &&
+    isDeepStrictEqual(existing.singleton_values ?? {}, singletonValues) &&
+    isDeepStrictEqual(existing.control ?? [], startParams.control ?? []);
+  if (!compatible) {
+    throw new Error(
+      `Active singleton Run ${String(existing.run ?? stateDir)} has incompatible Recipe identity, owner, startup values, or Control contract. Stop it before changing singleton configuration.`,
+    );
+  }
+  return {
+    ...(existing as unknown as AsyncRunMeta),
+    ...(startParams.launch_source
+      ? {
+          launch_kind: startParams.launch_source,
+          launch_source: startParams.launch_source,
+        }
+      : {}),
+    ...(startParams.launch_correlation
+      ? { launch_correlation: startParams.launch_correlation }
+      : {}),
+    reused: true,
+  };
+}
+
 export interface AsyncRunStartOptions {
   skillContext?: RecipesReferences.ActiveSkillRecipeContext;
 }
@@ -326,10 +371,25 @@ function resolveStartParams(
 ): AsyncRunStartParams {
   if (!params.file) return params;
   const fileParams = readRecipeFile(params.file, cwd, options);
+  const singleton = fileParams.singleton === true;
+  if (singleton && fileParams.async !== true) {
+    throw new Error("singleton Recipes must declare async: true");
+  }
+  if (singleton && (!fileParams.singleton_run_id || !fileParams.singleton_recipe_id)) {
+    throw new Error("singleton Recipes must resolve one active Skill-owned singleton identity");
+  }
+  const singletonRun = singleton ? fileParams.singleton_run_id : undefined;
+  if (singletonRun && params.run_id && params.run_id !== singletonRun) {
+    throw new Error(
+      `singleton Recipe run identity is run:${singletonRun}; received run:${params.run_id}`,
+    );
+  }
   return {
     ...fileParams,
     ...params,
+    ...(singleton ? { singleton: true } : {}),
     run_id:
+      singletonRun ||
       params.run_id ||
       fileParams.run_id ||
       fileParams.name ||
@@ -540,14 +600,37 @@ export function startRun(
     values,
     modelPolicy,
   );
-  assertNoActiveRunState(stateDir);
+  const singletonValues = Object.fromEntries(
+    [...declaredArgs].map((key) => [key, values[key]]),
+  );
+  if (startParams.singleton !== true) assertNoActiveRunState(stateDir);
   mkdirSync(stateDir, { recursive: true });
   const releaseStartLock = acquireStateStartLock(stateDir, {
     onContention: startParams.lifecycleHooks?.onLockContention,
   });
   try {
     claimRunStateDirectory(stateDir, run);
-    assertNoActiveRunState(stateDir);
+    if (
+      recipeFile &&
+      isMutableUsageRecipeFile(recipeFile) &&
+      !RecipesUsage.recordRecipeLaunch(
+        recipeFile,
+        new Date(),
+        startParams.launch_source === "tool" ? "tool" : "spawn",
+      )
+    ) {
+      throw new Error(
+        `Recipe launch rejected because its source changed during activation: ${recipeFile}. Reload recipe tools and retry.`,
+      );
+    }
+    if (startParams.singleton === true) {
+      const existing = reuseCompatibleSingletonRun(
+        stateDir,
+        startParams,
+        singletonValues,
+      );
+      if (existing) return existing;
+    } else assertNoActiveRunState(stateDir);
     prepareStateDirForStart(stateDir);
     const stdout = join(stateDir, "stdout.log");
     const stderr = join(stateDir, "stderr.log");
@@ -572,19 +655,6 @@ export function startRun(
               : record,
           )
         : undefined;
-    if (
-      recipeFile &&
-      isMutableUsageRecipeFile(recipeFile) &&
-      !RecipesUsage.recordRecipeLaunch(
-        recipeFile,
-        new Date(),
-        startParams.launch_source === "tool" ? "tool" : "spawn",
-      )
-    ) {
-      throw new Error(
-        `Recipe launch rejected because its source changed during activation: ${recipeFile}. Reload recipe tools and retry.`,
-      );
-    }
     const outFd = openSync(stdout, "a");
     const errFd = openSync(stderr, "a");
     const argv = asyncRunnerArgv(stateDir);
@@ -634,6 +704,13 @@ export function startRun(
         : {}),
       ...(startParams.retire_when === "children_terminal"
         ? { retire_when: "children_terminal" as const }
+        : {}),
+      ...(startParams.singleton === true
+        ? {
+            singleton: true,
+            singleton_recipe_id: startParams.singleton_recipe_id,
+            singleton_values: singletonValues,
+          }
         : {}),
       ...(transportContext
         ? { transport_context: transportContext } : {}),

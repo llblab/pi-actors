@@ -50,6 +50,7 @@ Common Recipe fields:
 - `imports` with optional binding defaults/values;
 - `template`;
 - `async`;
+- `singleton: true` for one explicit Skill-owned async service slot;
 - `artifacts`;
 - `control` for actual controlled services;
 - command-template flags such as `parallel`, `concurrency`, `min_successful`, `when`, `timeout`, `delay`, `retry`, `failure`, `recover`, `repeat`, `accept_output`, and `output`;
@@ -92,6 +93,12 @@ nested skill path    -> flatten filename or use explicit file path
 ```
 
 Removed `std:` and `skill:` forms fail with migration guidance; they are not aliases. Root packaged Recipes no longer exist. Flatten a maintained Skill component to a direct filename, or reference a nested/local file explicitly when it is intentionally outside the Skill component namespace.
+
+## Singleton Services
+
+`singleton: true` is valid only for an async Skill Recipe, and one Skill may declare at most one singleton Recipe. The runtime derives `run:<skill>` and the canonical `<skill>/<recipe>` identity, then rejects a conflicting caller-supplied Run id. A compatible repeated launch returns the healthy active generation; contradictory Recipe identity, ownership, startup values, or Control fails closed. A terminal result is never reused even during runner exit; retry after that process exits starts a fresh `run_instance_id` under the same logical Run id. Actor-owned workload continuity requires a validated state artifact that restart cleanup deliberately preserves; singleton identity alone never proves restored state.
+
+Direct Recipe delegation inherits the original singleton Run and Recipe identities, so registered tools and explicit wrappers cannot retarget the service or create parallel aliases.
 
 ## Control
 

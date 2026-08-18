@@ -99,8 +99,8 @@ test("Spawn launches a qualified active-Skill Recipe", async () => {
     assert.equal(result.details.values.skill_dir, skillDir);
     await waitForFile(join(stateDir, "result.json"));
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
-    await rm(root, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -185,7 +185,7 @@ test("Runtime async tools persist inherited policy provenance", async () => {
     assert.equal(result.details.model_policy.thinking.source, "inherited");
     await waitForFile(join(stateDir, "result.json"));
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

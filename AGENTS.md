@@ -60,7 +60,7 @@ Pi host
 - `observability.ts`, `run-ui-runtime.ts`: Trace attention, terminal reconciliation, and Pi follow-up delivery.
 - automatic draft/tool review domains: structurally redacted model review, journaled mutation, lineage, recovery, and explicit retry/reset safety.
 
-The bundled Skill Recipe dependency DAG is `artifacts → actors, swarm`, `media → artifacts`, and `project-work → actors, artifacts, swarm`; `actors`, `swarm`, and `recipe-memory` have no cross-Skill Recipe dependencies.
+The bundled Skill Recipe dependency DAG is `artifacts → actors, swarm` and `project-work → actors, artifacts, swarm`; `actors`, `music-player`, `swarm`, and `recipe-memory` have no cross-Skill Recipe dependencies.
 
 Scripts remain self-contained when no non-script consumer justifies a TypeScript domain. Command-template script leaves infer `.js`/`.mjs` in order through Node, Bun, or `deno run` and `.sh` through Bash without shell evaluation. Helper-backed Skill Recipes self-locate through runtime-owned `{skill_dir}`. Recipes stay optional, composable, policy-light, and caller-configurable.
 

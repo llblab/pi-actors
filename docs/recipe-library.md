@@ -34,12 +34,9 @@ Callers should own model, thinking, concurrency, quorum, and mission policy. Rev
 
 Artifact pipelines terminate in files/manifests and result evidence; they do not fabricate communication events.
 
-### Media and controlled services
+### Music playback and controlled services
 
-- `media/playlist-scan` — shallow unfiltered path inventory.
-- `media/playlist-build` — extension-filtered `paths`, `m3u`, or `inline` playlist output; it does not create a playlist file.
-- `media/library` — filtered playlist plus bounded library-report content; `artifact_path` alone is not durable-write proof.
-- `media/player` — playback service with declared playback actions, `controls.jsonl`, generation-fenced endpoint readiness, state artifact, and playback Trace. Player selection is `player:enum(auto,mpv,afplay,ffplay,cvlc,play,wmp)=auto`.
+- `music-player/playback` — singleton playback service that resolves files, directories, URLs, explicit lists, and playlist files into one persistent queue; it exposes declared playback Controls including arbitrary absolute `volume` percentages, generation-fenced endpoint readiness, structured status, a player-owned continuity checkpoint, and playback Trace. Player selection is `player:enum(auto,mpv,afplay,ffplay,cvlc,play,wmp)=auto`.
 - `actors/resource-locker` — optional queue/lease-lock service with explicit owner/resource input, lock Trace, and a 512-record/1 MiB atomically retained journal.
 
 These Recipes declare actor-local Control. Ordinary one-shot Recipes omit it. Helper-backed Skill Recipes self-locate through runtime-owned `{skill_dir}`; callers do not pass package installation roots.

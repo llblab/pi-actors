@@ -267,6 +267,19 @@ export function withFileMutationLock<T>(
   }
 }
 
+function replaceFileWithRetry(source: string, target: string): void {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(source, target);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== "EPERM" && code !== "EBUSY") || attempt >= 19) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+}
+
 export function writeTextAtomic(
   path: string,
   content: string,
@@ -277,7 +290,7 @@ export function writeTextAtomic(
   try {
     writeFileSync(tempPath, content, "utf8");
     options.onBeforeReplace?.();
-    renameSync(tempPath, path);
+    replaceFileWithRetry(tempPath, path);
   } catch (error) {
     try {
       unlinkSync(tempPath);

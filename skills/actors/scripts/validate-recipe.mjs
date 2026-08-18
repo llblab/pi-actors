@@ -106,6 +106,7 @@ function scanSkillRecipes(target) {
     if (!existsSync(recipeDir)) continue;
     const direct = readdirSync(recipeDir, { withFileTypes: true });
     const byStem = new Map();
+    const singletonFiles = [];
     for (const entry of direct) {
       const path = join(recipeDir, entry.name);
       if (entry.isDirectory()) {
@@ -120,6 +121,7 @@ function scanSkillRecipes(target) {
       }
       if (!entry.isFile() || !/\.(?:json|md)$/.test(entry.name)) continue;
       files.push(path);
+      if (readRawRecipeConfig(path)?.singleton === true) singletonFiles.push(path);
       const stem = basename(entry.name, extname(entry.name));
       const previous = byStem.get(stem);
       if (previous) {
@@ -129,6 +131,13 @@ function scanSkillRecipes(target) {
           error: `Skill Recipe stem collision: ${skill.name}/${stem} has both ${extname(previous)} and ${extname(path)} files`,
         });
       } else byStem.set(stem, path);
+    }
+    if (singletonFiles.length > 1) {
+      failures.push({
+        file: recipeDir,
+        ok: false,
+        error: `Skill ${skill.name} declares more than one singleton Recipe: ${singletonFiles.map((file) => basename(file)).join(", ")}`,
+      });
     }
   }
   let skillContext = packageSkillContext;
@@ -227,6 +236,8 @@ function qaDiagnostics(file, config) {
   const warnings = [];
   if (config.mailbox !== undefined)
     diagnostics.push("recipe.mailbox was removed; use control actions and Trace events");
+  if (config.singleton === true && config.async !== true)
+    diagnostics.push("singleton: requires async: true");
   diagnostics.push(...validateArtifactDeclarations(config));
   diagnostics.push(...validatePortablePaths(config));
   diagnostics.push(...validateHelperPaths(file, config));
@@ -260,6 +271,7 @@ function validateFile(file, qa = false, skillContext = packageSkillContext) {
       ok: qaOk(qaReport),
       name: config.name ?? "",
       async: Boolean(config.async),
+      singleton: Boolean(config.singleton),
       args: Array.isArray(config.args) ? config.args : [],
       defaults:
         config.defaults && typeof config.defaults === "object"

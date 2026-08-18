@@ -20,9 +20,6 @@ const artifactScript = fileURLToPath(
 const projectScript = fileURLToPath(
   new URL("../skills/project-work/scripts/project-utils.mjs", import.meta.url),
 );
-const mediaScript = fileURLToPath(
-  new URL("../skills/media/scripts/media-utils.mjs", import.meta.url),
-);
 const actorScript = fileURLToPath(
   new URL("../skills/actors/scripts/run-utils.mjs", import.meta.url),
 );
@@ -143,26 +140,6 @@ test("artifact-utils writes stdin with explicit mode", async () => {
     });
     assert.equal(appended.status, 0, appended.stderr);
     assert.equal(await readFile(file, "utf8"), "# Report\nMore\n");
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("media-utils builds a filtered playlist", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-media-utils-"));
-  try {
-    await writeFile(join(root, "one.mp3"), "one");
-    await writeFile(join(root, "skip.txt"), "skip");
-    const { stdout } = await execFileAsync(process.execPath, [
-      mediaScript,
-      "playlist",
-      root,
-      ".mp3",
-      "1",
-      "paths",
-    ]);
-    assert.match(stdout, /one\.mp3/);
-    assert.doesNotMatch(stdout, /skip\.txt/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -45,7 +45,7 @@ test("Packaged skills are registered through dist metadata", () => {
   assert.deepEqual(packagedSkillPaths, [
     "skills/actors/SKILL.md",
     "skills/artifacts/SKILL.md",
-    "skills/media/SKILL.md",
+    "skills/music-player/SKILL.md",
     "skills/project-work/SKILL.md",
     "skills/recipe-memory/SKILL.md",
     "skills/swarm/SKILL.md",
@@ -82,7 +82,7 @@ test("Packaged Skill descriptions are stable routing triggers", () => {
   assert.deepEqual(descriptions, {
     actors: "Use for any non-trivial pi-actors operation, diagnosis, or development involving Recipes, persistent tools, Runs, spawn, message, inspect, Trace, Control, capability specialization, or activation.",
     artifacts: "Use when an actor workflow must write reusable files, reports, manifests, or bundles with deterministic paths and declared outputs.",
-    media: "Use for local media discovery, filtering, library summaries, playlist construction, or controllable playback.",
+    "music-player": "Use for starting, resuming, inspecting, and controlling one persistent local music playback actor from caller-approved files, directories, URLs, or playlists.",
     "project-work": "Use for repository health inspection, project summaries, documentation maintenance, release-readiness evidence, or bounded run-operation reports.",
     "recipe-memory": "Use only for internal automatic Recipe-memory review, diagnosis, or recovery; do not use for normal Recipe creation, registration, or invocation.",
     swarm: "Use when work needs multiple actors or subagents for independent implementation, artifact generation, review, delegated audit, research, or coordinated decomposition and integration.",
@@ -92,7 +92,7 @@ test("Packaged Skill descriptions are stable routing triggers", () => {
     assert.match(description, /^Use (?:for|when|only)/);
     assert.doesNotMatch(description, /version|history|package-owned|recipes\/|\.json|helper|script/i);
   }
-  for (const name of ["artifacts", "media", "project-work", "recipe-memory", "swarm"]) {
+  for (const name of ["artifacts", "music-player", "project-work", "recipe-memory", "swarm"]) {
     assert.doesNotMatch(
       (descriptions as Record<string, string>)[name],
       /\bspawn\b|\bmessage\b|\binspect\b|\bTrace\b|\bControl\b|activation|persistent tool/,
@@ -104,7 +104,7 @@ test("Packaged Skill descriptions are stable routing triggers", () => {
 
 test("Packaged capability Skills route outcomes without duplicating actors mechanics", () => {
   const guides = Object.fromEntries(
-    ["artifacts", "media", "project-work", "recipe-memory"].map((name) => [
+    ["artifacts", "music-player", "project-work", "recipe-memory"].map((name) => [
       name,
       readFileSync(`skills/${name}/SKILL.md`, "utf8"),
     ]),
@@ -128,16 +128,11 @@ test("Packaged capability Skills route outcomes without duplicating actors mecha
   assert.match(guides.artifacts, /Do not claim a durable artifact from `report` or `manifest` alone/);
   assert.match(guides.artifacts, /persistent-capability workflow in `actors`/);
 
-  for (const identity of [
-    "media/player",
-    "media/library",
-    "media/playlist-build",
-    "media/playlist-scan",
-  ]) assert.match(guides.media, new RegExp(identity));
-  assert.match(guides.media, /async controlled service/);
-  assert.match(guides.media, /persistent-capability workflow in `actors`/);
-  assert.match(guides.media, /source_dir.*readable directory/);
-  assert.match(guides.media, /## Stop rules/);
+  assert.match(guides["music-player"], /music-player\/playback/);
+  assert.match(guides["music-player"], /singleton async controlled service/);
+  assert.match(guides["music-player"], /canonical address `run:music-player`/);
+  assert.match(guides["music-player"], /caller-approved local music/);
+  assert.match(guides["music-player"], /## Stop Rules/);
 
   for (const identity of [
     "project-work/repo-health",
@@ -304,10 +299,7 @@ test("Agent and human guidance surfaces keep explicit ownership", () => {
     "artifacts/report",
     "artifacts/write",
     "artifacts/bundle",
-    "media/playlist-scan",
-    "media/playlist-build",
-    "media/library",
-    "media/player",
+    "music-player/playback",
   ]) assert.match(humanCatalog, new RegExp(identity));
 });
 
@@ -349,7 +341,7 @@ test("Packaged actors references own operation detail without human-doc fallback
       readFileSync(`skills/actors/references/${name}.md`, "utf8"),
     )
     .join("\n");
-  assert.match(combined, /register_tool from=media\/player/);
+  assert.match(combined, /register_tool from=music-player\/playback/);
   assert.match(combined, /Named import composition/);
   assert.match(combined, /inspect target=tool:<name> view=status/);
   assert.match(combined, /inspect target=recipes view=doctor/);

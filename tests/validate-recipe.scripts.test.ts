@@ -188,6 +188,38 @@ test("validate-recipe Skill QA rejects nested Recipes and duplicate stems precis
   }
 });
 
+test("validate-recipe Skill QA admits at most one async singleton per Skill", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-singletons-"));
+  try {
+    await mkdir(join(root, "sample", "recipes"), { recursive: true });
+    await writeFile(
+      join(root, "sample", "recipes", "first.json"),
+      JSON.stringify({ async: true, singleton: true, template: "echo first" }),
+    );
+    await writeFile(
+      join(root, "sample", "recipes", "second.json"),
+      JSON.stringify({ singleton: true, template: "echo second" }),
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [...nodeArgs, root, "--skills", "--qa"]),
+      (error: unknown) => {
+        const report = JSON.parse((error as { stdout?: string }).stdout ?? "");
+        const errors = report.results
+          .map((result: { error?: string; qa?: { diagnostics?: string[] } }) => [
+            result.error ?? "",
+            ...(result.qa?.diagnostics ?? []),
+          ].join("\n"))
+          .join("\n");
+        assert.match(errors, /more than one singleton Recipe: first\.json, second\.json/);
+        assert.match(errors, /singleton: requires async: true/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("validate-recipe Skill QA rejects removed prefixes and unknown Skill identities", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-validate-skills-"));
   try {

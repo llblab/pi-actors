@@ -7,6 +7,10 @@ description: Use for starting, resuming, inspecting, and controlling one persist
 
 Use this Skill for one local music playback service. For generic Recipe execution, singleton Run lifecycle, persistent-tool setup, or diagnosis, follow `actors`; this Skill owns only playback-specific selection and controls.
 
+## Interaction Routing
+
+When a Telegram-originated turn or explicit Telegram-control question makes repeated player controls relevant, prefer the maintained Telegram view described below over synthesizing one-shot prompt buttons. If `telegram_bind` is available, load and follow the active operating guidance that owns Generative Apps, then bind or invoke the capability-owned adapter; do not re-author it or move playback authority into the view. If the runtime is unavailable or binding fails, report that boundary and fall back to ordinary model-mediated controls.
+
 ## Playback
 
 `music-player/playback` is a singleton async controlled service with the canonical address `run:music-player`. The Recipe is the sole lifecycle owner: it starts the service, supervises it, and stops playback when the Run closes. The service owns queue, backend, checkpoint, and playback state. `playback-client.mjs` is a pure actor-neutral RPC client; it never starts, adopts, supervises, or signals a service. The executable also supports explicit foreground `serve` for development or a caller-owned standalone host, but Actor and standalone ownership of one state directory are mutually exclusive.
@@ -33,10 +37,10 @@ Use only declared actions: `play`, `pause`, `resume`, `toggle`, `next`, `previou
 
 External local views use the actor-neutral playback client against the canonical service state directory. They must not read or edit Run files, signal playback processes, construct Actor Control records, or import pi-actors internals. The client validates bounded commands, exact service generation, structured responses, and active endpoint ownership before returning success.
 
-## Optional Telegram View
+## Maintained Telegram View
 
 > [!NOTE]
-> If a Generative App runtime is installed, this Skill includes a ready Music Player app at `genapps/music-player.mjs`. Use `telegram_bind` to copy and install it as app `music-player`; hot replacement keeps the same app name with `replace: true`.
+> This Skill includes a ready Music Player Generative App at `genapps/music-player.mjs`. When `telegram_bind` is available and Telegram interaction is relevant, use it to copy and install the app as `music-player`; hot replacement keeps the same app name with `replace: true`.
 
 Bind with absolute `control`, `stateDir`, and `node` arguments. The adapter reports whether the Actor control surface is actually available. Every mutating button queues a canonical Actor Control through `playback.mjs` and waits for that exact record to become handled or failed, so terminal evidence remains visible in the Run inspector and failures reach Telegram; bounded status projection is read-only. The adapter neither imports extension internals nor starts playback. Its stopped-state Start button returns to Pi so the composition root can spawn `music-player/playback`, while active controls remain deterministic Generative App actions that bypass the model. `pi-telegram` owns only the generic Generative App runtime.
 

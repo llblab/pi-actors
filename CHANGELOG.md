@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 0.49.1: Maintained Telegram View Routing
+
+- `Maintained Telegram View Routing`: Music Player now treats Telegram-originated control intent as a breadcrumb to its ready capability-owned Generative App, preferring bind/invoke over one-shot prompt buttons while preserving Actor playback authority and an explicit model-mediated fallback when the app runtime is unavailable.
+
 ## 0.49.0: Skill-Scoped Music Player
 
 - `Skill-Scoped Singletons`: Added one optional async singleton Recipe per active Skill with canonical `run:<skill>` and `<skill>/<recipe>` identities, idempotent compatible reuse, lifecycle/process fencing, terminal-generation replacement, delegation-safe identity inheritance, persistent actor-owned state directories, focused inspection, and fail-closed conflicts across Recipe, owner, startup values, and Control.

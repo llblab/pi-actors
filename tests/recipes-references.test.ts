@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -25,7 +25,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(__dirname, "..");
 const packageSkillContext = createActiveSkillRecipeContext(
-  ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"].map(
+  ["actors", "artifacts", "music-player", "project-work", "recipe-memory", "swarm"].map(
     (name) => ({ name, baseDir: join(packageRoot, "skills", name) }),
   ),
 );
@@ -513,6 +513,45 @@ test("Template Recipe direct delegation uses only canonical references", async (
     });
     await writeFile(parent, JSON.stringify({ template: "shared" }));
     assert.equal(readResolvedRecipeConfig(parent)?.template, "shared");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Direct delegation inherits singleton identity without retargeting it to the wrapper Skill", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-singleton-delegation-"));
+  const ownerDir = join(root, "music-player");
+  const aliasDir = join(root, "alias-skill");
+  const ownerRecipe = join(ownerDir, "recipes", "playback.json");
+  const wrapper = join(aliasDir, "recipes", "wrapper.json");
+  try {
+    await Promise.all([
+      mkdir(join(ownerDir, "recipes"), { recursive: true }),
+      mkdir(join(aliasDir, "recipes"), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(ownerDir, "SKILL.md"), "---\nname: music-player\ndescription: Owner.\n---\n"),
+      writeFile(join(aliasDir, "SKILL.md"), "---\nname: alias-skill\ndescription: Alias.\n---\n"),
+    ]);
+    await Promise.all([
+      writeFile(ownerRecipe, JSON.stringify({
+        async: true,
+        singleton: true,
+        template: "echo owner",
+      })),
+      writeFile(wrapper, JSON.stringify({
+        singleton: true,
+        template: "../../music-player/recipes/playback.json",
+      })),
+    ]);
+    const skillContext = createActiveSkillRecipeContext([
+      { name: "music-player", baseDir: ownerDir },
+      { name: "alias-skill", baseDir: aliasDir },
+    ]);
+    const resolved = readResolvedRecipeConfig(wrapper, [], { skillContext })!;
+    assert.equal(resolved.singleton, true);
+    assert.equal(resolved.singleton_run_id, "music-player");
+    assert.equal(resolved.singleton_recipe_id, "music-player/playback");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1006,7 +1045,7 @@ test("Actors and Recipe-memory capability packs expose the exact migrated invent
 
 test("Packaged Skill Recipes parse and resolve imports", () => {
   const components = listActiveSkillRecipeComponents(packageSkillContext);
-  assert.equal(components.length, 58);
+  assert.equal(components.length, 55);
   for (const component of components) {
     const config = readPackageRecipe(component.file);
     assert.ok(config, `${component.identity} should resolve`);
@@ -1122,8 +1161,14 @@ test("Packaged controlled services declare only actor-local actions", () => {
   assert.deepEqual(readPackageRecipe(join(packageRoot, "skills", "actors", "recipes", "resource-locker.json"))?.control, [
     "enqueue", "claim", "complete", "fail", "acquire", "renew", "release", "stop",
   ]);
-  assert.deepEqual(readPackageRecipe(join(packageRoot, "skills", "media", "recipes", "player.json"))?.control, [
-    "play", "pause", "resume", "toggle", "next", "previous", "stop", "status",
+  const playback = readPackageRecipe(
+    join(packageRoot, "skills", "music-player", "recipes", "playback.json"),
+  );
+  assert.equal(playback?.singleton, true);
+  assert.equal(playback?.singleton_run_id, "music-player");
+  assert.equal(playback?.singleton_recipe_id, "music-player/playback");
+  assert.deepEqual(playback?.control, [
+    "play", "pause", "resume", "toggle", "next", "previous", "seek", "volume", "stop", "status",
   ]);
 });
 

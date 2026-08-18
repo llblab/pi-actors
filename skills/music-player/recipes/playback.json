@@ -1,7 +1,7 @@
 {
   "async": true,
+  "singleton": true,
   "args": [
-    "command:enum(play,pause,resume,toggle,next,previous,stop,status)",
     "source:string",
     "loop:bool",
     "volume:int",
@@ -9,7 +9,6 @@
     "state_dir:path"
   ],
   "defaults": {
-    "command": "play",
     "loop": "true",
     "volume": "70",
     "player": "auto"
@@ -21,8 +20,10 @@
     "toggle",
     "next",
     "previous",
+    "seek",
+    "volume",
     "stop",
     "status"
   ],
-  "template": "{skill_dir}/scripts/music-player.mjs {command} {source} {loop} {volume} {player} {state_dir}"
+  "template": "{skill_dir}/scripts/playback.mjs play {source} {loop} {volume} {player} {state_dir}"
 }

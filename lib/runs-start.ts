@@ -19,16 +19,17 @@ import {
 
 type RunJsonReader = (path: string) => Record<string, unknown> | undefined;
 
-export function assertNoActiveRunState(
+export function readActiveOwnedRunState(
   stateDir: string,
   readJson: RunJsonReader,
   _runnerPath: string,
-): void {
+): Record<string, unknown> | undefined {
   const meta = readJson(join(stateDir, "run.json"));
-  if (!meta) return;
+  if (!meta) return undefined;
+  const result = readJson(join(stateDir, "result.json"));
+  if (typeof result?.completedAt === "string") return undefined;
   const pid = Number(meta.pid || 0);
-  const cwd = String(meta.cwd ?? "");
-  if (!pid || !isAlive(pid)) return;
+  if (!pid || !isAlive(pid)) return undefined;
   const identity = verifyRunProcessIdentity(
     pid,
     meta.process_identity as RunProcessIdentity | undefined,
@@ -43,7 +44,16 @@ export function assertNoActiveRunState(
       `Run state process identity proof is unavailable: ${String(meta.run ?? stateDir)}. Refusing to reuse the state directory while pid ${pid} is alive.`,
     );
   }
-  if (identity.valid) {
+  return identity.valid ? meta : undefined;
+}
+
+export function assertNoActiveRunState(
+  stateDir: string,
+  readJson: RunJsonReader,
+  runnerPath: string,
+): void {
+  const meta = readActiveOwnedRunState(stateDir, readJson, runnerPath);
+  if (meta) {
     throw new Error(
       `Run state already has an active owned process: ${String(meta.run ?? stateDir)}. Stop it before reusing the same run_id or state_dir.`,
     );

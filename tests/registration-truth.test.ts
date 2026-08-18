@@ -85,8 +85,8 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     const recipeRoot = join(root, "user-recipes");
     const mediaDir = await writeSkillRecipe(
       skillsRoot,
-      "media",
-      "player",
+      "music-player",
+      "playback",
       playerRecipe,
     );
     const staleDir = await writeSkillRecipe(skillsRoot, "stale", "broken", {
@@ -94,14 +94,14 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
       template: "echo broken",
     });
     const skillContext = createActiveSkillRecipeContext([
-      { name: "media", baseDir: mediaDir },
+      { name: "music-player", baseDir: mediaDir },
       { name: "stale", baseDir: staleDir },
     ]);
     const qa = spawnSync(
       process.execPath,
       [
         join(process.cwd(), "skills", "actors", "scripts", "validate-recipe.mjs"),
-        join(mediaDir, "recipes", "player.json"),
+        join(mediaDir, "recipes", "playback.json"),
         "--summary",
       ],
       { encoding: "utf8" },
@@ -117,14 +117,14 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
       "registration-truth-spawn",
       {
         as: `run:${runId}`,
-        recipe: "media/player",
+        recipe: "music-player/playback",
         values: { source: "fixture-library" },
       },
       undefined,
       undefined,
       { recipeResolutionContext, cwd: root },
     );
-    assert.equal(spawnResult.details.recipe_file, join(mediaDir, "recipes", "player.json"));
+    assert.equal(spawnResult.details.recipe_file, join(mediaDir, "recipes", "playback.json"));
     await waitForFile(join(runStateDir, "result.json"));
 
     const tools = new Map<string, RegisteredTool>();
@@ -132,7 +132,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     const registration = await executeRegisterTool(
       {
         defaults: { source: "~/Music/1MIX" },
-        from: "media/player",
+        from: "music-player/playback",
         name: "music_player",
       },
       {},
@@ -185,7 +185,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
         validated: true,
       },
     );
-    assert.equal(registration.details.source, "media/player");
+    assert.equal(registration.details.source, "music-player/playback");
     assert.equal(registration.details.activation_boundary, "current_session");
     assert.deepEqual(registration.details.required_args, []);
     assert.deepEqual(registration.details.optional_args, [
@@ -204,7 +204,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     assert.equal("template" in registration.details, false);
     const wrapperPath = join(recipeRoot, "music_player.json");
     const authoredWrapper = JSON.parse(await readFile(wrapperPath, "utf8"));
-    assert.equal(authoredWrapper.template, "media/player");
+    assert.equal(authoredWrapper.template, "music-player/playback");
     assert.equal(authoredWrapper.description, undefined);
     assert.equal(authoredWrapper.async, undefined);
     assert.equal(authoredWrapper.args, undefined);
@@ -323,7 +323,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
           setActiveTools: () => undefined,
         },
       ),
-      /Recipe source "missing\/task" validation failed: Active Skill Recipe not found: missing\/task.*Active Skills: media, stale.*Next: inspect target=recipes view=doctor identity=missing\/task/s,
+      /Recipe source "missing\/task" validation failed: Active Skill Recipe not found: missing\/task.*Active Skills: music-player, stale.*Next: inspect target=recipes view=doctor identity=missing\/task/s,
     );
     await assert.rejects(
       readFile(join(recipeRoot, "missing_tool.json"), "utf8"),
@@ -332,28 +332,32 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     const inventory = inventoryActiveSkillRecipeComponents(skillContext);
     assert.equal(inventory.partial, true);
     assert.equal(
-      inventory.components.some((component) => component.identity === "media/player"),
+      inventory.components.some((component) => component.identity === "music-player/playback"),
       true,
     );
     assert.match(inventory.rejected[0].reason, /Recipe\.name was removed/);
     assert.equal(
-      readResolvedRecipeConfig(join(mediaDir, "recipes", "player.json"), [], {
+      readResolvedRecipeConfig(join(mediaDir, "recipes", "playback.json"), [], {
         skillContext,
       })?.async,
       true,
     );
     assert.equal(registered.length, 1);
   } finally {
-    await rm(runStateDir, { recursive: true, force: true });
+    await rm(runStateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     await rm(join(getRunStateRoot(), wrapperRunId), {
       recursive: true,
       force: true,
+      maxRetries: 10,
+      retryDelay: 50,
     });
     await rm(join(getRunStateRoot(), toolRunId), {
       recursive: true,
       force: true,
+      maxRetries: 10,
+      retryDelay: 50,
     });
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -362,20 +366,20 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
   try {
     const firstMedia = await writeSkillRecipe(
       join(root, "first-skills"),
-      "media",
-      "player",
+      "music-player",
+      "playback",
       playerRecipe,
     );
     const secondMedia = await writeSkillRecipe(
       join(root, "second-skills"),
-      "media",
-      "player",
+      "music-player",
+      "playback",
       playerRecipe,
     );
     const wrapperPath = join(root, "recipes", "music_player.json");
     const wrapper = {
       description: "Music wrapper",
-      template: "media/player",
+      template: "music-player/playback",
     };
     const inactive = admitUserRecipe(
       wrapperPath,
@@ -389,13 +393,13 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
     assert.equal(inactive.validated, false);
     assert.match(
       inactive.diagnostics[0],
-      /Active Skill Recipe not found: media\/player.*Owning Skill "media" is not active.*Next: activate Skill media.*inspect target=recipes view=doctor identity=media\/player/s,
+      /Active Skill Recipe not found: music-player\/playback.*Owning Skill "music-player" is not active.*Next: activate Skill music-player.*inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
 
     const liveContext = createRecipeResolutionContext(
       "live-session",
       root,
-      createActiveSkillRecipeContext([{ name: "media", baseDir: firstMedia }]),
+      createActiveSkillRecipeContext([{ name: "music-player", baseDir: firstMedia }]),
     );
     const malformed = admitUserRecipe(wrapperPath, liveContext, {
       description: "Malformed wrapper",
@@ -406,7 +410,7 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
     const mistyped = admitUserRecipe(wrapperPath, liveContext, {
       description: "Mistyped wrapper",
       defaults: { volume: "loud" },
-      template: "media/player",
+      template: "music-player/playback",
     });
     assert.equal(mistyped.validated, false);
     assert.match(mistyped.diagnostics[0], /volume.*integer/i);
@@ -417,8 +421,8 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
         "ambiguous-session",
         root,
         createActiveSkillRecipeContext([
-          { name: "media", baseDir: firstMedia },
-          { name: "media", baseDir: secondMedia },
+          { name: "music-player", baseDir: firstMedia },
+          { name: "music-player", baseDir: secondMedia },
         ]),
       ),
       wrapper,
@@ -426,11 +430,11 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
     assert.equal(ambiguous.validated, false);
     assert.match(
       ambiguous.diagnostics[0],
-      /Duplicate active Skill identity media \(2 active definitions\).*Next: inspect target=recipes view=doctor identity=media\/player/s,
+      /Duplicate active Skill identity music-player \(2 active definitions\).*Next: inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
     assert.doesNotMatch(ambiguous.diagnostics[0], new RegExp(root));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -451,8 +455,8 @@ test(
     try {
       const mediaDir = await writeSkillRecipe(
         join(root, "skills"),
-        "media",
-        "player",
+        "music-player",
+        "playback",
         playerRecipe,
       );
       await mkdir(recipeRoot, { recursive: true });
@@ -462,13 +466,13 @@ test(
         JSON.stringify({
           description: "Broken wrapper",
           name: "removed-identity",
-          template: "media/player",
+          template: "music-player/playback",
         }),
       );
       const resolutionContext = createRecipeResolutionContext(
         "watch-session",
         root,
-        createActiveSkillRecipeContext([{ name: "media", baseDir: mediaDir }]),
+        createActiveSkillRecipeContext([{ name: "music-player", baseDir: mediaDir }]),
       );
       const definitions = new Map<string, { name: string }>();
       let activeTools: string[] = [];
@@ -497,7 +501,7 @@ test(
         JSON.stringify({
           description: "Repaired wrapper",
           defaults: { source: "~/Music/1MIX" },
-          template: "media/player",
+          template: "music-player/playback",
         }),
       );
       for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -509,7 +513,7 @@ test(
       assert.equal(runtime.getStatus().resolution_generation, resolutionContext.generation);
     } finally {
       watcher?.close();
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   },
 );

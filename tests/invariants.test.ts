@@ -265,7 +265,7 @@ test("Automatic recipe reviewers have no general filesystem tools", () => {
 });
 
 test("Music player helper uses only Control and Trace state", () => {
-  const script = readFileSync("skills/media/scripts/music-player.mjs", "utf8");
+  const script = readFileSync("skills/music-player/scripts/playback.mjs", "utf8");
   assert.match(script, /controls\.jsonl/);
   assert.match(script, /control-endpoint\.json/);
   assert.doesNotMatch(script, /inbox\.jsonl|outbox\.jsonl|message to=|player\.<command>/);
@@ -276,7 +276,7 @@ test("First-party scripts use only canonical Trace and Control journals", () => 
   for (const file of [
     "scripts/async-runner.mjs",
     "skills/actors/scripts/resource-locker.mjs",
-    "skills/media/scripts/music-player.mjs",
+    "skills/music-player/scripts/playback.mjs",
   ]) {
     const source = readFileSync(file, "utf8");
     assert.match(source, /importRuntimeModule\("runs-trace"\)/, file);
@@ -290,7 +290,7 @@ test("First-party scripts use only canonical Trace and Control journals", () => 
 });
 
 test("Music player helper keeps player processes inside the run process group", () => {
-  const script = readFileSync("skills/media/scripts/music-player.mjs", "utf8");
+  const script = readFileSync("skills/music-player/scripts/playback.mjs", "utf8");
   assert.doesNotMatch(
     script,
     /detached:\s*process\.platform\s*!==\s*["']win32["']/,
@@ -309,7 +309,7 @@ test("Music player helper keeps player processes inside the run process group", 
 });
 
 test("Music player backend enum stays aligned across recipe docs and script", () => {
-  const recipe = JSON.parse(readFileSync("skills/media/recipes/player.json", "utf8"));
+  const recipe = JSON.parse(readFileSync("skills/music-player/recipes/playback.json", "utf8"));
   const recipePlayers = recipe.args
     .find((arg: string) => arg.startsWith("player:enum("))
     ?.match(/^player:enum\((?<values>[^)]+)\)$/)
@@ -328,7 +328,7 @@ test("Music player backend enum stays aligned across recipe docs and script", ()
     .match(/player:enum\((?<values>[^)]+)\)=auto/)
     ?.groups?.values.split(",");
   assert.deepEqual(docsPlayers, recipePlayers);
-  const script = readFileSync("skills/media/scripts/music-player.mjs", "utf8");
+  const script = readFileSync("skills/music-player/scripts/playback.mjs", "utf8");
   const usagePlayers = script
     .match(/Supported players: (?<values>[^.]+)\./)
     ?.groups?.values.split(", ");

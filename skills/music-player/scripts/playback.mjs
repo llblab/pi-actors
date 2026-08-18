@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Packaged local music-player controlled-service helper.
+ * Packaged persistent local music playback controlled-service helper.
  *
- * This script backs the standard music-player recipe. It scans local music
+ * This script backs the singleton music-player/playback Recipe. It scans local music
  * sources, builds playback queues, launches an available backend player, and
  * consumes generation-bound Controls such as play, pause, next, previous,
  * stop, and status.
@@ -13,6 +13,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   accessSync,
   constants,
@@ -20,6 +21,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   watch,
@@ -55,9 +57,27 @@ async function importRuntimeModule(name) {
   return await import(pathToFileURL(module).href);
 }
 
-const { appendRunControlInStateDir, claimRunControlByIdInStateDir,
-  updateRunControlStatusInStateDir } = await importRuntimeModule("runs-controls");
-const { appendRunTraceEvent } = await importRuntimeModule("runs-trace");
+const actorAdapterEnabled = process.argv[2] !== "serve";
+let appendRunControlInStateDir;
+let claimRunControlByIdInStateDir;
+let processRunControlsInStateDir;
+let readRunControlJournalFromStateDir;
+let updateRunControlStatusInStateDir;
+let isAlive;
+let verifyRunProcessIdentity;
+let appendRunTraceEvent = () => {};
+if (actorAdapterEnabled) {
+  ({
+    appendRunControlInStateDir,
+    claimRunControlByIdInStateDir,
+    processRunControlsInStateDir,
+    readRunControlJournalFromStateDir,
+    updateRunControlStatusInStateDir,
+  } = await importRuntimeModule("runs-controls"));
+  ({ isAlive, verifyRunProcessIdentity } =
+    await importRuntimeModule("runs-process"));
+  ({ appendRunTraceEvent } = await importRuntimeModule("runs-trace"));
+}
 
 const AUDIO_EXTENSIONS = new Set([
   ".aac",
@@ -77,15 +97,17 @@ const CONTROL_COMMANDS = new Set([
   "toggle",
   "next",
   "previous",
+  "seek",
+  "volume",
   "stop",
   "status",
 ]);
-
 function usage() {
   console.error(`Usage:
-  music-player.mjs play <source-file-dir-url-playlist-or-list> [loop=true] [volume=70] [player=auto] [state-dir]
-  music-player.mjs <pause|resume|toggle|next|previous|stop|status> <state-dir>
-  music-player.mjs control <state-dir> <play|pause|toggle|next|previous|stop|status>
+  playback.mjs <play|serve> <source-file-dir-url-playlist-or-list> [loop=true] [volume=70] [player=auto] [state-dir]
+  playback.mjs <pause|resume|toggle|next|previous|stop|status> <state-dir>
+  playback.mjs <seek|volume> <state-dir> <percent>
+  playback.mjs control <state-dir> <play|pause|toggle|next|previous|seek|volume|stop|status> [percent]
 
 Runs a foreground music player so pi-actors can own it as a controlled Run.
 Controls use canonical records in <state-dir>/controls.jsonl.
@@ -118,6 +140,16 @@ function exists(path) {
     return existsSync(path);
   } catch {
     return false;
+  }
+}
+
+function isLocalProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
   }
 }
 
@@ -176,9 +208,35 @@ function parseBool(value) {
   }
 }
 
+function parsePercent(value, label) {
+  const candidate =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? value.percent
+      : value;
+  if (!/^\d+$/.test(String(candidate))) {
+    throw new Error(`${label} percent must be an integer 0..100`);
+  }
+  const percent = Number(candidate);
+  if (percent < 0 || percent > 100) {
+    throw new Error(`${label} percent must be an integer 0..100`);
+  }
+  return percent;
+}
+
+function parseSeekPercent(value) {
+  return parsePercent(value, "seek");
+}
+
+function parseVolumePercent(value) {
+  return parsePercent(value, "volume");
+}
+
 function normalizeVolume(value) {
-  if (!/^\d+$/.test(String(value))) fail("volume must be an integer 0..100", 2);
-  return Math.min(Number(value), 100);
+  try {
+    return parseVolumePercent(value);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error), 2);
+  }
 }
 
 function powershellCommand() {
@@ -359,7 +417,28 @@ try {
   ];
 }
 
-function playerCommand(ctx, player, volume, track) {
+function probeDurationSeconds(track) {
+  if (!have("ffprobe")) return undefined;
+  const result = spawnSync(
+    "ffprobe",
+    [
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "default=noprint_wrappers=1:nokey=1",
+      track,
+    ],
+    { encoding: "utf8", timeout: 5_000, windowsHide: true },
+  );
+  const duration = Number(String(result.stdout).trim());
+  return result.status === 0 && Number.isFinite(duration) && duration > 0
+    ? duration
+    : undefined;
+}
+
+function playerCommand(ctx, player, volume, track, startSeconds = 0) {
   switch (player) {
     case "mpv":
       return [
@@ -369,6 +448,7 @@ function playerCommand(ctx, player, volume, track) {
           "--really-quiet",
           "--force-window=no",
           `--volume=${volume}`,
+          ...(startSeconds > 0 ? [`--start=${startSeconds}`] : []),
           track,
         ],
       ];
@@ -388,6 +468,7 @@ function playerCommand(ctx, player, volume, track) {
           "-autoexit",
           "-volume",
           String(volume),
+          ...(startSeconds > 0 ? ["-ss", String(startSeconds)] : []),
           track,
         ],
       ];
@@ -401,11 +482,15 @@ function playerCommand(ctx, player, volume, track) {
           "--play-and-exit",
           "--volume",
           String(Math.floor((volume * 256) / 100)),
+          ...(startSeconds > 0 ? ["--start-time", String(startSeconds)] : []),
           track,
         ],
       ];
     case "play":
-      return ["play", ["-q", track]];
+      return [
+        "play",
+        ["-q", track, ...(startSeconds > 0 ? ["trim", String(startSeconds)] : [])],
+      ];
     case "wmp":
       return windowsMediaPlayerCommand(ctx, volume, track);
     default:
@@ -448,20 +533,60 @@ function emitStoppedEvent(ctx, reason = "stop") {
   emitPlayerEvent(ctx, "player.stopped", "Music player stopped", { reason });
 }
 
+function positionSnapshot(ctx, state, nowMs = Date.now()) {
+  const duration = Number(ctx.durationSeconds);
+  let position = Number(ctx.positionSeconds ?? 0);
+  if (state === "playing" && Number.isFinite(ctx.positionStartedAtMs)) {
+    position += Math.max(0, nowMs - ctx.positionStartedAtMs) / 1000;
+  }
+  if (Number.isFinite(duration) && duration > 0) {
+    position = Math.min(Math.max(position, 0), duration);
+  } else {
+    position = Math.max(position, 0);
+  }
+  const progressPercent = Number.isFinite(duration) && duration > 0
+    ? Math.min(100, Math.max(0, (position / duration) * 100))
+    : undefined;
+  return { duration, position, progressPercent, updatedAtMs: nowMs };
+}
+
+function freezePosition(ctx) {
+  const snapshot = positionSnapshot(ctx, "playing");
+  ctx.positionSeconds = snapshot.position;
+  ctx.positionStartedAtMs = undefined;
+}
+
+function resumePosition(ctx) {
+  ctx.positionStartedAtMs = Date.now();
+}
+
 function writeStatus(ctx, state, index, count, track, player, pid = "") {
   const updatedAt = new Date().toISOString();
+  const position = positionSnapshot(ctx, state);
   writeText(
     ctx.statusFile,
-    `state=${state}\nindex=${index}\ncount=${count}\ntrack=${track}\nplayer=${player}\npid=${pid}\nupdated_at=${updatedAt}\n`,
+    `state=${state}\nindex=${index}\ncount=${count}\ntrack=${track}\nplayer=${player}\nvolume=${ctx.volume}\nseek_percent=${ctx.seekPercent ?? 0}\nprogress_percent=${position.progressPercent === undefined ? "" : Math.round(position.progressPercent)}\npid=${pid}\nupdated_at=${updatedAt}\n`,
   );
   writeText(
     ctx.statusJsonFile,
-    `${JSON.stringify({ state, index, count, track, player, pid: String(pid), updated_at: updatedAt })}\n`,
+    `${JSON.stringify({ state, index, count, track, player, volume: ctx.volume, seek_percent: ctx.seekPercent ?? 0, progress_percent: position.progressPercent === undefined ? null : Math.round(position.progressPercent), position_seconds: position.position, duration_seconds: Number.isFinite(position.duration) ? position.duration : null, position_updated_at_ms: position.updatedAtMs, pid: String(pid), updated_at: updatedAt })}\n`,
   );
-  ctx.current = { count, index, pid: String(pid), player, state, track };
+  ctx.current = {
+    count,
+    index,
+    pid: String(pid),
+    player,
+    state,
+    track,
+    volume: ctx.volume,
+    seekPercent: ctx.seekPercent ?? 0,
+    progressPercent: position.progressPercent,
+  };
+  writePlaybackCheckpoint(ctx, state, index, track);
 }
 
 function setState(ctx, state) {
+  ctx.desiredState = state;
   writeText(ctx.stateFile, state);
   if (ctx.current) {
     writeStatus(
@@ -514,12 +639,91 @@ function controlCurrentPlayback(ctx, command) {
       sendSignalToCurrent(ctx, "SIGSTOP");
       break;
     case "stop":
+      sendSignalToCurrent(ctx, "SIGCONT");
       sendSignalToCurrent(ctx, "SIGTERM");
       break;
   }
 }
 
-function handleControl(ctx, input) {
+function pipeWireAudioStreamIds() {
+  if (process.platform !== "linux" || !have("wpctl")) return [];
+  const result = spawnSync("wpctl", ["status", "-n"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0) return [];
+  const audio = (String(result.stdout).split(/\nVideo\n/u)[0] ?? "");
+  const streams = audio.split(/\n\s*└─ Streams:\s*\n/u)[1] ?? "";
+  return [...streams.matchAll(/^\s+(\d+)\.\s/gmu)]
+    .map((match) => Number(match[1]))
+    .filter((id) => Number.isInteger(id) && id > 0);
+}
+
+function wpctlInspect(id) {
+  const result = spawnSync("wpctl", ["inspect", String(id)], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return result.status === 0 ? String(result.stdout) : "";
+}
+
+function findPipeWireAudioStreamForPid(pid) {
+  for (const nodeId of pipeWireAudioStreamIds()) {
+    const node = wpctlInspect(nodeId);
+    if (!/media\.class = "Stream\/Output\/Audio"/u.test(node)) continue;
+    const clientId = Number(node.match(/client\.id = "(\d+)"/u)?.[1]);
+    if (!Number.isInteger(clientId) || clientId <= 0) continue;
+    const client = wpctlInspect(clientId);
+    const processId = Number(client.match(/application\.process\.id = "(\d+)"/u)?.[1]);
+    if (processId === pid) return nodeId;
+  }
+  return undefined;
+}
+
+function setCurrentPlaybackVolume(ctx, percent) {
+  const pid = Number(ctx.child?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  const cached = ctx.pipeWireVolumeTarget;
+  const nodeId = cached?.pid === pid
+    ? cached.nodeId
+    : findPipeWireAudioStreamForPid(pid);
+  if (!Number.isInteger(nodeId) || nodeId <= 0) return false;
+  const result = spawnSync(
+    "wpctl",
+    ["set-volume", String(nodeId), `${percent}%`],
+    { encoding: "utf8", windowsHide: true },
+  );
+  if (result.status !== 0) {
+    ctx.pipeWireVolumeTarget = undefined;
+    return false;
+  }
+  ctx.pipeWireVolumeTarget = { nodeId, pid };
+  return true;
+}
+
+function seekCurrentPlayback(ctx, percent) {
+  if (!["mpv", "ffplay", "cvlc", "play"].includes(ctx.player)) {
+    throw new Error(`player ${ctx.player} does not support percentage seeking`);
+  }
+  const track = ctx.current?.track;
+  if (!track) throw new Error("current track is unavailable for seeking");
+  const duration = probeDurationSeconds(track);
+  if (duration === undefined) {
+    throw new Error("current track duration is unavailable for seeking");
+  }
+  ctx.seekPercent = percent;
+  ctx.seekSeconds = (duration * percent) / 100;
+  writeText(ctx.commandFile, "seek");
+  emitPlayerEvent(
+    ctx,
+    "player.seek",
+    `Music player seek set to ${percent}%`,
+    { percent, seconds: ctx.seekSeconds },
+  );
+  controlCurrentPlayback(ctx, "stop");
+}
+
+function handleControl(ctx, input, controlInput) {
   const command = input.trim().toLowerCase();
   if (!command) return;
   if (!CONTROL_COMMANDS.has(command)) {
@@ -529,19 +733,23 @@ function handleControl(ctx, input) {
   switch (command) {
     case "play":
     case "resume":
+      resumePosition(ctx);
       setState(ctx, "playing");
       controlCurrentPlayback(ctx, "play");
       break;
     case "pause":
+      freezePosition(ctx);
       setState(ctx, "paused");
       controlCurrentPlayback(ctx, "pause");
       break;
     case "toggle": {
       const current = readText(ctx.stateFile).trim();
       if (current === "paused") {
+        resumePosition(ctx);
         setState(ctx, "playing");
         controlCurrentPlayback(ctx, "play");
       } else {
+        freezePosition(ctx);
         setState(ctx, "paused");
         controlCurrentPlayback(ctx, "pause");
       }
@@ -556,6 +764,36 @@ function handleControl(ctx, input) {
       writeText(ctx.commandFile, "previous");
       controlCurrentPlayback(ctx, "stop");
       break;
+    case "seek":
+      seekCurrentPlayback(ctx, parseSeekPercent(controlInput));
+      break;
+    case "volume": {
+      const percent = parseVolumePercent(controlInput);
+      ctx.volume = percent;
+      if (ctx.current) {
+        writeStatus(
+          ctx,
+          ctx.current.state,
+          ctx.current.index,
+          ctx.current.count,
+          ctx.current.track,
+          ctx.current.player,
+          ctx.current.pid,
+        );
+      }
+      const adjustedInPlace = setCurrentPlaybackVolume(ctx, percent);
+      emitPlayerEvent(
+        ctx,
+        "player.volume",
+        `Music player volume set to ${percent}%`,
+        { adjusted_in_place: adjustedInPlace, percent },
+      );
+      if (ctx.child?.pid && !adjustedInPlace) {
+        writeText(ctx.commandFile, "replay");
+        controlCurrentPlayback(ctx, "stop");
+      }
+      break;
+    }
     case "stop":
       ctx.stopping = true;
       writeText(ctx.commandFile, "stop");
@@ -579,7 +817,124 @@ function readJsonFile(path, fallback) {
 }
 
 function writeJsonFile(path, value) {
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  renameSync(temporary, path);
+}
+
+function readPlaybackCheckpoint(path) {
+  if (!existsSync(path)) return { checkpoint: undefined, state: "new" };
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return { checkpoint: undefined, recovery: "invalid-json", state: "recovered" };
+  }
+  const checkpoint = normalizeCheckpoint(raw);
+  return checkpoint
+    ? { checkpoint, state: "valid" }
+    : { checkpoint: undefined, recovery: "invalid-shape", state: "recovered" };
+}
+
+function normalizeCheckpoint(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (
+    value.version !== 1 ||
+    typeof value.source !== "string" ||
+    !["playing", "paused", "stopped"].includes(value.state) ||
+    !Array.isArray(value.tracks) ||
+    value.tracks.length === 0 ||
+    value.tracks.some((track) => typeof track !== "string" || !track)
+  ) return undefined;
+  const index = Number(value.index);
+  if (!Number.isInteger(index) || index < 0 || index >= value.tracks.length)
+    return undefined;
+  return { ...value, index, tracks: value.tracks };
+}
+
+function writePlaybackCheckpoint(ctx, state, index, track) {
+  if (!ctx.playbackFile || !ctx.tracks?.length) return;
+  writeJsonFile(ctx.playbackFile, {
+    version: 1,
+    source: ctx.source,
+    tracks: ctx.tracks,
+    index,
+    track,
+    state,
+    loop: ctx.loop,
+    volume: ctx.volume,
+    seek_percent: ctx.seekPercent ?? 0,
+    player: ctx.player,
+    updated_at: new Date().toISOString(),
+  });
+}
+
+function writePlaybackEndpoint(ctx, path) {
+  writeJsonFile(join(ctx.stateDir, "playback-endpoint.json"), {
+    owner_mode: ctx.ownerMode,
+    path,
+    service_instance_id: ctx.serviceInstanceId,
+    service_pid: process.pid,
+    type: "named-pipe",
+  });
+}
+
+async function startPlaybackProtocolServer(ctx) {
+  const path = process.platform === "win32"
+    ? `\\\\.\\pipe\\pi-music-player-${ctx.serviceInstanceId}`
+    : join(ctx.stateDir, "playback.sock");
+  if (process.platform !== "win32") rmSync(path, { force: true });
+  const server = createServer((socket) => {
+    let content = "";
+    let handled = false;
+    const respond = () => {
+      if (handled) return;
+      handled = true;
+      try {
+        const wire = JSON.parse(content.trim());
+        if (
+          !wire ||
+          typeof wire !== "object" ||
+          Array.isArray(wire) ||
+          wire.service_instance_id !== ctx.serviceInstanceId ||
+          typeof wire.action !== "string" ||
+          !CONTROL_COMMANDS.has(wire.action)
+        ) throw new Error("invalid playback protocol command");
+        handleControl(ctx, wire.action, wire.input);
+        socket.end(`${JSON.stringify({ ok: true })}\n`);
+      } catch (error) {
+        socket.end(`${JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          ok: false,
+        })}\n`);
+      }
+    };
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      content += chunk;
+      if (Buffer.byteLength(content, "utf8") > 4096) {
+        handled = true;
+        socket.destroy();
+        return;
+      }
+      if (content.includes("\n")) respond();
+    });
+    socket.on("end", respond);
+    socket.resume();
+  });
+  await new Promise((resolveReady, rejectReady) => {
+    server.once("error", rejectReady);
+    server.listen(path, () => {
+      server.off("error", rejectReady);
+      writePlaybackEndpoint(ctx, path);
+      resolveReady();
+    });
+  });
+  return () => {
+    server.close();
+    rmSync(join(ctx.stateDir, "playback-endpoint.json"), { force: true });
+    if (process.platform !== "win32") rmSync(path, { force: true });
+  };
 }
 
 async function startControlServer(ctx, wakeControlLoop) {
@@ -598,7 +953,7 @@ async function startControlServer(ctx, wakeControlLoop) {
         try {
           const claimed = claimControl(ctx, JSON.parse(line));
           if (!claimed) continue;
-          handleControl(ctx, claimed.command);
+          handleControl(ctx, claimed.action, claimed.input);
           finalizeControl(ctx, claimed.id, "handled");
         } catch (error) {
           const id = (() => { try { return JSON.parse(line).id; } catch { return undefined; } })();
@@ -624,6 +979,7 @@ async function startControlServer(ctx, wakeControlLoop) {
   });
   return () => {
     server.close();
+    rmSync(join(ctx.stateDir, "control-endpoint.json"), { force: true });
     if (process.platform !== "win32") rmSync(path, { force: true });
   };
 }
@@ -634,10 +990,11 @@ function commandFromControl(control) {
   return CONTROL_COMMANDS.has(action) ? action : undefined;
 }
 
-function appendControl(ctx, action) {
+function appendControl(ctx, action, input) {
   const run = readJsonFile(runJsonFile(ctx), {});
-  appendRunControlInStateDir(ctx.stateDir, {
+  return appendRunControlInStateDir(ctx.stateDir, {
     action,
+    ...(input !== undefined ? { input } : {}),
     run_instance_id: run.run_instance_id,
   });
 }
@@ -646,13 +1003,15 @@ function claimControl(ctx, wire) {
   const control = claimRunControlByIdInStateDir(
     ctx.stateDir, ctx.runInstanceId, wire.id,
   );
-  const command = control ? commandFromControl(control) : undefined;
-  if (!command && control) {
+  const action = control ? commandFromControl(control) : undefined;
+  if (!action && control) {
     updateRunControlStatusInStateDir(ctx.stateDir, control.id, "failed", {
       error: "Unsupported music-player Control",
     }, ["claimed"]);
   }
-  return command && control ? { command, id: control.id } : undefined;
+  return action && control
+    ? { action, id: control.id, input: control.input }
+    : undefined;
 }
 
 function finalizeControl(ctx, id, status, error) {
@@ -700,8 +1059,19 @@ function startControlLoop(ctx) {
       const signature = controlsSignature(ctx);
       if (dirty || signature !== lastSignature) {
         dirty = false;
+        if (ctx.runInstanceId) {
+          await processRunControlsInStateDir(
+            ctx.stateDir,
+            ctx.runInstanceId,
+            (control) => {
+              const action = commandFromControl(control);
+              if (!action) throw new Error("Unsupported music-player Control");
+              handleControl(ctx, action, control.input);
+            },
+            8,
+          );
+        }
         lastSignature = controlsSignature(ctx);
-        continue;
       }
       await sleep(250);
     }
@@ -709,24 +1079,39 @@ function startControlLoop(ctx) {
   return { close, promise, wake: () => { dirty = true; } };
 }
 
-function playOne(ctx, player, volume, track, index, count) {
+function playOne(ctx, player, track, index, count) {
   return new Promise((resolveDone) => {
     if (ctx.stopping) {
       resolveDone();
       return;
     }
     rmSync(ctx.playerControlFile, { force: true });
-    const [command, args] = playerCommand(ctx, player, volume, track);
+    ctx.durationSeconds = probeDurationSeconds(track);
+    ctx.positionSeconds = ctx.seekSeconds ?? 0;
+    ctx.positionStartedAtMs = Date.now();
+    const [command, args] = playerCommand(
+      ctx,
+      player,
+      ctx.volume,
+      track,
+      ctx.seekSeconds ?? 0,
+    );
     writeStatus(ctx, "playing", index, count, track, player, "");
     const child = spawn(command, args, {
       detached: process.platform === "win32",
       stdio: ["ignore", "inherit", "inherit"],
     });
     ctx.child = child;
+    ctx.pipeWireVolumeTarget = undefined;
     const pid = child.pid || "";
     if (pid) writeText(ctx.pidFile, String(pid));
     if (ctx.stopping) controlCurrentPlayback(ctx, "stop");
     writeStatus(ctx, "playing", index, count, track, player, pid);
+    if (ctx.desiredState === "paused") {
+      controlCurrentPlayback(ctx, "pause");
+      freezePosition(ctx);
+      writeStatus(ctx, "paused", index, count, track, player, pid);
+    }
     emitTrackEvent(ctx, index, count, track, player);
     child.once("error", (error) => {
       console.error(
@@ -768,41 +1153,82 @@ async function playMain(args) {
       ),
   );
   mkdirSync(stateDir, { recursive: true });
-  const startupRun = readJsonFile(runJsonFile({ stateDir }), {});
+  const existingEndpoint = readJsonFile(
+    join(stateDir, "playback-endpoint.json"),
+    {},
+  );
+  if (isLocalProcessAlive(Number(existingEndpoint.service_pid))) {
+    if (actorAdapterEnabled && existingEndpoint.owner_mode === "standalone") {
+      fail(`standalone playback service already owns state: ${stateDir}`, 3);
+    }
+    if (!actorAdapterEnabled) {
+      fail(`active playback service already owns state: ${stateDir}`, 3);
+    }
+  }
+  const startupRun = actorAdapterEnabled
+    ? readJsonFile(runJsonFile({ stateDir }), {})
+    : {};
+  const source = expandPath(sourceArg);
+  const loop = parseBool(loopArg);
+  const volume = normalizeVolume(volumeArg);
+  const player = selectPlayer(playerArg);
+  const playbackFile = join(stateDir, "playback.json");
+  const checkpointLoad = readPlaybackCheckpoint(playbackFile);
+  const checkpoint = checkpointLoad.checkpoint;
+  const checkpointTracksUsable =
+    checkpoint?.source === source &&
+    checkpoint.player === player &&
+    checkpoint.tracks.every((track) => isUrl(track) || exists(track));
+  const tracks = checkpointTracksUsable ? checkpoint.tracks : loadPlaylist(source);
+  let index = checkpointTracksUsable ? checkpoint.index : 0;
   const ctx = {
     commandFile: join(stateDir, "command.txt"),
     current: undefined,
     controlsFile: join(stateDir, "controls.jsonl"),
+    desiredState:
+      checkpointTracksUsable && checkpoint.state === "paused"
+        ? "paused"
+        : "playing",
+    index,
+    loop,
     pidFile: join(stateDir, "current.pid"),
+    playbackFile,
+    ownerMode: actorAdapterEnabled ? "actor" : "standalone",
+    player,
     playerControlFile: join(stateDir, "player-control.txt"),
+    positionSeconds: 0,
+    positionStartedAtMs: undefined,
     runInstanceId: typeof startupRun.run_instance_id === "string"
       ? startupRun.run_instance_id
       : undefined,
+    seekPercent: 0,
+    seekSeconds: 0,
+    serviceInstanceId: randomUUID(),
+    source,
     stateDir,
     stateFile: join(stateDir, "player-state.txt"),
     statusFile: join(stateDir, "status.txt"),
     statusJsonFile: join(stateDir, "player.json"),
     stopping: false,
+    tracks,
+    volume,
   };
   rmSync(ctx.commandFile, { force: true });
   rmSync(ctx.pidFile, { force: true });
   rmSync(ctx.playerControlFile, { force: true });
-  const loop = parseBool(loopArg);
-  const volume = normalizeVolume(volumeArg);
-  const player = selectPlayer(playerArg);
-  const tracks = loadPlaylist(sourceArg);
   let controlLoop;
   let closeControlServer;
+  let closePlaybackProtocolServer;
   const cleanup = () => {
     ctx.stopping = true;
-    writeText(ctx.stateFile, "stopped");
-    if (ctx.child?.pid) {
-      try {
-        process.kill(ctx.child.pid, "SIGTERM");
-      } catch {}
-    }
+    if (ctx.current) {
+      freezePosition(ctx);
+      writeStatus(ctx, "stopped", index, tracks.length, tracks[index] ?? "", player, "");
+    } else writeText(ctx.stateFile, "stopped");
+    if (ctx.child?.pid) controlCurrentPlayback(ctx, "stop");
     controlLoop?.close();
     closeControlServer?.();
+    closePlaybackProtocolServer?.();
     rmSync(ctx.pidFile, { force: true });
     rmSync(ctx.playerControlFile, { force: true });
   };
@@ -820,30 +1246,56 @@ async function playMain(args) {
   });
   try {
     controlLoop = startControlLoop(ctx);
+    closePlaybackProtocolServer = await startPlaybackProtocolServer(ctx);
     closeControlServer = await startControlServer(ctx, controlLoop.wake);
-    setState(ctx, "playing");
+    if (checkpointLoad.recovery) {
+      console.error(
+        `music-player: checkpoint_recovery=${checkpointLoad.recovery} state_dir=${stateDir}`,
+      );
+      emitPlayerEvent(
+        ctx,
+        "player.checkpoint-recovered",
+        "Ignored malformed playback checkpoint and rebuilt the queue",
+        { reason: checkpointLoad.recovery },
+      );
+    }
+    setState(ctx, ctx.desiredState);
+    const checkpointState = checkpointTracksUsable
+      ? "resumed"
+      : checkpointLoad.recovery
+        ? "recovered"
+        : checkpoint
+          ? "rebuilt"
+          : "new";
     console.error(
-      `music-player: player=${player} loop=${loop} volume=${volume} tracks=${tracks.length} state_dir=${stateDir}`,
+      `music-player: player=${player} loop=${loop} volume=${ctx.volume} tracks=${tracks.length} checkpoint=${checkpointState} start_index=${index} state_dir=${stateDir}`,
     );
-    let index = 0;
     const count = tracks.length;
     while (!ctx.stopping) {
       const track = tracks[index];
-      await playOne(ctx, player, volume, track, index, count);
+      await playOne(ctx, player, track, index, count);
       const command = readAndClearCommand(ctx);
       if (command === "stop") {
+        freezePosition(ctx);
         writeStatus(ctx, "stopped", index, count, track, player, "");
         emitStoppedEvent(ctx, "message");
         return;
       }
       if (command === "previous" || command === "prev") {
+        ctx.seekPercent = 0;
+        ctx.seekSeconds = 0;
         index = (index - 1 + count) % count;
         continue;
       }
       if (command === "next") {
+        ctx.seekPercent = 0;
+        ctx.seekSeconds = 0;
         index = (index + 1) % count;
         continue;
       }
+      if (command === "seek" || command === "replay") continue;
+      ctx.seekPercent = 0;
+      ctx.seekSeconds = 0;
       if (index + 1 >= count) {
         if (loop) index = 0;
         else break;
@@ -851,6 +1303,7 @@ async function playMain(args) {
         index += 1;
       }
     }
+    freezePosition(ctx);
     writeStatus(ctx, "stopped", index, tracks.length, "", player, "");
     emitStoppedEvent(ctx, "complete");
   } finally {
@@ -859,26 +1312,112 @@ async function playMain(args) {
   }
 }
 
-function controlMain(args) {
+function projectCurrentProgress(status, nowMs = Date.now()) {
+  if (!status || typeof status !== "object" || Array.isArray(status)) return status;
+  const duration = Number(status.duration_seconds);
+  let position = Number(status.position_seconds);
+  const updatedAtMs = Number(status.position_updated_at_ms);
+  if (!Number.isFinite(position)) position = 0;
+  if (status.state === "playing" && Number.isFinite(updatedAtMs)) {
+    position += Math.max(0, nowMs - updatedAtMs) / 1000;
+  }
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return { ...status, progress_percent: null };
+  }
+  position = Math.min(Math.max(position, 0), duration);
+  return {
+    ...status,
+    progress_percent: Math.round((position / duration) * 100),
+    position_seconds: position,
+    position_updated_at_ms: nowMs,
+  };
+}
+
+function actorControlAvailability(stateDir) {
+  const run = readJsonFile(join(stateDir, "run.json"), {});
+  const result = readJsonFile(join(stateDir, "result.json"), {});
+  const endpoint = readJsonFile(join(stateDir, "control-endpoint.json"), {});
+  const playerStatus = readJsonFile(join(stateDir, "player.json"), {});
+  const pid = Number(run.pid || 0);
+  const hasProcessIdentity = pid > 0 || run.process_identity !== undefined;
+  const processIdentity = pid > 0
+    ? verifyRunProcessIdentity(pid, run.process_identity)
+    : { valid: false };
+  const available =
+    typeof run.run_instance_id === "string" &&
+    typeof result.completedAt !== "string" &&
+    (!hasProcessIdentity || (pid > 0 && isAlive(pid) && processIdentity.valid === true)) &&
+    endpoint.run_instance_id === run.run_instance_id &&
+    ["playing", "paused"].includes(playerStatus.state);
+  return {
+    available,
+    runInstanceId: typeof run.run_instance_id === "string"
+      ? run.run_instance_id
+      : undefined,
+  };
+}
+
+async function controlMain(args) {
   const stateDir = expandPath(args[0] || "");
   const command = args[1] || "status";
+  const rawInput = args[2];
   if (!stateDir) {
     usage();
     process.exit(2);
   }
   mkdirSync(stateDir, { recursive: true });
   if (command === "status") {
-    const statusFile = join(stateDir, "status.txt");
-    process.stdout.write(
-      exists(statusFile) ? readText(statusFile) : "state=unknown\n",
-    );
+    const statusFile = join(stateDir, "player.json");
+    const status = exists(statusFile)
+      ? readJsonFile(statusFile, { state: "unknown" })
+      : { state: "unknown" };
+    const actor = actorControlAvailability(stateDir);
+    process.stdout.write(`${JSON.stringify({
+      ...projectCurrentProgress(status),
+      actor_available: actor.available,
+      ...(actor.runInstanceId
+        ? { actor_run_instance_id: actor.runInstanceId }
+        : {}),
+    })}\n`);
     return;
   }
-  appendControl(
+  if (!actorControlAvailability(stateDir).available) {
+    fail(`Run playback is not active: ${stateDir}`, 3);
+  }
+  let input;
+  if (command === "seek" || command === "volume") {
+    try {
+      input = {
+        percent: command === "seek"
+          ? parseSeekPercent(rawInput)
+          : parseVolumePercent(rawInput),
+      };
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error), 2);
+    }
+  }
+  const queued = appendControl(
     { controlsFile: join(stateDir, "controls.jsonl"), stateDir },
     command,
+    input,
   );
-  console.log(`music-player: command=${command} queued state_dir=${stateDir}`);
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const current = readRunControlJournalFromStateDir(stateDir).records.find(
+      (record) => record.id === queued.id,
+    );
+    if (current?.status === "handled") {
+      console.log(
+        `music-player: command=${command} handled control_id=${queued.id} state_dir=${stateDir}`,
+      );
+      return;
+    }
+    if (current?.status === "failed") {
+      fail(current.error || `Control ${queued.id} failed`, 3);
+    }
+    await sleep(50);
+  }
+  fail(`Control ${queued.id} did not become terminal`, 3);
 }
 
 const [mode, ...rest] = process.argv.slice(2);
@@ -888,13 +1427,17 @@ const directControlCommands = new Set([
   "toggle",
   "next",
   "previous",
+  "seek",
+  "volume",
   "stop",
   "status",
 ]);
-if (mode === "play") await playMain(rest);
-else if (mode === "control") controlMain(rest);
-else if (directControlCommands.has(mode)) {
-  controlMain([rest[0], mode === "resume" ? "play" : mode]);
+if (mode === "play" || mode === "serve") await playMain(rest);
+else if (mode === "control") await controlMain(rest);
+else if (mode === "seek" || mode === "volume") {
+  await controlMain([rest[0], mode, rest[1]]);
+} else if (directControlCommands.has(mode)) {
+  await controlMain([rest.at(-1), mode === "resume" ? "play" : mode]);
 } else if (!mode || mode === "-h" || mode === "--help" || mode === "help") {
   usage();
   process.exit(mode ? 0 : 2);

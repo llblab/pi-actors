@@ -182,6 +182,144 @@ test("Async runs reject reuse of an active run state", async () => {
   }
 });
 
+test("Singleton Skill Recipes reuse one compatible active Run and reject conflicting identity or values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-singleton-"));
+  const skillDir = join(root, "music-player");
+  const recipeDir = join(skillDir, "recipes");
+  const recipe = join(recipeDir, "playback.json");
+  const alternateRecipe = join(recipeDir, "alternate.json");
+  const stateDir = join(root, "state");
+  await mkdir(recipeDir, { recursive: true });
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    "---\nname: music-player\ndescription: Test singleton.\n---\n",
+  );
+  await writeFile(
+    recipe,
+    JSON.stringify({
+      async: true,
+      singleton: true,
+      args: ["source:string"],
+      defaults: { source: "music" },
+      control: ["stop"],
+      template: `${process.execPath} -e "setTimeout(() => {}, 10000)"`,
+    }),
+  );
+  await writeFile(
+    alternateRecipe,
+    JSON.stringify({
+      async: true,
+      singleton: true,
+      args: ["source:string"],
+      defaults: { source: "music" },
+      control: ["stop"],
+      template: `${process.execPath} -e "setTimeout(() => {}, 20000)"`,
+    }),
+  );
+  try {
+    const first = startRun(
+      { file: recipe, state_dir: stateDir, ownerId: "session-a" },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    assert.equal(first.run, "music-player");
+    assert.equal(first.singleton, true);
+    const reused = startRun(
+      { file: recipe, state_dir: stateDir, ownerId: "session-a" },
+      process.cwd(),
+    );
+    assert.equal(reused.reused, true);
+    assert.equal(reused.pid, first.pid);
+    assert.equal(reused.run_instance_id, first.run_instance_id);
+    assert.throws(
+      () =>
+        startRun(
+          {
+            file: recipe,
+            state_dir: stateDir,
+            ownerId: "session-a",
+            values: { source: "other" },
+          },
+          process.cwd(),
+        ),
+      /incompatible Recipe identity, owner, startup values, or Control contract/,
+    );
+    assert.throws(
+      () =>
+        startRun(
+          { file: alternateRecipe, state_dir: stateDir, ownerId: "session-a" },
+          process.cwd(),
+        ),
+      /incompatible Recipe identity, owner, startup values, or Control contract/,
+    );
+    assert.throws(
+      () =>
+        startRun(
+          { file: recipe, run_id: "other", state_dir: join(root, "other") },
+          process.cwd(),
+        ),
+      /singleton Recipe run identity is run:music-player/,
+    );
+    await writeFile(join(stateDir, "workload-state.json"), "retained\n");
+    cancelRun(stateDir);
+    await waitForRunProcessExit(stateDir);
+    const restarted = startRun(
+      { file: recipe, state_dir: stateDir, ownerId: "session-a" },
+      process.cwd(),
+    );
+    assert.equal(restarted.run, "music-player");
+    assert.notEqual(restarted.run_instance_id, first.run_instance_id);
+    assert.equal(await readFile(join(stateDir, "workload-state.json"), "utf8"), "retained\n");
+    cancelRun(stateDir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Singleton reuse rejects a terminal result while its runner process exits", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-singleton-terminal-"));
+  const skillDir = join(root, "service");
+  const recipeDir = join(skillDir, "recipes");
+  const recipe = join(recipeDir, "worker.json");
+  const stateDir = join(root, "state");
+  await mkdir(recipeDir, { recursive: true });
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    "---\nname: service\ndescription: Test singleton terminal boundary.\n---\n",
+  );
+  await writeFile(
+    recipe,
+    JSON.stringify({
+      async: true,
+      singleton: true,
+      template: `${process.execPath} -e "setTimeout(() => {}, 10000)"`,
+    }),
+  );
+  try {
+    const first = startRun(
+      { file: recipe, state_dir: stateDir, ownerId: "session-a" },
+      process.cwd(),
+    );
+    await waitForStatus(stateDir, "running");
+    await writeFile(
+      join(stateDir, "result.json"),
+      JSON.stringify({ code: 0, completedAt: new Date().toISOString() }),
+    );
+    assert.throws(
+      () =>
+        startRun(
+          { file: recipe, state_dir: stateDir, ownerId: "session-a" },
+          process.cwd(),
+        ),
+      /active owned process/,
+    );
+    process.kill(first.pid, "SIGKILL");
+    await waitForRunProcessExit(stateDir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Async run controls fail closed on persisted process identity mismatch", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-process-identity-"));
   const stateDir = join(root, "identity");

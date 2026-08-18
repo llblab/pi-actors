@@ -19,7 +19,7 @@ register_tool name=repo_check template="make check" description="Run repository 
 Specialize a maintained Recipe without copying its contract:
 
 ```text
-register_tool name=music_player from=media/player defaults={"source":"~/Music/1MIX"}
+register_tool name=music_player from=music-player/playback defaults={"source":"~/Music/1MIX"}
 ```
 
 `from`, `template`, and `draft` are distinct source modes. `from` accepts exact `<skill>/<recipe>` identity or an explicit `.json` / `.md` path and inherits async behavior, args/types, source defaults, artifacts, Control, and runtime-owned origins. `defaults` may set only effective caller-owned args and must satisfy their types. `template` is only for trusted command definitions; public `values` authoring has been removed in favor of caller defaults or an authored Recipe file.

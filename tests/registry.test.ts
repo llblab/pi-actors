@@ -220,11 +220,11 @@ test("Registry mutations register typed command-template args progressively", as
 test("Registry mutations specialize active-Skill Recipes through from", async () => {
   const harness = await createHarness();
   try {
-    const skillDir = join(dirname(harness.root), "skills", "media");
+    const skillDir = join(dirname(harness.root), "skills", "music-player");
     await mkdir(join(skillDir, "recipes"), { recursive: true });
-    await writeFile(join(skillDir, "SKILL.md"), "---\nname: media\n---\n");
+    await writeFile(join(skillDir, "SKILL.md"), "---\nname: music-player\n---\n");
     await writeFile(
-      join(skillDir, "recipes", "player.json"),
+      join(skillDir, "recipes", "playback.json"),
       JSON.stringify({
         args: ["command:enum(play,status)", "volume:int", "state_dir:path"],
         artifacts: { state: "{state_dir}/state.json" },
@@ -238,12 +238,12 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
     const recipeResolutionContext = createRecipeResolutionContext(
       "registry-from",
       dirname(harness.root),
-      createActiveSkillRecipeContext([{ name: "media", baseDir: skillDir }]),
+      createActiveSkillRecipeContext([{ name: "music-player", baseDir: skillDir }]),
     );
     const result = await executeRegisterTool(
       {
         defaults: { volume: 35 },
-        from: "media/player",
+        from: "music-player/playback",
         name: "music_player",
       },
       { recipeResolutionContext },
@@ -254,7 +254,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
     );
     assert.deepEqual(stored, {
       defaults: { volume: 35 },
-      template: "media/player",
+      template: "music-player/playback",
     });
     const tool = harness.tools.get("music_player")!;
     assert.equal(tool.description, "Control local media.");
@@ -273,31 +273,31 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
       executeRegisterTool(
         {
           defaults: { volume: "loud" },
-          from: "media/player",
+          from: "music-player/playback",
           name: "bad_volume",
         },
         { recipeResolutionContext },
         harness.deps,
       ),
-      /Recipe source "media\/player" validation failed:.*volume.*integer.*Next: inspect target=recipes view=doctor identity=media\/player/is,
+      /Recipe source "music-player\/playback" validation failed:.*volume.*integer.*Next: inspect target=recipes view=doctor identity=music-player\/playback/is,
     );
     await assert.rejects(
       executeRegisterTool(
         {
           defaults: { unknown: "value" },
-          from: "media/player",
+          from: "music-player/playback",
           name: "bad_default",
         },
         { recipeResolutionContext },
         harness.deps,
       ),
-      /Recipe source "media\/player" validation failed:.*Unknown delegated Recipe default argument: unknown.*Next: inspect target=recipes view=doctor identity=media\/player/is,
+      /Recipe source "music-player\/playback" validation failed:.*Unknown delegated Recipe default argument: unknown.*Next: inspect target=recipes view=doctor identity=music-player\/playback/is,
     );
     await assert.rejects(
       executeRegisterTool(
         {
           defaults: { state_dir: "/tmp/copied-state" },
-          from: "media/player",
+          from: "music-player/playback",
           name: "bad_origin",
         },
         { recipeResolutionContext },
@@ -318,11 +318,11 @@ test("Registry mutations reject ambiguous or copied Recipe source modes", async 
   try {
     for (const [params, pattern] of [
       [
-        { description: "Mixed", from: "media/player", name: "mixed", template: "echo" },
+        { description: "Mixed", from: "music-player/playback", name: "mixed", template: "echo" },
         /exactly one register_tool source mode.*Next: remove the extra source fields and retry register_tool/s,
       ],
       [
-        { args: "source:path", from: "media/player", name: "copied_args" },
+        { args: "source:path", from: "music-player/playback", name: "copied_args" },
         /from inherits args and async behavior.*Next: retry register_tool with from and optional defaults only/s,
       ],
       [
@@ -334,15 +334,15 @@ test("Registry mutations reject ambiguous or copied Recipe source modes", async 
         /non-empty Recipe reference.*Next: retry register_tool with from=<skill>\/<recipe>/s,
       ],
       [
-        { from: "skill:media/player", name: "prefixed_from" },
-        /skill: Recipe references were removed.*Next: inspect target=recipes view=doctor identity=media\/player/s,
+        { from: "skill:music-player/playback", name: "prefixed_from" },
+        /skill: Recipe references were removed.*Next: inspect target=recipes view=doctor identity=music-player\/playback/s,
       ],
       [
         { from: "std:player", name: "std_from" },
         /std: Recipe references were removed.*Next: inspect target=recipes view=doctor/s,
       ],
       [
-        { description: "Nested", name: "nested", template: { template: "media/player" } },
+        { description: "Nested", name: "nested", template: { template: "music-player/playback" } },
         /Nested Recipe-shaped templates.*Next: retry with from=<skill>\/<recipe> and defaults=/is,
       ],
       [

@@ -1143,17 +1143,14 @@ export function pruneRunObservationState(
 ): void {
   const activeRuns = new Set(summary.runs.map((run) => runObservationKey(run)));
   const terminalRunSet = new Set(terminalRuns);
-  const terminalLineKeys = new Set(summary.runs
-    .filter((run) => terminalRunSet.has(runObservationKey(run)))
-    .map((run) => runObservationKey(run)));
   const activeLineKeys = new Set(summary.runs.map((run) => run.stateDir ?? run.run));
   for (const run of terminalRunSet) previousStatuses.delete(run);
   for (const run of previousStatuses.keys())
     if (!activeRuns.has(run)) previousStatuses.delete(run);
   for (const key of previousLineCounts.keys())
-    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) previousLineCounts.delete(key);
+    if (!activeLineKeys.has(key)) previousLineCounts.delete(key);
   for (const key of seenEventIds.keys())
-    if (terminalLineKeys.has(key) || !activeLineKeys.has(key)) seenEventIds.delete(key);
+    if (!activeLineKeys.has(key)) seenEventIds.delete(key);
 }
 
 export function detectRunAttentionEvents(

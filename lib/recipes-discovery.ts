@@ -957,7 +957,8 @@ export function summarizeRegisteredToolArgs(tool: RegisteredTool): {
   const requiredSet = new Set(required);
   const optional = publicArgs.filter((arg) => !requiredSet.has(arg));
   if (tool.recipe?.async === true) {
-    optional.push("run_id", "transport_context");
+    if (tool.recipe.singleton !== true) optional.push("run_id");
+    optional.push("transport_context");
   }
   return { optional, required };
 }

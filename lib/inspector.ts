@@ -185,6 +185,9 @@ export function readActorInspectorRecipe(
       source_kind: primarySourceKind,
       launch_kind: meta.launch_kind ?? meta.launch_source,
       launch_source: meta.launch_source,
+      ...(meta.singleton === true
+        ? { singleton: true, singleton_recipe_id: meta.singleton_recipe_id }
+        : {}),
     }),
     launch: redactedRecord({
       cwd: meta.cwd,
@@ -195,6 +198,7 @@ export function readActorInspectorRecipe(
       artifacts: meta.artifacts,
       notification_policy: meta.notification_policy,
       retire_when: meta.retire_when,
+      singleton_values: meta.singleton_values,
     }),
   };
 }

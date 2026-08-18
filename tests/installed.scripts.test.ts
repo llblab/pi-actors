@@ -24,8 +24,12 @@ async function readTextIfExists(path: string): Promise<string> {
   }
 }
 
-async function waitForText(path: string, pattern: RegExp): Promise<string> {
-  const deadline = Date.now() + 5000;
+async function waitForText(
+  path: string,
+  pattern: RegExp,
+  timeoutMs = 5000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const text = await readTextIfExists(path);
     if (pattern.test(text)) return text;
@@ -122,7 +126,7 @@ test("build output mirrors JS runtime assets under dist", async () => {
   await access(join(process.cwd(), "dist", "skills", "actors", "scripts", "validate-recipe.mjs"));
   await access(join(process.cwd(), "dist", "fixtures", "protocol", "control-record.json"));
   await access(join(process.cwd(), "dist", "fixtures", "protocol", "trace-event.json"));
-  for (const skill of ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]) {
+  for (const skill of ["actors", "artifacts", "music-player", "project-work", "recipe-memory", "swarm"]) {
     await access(join(process.cwd(), "dist", "skills", skill, "SKILL.md"));
   }
 });
@@ -251,7 +255,7 @@ test("installed dist resolves every representative capability pack by qualified 
       "project-work/release-readiness",
       "swarm/quorum-review",
       "artifacts/bundle",
-      "media/player",
+      "music-player/playback",
       "recipe-memory/draft-review",
     ];
     const { stdout, stderr } = await execFileAsync(process.execPath, [
@@ -262,7 +266,7 @@ test("installed dist resolves every representative capability pack by qualified 
        const identities = JSON.parse(process.argv[2]);
        import(pathToFileURL(join(packageDir, "dist", "lib", "recipes-references.js")).href).then((mod) => {
          const skillContext = mod.createActiveSkillRecipeContext(
-           ["actors", "artifacts", "media", "project-work", "recipe-memory", "swarm"]
+           ["actors", "artifacts", "music-player", "project-work", "recipe-memory", "swarm"]
              .map((name) => ({ name, baseDir: join(packageDir, "skills", name) })),
          );
          const resolved = identities.map((identity) => {
@@ -302,6 +306,13 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     assert.deepEqual(await readdir(agentDir), []);
     await mkdir(join(staleSkillDir, "recipes"), { recursive: true });
     await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, "track.wav"), "audio fixture");
+    const fakeFfplay = join(sourceDir, process.platform === "win32" ? "ffplay.cmd" : "ffplay");
+    await writeFile(
+      fakeFfplay,
+      process.platform === "win32" ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n",
+    );
+    if (process.platform !== "win32") await chmod(fakeFfplay, 0o755);
     await writeFile(join(staleSkillDir, "SKILL.md"), "---\nname: stale\n---\n");
     await writeFile(join(staleSkillDir, "recipes", "broken.json"), JSON.stringify({
       name: "removed-identity",
@@ -355,8 +366,8 @@ test("packed artifact first session preserves agent-native Skill and tool parity
                  filePath: join(packageDir, "dist", "skills", "actors", "SKILL.md"),
                },
                {
-                 name: "media",
-                 filePath: join(packageDir, "dist", "skills", "media", "SKILL.md"),
+                 name: "music-player",
+                 filePath: join(packageDir, "dist", "skills", "music-player", "SKILL.md"),
                },
                { name: "stale", filePath: join(staleSkillDir, "SKILL.md") },
              ],
@@ -380,35 +391,61 @@ test("packed artifact first session preserves agent-native Skill and tool parity
          const inspect = definitions.get("inspect");
          const message = definitions.get("message");
          const musicRegistration = await register.execute("packed-music-register", {
-           defaults: { source: sourceDir },
+           defaults: { source: sourceDir, loop: false, player: "ffplay" },
            name: "music_player",
-           description: "Control local music from the maintained media Recipe.",
-           from: "media/player",
+           description: "Control local music from the maintained Music Player Recipe.",
+           from: "music-player/playback",
          }, undefined, undefined, context);
          const musicPlayer = definitions.get("music_player");
          const wrapperPath = join(process.env.PI_CODING_AGENT_DIR, "recipes", "music_player.json");
          const authoredWrapper = JSON.parse(readFileSync(wrapperPath, "utf8"));
+         const waitForMusicTerminal = async () => {
+           for (let attempt = 0; attempt < 200; attempt += 1) {
+             const current = await inspect.execute("packed-music-terminal", {
+               target: "run:music-player",
+               view: "control",
+               verbose: true,
+             }, undefined, undefined, context);
+             if (current.details.status !== "running") {
+               let pid = 0;
+               try {
+                 const runState = JSON.parse(readFileSync(join(
+                   process.env.PI_CODING_AGENT_DIR,
+                   "tmp", "pi-actors", "runs", "music-player", "run.json",
+                 ), "utf8"));
+                 pid = Number(runState.pid || 0);
+               } catch {}
+               try {
+                 if (pid > 0) process.kill(pid, 0);
+                 else return;
+               } catch {
+                 return;
+               }
+             }
+             await new Promise((resolve) => setTimeout(resolve, 25));
+           }
+           throw new Error("packed music player did not reach terminal state");
+         };
          const mediaSpawn = await spawn.execute("packed-media-spawn", {
-           as: "run:packed-media-direct",
-           recipe: "media/player",
-           values: { command: "status", source: sourceDir },
+           recipe: "music-player/playback",
+           values: { source: sourceDir, loop: false, player: "ffplay" },
          }, undefined, undefined, context);
+         await waitForMusicTerminal();
          const wrapperSpawn = await spawn.execute("packed-wrapper-spawn", {
-           as: "run:packed-media-wrapper",
            file: wrapperPath,
-           values: { command: "status" },
+           values: {},
          }, undefined, undefined, context);
-         const musicInvocation = await musicPlayer.execute("packed-music-call", {
-           command: "status",
-           run_id: "packed-media-tool",
-         }, undefined, undefined, context);
+         await waitForMusicTerminal();
+         const musicInvocation = await musicPlayer.execute(
+           "packed-music-call", {}, undefined, undefined, context,
+         );
          const musicStatus = await inspect.execute("packed-music-status", {
            target: "tool:music_player",
            view: "status",
            verbose: true,
          }, undefined, undefined, context);
          const musicControl = await inspect.execute("packed-music-control", {
-           target: "run:packed-media-tool",
+           target: "run:music-player",
            view: "control",
            verbose: true,
          }, undefined, undefined, context);
@@ -420,7 +457,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
          const focusedDoctor = await inspect.execute("packed-recipes-doctor", {
            target: "recipes",
            view: "doctor",
-           identity: "media/player",
+           identity: "music-player/playback",
            verbose: true,
          }, undefined, undefined, context);
          let started;
@@ -513,6 +550,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
         ...process.env,
         HOME: homeDir,
         PI_CODING_AGENT_DIR: agentDir,
+        PATH: `${sourceDir}${delimiter}${process.env.PATH ?? ""}`,
         USERPROFILE: homeDir,
       },
     });
@@ -580,11 +618,11 @@ test("packed artifact first session preserves agent-native Skill and tool parity
       },
     );
     assert.equal(loaded.music.registration.async, true);
-    assert.equal(loaded.music.registration.source, "media/player");
+    assert.equal(loaded.music.registration.source, "music-player/playback");
     assert.equal(loaded.music.registration.activation_boundary, "current_session");
     assert.deepEqual(loaded.music.registration.required_args, []);
     assert.deepEqual(loaded.music.registration.optional_args, [
-      "command", "source", "loop", "volume", "player", "run_id", "transport_context",
+      "source", "loop", "volume", "player", "transport_context",
     ]);
     assert.deepEqual(loaded.music.registration.next_actions, [
       "call tool music_player",
@@ -593,48 +631,48 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     assert.equal("config" in loaded.music.registration, false);
     assert.equal("template" in loaded.music.registration, false);
     assert.deepEqual(loaded.music.actorActions, [
-      "play", "pause", "resume", "toggle", "next", "previous", "stop", "status",
+      "play", "pause", "resume", "toggle", "next", "previous", "seek", "volume", "stop", "status",
     ]);
     assert.deepEqual(loaded.music.authoredWrapper, {
-      description: "Control local music from the maintained media Recipe.",
-      defaults: { source: sourceDir },
-      template: "media/player",
+      description: "Control local music from the maintained Music Player Recipe.",
+      defaults: { loop: false, player: "ffplay", source: sourceDir },
+      template: "music-player/playback",
     });
     assert.deepEqual(loaded.music.schemaProperties, [
-      "command", "loop", "player", "run_id", "source", "transport_context", "volume",
+      "loop", "player", "source", "transport_context", "volume",
     ]);
     assert.equal(loaded.music.directLaunchKind, "spawn");
     assert.equal(loaded.music.wrapperLaunchKind, "spawn");
     assert.equal(loaded.music.invocationLaunchKind, "tool");
     assert.equal(loaded.music.status.callable_now, true);
     assert.equal(loaded.music.status.activation_boundary, "current_session");
-    assert.equal(loaded.music.status.source, "media/player");
+    assert.equal(loaded.music.status.source, "music-player/playback");
     assert.equal(loaded.music.status.persisted, true);
     assert.equal(loaded.music.status.registry_active, true);
     assert.deepEqual(loaded.music.status.required_args, []);
     assert.deepEqual(loaded.music.status.optional_args, [
-      "command", "source", "loop", "volume", "player", "run_id", "transport_context",
+      "source", "loop", "volume", "player", "transport_context",
     ]);
     assert.deepEqual(loaded.music.status.next_actions, ["call tool music_player"]);
     assert.equal(loaded.music.status.launch_kind, "tool");
     assert.equal(loaded.music.status.spawn_calls, 1);
     assert.equal(loaded.music.status.tool_calls, 1);
-    assert.equal(loaded.focusedDoctor.identity, "media/player");
+    assert.equal(loaded.focusedDoctor.identity, "music-player/playback");
     assert.equal(loaded.focusedDoctor.skill_active, true);
     assert.equal(loaded.focusedDoctor.resolvable, true);
     assert.equal(loaded.focusedDoctor.catalog_partial, true);
     assert.equal(loaded.focusedDoctor.component_status, "available");
-    assert.equal(loaded.focusedDoctor.source_location, "<active-skill:media>/player.json");
+    assert.equal(loaded.focusedDoctor.source_location, "<active-skill:music-player>/playback.json");
     assert.equal(typeof loaded.focusedDoctor.resolution_generation, "string");
     assert.deepEqual(loaded.focusedDoctor.next_actions, [
-      "spawn recipe=media/player",
-      "register_tool name=<tool-name> from=media/player",
+      "spawn recipe=music-player/playback",
+      "register_tool name=<tool-name> from=music-player/playback",
     ]);
     assert.equal(loaded.recipeCatalog.registry_generation, 1);
     assert.equal(loaded.recipeCatalog.skill_recipe_catalog_partial, true);
     assert.equal(
       loaded.recipeCatalog.skill_recipe_components.some(
-        (component: any) => component.identity === "media/player",
+        (component: any) => component.identity === "music-player/playback",
       ),
       true,
     );
@@ -670,12 +708,12 @@ test("packed artifact first session preserves agent-native Skill and tool parity
       ["action", "input", "target", "verbose"],
       ["identity", "lines", "source", "status", "target", "verbose", "view"],
       [],
-      ["command", "loop", "player", "run_id", "source", "transport_context", "volume"],
+      ["loop", "player", "source", "transport_context", "volume"],
     ]);
     const expectedDescriptions: Record<string, string> = {
       actors: "Use for any non-trivial pi-actors operation, diagnosis, or development involving Recipes, persistent tools, Runs, spawn, message, inspect, Trace, Control, capability specialization, or activation.",
       artifacts: "Use when an actor workflow must write reusable files, reports, manifests, or bundles with deterministic paths and declared outputs.",
-      media: "Use for local media discovery, filtering, library summaries, playlist construction, or controllable playback.",
+      "music-player": "Use for starting, resuming, inspecting, and controlling one persistent local music playback actor from caller-approved files, directories, URLs, or playlists.",
       "project-work": "Use for repository health inspection, project summaries, documentation maintenance, release-readiness evidence, or bounded run-operation reports.",
       "recipe-memory": "Use only for internal automatic Recipe-memory review, diagnosis, or recovery; do not use for normal Recipe creation, registration, or invocation.",
       swarm: "Use when work needs multiple actors or subagents for independent implementation, artifact generation, review, delegated audit, research, or coordinated decomposition and integration.",
@@ -697,13 +735,12 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     }
     await assert.rejects(access(join(packageDir, ".agents")));
     const sourcePlayer = JSON.parse(
-      await readFile(join(process.cwd(), "skills", "media", "recipes", "player.json"), "utf8"),
+      await readFile(join(process.cwd(), "skills", "music-player", "recipes", "playback.json"), "utf8"),
     );
     const expectedSchema = [
       ...sourcePlayer.args
         .map((arg: string) => arg.split(":", 1)[0])
         .filter((arg: string) => arg !== "state_dir"),
-      "run_id",
       "transport_context",
     ].sort();
     assert.deepEqual(loaded.music.schemaProperties, expectedSchema);
@@ -786,7 +823,7 @@ test("installed extension entrypoint imports compiled dist runtime", async () =>
   }
 });
 
-test("music-player direct control queues canonical Controls", async () => {
+test("music-player direct control rejects a terminal Run before journal admission", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-music-control-"));
   const stateDir = join(root, "music");
   try {
@@ -795,20 +832,251 @@ test("music-player direct control queues canonical Controls", async () => {
       join(stateDir, "run.json"),
       JSON.stringify({ run: "music", run_instance_id: "generation-a" }),
     );
-    const { stdout } = await execFileAsync(process.execPath, [
-      join(process.cwd(), "skills", "media", "scripts", "music-player.mjs"),
-      "next",
-      stateDir,
-    ]);
-    assert.match(stdout, /command=next queued/);
-    const control = JSON.parse(await readFile(join(stateDir, "controls.jsonl"), "utf8"));
-    assert.equal(control.action, "next");
-    assert.equal(control.run_instance_id, "generation-a");
-    assert.equal(control.status, "queued");
-    assert.equal(Object.hasOwn(control, "to"), false);
-    assert.equal(await readTextIfExists(join(stateDir, "wake.jsonl")), "");
+    await writeFile(
+      join(stateDir, "result.json"),
+      JSON.stringify({ code: 0, completedAt: new Date().toISOString() }),
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"),
+        "next",
+        stateDir,
+      ]),
+      /Run playback is not active/,
+    );
+    assert.equal(await readTextIfExists(join(stateDir, "controls.jsonl")), "");
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("music-player ships a capability-owned optional Generative App", async () => {
+  const adapter = join(
+    process.cwd(),
+    "skills",
+    "music-player",
+    "genapps",
+    "music-player.mjs",
+  );
+  await execFileAsync(process.execPath, ["--check", adapter]);
+  const source = await readFile(adapter, "utf8");
+  assert.doesNotMatch(source, /pi-telegram|pi-actors|run\.json|controls\.jsonl/);
+  assert.match(source, /playback\.mjs/);
+  assert.match(source, /actor_available/);
+  assert.match(source, /export async function play[\s\S]*apply\("resume", context\)/);
+  assert.match(source, /\[0, 15, 30, 45, 60, 75, 90\]/);
+});
+
+test("music-player standalone service uses only the neutral playback protocol", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-music-standalone-"));
+  const stateDir = join(root, "music");
+  const source = join(root, "silence.wav");
+  const fakePlayer = join(root, process.platform === "win32" ? "ffplay.exe" : "ffplay");
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(source, "audio fixture", "utf8");
+  if (process.platform === "win32") {
+    const sourceFile = join(root, "fake-player.cs");
+    await writeFile(
+      sourceFile,
+      "using System.Threading; public class Program { public static void Main(string[] args) { Thread.Sleep(30000); } }\n",
+      "utf8",
+    );
+    await execFileAsync("powershell.exe", [
+      "-NoProfile", "-NonInteractive", "-Command",
+      `Add-Type -Path '${sourceFile.replaceAll("'", "''")}' -OutputAssembly '${fakePlayer.replaceAll("'", "''")}' -OutputType ConsoleApplication`,
+    ]);
+  } else {
+    await writeFile(fakePlayer, "#!/bin/sh\nexec sleep 30\n", "utf8");
+    await chmod(fakePlayer, 0o755);
+  }
+  const service = join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs");
+  const client = join(process.cwd(), "skills", "music-player", "scripts", "playback-client.mjs");
+  const env = { ...process.env, PATH: `${root}${delimiter}${process.env.PATH ?? ""}` };
+  await assert.rejects(
+    execFileAsync(process.execPath, [client, "start", stateDir, source], { env }),
+    /usage: playback-client\.mjs/,
+  );
+  const child = spawn(
+    process.execPath,
+    [service, "serve", source, "false", "70", "ffplay", stateDir],
+    { env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  try {
+    await waitForText(join(stateDir, "playback-endpoint.json"), /service_instance_id/);
+    await execFileAsync(process.execPath, [client, "pause", stateDir], { env });
+    const paused = JSON.parse(
+      (await execFileAsync(process.execPath, [client, "status", stateDir], { env })).stdout,
+    );
+    assert.equal(paused.state, "paused");
+    await execFileAsync(process.execPath, [client, "play", stateDir], { env });
+    await execFileAsync(process.execPath, [client, "stop", stateDir], { env });
+    const code = await Promise.race([
+      new Promise((resolve) => child.once("exit", resolve)),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("standalone playback did not stop")), 5000),
+      ),
+    ]);
+    assert.equal(code, 0);
+    assert.equal(await readTextIfExists(join(stateDir, "run.json")), "");
+    assert.equal(await readTextIfExists(join(stateDir, "controls.jsonl")), "");
+    assert.equal(await readTextIfExists(join(stateDir, "trace.jsonl")), "");
+    assert.equal(await readTextIfExists(join(stateDir, "control-endpoint.json")), "");
+
+    const standalone = spawn(
+      process.execPath,
+      [service, "serve", source, "false", "70", "ffplay", stateDir],
+      { env, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    await waitForText(
+      join(stateDir, "playback-endpoint.json"),
+      /"owner_mode": "standalone"/,
+    );
+    await writeFile(
+      join(stateDir, "run.json"),
+      JSON.stringify({ run: "music-player", run_instance_id: "generation-a" }),
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        service,
+        "play",
+        source,
+        "false",
+        "70",
+        "ffplay",
+        stateDir,
+      ], { env }),
+      /standalone playback service already owns state/,
+    );
+    await execFileAsync(process.execPath, [client, "stop", stateDir], { env });
+    await new Promise((resolve) => standalone.once("exit", resolve));
+  } finally {
+    child.kill("SIGKILL");
+    await removeTreeEventually(root);
+  }
+});
+
+test("music-player checkpoints and resumes its resolved playlist index", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-music-checkpoint-"));
+  const stateDir = join(root, "music");
+  const sourceDir = join(root, "source");
+  const fakePlayer = join(root, process.platform === "win32" ? "ffplay.exe" : "ffplay");
+  await mkdir(stateDir, { recursive: true });
+  await mkdir(sourceDir, { recursive: true });
+  await writeFile(join(stateDir, "run.json"), JSON.stringify({ run: "music-player", run_instance_id: "generation-a" }));
+  await writeFile(join(sourceDir, "one.wav"), "one");
+  await writeFile(join(sourceDir, "two.wav"), "two");
+  if (process.platform === "win32") {
+    const sourceFile = join(root, "fake-player.cs");
+    await writeFile(sourceFile, "public class Program { public static void Main(string[] args) {} }\n");
+    await execFileAsync("powershell.exe", [
+      "-NoProfile", "-NonInteractive", "-Command",
+      `Add-Type -Path '${sourceFile.replaceAll("'", "''")}' -OutputAssembly '${fakePlayer.replaceAll("'", "''")}' -OutputType ConsoleApplication`,
+    ]);
+  } else {
+    await writeFile(fakePlayer, "#!/bin/sh\nexit 0\n");
+    await chmod(fakePlayer, 0o755);
+  }
+  const args = [
+    join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"),
+    "play", sourceDir, "false", "70", "ffplay", stateDir,
+  ];
+  const env = { ...process.env, PATH: `${root}${delimiter}${process.env.PATH ?? ""}` };
+  try {
+    await execFileAsync(process.execPath, args, { env });
+    const checkpoint = JSON.parse(await readFile(join(stateDir, "playback.json"), "utf8"));
+    assert.equal(checkpoint.source, sourceDir);
+    assert.equal(checkpoint.tracks.length, 2);
+    assert.equal(checkpoint.index, 1);
+    assert.equal(checkpoint.volume, 70);
+    const resumed = await execFileAsync(process.execPath, args, { env });
+    assert.match(resumed.stderr, /checkpoint=resumed start_index=1/);
+    await writeFile(join(stateDir, "playback.json"), "{truncated", "utf8");
+    const recovered = await execFileAsync(process.execPath, args, { env });
+    assert.match(recovered.stderr, /checkpoint_recovery=invalid-json/);
+    assert.match(recovered.stderr, /checkpoint=recovered start_index=0/);
+    assert.match(
+      await readFile(join(stateDir, "trace.jsonl"), "utf8"),
+      /"kind":"player\.checkpoint-recovered"/,
+    );
+    const invalidIndexCheckpoint = JSON.parse(
+      await readFile(join(stateDir, "playback.json"), "utf8"),
+    );
+    invalidIndexCheckpoint.index = "not-an-index";
+    await writeFile(
+      join(stateDir, "playback.json"),
+      JSON.stringify(invalidIndexCheckpoint),
+      "utf8",
+    );
+    const invalidIndex = await execFileAsync(process.execPath, args, { env });
+    assert.match(invalidIndex.stderr, /checkpoint_recovery=invalid-shape/);
+    assert.match(invalidIndex.stderr, /checkpoint=recovered start_index=0/);
+    const status = JSON.parse((await execFileAsync(process.execPath, [args[0], "status", stateDir])).stdout);
+    assert.equal(status.state, "stopped");
+    assert.equal(status.volume, 70);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("music-player restores a paused checkpoint without resuming intent", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX signal fixture");
+    return;
+  }
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-music-paused-"));
+  const stateDir = join(root, "music");
+  const source = join(root, "track.wav");
+  const fakePlayer = join(root, "ffplay");
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(source, "audio fixture");
+  await writeFile(fakePlayer, "#!/bin/sh\nexec sleep 30\n");
+  await chmod(fakePlayer, 0o755);
+  await writeFile(
+    join(stateDir, "run.json"),
+    JSON.stringify({ run: "music-player", run_instance_id: "generation-a" }),
+  );
+  const args = [
+    join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"),
+    "play", source, "true", "70", "ffplay", stateDir,
+  ];
+  const env = { ...process.env, PATH: `${root}${delimiter}${process.env.PATH ?? ""}` };
+  const first = spawn(process.execPath, args, { env, stdio: "ignore" });
+  let second: ReturnType<typeof spawn> | undefined;
+  try {
+    await waitForText(join(stateDir, "player.json"), /"state":"playing"/);
+    await deliverRunControl("music-player", stateDir, {
+      action: "pause",
+      run_instance_id: "generation-a",
+    });
+    const paused = JSON.parse(
+      await waitForText(join(stateDir, "player.json"), /"state":"paused"/),
+    );
+    assert.equal(
+      JSON.parse(await readFile(join(stateDir, "playback.json"), "utf8")).state,
+      "paused",
+    );
+    first.kill("SIGKILL");
+    process.kill(Number(paused.pid), "SIGKILL");
+    await new Promise((resolve) => first.once("exit", resolve));
+    second = spawn(process.execPath, args, { env, stdio: "ignore" });
+    const deadline = Date.now() + 5000;
+    let restored: { state?: string } | undefined;
+    while (Date.now() < deadline) {
+      const text = await readTextIfExists(join(stateDir, "player.json"));
+      if (text) {
+        const candidate = JSON.parse(text);
+        if (candidate.state === "paused" && candidate.pid !== paused.pid) {
+          restored = candidate;
+          break;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(restored?.state, "paused");
+  } finally {
+    first.kill("SIGKILL");
+    second?.kill("SIGTERM");
+    await removeTreeEventually(root);
   }
 });
 
@@ -817,6 +1085,10 @@ test("music-player consumes publicly delivered Controls", async () => {
   const stateDir = join(root, "music");
   const source = join(root, "silence.wav");
   const fakePlayer = join(root, process.platform === "win32" ? "ffplay.exe" : "ffplay");
+  const fakeWpctl = join(root, "wpctl");
+  const fakeFfprobe = join(root, "ffprobe");
+  const playerLog = join(root, "ffplay.log");
+  const wpctlLog = join(root, "wpctl.log");
   await mkdir(stateDir, { recursive: true });
   await writeFile(
     join(stateDir, "run.json"),
@@ -839,16 +1111,43 @@ test("music-player consumes publicly delivered Controls", async () => {
       `Add-Type -Path '${quotedSource}' -OutputAssembly '${quotedPlayer}' -OutputType ConsoleApplication`,
     ]);
   } else {
-    await writeFile(fakePlayer, "#!/bin/sh\nsleep 30\n", "utf8");
+    await writeFile(
+      fakePlayer,
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FFPLAY_LOG_FILE\"\nexec sleep 30\n",
+      "utf8",
+    );
     await chmod(fakePlayer, 0o755);
+    await writeFile(fakeFfprobe, "#!/bin/sh\nprintf '100\\n'\n", "utf8");
+    await chmod(fakeFfprobe, 0o755);
+    await writeFile(
+      fakeWpctl,
+      `#!/bin/sh
+case "$1:$2" in
+  status:-n) printf 'Audio\\n └─ Streams:\\n        88. ffplay\\n\\nVideo\\n' ;;
+  inspect:88) printf '  * client.id = "99"\\n  * media.class = "Stream/Output/Audio"\\n' ;;
+  inspect:99) printf '    application.process.id = "%s"\\n' "$(cat "$WPCTL_PID_FILE")" ;;
+  set-volume:88) printf '%s %s\\n' "$2" "$3" >> "$WPCTL_LOG_FILE" ;;
+  *) exit 1 ;;
+esac
+`,
+      "utf8",
+    );
+    await chmod(fakeWpctl, 0o755);
   }
   let playbackPid: number | undefined;
+  const playbackPids = new Set<number>();
   let childOutput = "";
   const child = spawn(
     process.execPath,
-    [join(process.cwd(), "skills", "media", "scripts", "music-player.mjs"), "play", source, "false", "70", "ffplay", stateDir],
+    [join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"), "play", source, "false", "70", "ffplay", stateDir],
     {
-      env: { ...process.env, PATH: `${root}${delimiter}${process.env.PATH ?? ""}` },
+      env: {
+        ...process.env,
+        FFPLAY_LOG_FILE: playerLog,
+        PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
+        WPCTL_LOG_FILE: wpctlLog,
+        WPCTL_PID_FILE: join(stateDir, "current.pid"),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -856,12 +1155,172 @@ test("music-player consumes publicly delivered Controls", async () => {
   child.stderr.on("data", (chunk) => { childOutput += String(chunk); });
   try {
     await waitForText(join(stateDir, "control-endpoint.json"), /run_instance_id/);
+    await waitForText(join(stateDir, "playback-endpoint.json"), /service_instance_id/);
+    await waitForText(join(stateDir, "player.json"), /"state":"playing"/);
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"),
+        "serve",
+        source,
+        "false",
+        "70",
+        "ffplay",
+        stateDir,
+      ], { env: { ...process.env, PATH: `${root}${delimiter}${process.env.PATH ?? ""}` } }),
+      /active playback service already owns state/,
+    );
+    const initialPlayerState = JSON.parse(
+      await waitForText(
+        join(stateDir, "player.json"),
+        /"pid":"\d+","updated_at":"[^"]+"}\s*$/,
+      ),
+    );
+    playbackPid = Number(initialPlayerState.pid);
+    playbackPids.add(playbackPid);
+    const controlsBeforeClient = await readTextIfExists(join(stateDir, "controls.jsonl"));
+    const client = join(
+      process.cwd(),
+      "skills",
+      "music-player",
+      "scripts",
+      "playback-client.mjs",
+    );
+    await execFileAsync(process.execPath, [client, "volume", stateDir, "62"], {
+      env: {
+        ...process.env,
+        PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
+        WPCTL_LOG_FILE: wpctlLog,
+        WPCTL_PID_FILE: join(stateDir, "current.pid"),
+      },
+    });
+    const clientVolumeState = JSON.parse(
+      await waitForText(join(stateDir, "player.json"), /"volume":62/),
+    );
     if (process.platform === "win32") {
-      const playerState = JSON.parse(
-        await waitForText(join(stateDir, "player.json"), /"pid":"\d+"/),
-      );
-      playbackPid = Number(playerState.pid);
+      playbackPids.add(Number(clientVolumeState.pid));
     }
+    assert.equal(
+      await readTextIfExists(join(stateDir, "controls.jsonl")),
+      controlsBeforeClient,
+    );
+    const clientStatus = JSON.parse(
+      (await execFileAsync(process.execPath, [client, "status", stateDir])).stdout,
+    );
+    assert.equal(clientStatus.volume, 62);
+    if (process.platform === "win32") {
+      assert.equal(clientStatus.progress_percent, null);
+    } else {
+      assert.equal(Number.isInteger(clientStatus.progress_percent), true);
+    }
+    await deliverRunControl("music", stateDir, {
+      action: "volume",
+      input: { percent: 63 },
+      run_instance_id: "generation-a",
+    });
+    await waitForText(
+      join(stateDir, "controls.jsonl"),
+      /"action":"volume".*"status":"handled"/,
+    );
+    const volumeState = JSON.parse(
+      await waitForText(
+        join(stateDir, "player.json"),
+        /"volume":63.*"updated_at":"[^"]+"}\s*$/,
+      ),
+    );
+    if (process.platform === "linux") {
+      assert.equal(Number(volumeState.pid), playbackPid);
+      assert.equal(await readFile(wpctlLog, "utf8"), "88 62%\n88 63%\n");
+    } else {
+      playbackPid = Number(volumeState.pid);
+      playbackPids.add(playbackPid);
+    }
+    await deliverRunControl("music", stateDir, {
+      action: "volume",
+      input: { percent: 101 },
+      run_instance_id: "generation-a",
+    });
+    await waitForText(
+      join(stateDir, "controls.jsonl"),
+      /"action":"volume".*"percent":101.*"status":"failed"/,
+    );
+    if (process.platform !== "win32") {
+      await deliverRunControl("music", stateDir, {
+        action: "seek",
+        input: { percent: 40 },
+        run_instance_id: "generation-a",
+      });
+      await waitForText(
+        join(stateDir, "controls.jsonl"),
+        /"action":"seek".*"status":"handled"/,
+      );
+      const seekState = JSON.parse(
+        await waitForText(
+          join(stateDir, "player.json"),
+          /"seek_percent":40.*"pid":"\d+","updated_at":"[^"]+"}\s*$/,
+        ),
+      );
+      assert.notEqual(Number(seekState.pid), playbackPid);
+      await waitForText(playerLog, /-ss 40/);
+      playbackPid = Number(seekState.pid);
+    }
+    await execFileAsync(process.execPath, [
+      join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"),
+      "pause",
+      stateDir,
+    ]);
+    try {
+      await waitForText(join(stateDir, "controls.jsonl"), /"action":"pause".*"status":"handled"/);
+    } catch (error) {
+      const controls = await readTextIfExists(join(stateDir, "controls.jsonl"));
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; ` +
+        `child_exit=${child.exitCode ?? "running"}; child_signal=${child.signalCode ?? "none"}; ` +
+        `controls=${JSON.stringify(controls.slice(-2000))}; output=${JSON.stringify(childOutput.slice(-2000))}`,
+      );
+    }
+    const pausedStatus = JSON.parse((await execFileAsync(process.execPath, [
+      join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"),
+      "status",
+      stateDir,
+    ])).stdout);
+    assert.equal(pausedStatus.state, "paused");
+    if (process.platform === "win32") {
+      assert.equal(pausedStatus.progress_percent, null);
+    } else {
+      assert.equal(Number.isInteger(pausedStatus.progress_percent), true);
+      assert.ok(pausedStatus.progress_percent >= 0 && pausedStatus.progress_percent <= 100);
+    }
+    await execFileAsync(process.execPath, [
+      join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"),
+      "volume",
+      stateDir,
+      "57",
+    ]);
+    await waitForText(
+      join(stateDir, "controls.jsonl"),
+      /"action":"volume".*"percent":57.*"status":"handled"/,
+    );
+    await waitForText(
+      join(stateDir, "player.json"),
+      /"state":"paused".*"volume":57.*"updated_at":"[^"]+"}\s*$/,
+    );
+    const controlsBeforeInvalidVolume = await readFile(
+      join(stateDir, "controls.jsonl"),
+      "utf8",
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        join(process.cwd(), "skills", "music-player", "scripts", "playback.mjs"),
+        "volume",
+        stateDir,
+        "101",
+      ]),
+      /volume percent must be an integer 0\.\.100/,
+    );
+    assert.equal(
+      await readFile(join(stateDir, "controls.jsonl"), "utf8"),
+      controlsBeforeInvalidVolume,
+    );
     const action = process.platform === "win32" ? "status" : "stop";
     const stopStartedAt = Date.now();
     await deliverRunControl("music", stateDir, {
@@ -869,7 +1328,7 @@ test("music-player consumes publicly delivered Controls", async () => {
       run_instance_id: "generation-a",
     });
     try {
-      await waitForText(join(stateDir, "controls.jsonl"), /"status":"handled"/);
+      await waitForText(join(stateDir, "controls.jsonl"), new RegExp(`"action":"${action}".*"status":"handled"`));
     } catch (error) {
       const controls = await readTextIfExists(join(stateDir, "controls.jsonl"));
       throw new Error(
@@ -890,13 +1349,57 @@ test("music-player consumes publicly delivered Controls", async () => {
       assert.equal(code, 0);
       assert.ok(Date.now() - stopStartedAt < 2500, "music-player stop must beat natural fixture exit");
     }
-    const control = JSON.parse(await readFile(join(stateDir, "controls.jsonl"), "utf8"));
-    assert.equal(control.status, "handled");
-    assert.equal(typeof control.delivered_at, "string");
+    const controls = (await readFile(join(stateDir, "controls.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const pauseControl = controls.find((control) => control.action === "pause");
+    assert.equal(pauseControl?.status, "handled");
+    assert.equal(Object.hasOwn(pauseControl ?? {}, "delivered_at"), false);
+    const seekControl = controls.find((control) => control.action === "seek");
+    if (process.platform !== "win32") {
+      assert.deepEqual(seekControl?.input, { percent: 40 });
+      assert.equal(seekControl?.status, "handled");
+    }
+    const volumeControls = controls.filter((control) => control.action === "volume");
+    assert.deepEqual(volumeControls.map((control) => control.input), [
+      { percent: 63 },
+      { percent: 101 },
+      { percent: 57 },
+    ]);
+    assert.deepEqual(volumeControls.map((control) => control.status), [
+      "handled",
+      "failed",
+      "handled",
+    ]);
+    assert.equal(typeof volumeControls[0]?.delivered_at, "string");
+    assert.match(volumeControls[1]?.error ?? "", /integer 0\.\.100/);
+    assert.equal(Object.hasOwn(volumeControls[2] ?? {}, "delivered_at"), false);
+    const volumeTrace = await readFile(join(stateDir, "trace.jsonl"), "utf8");
+    assert.match(volumeTrace, /"kind":"player\.volume"/);
+    assert.match(volumeTrace, /"percent":57/);
+    const delivered = controls.find((control) => control.action === action);
+    assert.equal(delivered?.status, "handled");
+    assert.equal(typeof delivered?.delivered_at, "string");
   } finally {
-    child.kill("SIGKILL");
-    if (process.platform === "win32" && playbackPid) {
-      await execFileAsync("taskkill", ["/PID", String(playbackPid), "/T", "/F"]).catch(() => {});
+    if (process.platform === "win32") {
+      const quotedPlayer = fakePlayer.replaceAll("'", "''");
+      await execFileAsync("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$target = '${quotedPlayer}'; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $target } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+      ]).catch(() => {});
+      for (const pid of playbackPids) {
+        await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"]).catch(() => {});
+      }
+    }
+    if (child.exitCode === null) {
+      child.kill("SIGKILL");
+      await Promise.race([
+        new Promise((resolve) => child.once("exit", resolve)),
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ]);
     }
     await removeTreeEventually(root);
   }
@@ -974,7 +1477,7 @@ test("installed Skill Recipe QA matches the source capability inventory", async 
       ...args,
     ]);
     assert.deepEqual(JSON.parse(installed.stdout), JSON.parse(source.stdout));
-    assert.equal(JSON.parse(installed.stdout).total, 58);
+    assert.equal(JSON.parse(installed.stdout).total, 55);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

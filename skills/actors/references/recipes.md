@@ -7,14 +7,14 @@ A Recipe is a reusable executable definition. Address a maintained component as 
 Use direct delegation when the root remains fundamentally the same capability under a different persistent name, description, or caller default:
 
 ```text
-media/player
+music-player/playback
 → music_player with a default source
 ```
 
 For agent-facing persistent specialization, use:
 
 ```text
-register_tool from=media/player defaults={"source":"~/Music/1MIX"}
+register_tool from=music-player/playback defaults={"source":"~/Music/1MIX"}
 ```
 
 The delegated root inherits async behavior, args and types, defaults, artifacts, Control, and runtime-owned origins. Do not copy those fields into the wrapper.

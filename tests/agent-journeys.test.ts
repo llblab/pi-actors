@@ -35,16 +35,16 @@ async function waitForFile(path: string): Promise<void> {
 
 async function journeyFixture() {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-agent-journey-"));
-  const media = join(root, "skills", "media");
+  const media = join(root, "skills", "music-player");
   const stale = join(root, "skills", "stale");
   const recipeRoot = join(root, "recipes");
   await mkdir(join(media, "recipes"), { recursive: true });
   await mkdir(join(stale, "recipes"), { recursive: true });
   await mkdir(recipeRoot, { recursive: true });
-  await writeFile(join(media, "SKILL.md"), "---\nname: media\ndescription: Use for media.\n---\n");
+  await writeFile(join(media, "SKILL.md"), "---\nname: music-player\ndescription: Use for media.\n---\n");
   await writeFile(join(stale, "SKILL.md"), "---\nname: stale\ndescription: Stale fixture.\n---\n");
   await writeFile(
-    join(media, "recipes", "player.json"),
+    join(media, "recipes", "playback.json"),
     JSON.stringify({
       async: true,
       args: [
@@ -64,7 +64,7 @@ async function journeyFixture() {
     JSON.stringify({ name: "removed", template: "echo stale" }),
   );
   const skillContext = createActiveSkillRecipeContext([
-    { name: "media", baseDir: media },
+    { name: "music-player", baseDir: media },
     { name: "stale", baseDir: stale },
   ]);
   return {
@@ -90,7 +90,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
       "journey-a",
       {
         as: `run:${oneOffRun}`,
-        recipe: "media/player",
+        recipe: "music-player/playback",
         values: { command: "status", source: "~/Music/1MIX" },
       },
       undefined,
@@ -100,7 +100,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
     assert.equal(oneOff.details.launch_kind, "spawn");
     assert.equal(
       oneOff.details.recipe_file,
-      join(fixture.media, "recipes", "player.json"),
+      join(fixture.media, "recipes", "playback.json"),
     );
     assert.deepEqual(await readdir(fixture.recipeRoot), []);
     await waitForFile(join(oneOffState, "result.json"));
@@ -110,7 +110,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
     const inventory = inventoryActiveSkillRecipeComponents(fixture.skillContext);
     assert.equal(inventory.partial, true);
     assert.equal(
-      inventory.components.some((component) => component.identity === "media/player"),
+      inventory.components.some((component) => component.identity === "music-player/playback"),
       true,
     );
     const staleBefore = await readFile(fixture.stalePath, "utf8");
@@ -131,7 +131,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
     const registration = await executeRegisterTool(
       {
         defaults: { source: "~/Music/1MIX" },
-        from: "media/player",
+        from: "music-player/playback",
         name: "music_player",
       },
       { recipeResolutionContext: fixture.context },
@@ -149,12 +149,12 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
         },
       },
     );
-    assert.equal(registration.details.source, "media/player");
+    assert.equal(registration.details.source, "music-player/playback");
     assert.equal(registration.details.callable_now, true);
     assert.deepEqual(registration.details.next_actions?.[0], "call tool music_player");
     assert.deepEqual(
       JSON.parse(await readFile(join(fixture.recipeRoot, "music_player.json"), "utf8")),
-      { defaults: { source: "~/Music/1MIX" }, template: "media/player" },
+      { defaults: { source: "~/Music/1MIX" }, template: "music-player/playback" },
     );
     const musicPlayer = definitions.get("music_player");
     assert.ok(musicPlayer);
@@ -179,16 +179,16 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
     await assert.rejects(
       spawn.execute(
         "journey-d",
-        { recipe: "media/player", values: { source: "~/Music/1MIX" } },
+        { recipe: "music-player/playback", values: { source: "~/Music/1MIX" } },
         undefined,
         undefined,
         { cwd: fixture.root, recipeResolutionContext: inactive },
       ),
-      /Owning Skill "media" is not active.*Next: activate Skill media.*inspect target=recipes view=doctor identity=media\/player/s,
+      /Owning Skill "music-player" is not active.*Next: activate Skill music-player.*inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
     await assert.rejects(
       executeRegisterTool(
-        { from: "media/player", name: "inactive_player" },
+        { from: "music-player/playback", name: "inactive_player" },
         { recipeResolutionContext: inactive },
         {
           configPath: join(fixture.root, "tool-registry.json"),
@@ -204,9 +204,9 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
           },
         },
       ),
-      /Recipe source "media\/player" validation failed:.*Owning Skill "media" is not active.*Next: inspect target=recipes view=doctor identity=media\/player/s,
+      /Recipe source "music-player\/playback" validation failed:.*Owning Skill "music-player" is not active.*Next: inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
-    assert.equal(existsSync(join(fixture.recipeRoot, "inactive_player.json")), false);
+    assert.equal(existsSync(join(fixture.recipeRoot, "inactive_playback.json")), false);
   } finally {
     await rm(oneOffState, { force: true, recursive: true });
     await rm(toolState, { force: true, recursive: true });

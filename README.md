@@ -29,7 +29,7 @@ For local development:
 pi install /path/to/pi-actors
 ```
 
-The package contributes the extension and six capability-owning Skills for actors, artifacts, media, project work, Recipe memory, and swarm orchestration.
+The package contributes the extension and six capability-owning Skills for actors, artifacts, music playback, project work, Recipe memory, and swarm orchestration.
 
 ## Public Tools
 
@@ -40,7 +40,7 @@ Create a Run from an active-Skill Recipe, an explicit Recipe file, or an inline 
 ```text
 spawn template="sleep 30" as=run:demo
 spawn recipe=project-work/repo-health values={"repo":"/work/project","model":"provider/model"}
-spawn recipe=media/player values={"source":"/music"} as=run:player
+spawn recipe=music-player/playback values={"source":"/music"}
 spawn template="make test" as=run:test
 ```
 
@@ -80,7 +80,7 @@ inspect target=run:test view=trace source=lifecycle lines=40
 inspect target=run:test view=control
 inspect target=runtime view=status
 inspect target=recipes view=status
-inspect target=recipes view=doctor identity=media/player
+inspect target=recipes view=doctor identity=music-player/playback
 inspect target=tool:my_tool view=status
 ```
 
@@ -203,7 +203,7 @@ Useful entry points include:
 - `project-work/release-readiness`
 - `swarm/quorum-review`
 - `artifacts/bundle`
-- `media/player` — controlled playback service
+- `music-player/playback` — singleton controlled playback service
 - `actors/resource-locker` — optional controlled resource-lock service
 
 Validate Recipes with:

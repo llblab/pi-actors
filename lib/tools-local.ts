@@ -150,6 +150,7 @@ export function createRuntimeToolDefinition(
   const isAsyncRecipe = cfg.recipe
     ? cfg.recipe.async === true
     : RecipesReferences.isAsyncRecipeReference(cfg.template);
+  const isSingletonRecipe = cfg.recipe?.singleton === true;
   const recipeTemplate =
     cfg.recipe?.template ?? RecipesReferences.getRecipeTemplate(cfg.template);
   const requiredTemplate = recipeTemplate ?? cfg.template!;
@@ -185,7 +186,7 @@ export function createRuntimeToolDefinition(
     paramSchema[arg] = typedArgSchema(arg, cfg.argTypes?.[arg]);
     if (requiredArgs.has(arg)) required.push(arg);
   }
-  if (isAsyncRecipe)
+  if (isAsyncRecipe && !isSingletonRecipe)
     paramSchema.run_id = Schema.stringSchema(
       "Optional run id override for this async template recipe invocation.",
     );
@@ -225,8 +226,9 @@ export function createRuntimeToolDefinition(
           const input = params as Record<string, unknown>;
           const { run_id, transport_context, ...values } = input;
           const base = cfg.recipe ? cfg.recipe : { file: String(cfg.template) };
-          const runId =
-            typeof run_id === "string" && run_id.trim()
+          const runId = isSingletonRecipe
+            ? undefined
+            : typeof run_id === "string" && run_id.trim()
               ? run_id.trim()
               : `${cfg.name}-${Date.now()}`;
           const meta = AsyncRuns.startRun(
@@ -293,7 +295,7 @@ export function createRuntimeToolDefinition(
           cfg,
           error,
           required,
-          isAsyncRecipe,
+          isAsyncRecipe && !isSingletonRecipe,
         );
       }
     },

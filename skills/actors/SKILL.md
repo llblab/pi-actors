@@ -58,12 +58,12 @@ A Skill Recipe is a maintained component addressed by `<skill>/<recipe>`. `spawn
 
 ## Persistent capability workflow
 
-To make `media/player` callable as `music_player` with a default source:
+To make `music-player/playback` callable as `music_player` with a default source:
 
 ```text
 register_tool
   name=music_player
-  from=media/player
+  from=music-player/playback
   defaults={"source":"~/Music/1MIX"}
 ```
 

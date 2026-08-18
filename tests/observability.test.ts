@@ -1102,7 +1102,7 @@ test("Run observability suppresses duplicate handled terminal transitions", () =
   assert.equal(shouldSendRunTransitionFollowUp(done), true);
 });
 
-test("Run observability prunes terminal and stale map entries", () => {
+test("Run observability prunes stale entries but retains terminal attention dedupe", () => {
   const statuses = new Map([
     ["/tmp/done", "done" as const],
     ["/tmp/missing", "running" as const],
@@ -1139,8 +1139,8 @@ test("Run observability prunes terminal and stale map entries", () => {
     seenEventIds,
   );
   assert.deepEqual([...statuses.keys()], ["/tmp/live"]);
-  assert.deepEqual([...lineCounts.keys()], ["/tmp/live"]);
-  assert.deepEqual([...seenEventIds.keys()], ["/tmp/live"]);
+  assert.deepEqual([...lineCounts.keys()], ["/tmp/done", "/tmp/live"]);
+  assert.deepEqual([...seenEventIds.keys()], ["/tmp/done", "/tmp/live"]);
 });
 
 test("Run observability renders animated subagent triangles", () => {

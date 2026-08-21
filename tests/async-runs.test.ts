@@ -323,15 +323,17 @@ test("Singleton reuse rejects a terminal result while its runner process exits",
 test("Async run controls fail closed on persisted process identity mismatch", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-process-identity-"));
   const stateDir = join(root, "identity");
+  let runPid: number | undefined;
   try {
     const meta = startRun(
       {
         run_id: "identity",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 3000)"`,
+        template: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
       },
       process.cwd(),
     );
+    runPid = meta.pid;
     assert.equal(typeof meta.process_identity?.start_time, "string");
     const runPath = join(stateDir, "run.json");
     const stored = JSON.parse(await readFile(runPath, "utf8"));
@@ -351,7 +353,7 @@ test("Async run controls fail closed on persisted process identity mismatch", as
           {
             run_id: "identity",
             state_dir: stateDir,
-            template: `${process.execPath} -e "setTimeout(() => {}, 3000)"`,
+            template: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
           },
           process.cwd(),
         ),
@@ -369,9 +371,15 @@ test("Async run controls fail closed on persisted process identity mismatch", as
       killRun(stateDir);
     } catch (error) {
       if (process.platform !== "win32" || !/unsupported proof/.test(String(error))) throw error;
-      process.kill(meta.pid, "SIGKILL");
     }
   } finally {
+    if (runPid !== undefined) {
+      try {
+        process.kill(runPid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    }
     await rm(root, { recursive: true, force: true });
   }
 });

@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## 0.49.2: Stale-Context Lifecycle Hotfix
+
 - `Stale-Context Lifecycle Hotfix`: Contains Run UI animation, delayed watcher, reconciliation, error-handler, retirement, and Recipe-reload callbacks so invalidated Pi contexts cannot escape into the host event loop. Session owners are captured while live, stale shutdown cannot close a replacement session, and parent teardown plus shutdown notification remain identity-fenced and no-throw (GitHub issue #125).
 
 ## 0.49.1: Maintained Telegram View Routing

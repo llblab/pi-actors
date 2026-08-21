@@ -107,7 +107,18 @@ test("Runtime reports recipe watcher failures", () => {
 test("Session shutdown tears down exact-parent runs through the run UI runtime", () => {
   assert.match(indexSource, /pi\.on\("session_shutdown"/);
   assert.match(indexSource, /runtime\.onSessionShutdown\(event\.reason, ctx\)/);
-  assert.match(extensionRuntimeSource, /runUiRuntime\.shutdown\(reason, ctx\)/);
+  assert.match(
+    extensionRuntimeSource,
+    /runUiRuntime\.shutdown\(reason, ownerId, ctx\)/,
+  );
+  assert.match(
+    extensionRuntimeSource,
+    /const ownerId = runOwnerIdsByContext\.get\(ctx\)/,
+  );
+  assert.match(
+    extensionRuntimeSource,
+    /if \(activeRunContext === ctx\) closeActiveSessionRuntimes\(\)/,
+  );
   assert.match(runUiRuntimeSource, /AsyncRuns\.teardownRunsOwnedByParent/);
   assert.match(runUiRuntimeSource, /session_shutdown:\$\{eventReason\}/);
 });

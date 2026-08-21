@@ -418,7 +418,11 @@ export function createRunTerminalReconciliationLoop(input: {
       input.refreshWatcher();
       input.reconcile();
     } catch (error) {
-      input.onError?.(error);
+      try {
+        input.onError?.(error);
+      } catch {
+        /* reconciliation callbacks must never escape into the host event loop */
+      }
     }
   };
   const close = (): void => {

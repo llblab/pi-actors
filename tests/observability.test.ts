@@ -691,6 +691,20 @@ test("Run observability detects failed terminal transitions", () => {
   ]);
 });
 
+test("Terminal reconciliation contains a throwing error handler", () => {
+  const loop = createRunTerminalReconciliationLoop({
+    onError: () => {
+      throw new Error("notification context is stale");
+    },
+    reconcile: () => {
+      throw new Error("reconciliation failed");
+    },
+    refreshWatcher: () => undefined,
+  });
+  assert.doesNotThrow(() => loop.reconcileNow());
+  loop.close();
+});
+
 test("Periodic terminal reconciliation delivers without a watcher event", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-periodic-"));
   const stateDir = join(root, "review");

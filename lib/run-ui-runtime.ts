@@ -11,25 +11,89 @@ import * as Pi from "./pi.ts";
 
 export interface RunUiRuntime {
   close(): void;
-  shutdown(eventReason: string, ctx: Pi.ExtensionContext): void;
-  start(ctx: Pi.ExtensionContext): void;
+  shutdown(
+    eventReason: string,
+    ownerId: string | undefined,
+    ctx?: Pi.ExtensionContext,
+  ): void;
+  start(ctx: Pi.ExtensionContext, ownerId: string): void;
 }
 
 export interface RunUiRuntimeDeps {
+  animationIntervalMs?: number;
+  createRunStateWatcher?: typeof Observability.createRunStateWatcher;
+  createRunTerminalReconciliationLoop?:
+    typeof Observability.createRunTerminalReconciliationLoop;
   getActiveContext(): Pi.ExtensionContext | undefined;
-  getRunOwnerId(ctx: Pi.ExtensionContext): string;
+  notificationDelayMs?: number;
+  onCallbackError?: (error: unknown) => void;
   onRunEvent(): void;
   pi: Pi.ExtensionAPI;
+  teardownRunsOwnedByParent?: typeof AsyncRuns.teardownRunsOwnedByParent;
 }
 
 export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
+  let activeContext: Pi.ExtensionContext | undefined;
+  let activeOwnerId: string | undefined;
   let animationInterval: NodeJS.Timeout | undefined;
   let notifyTimeout: NodeJS.Timeout | undefined;
+  let running = false;
   let lastWatcherDiagnosticId = 0;
   const observation = Observability.createRunUiObservationState();
   const retirementAttempts = new Set<string>();
   const terminalNotificationsInFlight = new Set<string>();
 
+  const close = (): void => {
+    running = false;
+    activeContext = undefined;
+    activeOwnerId = undefined;
+    try {
+      watcher.close();
+    } catch {
+      /* cleanup must not escape a host callback */
+    }
+    try {
+      reconciliation.close();
+    } catch {
+      /* cleanup must not escape a host callback */
+    }
+    if (notifyTimeout) clearTimeout(notifyTimeout);
+    notifyTimeout = undefined;
+    if (animationInterval) clearInterval(animationInterval);
+    animationInterval = undefined;
+  };
+  const stopAfterCallbackFailure = (
+    label: string,
+    error: unknown,
+    expectedContext: Pi.ExtensionContext,
+  ): void => {
+    if (activeContext !== expectedContext) return;
+    close();
+    try {
+      deps.onCallbackError?.(error);
+    } catch {
+      /* host callback containment must remain no-throw */
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      expectedContext.ui.notify(`Actor ${label} failed: ${message}`, "error");
+    } catch {
+      /* stale context or unavailable UI */
+    }
+  };
+  const runActiveCallback = (
+    label: string,
+    callback: (ctx: Pi.ExtensionContext, ownerId: string) => void,
+  ): void => {
+    if (!running || !activeContext || !activeOwnerId) return;
+    const ctx = activeContext;
+    try {
+      if (deps.getActiveContext() !== ctx) return;
+      callback(ctx, activeOwnerId);
+    } catch (error) {
+      stopAfterCallbackFailure(label, error, ctx);
+    }
+  };
   const retireCandidateRuns = (
     ctx: Pi.ExtensionContext,
     summary: Observability.RunSummary,
@@ -39,14 +103,16 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
       cancelRun: (candidate) => AsyncRuns.cancelRun(candidate.stateDir),
       notify: (message, level) => ctx.ui.notify(message, level),
       sendStop: async (candidate) => AsyncRuns.cancelRun(candidate.stateDir),
-    });
+    }).catch((error) =>
+      stopAfterCallbackFailure("Run retirement callback", error, ctx),
+    );
   };
   const update = (
     ctx: Pi.ExtensionContext,
+    ownerId: string,
     notify = false,
     terminalOnly = false,
   ): void => {
-    const ownerId = deps.getRunOwnerId(ctx);
     const snapshot = Observability.readRunUiSnapshot(observation, ownerId);
     ctx.ui.setStatus(
       "zz-pi-actors-runs",
@@ -76,61 +142,63 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     }
   };
   const scheduleUpdate = (): void => {
+    if (!running) return;
     if (notifyTimeout) clearTimeout(notifyTimeout);
     notifyTimeout = setTimeout(() => {
-      const ctx = deps.getActiveContext();
-      if (!ctx) return;
-      watcher.refresh();
-      update(ctx, true);
-      deps.onRunEvent();
-      reportDiagnostics(ctx);
-    }, 50);
+      runActiveCallback("Run watcher callback", (ctx, ownerId) => {
+        watcher.refresh();
+        update(ctx, ownerId, true);
+        deps.onRunEvent();
+        reportDiagnostics(ctx);
+      });
+    }, deps.notificationDelayMs ?? 50);
     notifyTimeout.unref?.();
   };
-  const watcher = Observability.createRunStateWatcher({
+  const watcher = (deps.createRunStateWatcher ?? Observability.createRunStateWatcher)({
     stateRoot: Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
     onChange: scheduleUpdate,
   });
-  const reconciliation = Observability.createRunTerminalReconciliationLoop({
+  const reconciliation = (
+    deps.createRunTerminalReconciliationLoop ??
+    Observability.createRunTerminalReconciliationLoop
+  )({
     onError: (error) => {
-      const ctx = deps.getActiveContext();
-      if (!ctx) return;
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Actor terminal reconciliation failed: ${message}`, "error");
+      if (!running || !activeContext) return;
+      stopAfterCallbackFailure(
+        "terminal reconciliation callback",
+        error,
+        activeContext,
+      );
     },
     reconcile: () => {
-      const ctx = deps.getActiveContext();
-      if (!ctx) return;
-      Observability.reconcileRunTerminalNotifications({
-        inFlight: terminalNotificationsInFlight,
-        ownerId: deps.getRunOwnerId(ctx),
-        sink: Pi.createNotificationSink(deps.pi, ctx),
-        state: observation,
-        includeAttention: true,
+      runActiveCallback("terminal reconciliation callback", (ctx, ownerId) => {
+        Observability.reconcileRunTerminalNotifications({
+          inFlight: terminalNotificationsInFlight,
+          ownerId,
+          sink: Pi.createNotificationSink(deps.pi, ctx),
+          state: observation,
+          includeAttention: true,
+        });
+        reportDiagnostics(ctx);
       });
-      reportDiagnostics(ctx);
     },
-    refreshWatcher: () => watcher.refresh(),
+    refreshWatcher: () => {
+      if (running) watcher.refresh();
+    },
   });
-  const close = (): void => {
-    watcher.close();
-    reconciliation.close();
-    if (notifyTimeout) clearTimeout(notifyTimeout);
-    notifyTimeout = undefined;
-    if (animationInterval) clearInterval(animationInterval);
-    animationInterval = undefined;
-  };
 
   return {
     close,
-    shutdown(eventReason, ctx) {
-      close();
-      const teardown = AsyncRuns.teardownRunsOwnedByParent(
-        deps.getRunOwnerId(ctx),
+    shutdown(eventReason, ownerId, ctx) {
+      if (!ownerId) return;
+      const teardown = (
+        deps.teardownRunsOwnedByParent ?? AsyncRuns.teardownRunsOwnedByParent
+      )(
+        ownerId,
         Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
         { trigger: `session_shutdown:${eventReason}` },
       );
-      if (teardown.failed === 0) return;
+      if (teardown.failed === 0 || !ctx) return;
       try {
         ctx.ui.notify(
           `Actor shutdown teardown: killed=${teardown.killed} failed=${teardown.failed} skipped=${teardown.skipped} discovery_failed=${teardown.discoveryFailed}. Summary: ${teardown.summaryPath ?? "unavailable"}.`,
@@ -140,16 +208,26 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
         /* stale shutdown context */
       }
     },
-    start(ctx) {
+    start(ctx, ownerId) {
       close();
-      Observability.primeRunAttentionState(observation, deps.getRunOwnerId(ctx));
-      update(ctx, true, true);
-      watcher.refresh();
-      reconciliation.start();
-      animationInterval = setInterval(() => {
-        if (deps.getActiveContext() === ctx) update(ctx);
-      }, 1000);
-      animationInterval.unref?.();
+      activeContext = ctx;
+      activeOwnerId = ownerId;
+      running = true;
+      try {
+        Observability.primeRunAttentionState(observation, ownerId);
+        update(ctx, ownerId, true, true);
+        watcher.refresh();
+        reconciliation.start();
+        animationInterval = setInterval(() => {
+          runActiveCallback("status animation callback", (current, currentOwnerId) =>
+            update(current, currentOwnerId),
+          );
+        }, deps.animationIntervalMs ?? 1000);
+        animationInterval.unref?.();
+      } catch (error) {
+        close();
+        throw error;
+      }
     },
   };
 }

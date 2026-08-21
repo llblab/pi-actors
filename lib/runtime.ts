@@ -308,7 +308,9 @@ export function createAutoToolsRuntime(
 export interface RecipeToolReloadWatcherDeps {
   exists?: (path: string) => boolean;
   getResolutionContext?: () => RecipeResolutionContext | undefined;
+  onCallbackError?: (error: unknown) => void;
   recipeRoot?: string;
+  reloadDelayMs?: number;
   watchPath?: typeof watch;
 }
 
@@ -336,22 +338,39 @@ export function createRecipeToolReloadWatcher(
     reloadTimeout = undefined;
     setWatchStatus("closed");
   };
+  const reportCallbackError = (error: unknown): void => {
+    try {
+      deps.onCallbackError?.(error);
+    } catch {
+      /* host callback containment must remain no-throw */
+    }
+  };
   const notifyFailure = (ctx: RuntimeContext): void => {
     if (failureNotified) return;
     failureNotified = true;
     setWatchStatus("failed");
-    ctx.ui.notify(
-      "Recipe live reload watcher failed; restart the session or use register_tool again to refresh recipe tools.",
-      "warning",
-    );
+    try {
+      ctx.ui.notify(
+        "Recipe live reload watcher failed; restart the session or use register_tool again to refresh recipe tools.",
+        "warning",
+      );
+    } catch (error) {
+      reportCallbackError(error);
+    }
   };
   const scheduleReload = (ctx: RuntimeContext): void => {
     failureNotified = false;
     if (reloadTimeout) clearTimeout(reloadTimeout);
     reloadTimeout = setTimeout(() => {
-      runtime.loadTools(ctx, deps.getResolutionContext?.());
-      ctx.ui.notify("Recipe tools refreshed from ~/.pi/agent/recipes", "info");
-    }, 150);
+      reloadTimeout = undefined;
+      try {
+        runtime.loadTools(ctx, deps.getResolutionContext?.());
+        ctx.ui.notify("Recipe tools refreshed from ~/.pi/agent/recipes", "info");
+      } catch (error) {
+        notifyFailure(ctx);
+        reportCallbackError(error);
+      }
+    }, deps.reloadDelayMs ?? 150);
     reloadTimeout.unref?.();
   };
   const watchParent = (ctx: RuntimeContext, recipeRoot: string): void => {

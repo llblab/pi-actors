@@ -446,6 +446,63 @@ test("Stale recipe watcher callbacks cannot close a replacement watcher", async 
   watcher.close();
 });
 
+test("Recipe reload callback failures close through the session owner without escaping", async () => {
+  class FakeWatcher extends EventEmitter {
+    closed = false;
+    readonly listener: (event: string, changedFile: string | null) => void;
+    constructor(listener: (event: string, changedFile: string | null) => void) {
+      super();
+      this.listener = listener;
+    }
+    close(): void {
+      this.closed = true;
+    }
+    change(): void {
+      this.listener("change", "tool.json");
+    }
+  }
+  let stale = false;
+  let callbackErrors = 0;
+  let watcher: ReturnType<typeof createRecipeToolReloadWatcher>;
+  const created: FakeWatcher[] = [];
+  const ctx = {
+    hasUI: true,
+    get ui() {
+      if (stale) throw new Error("stale recipe reload context");
+      return { notify() {} };
+    },
+  };
+  watcher = createRecipeToolReloadWatcher(
+    {
+      loadTools: () => {
+        void ctx.ui;
+      },
+    },
+    {
+      exists: () => true,
+      onCallbackError: () => {
+        callbackErrors += 1;
+        watcher.close();
+      },
+      recipeRoot: "/agent/recipes",
+      reloadDelayMs: 5,
+      watchPath: ((_path: string, listener: FakeWatcher["listener"]) => {
+        const next = new FakeWatcher(listener);
+        created.push(next);
+        return next;
+      }) as unknown as typeof import("node:fs").watch,
+    },
+  );
+  watcher.watch(ctx);
+  created[0]!.change();
+  stale = true;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(callbackErrors >= 1, true);
+  assert.equal(created[0]!.closed, true);
+  assert.doesNotThrow(() => watcher.close());
+});
+
 test("Recipe watcher rearms when the recipe root appears", {
   skip: process.platform === "win32"
     ? "Node's Windows fs watcher asserts when its watched directory is removed"

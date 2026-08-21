@@ -35,6 +35,8 @@ export function createActorExtensionRuntime(
   pi: Pi.ExtensionAPI,
 ): ActorExtensionRuntime {
   let activeRunContext: Pi.ExtensionContext | undefined;
+  let activeRunOwnerId: string | undefined;
+  const runOwnerIdsByContext = new WeakMap<Pi.ExtensionContext, string>();
   const recipeResolutionContextsBySession = new Map<
     string,
     RecipeResolution.RecipeResolutionContext
@@ -55,9 +57,20 @@ export function createActorExtensionRuntime(
     getRunOwnerId,
     getThinkingLevel: () => pi.getThinkingLevel(),
   });
-  const runUiRuntime = RunUiRuntime.createRunUiRuntime({
+  let recipeReload: Runtime.RecipeToolReloadWatcher | undefined;
+  let runUiRuntime: RunUiRuntime.RunUiRuntime;
+  const closeActiveSessionRuntimes = (): void => {
+    const ownerId = activeRunOwnerId;
+    activeRunContext = undefined;
+    activeRunOwnerId = undefined;
+    runUiRuntime?.close();
+    automaticReview.close();
+    recipeReload?.close();
+    if (ownerId) recipeResolutionContextsBySession.delete(ownerId);
+  };
+  runUiRuntime = RunUiRuntime.createRunUiRuntime({
     getActiveContext: () => activeRunContext,
-    getRunOwnerId,
+    onCallbackError: closeActiveSessionRuntimes,
     onRunEvent: automaticReview.schedule,
     pi,
   });
@@ -102,11 +115,12 @@ export function createActorExtensionRuntime(
     reservedToolNames: Tools.RESERVED_TOOL_NAMES,
     setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
   });
-  const recipeReload = Runtime.createRecipeToolReloadWatcher(runtime, {
+  recipeReload = Runtime.createRecipeToolReloadWatcher(runtime, {
     getResolutionContext: () =>
       activeRunContext
         ? getRecipeResolutionContext(activeRunContext)
         : undefined,
+    onCallbackError: closeActiveSessionRuntimes,
   });
   return {
     beforeAgentStart(systemPrompt, skills, ctx) {
@@ -131,11 +145,11 @@ export function createActorExtensionRuntime(
       if (activeRunContext === ctx) automaticReview.schedule();
     },
     onSessionShutdown(reason, ctx) {
-      recipeResolutionContextsBySession.delete(getRunOwnerId(ctx));
-      activeRunContext = undefined;
-      automaticReview.close();
-      recipeReload.close();
-      runUiRuntime.shutdown(reason, ctx);
+      const ownerId = runOwnerIdsByContext.get(ctx);
+      runOwnerIdsByContext.delete(ctx);
+      if (activeRunContext === ctx) closeActiveSessionRuntimes();
+      if (ownerId) recipeResolutionContextsBySession.delete(ownerId);
+      runUiRuntime.shutdown(reason, ownerId, ctx);
     },
     async onSessionStart(ctx) {
       const sessionId = getRunOwnerId(ctx);
@@ -145,13 +159,15 @@ export function createActorExtensionRuntime(
       );
       ctx.ui.setWidget("zz-pi-actors-comms", undefined);
       activeRunContext = ctx;
+      activeRunOwnerId = sessionId;
+      runOwnerIdsByContext.set(ctx, sessionId);
       runUiRuntime.close();
       automaticReview.close();
       recipeReload.close();
       await Temp.prepareExtensionTempDir(Paths.EXTENSION_RUNTIME_PATHS.tempDir);
-      if (activeRunContext !== ctx) return;
+      if (activeRunContext !== ctx || activeRunOwnerId !== sessionId) return;
       automaticReview.start(ctx);
-      runUiRuntime.start(ctx);
+      runUiRuntime.start(ctx, sessionId);
       recipeReload.watch(ctx);
     },
     registerCoreTools() {

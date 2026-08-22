@@ -4,7 +4,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  openSync,
+  readSync,
+} from "node:fs";
 
 import { substituteCommandTemplateToken } from "./command-templates.ts";
 
@@ -20,6 +25,31 @@ export interface RunArtifactManifestEntry {
   required?: boolean;
   sha256?: string;
   size?: number;
+}
+
+function hashArtifactFile(path: string): { sha256: string; size: number } {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const hash = createHash("sha256");
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    while (position < size) {
+      const bytesRead = readSync(
+        fd,
+        chunk,
+        0,
+        Math.min(chunk.byteLength, size - position),
+        position,
+      );
+      if (bytesRead === 0) break;
+      hash.update(chunk.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    return { sha256: hash.digest("hex"), size: position };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export function resolveArtifactPaths(
@@ -64,7 +94,7 @@ export function resolveArtifactManifest(
       typeof artifact === "string" ? { path: artifact } : artifact;
     if (!declaration?.path) continue;
     try {
-      const content = readFileSync(declaration.path);
+      const hashed = hashArtifactFile(declaration.path);
       manifest[name] = {
         exists: true,
         ...(declaration.kind ? { kind: declaration.kind } : {}),
@@ -75,8 +105,8 @@ export function resolveArtifactManifest(
         ...(declaration.required !== undefined
           ? { required: declaration.required }
           : {}),
-        sha256: createHash("sha256").update(content).digest("hex"),
-        size: content.byteLength,
+        sha256: hashed.sha256,
+        size: hashed.size,
       };
     } catch {
       manifest[name] = {

@@ -17,8 +17,11 @@ export function getContextSessionId(ctx: unknown): string | undefined {
 export function requireContextSessionId(ctx: unknown, actor: string): string {
   const sessionId = getContextSessionId(ctx);
   if (!sessionId) {
-    throw new Error(
-      `${actor} requires a current coordinator session; use session:<id> or session:all for explicit session inventory.`,
+    throw Object.assign(
+      new Error(
+        `${actor} reason=session_unavailable requires a current coordinator session; retry from an active coordinator session.`,
+      ),
+      { reason: "session_unavailable" },
     );
   }
   return sessionId;
@@ -33,16 +36,13 @@ export function sessionMismatchError(input: {
   const ownerSession = input.expectedSession ?? "none";
   const currentSession = input.currentSession ?? "none";
   const actor = input.run ? `run:${input.run}` : (input.target ?? "session");
-  const hintTarget = input.expectedSession
-    ? `session:${input.expectedSession}`
-    : "session:all";
   return Object.assign(
     new Error(
-      `${actor} reason=session_mismatch owner_session=${ownerSession} current_session=${currentSession} hint=inspect_session:${input.expectedSession ?? "all"}`,
+      `${actor} reason=session_mismatch owner_session=${ownerSession} current_session=${currentSession} hint=inspect_runtime_runs`,
     ),
     {
       current_session: input.currentSession,
-      hint: `inspect target=${hintTarget} view=status`,
+      hint: "inspect target=runtime view=runs",
       owner_session: input.expectedSession,
       reason: "session_mismatch",
       run: input.run,
@@ -51,18 +51,32 @@ export function sessionMismatchError(input: {
   );
 }
 
-export function assertRunAccessibleToContext(
+export function assertRunStatusAccessibleToContext(
   runId: string,
+  status: Record<string, unknown>,
   ctx: unknown,
 ): Record<string, unknown> {
-  const status = AsyncRuns.getRunStatus(runId);
-  const sessionId = getContextSessionId(ctx);
-  if (sessionId && status.ownerId && status.ownerId !== sessionId) {
+  const sessionId = requireContextSessionId(ctx, `run:${runId}`);
+  const ownerId = typeof status.ownerId === "string" && status.ownerId
+    ? status.ownerId
+    : undefined;
+  if (ownerId !== sessionId) {
     throw sessionMismatchError({
       currentSession: sessionId,
-      expectedSession: String(status.ownerId),
+      expectedSession: ownerId,
       run: runId,
     });
   }
   return status;
+}
+
+export function assertRunAccessibleToContext(
+  runId: string,
+  ctx: unknown,
+): Record<string, unknown> {
+  return assertRunStatusAccessibleToContext(
+    runId,
+    AsyncRuns.getRunStatus(runId),
+    ctx,
+  );
 }

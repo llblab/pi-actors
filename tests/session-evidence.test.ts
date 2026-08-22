@@ -100,6 +100,24 @@ test("session evidence remains bounded and reports incomplete parent chains", as
   }
 });
 
+test("session evidence rejects oversized files before materializing JSONL", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-session-oversized-"));
+  const file = join(root, "session.jsonl");
+  try {
+    await writeFile(
+      file,
+      `${entry({ type: "session", version: 3, id: "session" })}\n${"x".repeat(4_096)}`,
+    );
+    const evidence = readSessionEvidence(file, { maxBytes: 128 });
+    assert.equal(evidence.truncated, true);
+    assert.equal(evidence.totalTurns, 0);
+    assert.deepEqual(evidence.turns, []);
+    assert.match(evidence.diagnostics[0].message, /exceeds bounded read limit/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("session evidence redaction handles nested values and circular objects", () => {
   const circular: Record<string, unknown> = {
     authorization: "Bearer secret",

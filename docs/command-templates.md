@@ -30,7 +30,7 @@ Command-template standard does not own:
 
 ## Shape
 
-A command template is either a command-line string or an ordered array of command-template leaves:
+A command template is a command-line string, an ordered array of command-template nodes, or an object that applies execution fields to a nested `template`:
 
 ```json
 {
@@ -62,7 +62,8 @@ Common object fields:
 - `retry`: Optional max attempts including the first. Default is `1`.
 - `failure`: Optional failure propagation scope: `continue`, `branch`, or `root`. Default is `continue`.
 - `recover`: Optional command template run between failed retry attempts. Recovery output is ignored; recovery failure stops retries.
-- `template`: Required command string or ordered composition array.
+- `repeat`: Optional non-negative expansion count or supported length expression. Repeated nodes receive generated zero-based index placeholders.
+- `template`: Required nested command string, ordered composition array, or command-template object.
 
 For object form, write `template` last. Read the node flags first, then the executable content. Storage paths, labels, selectors, descriptions, and registry-specific metadata belong to each extension's local schema.
 
@@ -83,7 +84,7 @@ Implementations may expand `~` in command position and may resolve relative comm
 Supported forms:
 
 | Form               | Meaning                                          |
-| ------------------ | ------------------------------------------------ |
+| --- | --- |
 | `{name}`           | Required value from runtime values or `defaults` |
 | `{name=default}`   | Inline default when no value is provided         |
 | `{name??fallback}` | Fallback when value is missing, null, or empty   |
@@ -206,7 +207,7 @@ Repeat expressions support only integers, `index`, `prev`, `next`, `repeat`, par
 
 Repeat placeholders are local generated values. Call-time args should not use these reserved names to override the repeat index.
 
-Parallel children use the same object shape: flags come first and `template` stays last. A join remains usable when at least one branch succeeds and reports each branch label/status. Some local schemas may accept `pipe`, but the portable standard is `template: [...]`.
+Parallel children use the same object shape: flags come first and `template` stays last. A join remains usable when at least one branch succeeds and reports each branch label/status. The portable composition field is always `template`.
 
 ## Failure Propagation
 

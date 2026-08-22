@@ -22,9 +22,21 @@ Specialize a maintained Recipe without copying its contract:
 register_tool name=music_player from=music-player/playback defaults={"source":"~/Music/1MIX"}
 ```
 
-`from`, `template`, and `draft` are distinct source modes. `from` accepts exact `<skill>/<recipe>` identity or an explicit `.json` / `.md` path and inherits async behavior, args/types, source defaults, artifacts, Control, and runtime-owned origins. `defaults` may set only effective caller-owned args and must satisfy their types. `template` is only for trusted command definitions; public `values` authoring has been removed in favor of caller defaults or an authored Recipe file.
+`from`, `template`, and `draft` are distinct source modes. `from` accepts exact `<skill>/<recipe>` identity or an explicit `.json` / `.md` path and inherits async behavior, args/types, source defaults, artifacts, Control, and runtime-owned origins. `defaults` may set only effective caller-owned args and must satisfy their types. `template` is only for trusted command definitions; specialization accepts caller `defaults`, while authored composition values belong in a Recipe file.
 
-Promote an immutable captured draft only with its draft path and explicit target name. Name collisions require `update=true`. Invalid content fails before active mutation.
+Promote an immutable captured draft only with its draft path and explicit target name:
+
+```text
+register_tool name=repo_check draft=~/.pi/agent/recipes/drafts/<captured-recipe>.json
+```
+
+Delete a persisted definition through the same fenced mutation path:
+
+```text
+register_tool name=repo_check template=null
+```
+
+An empty `template` string is the equivalent deletion form. Do not delete registry files manually. Host-visible dynamic definitions may remain visible until reload because Pi cannot unregister them, but extension-local lookup rejects the deleted definition immediately. Name collisions for creation or replacement require `update=true`. Invalid content fails before active mutation.
 
 Registration resolves the effective delegated contract before persistence, then reports logical `source`, effective `required_args` / `optional_args`, and distinct `persisted`, `registry_active`, `host_registered`, `active_tool`, and `callable_now` states. A callable result points to the actual generated tool as the next action. An uncallable result names its `activation_boundary` and status/doctor action without suggesting spawn as a substitute. Diagnose one maintained source with `inspect target=recipes view=doctor identity=<skill>/<recipe>`; diagnose final activation, source, schema summary, and separate spawn/tool usage with `inspect target=tool:<name> view=status`. Treat the tool as callable in the current session only when `callable_now` is true; persistence alone is not activation proof. Registration results omit raw persisted paths and executable template/config payloads.
 
@@ -41,9 +53,18 @@ inspect target=recipes view=status
 inspect target=tool:<name> view=status
 ```
 
-Recipe inspection reports generation, scan/watch state, active, shadowed, invalid, disabled, component rejection, diagnostic, risk, usage, and review evidence. Tool status reports current activation plus separate `tool_calls` and `spawn_calls`; tool schema reports the caller-owned capability contract. A registered tool is not a running actor.
+Recipe inspection reports generation, scan/watch state, active, shadowed, invalid, disabled, component rejection, diagnostic, risk, usage, and review evidence. Tool status reports current activation plus separate `tool_calls` and `spawn_calls`; tool schema reports the caller-owned capability contract. Inspect the complete target/view contract in [Management Inspection](./inspection.md). A registered tool is not a running actor.
 
 `spawn recipe=<name>` executes a Recipe and reports `launch_kind: "spawn"`; it does not prove that a registered tool was exposed or invoked. Registered-tool execution reports `launch_kind: "tool"`.
+
+Async registered tools add runtime-owned optional invocation parameters after resolving the Recipe contract:
+
+| Parameter | Availability | Purpose |
+| --- | --- | --- |
+| `run_id` | non-singleton async tools | Overrides the generated logical Run id for this invocation |
+| `transport_context` | all async tools | Preserves an originating transport route for detached terminal follow-up |
+
+These parameters are not Recipe-authored args. Singleton tools do not expose `run_id` because their canonical Run identity is owned by the Skill Recipe.
 
 ## Automatic Review
 

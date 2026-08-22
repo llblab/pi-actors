@@ -10,6 +10,7 @@ import * as path from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   matchesKey,
+  sliceByColumn,
   truncateToWidth,
   visibleWidth,
   type TUI,
@@ -29,6 +30,11 @@ export type ActorInspectorTab = "recipe" | "trace" | "control";
 
 type InspectorFocus = "runs" | "tabs" | "document" | "list" | "detail" | "select";
 type SelectorMode = "run" | "source";
+
+interface SelectorOption {
+  content: string;
+  preserveColors?: boolean;
+}
 
 export interface ActorInspectorActionResult {
   ok: boolean;
@@ -73,6 +79,7 @@ export class ActorInspectorOverlay {
   private readonly theme: Theme;
   private readonly tui: TUI;
   private readonly refreshTimer: NodeJS.Timeout;
+  private contentSelectedRows = new Set<number>();
   private contentStripeIndices: number[] = [];
   private documentScroll = 0;
   private detailScroll = 0;
@@ -244,10 +251,11 @@ export class ActorInspectorOverlay {
     if (this.killConfirmation) return this.renderKillDialog(innerWidth);
 
     const lines = [this.border("╭", " Actor Inspector ", "╮", innerWidth)];
-    lines.push(this.row(this.renderRunControl(run, runs.length - this.runIndex), innerWidth));
+    lines.push(this.row(this.renderRunControl(run, runs.length - this.runIndex - 1), innerWidth));
     lines.push(this.row(this.renderTabs(run), innerWidth));
     lines.push(this.border("├", "", "┤", innerWidth));
 
+    this.contentSelectedRows.clear();
     this.contentStripeIndices = [];
     let content = this.renderContent(run, innerWidth);
     if (this.feedback) {
@@ -257,6 +265,9 @@ export class ActorInspectorOverlay {
           ? "error"
           : "warning";
       content = [this.theme.fg(color, ` ${this.feedback.message}`), ...content];
+      this.contentSelectedRows = new Set(
+        [...this.contentSelectedRows].map((index) => index + 1),
+      );
       this.contentStripeIndices = [0, ...this.contentStripeIndices];
     }
     const viewportRows = this.contentViewportRows();
@@ -266,9 +277,27 @@ export class ActorInspectorOverlay {
         content[index] ?? "",
         innerWidth,
         this.contentStripeIndices[index] ?? index,
+        this.contentSelectedRows.has(index),
       ));
     }
     lines.push(this.footerBorder(this.renderKeyHints(), innerWidth));
+    if (this.focus === "select") {
+      const runSelector = this.selectorMode === "run";
+      const startRow = runSelector ? 2 : 3;
+      const horizontalOffset = runSelector ? 4 : 12;
+      const availableRows = Math.max(3, lines.length - startRow - 1);
+      const menu = this.renderSelector(run, availableRows);
+      for (const [offset, menuLine] of menu.entries()) {
+        const target = startRow + offset;
+        if (target >= lines.length - 1) break;
+        lines[target] = this.compositeMenuLine(
+          lines[target]!,
+          menuLine,
+          innerWidth,
+          horizontalOffset,
+        );
+      }
+    }
     return lines;
   }
 
@@ -428,10 +457,10 @@ export class ActorInspectorOverlay {
   private renderKillDialog(innerWidth: number): string[] {
     const confirmation = this.killConfirmation!;
     const cancel = this.killDialogChoice === "cancel"
-      ? this.theme.bg("customMessageBg", this.theme.fg("accent", "  Cancel  "))
+      ? this.theme.bg("selectedBg", this.theme.fg("accent", "  Cancel  "))
       : this.theme.fg("muted", "  Cancel  ");
     const kill = this.killDialogChoice === "kill"
-      ? this.theme.bg("customMessageBg", this.theme.fg("error", "  Kill actor  "))
+      ? this.theme.bg("selectedBg", this.theme.fg("error", "  Kill actor  "))
       : this.theme.fg("error", "  Kill actor  ");
     const body = [
       "",
@@ -464,23 +493,32 @@ export class ActorInspectorOverlay {
     const suffix = active ? this.theme.fg("accent", " → ") : "   ";
     if (!run) {
       const empty = this.theme.fg("muted", `${prefix}Run: none${suffix}`);
-      return this.focus === "runs" ? this.theme.bg("customMessageBg", empty) : empty;
+      return active ? this.theme.bg("selectedBg", empty) : empty;
     }
     const value = `${prefix}${this.theme.fg("muted", "Run: ")}${this.theme.fg("text", `#${sequence}`)}  ${this.theme.fg("accent", run.run)}  ${this.theme.fg(this.statusColor(run.status), run.status)}${suffix}`;
-    return this.focus === "runs" ? this.theme.bg("customMessageBg", value) : value;
+    return active ? this.theme.bg("selectedBg", value) : value;
   }
 
   private renderTabs(run?: ActorInspector.ActorInspectorRunItem): string {
     const source = this.traceSource(run);
     return TABS.map((tab, index) => {
       const base = `${tab[0]!.toUpperCase()}${tab.slice(1)}`;
-      const label = tab === "trace" && source !== "all" ? `${base} (${source})` : base;
+      const label = tab === "trace" && source !== "all" ? `${base}: ${source}` : base;
       const selected = index === this.tabIndex;
-      const display = selected && this.focus !== "runs" ? `[ ${label} ]` : `  ${label}  `;
-      const value = ` ${display} `;
-      if (!selected) return this.theme.fg("muted", value);
-      const colored = this.theme.fg("accent", value);
-      return this.focus === "tabs" ? this.theme.bg("customMessageBg", colored) : colored;
+      const bracketed = selected && this.focus !== "runs";
+      if (!selected) {
+        const display = bracketed ? `[ ${label} ]` : `  ${label}  `;
+        return this.theme.fg("muted", ` ${display} `);
+      }
+      const coloredLabel = tab === "trace" && source !== "all"
+        ? `${this.theme.fg("accent", `${base}:`)} ${this.theme.fg("text", source)}`
+        : this.theme.fg("accent", label);
+      const colored = bracketed
+        ? ` ${this.theme.fg("accent", "[ ")}${coloredLabel}${this.theme.fg("accent", " ]")} `
+        : `   ${coloredLabel}   `;
+      const active = this.focus === "tabs"
+        || (this.focus === "select" && this.selectorMode === "source");
+      return active ? this.theme.bg("selectedBg", colored) : colored;
     }).join(" ");
   }
 
@@ -489,7 +527,6 @@ export class ActorInspectorOverlay {
     width: number,
   ): string[] {
     if (!run) return [this.theme.fg("muted", " No owned actor runs")];
-    if (this.focus === "select") return this.renderSelector(run);
     if (this.focus === "detail") return this.renderTraceDetail(width);
     if (this.tab === "trace") return this.renderTraceList(run);
     const stateDir = path.join(this.stateRoot, run.run);
@@ -509,31 +546,64 @@ export class ActorInspectorOverlay {
     );
   }
 
-  private renderSelector(run: ActorInspector.ActorInspectorRunItem): string[] {
+  private renderSelector(
+    run: ActorInspector.ActorInspectorRunItem,
+    availableRows: number,
+  ): string[] {
     const options = this.selectorMode === "run"
-      ? this.runs().map((item) => `run:${item.run}  ${item.status}`)
-      : this.traceSources(run).map((source) => `Trace source: ${source}`);
-    const lines = this.renderMenuBox(options, this.selectorIndex);
-    this.contentStripeIndices = lines.map(() => 0);
-    return lines;
+      ? this.runSelectorOptions()
+      : this.traceSources(run).map((source) => ({
+        content: `${this.theme.fg("accent", "Trace:")} ${this.theme.fg("text", source)}`,
+        preserveColors: true,
+      }));
+    return this.renderMenuBox(options, this.selectorIndex, availableRows);
   }
 
-  private renderMenuBox(options: string[], focusedIndex: number): string[] {
+  private runSelectorOptions(): SelectorOption[] {
+    const runs = this.runs();
+    const sequenceWidth = Math.max(
+      2,
+      ...runs.map((_item, index) => `#${runs.length - index - 1}`.length),
+    );
+    const runWidth = Math.max(1, ...runs.map((item) => visibleWidth(item.run)));
+    return runs.map((item, index) => ({
+      content: [
+        this.theme.fg("text", this.fit(`#${runs.length - index - 1}`, sequenceWidth)),
+        this.theme.fg("accent", this.fit(item.run, runWidth)),
+        this.theme.fg(this.statusColor(item.status), item.status),
+      ].join("  "),
+      preserveColors: true,
+    }));
+  }
+
+  private renderMenuBox(
+    options: SelectorOption[],
+    focusedIndex: number,
+    availableRows: number,
+  ): string[] {
     if (options.length === 0) return [this.theme.fg("muted", " No options")];
-    const visibleLimit = Math.max(1, Math.min(this.contentViewportRows(), options.length));
+    const visibleLimit = Math.max(
+      1,
+      Math.min(availableRows - 2, options.length),
+    );
     const maxStart = Math.max(0, options.length - visibleLimit);
     const start = Math.max(0, Math.min(focusedIndex - Math.floor(visibleLimit / 2), maxStart));
     const visible = options.slice(start, start + visibleLimit);
-    const width = Math.max(8, ...options.map((option) => visibleWidth(option) + 4));
+    const width = Math.max(8, ...options.map((option) => visibleWidth(option.content) + 4));
     const border = (left: string, right: string, marker = "") =>
       this.theme.fg("borderAccent", `${left}${marker}${"─".repeat(Math.max(0, width - visibleWidth(marker)))}${right}`);
     return [
       border("╭", "╮", start > 0 ? "↑" : ""),
       ...visible.map((option, offset) => {
         const index = start + offset;
-        const row = this.fit(`${index === focusedIndex ? " ▶ " : "   "}${option}`, width);
-        const colored = index === focusedIndex ? this.theme.fg("accent", row) : row;
-        const styled = index === focusedIndex ? this.theme.bg("customMessageBg", colored) : colored;
+        const marker = index === focusedIndex
+          ? this.theme.fg("accent", " ▶ ")
+          : "   ";
+        const row = this.fit(`${marker}${option.content}`, width);
+        const colored = index === focusedIndex && !option.preserveColors
+          ? this.theme.fg("accent", row)
+          : row;
+        const styled = index === focusedIndex ? this.theme.bg("selectedBg", colored) : colored;
         return `${this.theme.fg("borderAccent", "│")}${styled}${this.theme.fg("borderAccent", "│")}`;
       }),
       border("╰", "╯", start + visible.length < options.length ? "↓" : ""),
@@ -562,6 +632,14 @@ export class ActorInspectorOverlay {
     this.contentStripeIndices = items
       .slice(start, start + viewportRows)
       .map((_item, offset) => start + offset);
+    const selectedViewportRow = banner.length + this.rowIndex - start;
+    if (
+      this.focus === "list" &&
+      selectedViewportRow >= banner.length &&
+      selectedViewportRow < viewportRows
+    ) {
+      this.contentSelectedRows.add(selectedViewportRow);
+    }
     return [...banner, ...items.slice(start, start + viewportRows - banner.length).map((item, offset) => {
       const index = start + offset;
       const detail = item.detail && typeof item.detail === "object"
@@ -575,7 +653,7 @@ export class ActorInspectorOverlay {
       const prefix = this.focus === "list" && index === this.rowIndex
         ? this.theme.fg("accent", " ▶ ")
         : "   ";
-      const row = `${prefix}${this.theme.fg("text", `#${items.length - index}`)} ${marker} ${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
+      const row = `${prefix}${this.theme.fg("text", `#${items.length - index - 1}`)} ${marker} ${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
       return this.focus === "list" && index === this.rowIndex
         ? this.theme.fg("accent", row)
         : row;
@@ -734,11 +812,24 @@ export class ActorInspectorOverlay {
       return [
         `${indent}[`,
         ...value.flatMap((item, index) => {
-          const marker = `${indent}  - #${index + 1}`;
+          const itemDepth = depth + 1;
+          const itemIndent = "  ".repeat(itemDepth);
+          const marker = `#${index}`;
           const itemInline = this.inlineDocumentValue(item);
-          return itemInline !== undefined
-            ? [`${marker}: ${itemInline}`]
-            : [marker, ...this.document(item, depth + 2)];
+          let lines: string[];
+          if (itemInline !== undefined) {
+            lines = [`${itemIndent}${marker}: ${itemInline}`];
+          } else if (item && typeof item === "object") {
+            const nested = this.document(item, itemDepth);
+            lines = [
+              `${itemIndent}${marker}: ${nested[0]!.slice(itemIndent.length)}`,
+              ...nested.slice(1),
+            ];
+          } else {
+            lines = this.labeledScalarLines(marker, item, itemDepth);
+          }
+          if (index < value.length - 1) lines[lines.length - 1] += ",";
+          return lines;
         }),
         `${indent}]`,
       ];
@@ -792,8 +883,12 @@ export class ActorInspectorOverlay {
   private styleDocumentLine(line: string): string {
     const indent = line.match(/^ */u)?.[0] ?? "";
     const content = line.slice(indent.length);
-    if (/^- #\d+$/u.test(content) || content.endsWith(":")) {
+    if (content.endsWith(":")) {
       return `${indent}${this.theme.fg("accent", content)}`;
+    }
+    const indexed = /^(#\d+:)(.*)$/u.exec(content);
+    if (indexed) {
+      return `${indent}${this.theme.fg("accent", indexed[1])}${this.theme.fg("text", indexed[2])}`;
     }
     const labeled = /^([^:]+:)(.*)$/u.exec(content);
     if (labeled) {
@@ -868,13 +963,46 @@ export class ActorInspectorOverlay {
     return `${this.theme.fg("borderAccent", `╰${prefix}`)}${content}${this.theme.fg("borderAccent", `${suffix}${fill}╯`)}`;
   }
 
+  private compositeMenuLine(
+    baseLine: string,
+    menuLine: string,
+    innerWidth: number,
+    horizontalOffset: number,
+  ): string {
+    const offset = Math.max(0, Math.min(horizontalOffset, innerWidth));
+    const menuWidth = Math.min(innerWidth - offset, visibleWidth(menuLine));
+    const baseInner = sliceByColumn(baseLine, 1, innerWidth, true);
+    const prefix = sliceByColumn(baseInner, 0, offset, true);
+    const suffixStart = offset + menuWidth;
+    const suffix = sliceByColumn(
+      baseInner,
+      suffixStart,
+      Math.max(0, innerWidth - suffixStart),
+      true,
+    );
+    const remainder = this.fit(suffix, innerWidth - suffixStart);
+    return `${this.theme.fg("borderAccent", "│")}${this.fit(prefix, offset)}${truncateToWidth(menuLine, menuWidth, "")}${remainder}${this.theme.fg("borderAccent", "│")}`;
+  }
+
   private stripeBackground(content: string, index: number): string {
     return index % 2 === 0 ? content : this.theme.bg("customMessageBg", content);
   }
 
-  private stripedRow(content: string, width: number, index: number): string {
-    const fitted = this.fit(content, width);
-    return `${this.theme.fg("borderAccent", "│")}${this.stripeBackground(fitted, index)}${this.theme.fg("borderAccent", "│")}`;
+  private stripedRow(
+    content: string,
+    width: number,
+    index: number,
+    selected: boolean,
+  ): string {
+    if (!selected) {
+      const fitted = this.fit(content, width);
+      return `${this.theme.fg("borderAccent", "│")}${this.stripeBackground(fitted, index)}${this.theme.fg("borderAccent", "│")}`;
+    }
+    const selectedContent = truncateToWidth(`${content} `, width, "");
+    const remainder = " ".repeat(
+      Math.max(0, width - visibleWidth(selectedContent)),
+    );
+    return `${this.theme.fg("borderAccent", "│")}${this.theme.bg("selectedBg", selectedContent)}${this.stripeBackground(remainder, index)}${this.theme.fg("borderAccent", "│")}`;
   }
 
   private row(content: string, width: number): string {

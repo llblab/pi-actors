@@ -42,7 +42,7 @@ export interface InspectToolDeps<TContext = unknown> {
 
 function runtimeStatus(): Record<string, unknown> {
   return {
-    automatic_review: process.env.PI_ACTORS_AUTOMATIC_REVIEW !== "off",
+    automatic_review: Paths.isAutomaticRecipeReviewEnabled(),
     run_root: Paths.getRunStateRoot(),
     state_schema: RuntimeIdentity.RUN_STATE_SCHEMA,
     version: RuntimeIdentity.getPackageVersion(),
@@ -54,7 +54,7 @@ function runtimeRuns(
   deps: InspectToolDeps,
   status: string | undefined,
 ): Record<string, unknown> {
-  const session = ToolsAccess.getContextSessionId(ctx);
+  const session = ToolsAccess.requireContextSessionId(ctx, "runtime Run inventory");
   const listed = deps.listRuns
     ? deps.listRuns()
     : AsyncRuns.listRuns(undefined, status);
@@ -68,8 +68,8 @@ function runtimeRuns(
         return run;
       }
     })
-    .filter((run) => !session || !run.ownerId || run.ownerId === session);
-  return { ...(session ? { owner_session: session } : {}), runs };
+    .filter((run) => run.ownerId === session);
+  return { owner_session: session, runs };
 }
 
 function runtimeTriage(
@@ -463,7 +463,11 @@ function inspectRun(
     throw new Error("inspect run:<id> supports view=recipe, view=trace, or view=control.");
   }
   const status = deps.getRunStatus
-    ? deps.getRunStatus(run)
+    ? ToolsAccess.assertRunStatusAccessibleToContext(
+        run,
+        deps.getRunStatus(run),
+        ctx,
+      )
     : ToolsAccess.assertRunAccessibleToContext(run, ctx);
   const stateDir = String(status.state_dir);
   if (view === "recipe") {

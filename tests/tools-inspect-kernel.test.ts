@@ -9,6 +9,10 @@ import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 
+const sessionAContext = {
+  sessionManager: { getSessionId: () => "session-a" },
+};
+
 async function fixture(): Promise<{ root: string; status: Record<string, unknown> }> {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-kernel-"));
   const status = {
@@ -63,14 +67,14 @@ test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () 
   const { root, status } = await fixture();
   try {
     const tool = createInspectToolDefinition({ getRunStatus: () => status });
-    const recipe = await tool.execute("recipe", { target: "run:demo", view: "recipe", verbose: true }, undefined, undefined, {});
+    const recipe = await tool.execute("recipe", { target: "run:demo", view: "recipe", verbose: true }, undefined, undefined, sessionAContext);
     assert.equal(recipe.details.identity.recipe, "demo-recipe");
     assert.equal(recipe.details.identity.logical_reference, "demo.json");
     assert.equal(recipe.details.identity.source_kind, "explicit_file_recipe");
     assert.equal(recipe.details.composition[0].role, "entry");
     assert.equal(recipe.details.composition[0].recipe_stem, "demo-recipe");
     assert.doesNotMatch(JSON.stringify(recipe), /\/private\/recipes/);
-    const trace = await tool.execute("trace", { target: "run:demo", view: "trace", source: "lifecycle", verbose: true }, undefined, undefined, {});
+    const trace = await tool.execute("trace", { target: "run:demo", view: "trace", source: "lifecycle", verbose: true }, undefined, undefined, sessionAContext);
     assert.equal(trace.details.items[0].kind, "run.start");
     assert.deepEqual(trace.details.summary, {
       history_complete: true,
@@ -82,7 +86,7 @@ test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () 
       retained_events: 1,
       retained_bytes: Buffer.byteLength(await readFile(join(root, "trace.jsonl"))),
     });
-    const control = await tool.execute("control", { target: "run:demo", view: "control", verbose: true }, undefined, undefined, {});
+    const control = await tool.execute("control", { target: "run:demo", view: "control", verbose: true }, undefined, undefined, sessionAContext);
     assert.deepEqual(control.details.actor_actions, ["pause"]);
     assert.deepEqual(control.details.runtime_actions, ["kill"]);
     assert.equal(control.details.endpoint.type, "named-pipe");
@@ -110,13 +114,45 @@ test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () 
       { target: "run:demo", view: "trace", source: "control", verbose: true },
       undefined,
       undefined,
-      {},
+      sessionAContext,
     );
     assert.equal(controlTrace.details.items[0].kind, "control.failed");
     assert.doesNotMatch(JSON.stringify(controlTrace), /TOOL_.*_SECRET/);
     const durable = await readFile(join(root, "controls.jsonl"), "utf8");
     assert.match(durable, /TOOL_CONTROL_SECRET/);
     assert.match(durable, /TOOL_ERROR_SECRET/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Run inspection fails closed without a matching coordinator session", async () => {
+  const { root, status } = await fixture();
+  try {
+    const tool = createInspectToolDefinition({ getRunStatus: () => status });
+    await assert.rejects(
+      tool.execute(
+        "missing-session",
+        { target: "run:demo", view: "trace" },
+        undefined,
+        undefined,
+        {},
+      ),
+      (error: Error & { reason?: string }) =>
+        error.reason === "session_unavailable" && /active coordinator session/.test(error.message),
+    );
+    await assert.rejects(
+      tool.execute(
+        "foreign-session",
+        { target: "run:demo", view: "control" },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "session-b" } },
+      ),
+      (error: Error & { hint?: string; reason?: string }) =>
+        error.reason === "session_mismatch" &&
+        error.hint === "inspect target=runtime view=runs",
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -132,7 +168,7 @@ test("Inspect Control diagnoses structurally invalid retained records", async ()
     const tool = createInspectToolDefinition({ getRunStatus: () => status });
     const control = await tool.execute("control", {
       target: "run:demo", view: "control", verbose: true,
-    }, undefined, undefined, {});
+    }, undefined, undefined, sessionAContext);
     assert.deepEqual(control.details.diagnostics, [{ reason: "invalid_status_timestamp" }]);
     assert.equal(control.details.pending, 1);
   } finally {
@@ -145,7 +181,7 @@ test("Inspect rejects removed Run views on the canonical target", async () => {
   try {
     const tool = createInspectToolDefinition({ getRunStatus: () => status });
     await assert.rejects(
-      tool.execute("status", { target: "run:demo", view: "status" }, undefined, undefined, {}),
+      tool.execute("status", { target: "run:demo", view: "status" }, undefined, undefined, sessionAContext),
       /supports view=recipe, view=trace, or view=control/,
     );
   } finally {
@@ -378,6 +414,36 @@ test("Runtime status reports immutable source package identity", async () => {
   }
 });
 
+test("Runtime status uses the canonical automatic-review policy", async () => {
+  const tool = createInspectToolDefinition();
+  const previous = process.env.PI_ACTORS_AUTOMATIC_REVIEW;
+  try {
+    for (const value of ["0", "false", "off", " OFF "]) {
+      process.env.PI_ACTORS_AUTOMATIC_REVIEW = value;
+      const result = await tool.execute(
+        "status",
+        { target: "runtime", view: "status", verbose: true },
+        undefined,
+        undefined,
+        {},
+      );
+      assert.equal(result.details.automatic_review, false, value);
+    }
+    process.env.PI_ACTORS_AUTOMATIC_REVIEW = "on";
+    const enabled = await tool.execute(
+      "status-enabled",
+      { target: "runtime", view: "status", verbose: true },
+      undefined,
+      undefined,
+      {},
+    );
+    assert.equal(enabled.details.automatic_review, true);
+  } finally {
+    if (previous === undefined) delete process.env.PI_ACTORS_AUTOMATIC_REVIEW;
+    else process.env.PI_ACTORS_AUTOMATIC_REVIEW = previous;
+  }
+});
+
 test("Inspect reports compacted and inexact Trace history", async () => {
   const { root, status } = await fixture();
   try {
@@ -393,7 +459,7 @@ test("Inspect reports compacted and inexact Trace history", async () => {
     const tool = createInspectToolDefinition({ getRunStatus: () => status });
     const trace = await tool.execute("trace", {
       target: "run:demo", view: "trace", verbose: true,
-    }, undefined, undefined, {});
+    }, undefined, undefined, sessionAContext);
     assert.deepEqual(trace.details.summary, {
       history_complete: false, compacted: true, compactions_total: 2,
       dropped_events: 5, dropped_bytes: 500, dropped_event_count_exact: false,
@@ -547,12 +613,22 @@ test("Runtime triage filters owners and diagnoses malformed Controls without sta
       getRunStatus: (target) => target === foreignRoot ? foreign : status,
       listRuns: () => [status, foreign],
     });
+    await assert.rejects(
+      tool.execute(
+        "triage-missing-session",
+        { target: "runtime", view: "triage", verbose: true },
+        undefined,
+        undefined,
+        {},
+      ),
+      /reason=session_unavailable/,
+    );
     const result = await tool.execute(
       "triage",
       { target: "runtime", view: "triage", verbose: true },
       undefined,
       undefined,
-      { sessionManager: { getSessionId: () => "session-a" } },
+      sessionAContext,
     );
     assert.deepEqual(result.details.runs.map((run: Record<string, unknown>) => run.run), ["demo"]);
     assert.equal(result.details.pending_control_count, 1);

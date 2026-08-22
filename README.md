@@ -19,6 +19,8 @@ This topology does not require every task to become a subagent. Short work with 
 
 ## Install
 
+Requires Node.js 22.19.0 or newer.
+
 ```bash
 pi install npm:@llblab/pi-actors
 ```
@@ -59,7 +61,7 @@ Send one exact Control:
 }
 ```
 
-Run targets accept only actions declared by the captured Recipe. Runtime targets accept only reserved review actions:
+Run targets accept Recipe-declared actor-local actions plus runtime-owned `kill`, `archive`, and `prune`, subject to Run state. Runtime targets accept only reserved review actions:
 
 ```text
 message target=runtime action=review.retry input={"scope":"draft"}
@@ -79,12 +81,14 @@ inspect target=run:test view=recipe
 inspect target=run:test view=trace source=lifecycle lines=40
 inspect target=run:test view=control
 inspect target=runtime view=status
+inspect target=runtime view=runs status=failed
+inspect target=runtime view=triage
 inspect target=recipes view=status
 inspect target=recipes view=doctor identity=music-player/playback
 inspect target=tool:my_tool view=status
 ```
 
-A Run exposes exactly `recipe`, `trace`, and `control` views.
+A Run exposes exactly `recipe`, `trace`, and `control` views. Run-specific `inspect` and `message` require a current coordinator session whose id exactly matches the persisted non-empty Run owner; possessing `run:<id>` alone is not authorization. Missing-session, ownerless, and cross-owner access fails closed. Use `inspect target=runtime view=runs` for the current session's exact-owner inventory. See the complete [management inspection matrix](./docs/inspection.md).
 
 ### `register_tool`
 
@@ -151,7 +155,17 @@ Attention is a live wake hint, not a durable queue: persist recovery state or an
 
 ## Control
 
-Controls persist to `controls.jsonl` before transport. One token-owned lock rejects a 65th pending Control or 1 MiB rewrite before admission, fails closed on malformed or stale-generation evidence, and atomically admits one record. Canonical transitions retain a 128-terminal tail, expected-state fencing, and 4 KiB errors. Admitted nonterminal Controls never expire automatically. Every record carries immutable `run_instance_id`. `inspect view=control` reports pending capacity, saturation, stale work, journal bytes, and bounded diagnostics. If a stuck Run is saturated, use runtime-owned `kill`; it bypasses actor-local capacity and creates no synthetic Control.
+Controls persist to `controls.jsonl` before transport. One token-owned lock rejects a 65th pending Control or 1 MiB rewrite before admission, fails closed on malformed or stale-generation evidence, and atomically admits one record. Canonical transitions retain a 128-terminal tail, expected-state fencing, and 4 KiB errors. Admitted nonterminal Controls never expire automatically. Every record carries immutable `run_instance_id`. `inspect view=control` reports pending capacity, saturation, stale work, journal bytes, and bounded diagnostics.
+
+Runtime-owned lifecycle and retention actions use the same `message` tool:
+
+```text
+message target=run:<id> action=kill
+message target=run:<id> action=archive
+message target=run:<id> action=prune input={"preserve_artifacts":true}
+```
+
+`kill` accepts only a currently running owned generation, bypasses actor-local capacity, and creates no synthetic Control. `archive` and `prune` accept only terminal owned Runs. Archive moves the entire Run state directory and leaves a tombstone. Prune removes Run state; declared existing artifacts survive only when `preserve_artifacts` is explicitly true, in which case they are copied to retained artifact storage before removal.
 
 Long-lived services publish `control-endpoint.json` only when ready:
 
@@ -221,6 +235,8 @@ npm test
 npm run validate
 npm run test:preservation
 ```
+
+The build produces the JavaScript runtime used by detached Actor processes in npm installations. Pi can load a TypeScript extension entrypoint, but standalone Node processes cannot type-strip modules under `node_modules`; keeping compiled Run modules preserves process isolation without a runtime TypeScript loader.
 
 See the [documentation index](./docs/README.md), [Run lifecycle](./docs/async-runs.md), and [Recipe library](./docs/recipe-library.md).
 

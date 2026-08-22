@@ -80,7 +80,7 @@ Do not bulk-copy bundled Recipes into the user Recipe root. Internal `recipe-mem
 npm run recipes:qa
 ```
 
-Recipe QA recursively inventories direct Skill components and validates filesystem identity, syntax, imports, Control declarations, origin ownership, portable artifact paths, and `{skill_dir}` helper references. Nested files and JSON/Markdown stem collisions fail precisely. Recipe descriptions remain optional; QA requires zero capability diagnostics and zero warnings without enforcing style, documentation quotas, or architecture policy. Removed mailbox declarations fail with the migration diagnostic rather than receiving automatic conversion.
+Recipe QA recursively inventories direct Skill components and validates filesystem identity, syntax, imports, Control declarations, origin ownership, portable artifact paths, and `{skill_dir}` helper references. Nested files and JSON/Markdown stem collisions fail precisely. Recipe descriptions remain optional; QA requires zero capability diagnostics and zero warnings without enforcing style, documentation quotas, or architecture policy. `mailbox` is not part of the current Recipe contract and fails validation.
 
 ## Related
 

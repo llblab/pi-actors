@@ -55,6 +55,7 @@ export interface SessionEvidence {
 }
 
 export interface SessionEvidenceReadOptions {
+  maxBytes?: number;
   maxTextChars?: number;
   maxToolCalls?: number;
   maxTurns?: number;
@@ -195,6 +196,10 @@ export function readSessionEvidence(
   path: string,
   options: SessionEvidenceReadOptions = {},
 ): SessionEvidence {
+  const maxBytes = Math.max(
+    1,
+    options.maxBytes ?? Limits.SESSION_EVIDENCE_MAX_BYTES,
+  );
   const maxTextChars = Math.max(
     1,
     options.maxTextChars ?? Limits.SESSION_EVIDENCE_TEXT_CHARS,
@@ -207,7 +212,7 @@ export function readSessionEvidence(
     1,
     options.maxTurns ?? Limits.SESSION_EVIDENCE_MAX_TURNS,
   );
-  const read = readJsonlFileResilient<SessionEntry>(path);
+  const read = readJsonlFileResilient<SessionEntry>(path, { maxBytes });
   const diagnostics = [...read.diagnostics];
   const header = read.records.find((entry) => entry.type === "session");
   const branch = activeBranch(read.records, path, diagnostics);
@@ -296,7 +301,7 @@ export function readSessionEvidence(
     path,
     ...(header ? { session: asRecord(header) } : {}),
     totalTurns: turns.length,
-    truncated: turns.length > visibleTurns.length,
+    truncated: read.truncated === true || turns.length > visibleTurns.length,
     turns: visibleTurns,
   };
 }

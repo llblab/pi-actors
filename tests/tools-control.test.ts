@@ -48,6 +48,37 @@ test("Public message tool routes only allowlisted runtime Controls", async () =>
   );
 });
 
+test("Public message Run operations fail closed without a matching coordinator session", async () => {
+  const tool = createControlToolDefinition({
+    getRunStatus: () => ({
+      control: ["pause"],
+      ownerId: "session-a",
+      run_instance_id: "generation-a",
+      status: "running",
+    }),
+  });
+  await assert.rejects(
+    tool.execute(
+      "missing-session",
+      { action: "pause", target: "run:demo" },
+      undefined,
+      undefined,
+      {},
+    ),
+    (error: Error & { reason?: string }) => error.reason === "session_unavailable",
+  );
+  await assert.rejects(
+    tool.execute(
+      "foreign-session",
+      { action: "pause", target: "run:demo" },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "session-b" } },
+    ),
+    (error: Error & { reason?: string }) => error.reason === "session_mismatch",
+  );
+});
+
 test("Public message tool rejects every legacy envelope before dispatch", async () => {
   const tool = createControlToolDefinition();
   await assert.rejects(

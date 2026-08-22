@@ -25,7 +25,7 @@ Each Run persists:
 - captured Recipe/template/values;
 - model and thinking policy provenance.
 
-Inspection, Control, cancellation, kill, retirement, and teardown filter by owner. Lifecycle mutations revalidate generation, state, and process identity under the canonical lock.
+Inspection, Control, cancellation, kill, retirement, and teardown filter by owner. Public Run-specific `inspect` and `message` also require a current coordinator session whose id exactly matches the persisted non-empty owner; possession of `run:<id>` alone grants no access. Missing coordinator identity, ownerless state, and cross-owner state fail closed. `inspect target=runtime view=runs` returns only the current session's exact-owner inventory and is the supported diagnostic when a remembered Run is inaccessible. Lifecycle mutations additionally revalidate generation, state, and process identity under the canonical lock.
 
 ## State Files
 
@@ -86,11 +86,19 @@ Unix services may publish a FIFO; native Windows services publish a Windows name
 
 A service exact-id claims queued or transport-delivered Controls and records handled/failed outcomes through the canonical Control journal authority. Admission performs one locked read, integrity/generation check, terminal-tail compaction, capacity decision, and atomic write. The 65th pending Control and a rewrite exceeding 1 MiB fail as bounded `control_backpressure` before admission; malformed, unreadable, oversized, or stale-generation journals fail with an integrity reason and no rejected record. `inspect view=control` reports pending capacity, saturation, stale work, journal bytes, and diagnostics. Every transition uses the same lock, expected-state fence, 128-terminal compaction, and atomic bounded rewrite; persisted errors truncate inside the string at 4 KiB. Admitted nonterminal Controls never expire automatically. Delivery failure evidence cannot regress a Control already claimed or completed by a fast consumer. Services capture their startup generation, so stale-generation Controls never execute.
 
-Runtime lifecycle `kill`, retention actions, and review retry/reset remain runtime-owned rather than Recipe-declared. Kill is the recovery path for a stuck saturated Run: it bypasses actor-local Control capacity and creates no synthetic Control. Same-directory restart clears all generation-local evidence before the new `run_instance_id`; archive moves the exact bounded terminal tree, while prune removes kernel state and preserves only explicitly requested artifacts.
+Runtime lifecycle `kill`, retention actions, and review retry/reset remain runtime-owned rather than Recipe-declared. Invoke Run actions through the public tool exactly as follows:
+
+```text
+message target=run:<id> action=kill
+message target=run:<id> action=archive
+message target=run:<id> action=prune input={"preserve_artifacts":true}
+```
+
+Kill accepts only a running owned generation and is the recovery path for a stuck saturated Run: it bypasses actor-local Control capacity and creates no synthetic Control. Archive and prune accept only terminal owned Runs. Archive moves the entire Run state directory and leaves a tombstone at the original path. Prune removes kernel state and preserves declared existing artifacts only when `preserve_artifacts` is explicitly true, copying them to retained artifact storage first. Same-directory restart clears all generation-local evidence before the new `run_instance_id`.
 
 ## Execution Evidence
 
-`execution.json` stores general command/session provenance. The async runner keeps bounded stdout/stderr logs plus complete capture artifacts when semantic validation requires untruncated evidence. Pi command execution also records owned session provenance for later Trace projection and review checks. Trace and Control quotas do not constrain declared user artifacts, repositories or media sources, complete execution captures, or actor-owned queue/workload state; each remains governed by its own lifecycle and policy.
+`execution.json` stores general command/session provenance. The async runner keeps bounded stdout/stderr logs plus complete capture artifacts when semantic validation requires untruncated evidence. Pi command execution also records owned session provenance for later Trace projection and review checks. Session evidence files larger than 4 MiB are rejected before JSONL materialization and surface explicit truncation diagnostics instead of being loaded unboundedly. Artifact manifests compute size and SHA-256 incrementally in 64 KiB chunks. Trace and Control quotas do not constrain declared user artifacts, repositories or media sources, complete execution captures, or actor-owned queue/workload state; each remains governed by its own lifecycle and policy.
 
 Review acceptance remains a command-stage concern. General execution evidence does not imply review approval.
 
@@ -126,7 +134,7 @@ Packaged controlled services demonstrate the endpoint protocol:
 - `music-player/playback` consumes playback Controls and emits playback Trace;
 - `actors/resource-locker` consumes queue/lease actions, emits lock Trace, and atomically retains at most 512 valid journal records within 1 MiB.
 
-Shared archive/prune evidence similarly retains at most 256 valid records within 1 MiB under its canonical lock. The obsolete advisory `wake.jsonl` notifier was removed; filesystem watchers and bounded reconciliation observe authoritative state directly.
+Shared archive/prune evidence similarly retains at most 256 valid records within 1 MiB under its canonical lock. Filesystem watchers and bounded reconciliation observe authoritative state directly.
 
 One-shot pipelines omit Control and terminate through their command graph.
 
@@ -136,6 +144,10 @@ One-shot pipelines omit Control and terminate through their command graph.
 inspect target=run:<id> view=recipe
 inspect target=run:<id> view=trace source=lifecycle lines=40
 inspect target=run:<id> view=control
+inspect target=runtime view=runs
+inspect target=runtime view=triage
 ```
+
+Runtime `runs` is the exact-owner inventory; `triage` aggregates failed Runs, Control pressure, incomplete Trace evidence, and attention for that inventory. See [Management Inspection](./inspection.md) for every target/view combination and applicable inputs.
 
 Use `/actor-inspector` to inspect Runs as concrete actor instances in the live TUI. Runtime, Recipe registry, and tool definitions remain separate management targets. No public noun, tool, target, or view is added by bounded retention.

@@ -59,6 +59,9 @@ test("Maintained invocation guidance uses complete current inspect and Control s
     "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
     "message target=runtime action=review.reset input={\"scope\":\"draft\"}",
     "message target=runtime action=review.reset input={\"scope\":\"tool\"}",
+    "message target=run:<id> action=kill",
+    "message target=run:<id> action=archive",
+    "message target=run:<id> action=prune input={\"preserve_artifacts\":true}",
   ]) {
     assert.ok(combined.includes(expected), `Missing canonical invocation: ${expected}`);
   }
@@ -105,6 +108,26 @@ test("Canonical runtime review Controls pass the real normalizers", () => {
     () => parseAutomaticReviewScope({}),
     /input\.scope=draft or input\.scope=tool/,
   );
+  assert.deepEqual(
+    normalizeControlRequest({ action: "kill", target: "run:demo" }),
+    { action: "kill", target: "run:demo" },
+  );
+  assert.deepEqual(
+    normalizeControlRequest({ action: "archive", target: "run:demo" }),
+    { action: "archive", target: "run:demo" },
+  );
+  assert.deepEqual(
+    normalizeControlRequest({
+      action: "prune",
+      input: { preserve_artifacts: true },
+      target: "run:demo",
+    }),
+    {
+      action: "prune",
+      input: { preserve_artifacts: true },
+      target: "run:demo",
+    },
+  );
 });
 
 test("Maintained public examples pass current schemas and protocol fixtures parse", () => {
@@ -140,6 +163,7 @@ test("Canonical management inspect examples pass the real dispatcher", async () 
       listRuns: () => [],
       recipeRoot,
     });
+    const context = { sessionManager: { getSessionId: () => "session-a" } };
     for (const params of [
       { target: "runtime", view: "status" },
       { target: "runtime", view: "triage" },
@@ -147,7 +171,7 @@ test("Canonical management inspect examples pass the real dispatcher", async () 
       { target: "tool:demo", view: "status" },
       { target: "tool:demo", view: "schema" },
     ]) {
-      const result = await inspect.execute("call", params, undefined, undefined, {});
+      const result = await inspect.execute("call", params, undefined, undefined, context);
       assert.equal(result.content[0].type, "text");
     }
     await assert.rejects(

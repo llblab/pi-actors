@@ -46,6 +46,7 @@ function runNextActions(run: string, result: Record<string, unknown>): string[] 
 }
 
 export interface ControlToolDeps {
+  getRunStatus?: (run: string) => Record<string, unknown>;
   handleRuntimeControl?: (
     action: string,
     input: unknown,
@@ -94,7 +95,13 @@ export function createControlToolDefinition<TContext = unknown>(
         result = deps.handleRuntimeControl(request.action, request.input);
       } else {
         const run = request.target.slice(4);
-        const status = ToolsAccess.assertRunAccessibleToContext(run, ctx);
+        const status = deps.getRunStatus
+          ? ToolsAccess.assertRunStatusAccessibleToContext(
+              run,
+              deps.getRunStatus(run),
+              ctx,
+            )
+          : ToolsAccess.assertRunAccessibleToContext(run, ctx);
         const runInstanceId =
           typeof status.run_instance_id === "string"
             ? status.run_instance_id

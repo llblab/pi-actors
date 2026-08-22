@@ -773,8 +773,9 @@ test("installed dist enforces the same bounded Trace, Control, and inspect contr
         try { controls.appendRunControlInStateDir(stateDir, { action: "pause", run_instance_id: "generation-a" }); }
         catch (error) { reason = error.reason; }
         const tool = inspect.createInspectToolDefinition({ getRunStatus: () => status });
-        const traceView = await tool.execute("trace", { target: "run:installed", view: "trace", verbose: true }, undefined, undefined, {});
-        const controlView = await tool.execute("control", { target: "run:installed", view: "control", verbose: true }, undefined, undefined, {});
+        const context = { sessionManager: { getSessionId: () => "owner-a" } };
+        const traceView = await tool.execute("trace", { target: "run:installed", view: "trace", verbose: true }, undefined, undefined, context);
+        const controlView = await tool.execute("control", { target: "run:installed", view: "control", verbose: true }, undefined, undefined, context);
         console.log(JSON.stringify({ reason, trace: traceView.details.summary, control: {
           available: controlView.details.available, backpressured: controlView.details.backpressured,
           pending: controlView.details.pending }, traceBytes: statSync(join(stateDir, "trace.jsonl")).size,
@@ -1051,10 +1052,10 @@ test("music-player restores a paused checkpoint without resuming intent", async 
     const paused = JSON.parse(
       await waitForText(join(stateDir, "player.json"), /"state":"paused"/),
     );
-    assert.equal(
-      JSON.parse(await readFile(join(stateDir, "playback.json"), "utf8")).state,
-      "paused",
+    const pausedCheckpoint = JSON.parse(
+      await waitForText(join(stateDir, "playback.json"), /"state":\s*"paused"/),
     );
+    assert.equal(pausedCheckpoint.state, "paused");
     first.kill("SIGKILL");
     process.kill(Number(paused.pid), "SIGKILL");
     await new Promise((resolve) => first.once("exit", resolve));

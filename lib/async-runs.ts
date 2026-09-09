@@ -32,6 +32,7 @@ import {
   type CurrentPolicyProvenance,
 } from "./model-context.ts";
 import * as Paths from "./paths.ts";
+import * as RunDeliveryLineage from "./run-delivery-lineage.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as Schema from "./schema.ts";
@@ -186,6 +187,8 @@ export interface AsyncRunMeta {
   artifacts?: Record<string, RunArtifactDeclaration>;
   control?: string[];
   control_endpoint?: AsyncRunControlEndpoint;
+  delivery_owner_id?: string;
+  delivery_parent?: RunDeliveryLineage.RunDeliveryParent;
   model_policy?: CurrentPolicyProvenance;
   notification_policy?: "normal" | "silent";
   process_identity?: RunProcessIdentity;
@@ -666,6 +669,10 @@ export function startRun(
       startParams.transport_context,
     );
     const artifacts = resolveArtifactPaths(startParams.artifacts, outputValues);
+    const runInstanceId = randomUUID();
+    const deliveryLineage = RunDeliveryLineage.inheritedRunDeliveryLineage(
+      startParams.ownerId,
+    );
     const meta: AsyncRunMeta = {
       argv: [process.execPath, ...argv],
       createdAt: new Date().toISOString(),
@@ -683,7 +690,7 @@ export function startRun(
       ...(recipe ? { recipe } : {}),
       ...(recipeFile ? { recipe_file: recipeFile } : {}),
       run,
-      run_instance_id: randomUUID(),
+      run_instance_id: runInstanceId,
       state_dir: stateDir,
       state_schema: RuntimeIdentity.RUN_STATE_SCHEMA,
       status: "running",
@@ -696,6 +703,7 @@ export function startRun(
       ...(startParams.control_endpoint
         ? { control_endpoint: startParams.control_endpoint }
         : {}),
+      ...(deliveryLineage ?? {}),
       ...(startParams.notification_policy === "silent"
         ? { notification_policy: "silent" as const }
         : {}),
@@ -726,6 +734,15 @@ export function startRun(
     const child = spawn(process.execPath, argv, {
       cwd,
       detached: true,
+      ...(deliveryLineage
+        ? {
+            env: RunDeliveryLineage.runDeliveryChildEnv(deliveryLineage, {
+              run,
+              run_instance_id: runInstanceId,
+              state_dir: stateDir,
+            }),
+          }
+        : {}),
       stdio: ["ignore", outFd, errFd],
     });
     closeSync(outFd);

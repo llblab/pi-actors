@@ -543,6 +543,18 @@ test("Recipe watcher rearms when the recipe root appears", {
     });
     await waitForLoad(0);
     assert.match(notifications.join("\n"), /Recipe tools refreshed/);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    notifications.length = 0;
+    previousLoads = loads;
+    const draftRoot = join(recipeRoot, "drafts");
+    await mkdir(draftRoot);
+    await writeRecipe(draftRoot, "captured", {
+      description: "Captured draft",
+      template: "echo draft",
+    });
+    await waitForLoad(previousLoads);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.doesNotMatch(notifications.join("\n"), /Recipe tools refreshed/);
     previousLoads = loads;
     await rm(recipeRoot, { recursive: true, force: true });
     await waitForLoad(previousLoads);

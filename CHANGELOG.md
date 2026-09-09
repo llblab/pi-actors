@@ -2,6 +2,12 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.53.0: Tree-Compressed Completion Delivery
+
+- `Quiet Draft Reloads`: Keeps automatic Recipe reload active for draft-directory changes while showing “Recipe tools refreshed” only for active non-draft Recipe changes or registry-root replacement, so ordinary spawn draft capture no longer produces misleading tool-refresh noise.
+- `Tree-Compressed Completion Delivery`: Propagates exact root-owner and parent-generation lineage through nested Actor processes. Descendants stay quiet and wait for the complete top-level tree; the root batches ready trees and concurrent roots into one visible gray card plus one parent-child model prompt with bounded outputs. Completion forests render in stable root/descendant preorder. Successful Pi acceptance finalizes completion members immediately, preventing missed callbacks or long branches from blocking later epochs; settled/context delivery accepts fresh Pi context wrappers only for the exact active session owner, while urgent steer retains exact presentation acknowledgment.
+- `Command Timeout Trees`: Terminates the full command-template descendant tree on timeout, preventing inherited output streams from leaving an Actor stuck after its command deadline while preserving outer Run process-group cancellation.
+
 ## 0.52.1: Unified Playback Control Hotfix
 
 - `Unified Playback CLI`: Consolidates standalone playback and external control into `playback.mjs`; standalone commands remain runtime-independent, while Actor-owned commands retain exact terminal Control evidence. The maintained Music Player Generative App uses the same explicit control entrypoint. Post-stop status remains readable despite leftover Run metadata; inactive controls fail before journal admission. External callers of the removed `playback-client.mjs` use `playback.mjs control` instead.

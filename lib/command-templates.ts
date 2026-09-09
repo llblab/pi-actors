@@ -4,7 +4,7 @@
  * Owns portable command-template parsing, expansion, risk checks, retries, timeouts, and direct execution.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { accessSync, appendFileSync, constants, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, extname, isAbsolute, join, resolve as resolvePath } from "node:path";
@@ -1010,12 +1010,50 @@ function execCommandTemplateOnce(
     let settled = false;
     let timeoutId: NodeJS.Timeout | undefined;
     let killTimeoutId: NodeJS.Timeout | undefined;
+    const signalProcessTree = (signal: NodeJS.Signals): void => {
+      if (proc.pid === undefined) return;
+      if (process.platform === "win32") {
+        spawnSync("taskkill", [
+          "/PID",
+          String(proc.pid),
+          "/T",
+          ...(signal === "SIGKILL" ? ["/F"] : []),
+        ]);
+        return;
+      }
+      const snapshot = spawnSync("ps", ["-eo", "pid=,ppid="], { encoding: "utf8" });
+      const children = new Map<number, number[]>();
+      for (const line of snapshot.stdout?.split(/\r?\n/u) ?? []) {
+        const [pidText, parentText] = line.trim().split(/\s+/u);
+        const pid = Number(pidText);
+        const parent = Number(parentText);
+        if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(parent)) continue;
+        const siblings = children.get(parent) ?? [];
+        siblings.push(pid);
+        children.set(parent, siblings);
+      }
+      const descendants: number[] = [];
+      const collect = (parent: number): void => {
+        for (const child of children.get(parent) ?? []) {
+          collect(child);
+          descendants.push(child);
+        }
+      };
+      collect(proc.pid);
+      for (const pid of [...descendants, proc.pid]) {
+        try {
+          process.kill(pid, signal);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      }
+    };
     const killProcess = (): void => {
       if (killed) return;
       killed = true;
-      proc.kill("SIGTERM");
+      signalProcessTree("SIGTERM");
       killTimeoutId = setTimeout(() => {
-        if (!settled) proc.kill("SIGKILL");
+        if (!settled) signalProcessTree("SIGKILL");
       }, options.killGrace ?? 5000);
     };
     const settle = (code: number): void => {

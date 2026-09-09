@@ -107,7 +107,7 @@ Run = Recipe + Trace + Control
 ```
 
 1. Spawn with the exact logical Recipe identity and caller-owned values.
-2. Retain the returned `run:<id>` and normally wait for its settled completion batch instead of polling.
+2. Retain the returned `run:<id>` and normally wait for the root coordinator's settled completion batch instead of polling. Nested actor completions accumulate under their containing top-level Run and arrive in that one tree-compressed batch; descendant sessions do not need notification options.
 3. Inspect `view=trace` when retained observations or attention matter.
 4. Inspect `view=control` before diagnosing service readiness, stale work, or saturation.
 5. Send `message` only for an action declared and consumed by that controlled Recipe.

@@ -52,7 +52,7 @@ export function sendRunCompletionBatch(
   pi.sendMessage({
     customType: RUN_COMPLETION_BATCH_CUSTOM_TYPE,
     content,
-    display: false,
+    display: true,
     details: {
       pi_actors_delivery: {
         batch_id: batchId,
@@ -96,17 +96,20 @@ function completionBatchMessage(
     typeof record.content !== "string"
   ) return undefined;
   const details = record.details;
-  if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
-  const delivery = (details as Record<string, unknown>).pi_actors_delivery;
-  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) return undefined;
-  const envelope = delivery as Record<string, unknown>;
-  if (
-    envelope.kind !== "completion_batch" ||
-    typeof envelope.batch_id !== "string" ||
-    !envelope.batch_id ||
-    envelope.batch_id.length > 128
-  ) return undefined;
-  return { batchId: envelope.batch_id, content: record.content };
+  const delivery = details && typeof details === "object" && !Array.isArray(details)
+    ? (details as Record<string, unknown>).pi_actors_delivery
+    : undefined;
+  const envelope = delivery && typeof delivery === "object" && !Array.isArray(delivery)
+    ? delivery as Record<string, unknown>
+    : undefined;
+  const detailedId = envelope?.kind === "completion_batch" &&
+    typeof envelope.batch_id === "string"
+    ? envelope.batch_id
+    : undefined;
+  const contentId = /^Batch: `([^`]{1,128})`$/mu.exec(record.content)?.[1];
+  const batchId = detailedId ?? contentId;
+  if (!batchId || batchId.length > 128) return undefined;
+  return { batchId, content: record.content };
 }
 
 /** Collapse exact retry duplicates and remove conflicting delivery envelopes. */
@@ -229,22 +232,6 @@ export function inspectRunSteerSessionEvidence(
       return steer.content === input.content && steer.eventId === input.eventId
         ? "present"
         : "conflict";
-    },
-  });
-}
-
-export function inspectRunCompletionBatchSessionEvidence(
-  ctx: ExtensionContext,
-  batchId: string,
-  content: string,
-): SessionEvidence.ActiveSessionEntryEvidence {
-  return SessionEvidence.inspectBoundedActiveSessionEntries({
-    getEntry: (id) => ctx.sessionManager.getEntry(id),
-    leaf: ctx.sessionManager.getLeafEntry(),
-    match: (entry) => {
-      const batch = completionBatchMessage(entry);
-      if (!batch || batch.batchId !== batchId) return undefined;
-      return batch.content === content ? "present" : "conflict";
     },
   });
 }

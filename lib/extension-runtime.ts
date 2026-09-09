@@ -143,7 +143,7 @@ export function createActorExtensionRuntime(
     },
     getRunOwnerId,
     onAgentSettled(ctx) {
-      if (activeRunContext !== ctx) return;
+      if (!activeRunOwnerId || getRunOwnerId(ctx) !== activeRunOwnerId) return;
       if (!runUiRuntime.flushCompletionBatch(ctx)) automaticReview.schedule();
     },
     onContext(messages, ctx) {

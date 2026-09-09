@@ -43,6 +43,12 @@ export interface RunObservation {
   activeSubagents?: number;
   completed?: number;
   descendantSubagents?: number;
+  deliveryOwnerId?: string;
+  deliveryParent?: {
+    run: string;
+    run_instance_id: string;
+    state_dir: string;
+  };
   failures?: number;
   ownerId?: string;
   artifacts?: Record<string, string>;
@@ -131,6 +137,21 @@ export function readRunUiSnapshot(
             state.attentionEventIds,
           ),
     status,
+    summary,
+    transitions: detectRunTransitions(state.observed, summary),
+  };
+}
+
+/** Observe every Run generation routed to one root coordinator. */
+export function readRunDeliverySnapshot(
+  state: RunUiObservationState,
+  deliveryOwnerId: string,
+  stateRoot?: string,
+): RunUiSnapshot {
+  const summary = summarizeRuns(stateRoot, undefined, deliveryOwnerId);
+  return {
+    attentionEvents: [],
+    status: undefined,
     summary,
     transitions: detectRunTransitions(state.observed, summary),
   };
@@ -383,6 +404,11 @@ export interface RunRetirementExecutorOptions {
 }
 
 export interface RunTransition {
+  deliveryParent?: {
+    run: string;
+    run_instance_id: string;
+    state_dir: string;
+  };
   from: RunObservedStatus;
   run: string;
   runInstanceId?: string;
@@ -584,6 +610,23 @@ function observeRun(stateDir: string): RunObservation | undefined {
       failures: Array.isArray(progress.failures)
         ? progress.failures.length
         : undefined,
+      ...(typeof status.delivery_owner_id === "string"
+        ? { deliveryOwnerId: status.delivery_owner_id }
+        : {}),
+      ...(status.delivery_parent &&
+      typeof status.delivery_parent === "object" &&
+      !Array.isArray(status.delivery_parent) &&
+      typeof (status.delivery_parent as Record<string, unknown>).run === "string" &&
+      typeof (status.delivery_parent as Record<string, unknown>).run_instance_id === "string" &&
+      typeof (status.delivery_parent as Record<string, unknown>).state_dir === "string"
+        ? {
+            deliveryParent: status.delivery_parent as {
+              run: string;
+              run_instance_id: string;
+              state_dir: string;
+            },
+          }
+        : {}),
       ...(typeof status.ownerId === "string"
         ? { ownerId: status.ownerId }
         : {}),
@@ -630,6 +673,7 @@ function observeRun(stateDir: string): RunObservation | undefined {
 export function summarizeRuns(
   stateRoot = Paths.getRunStateRoot(),
   ownerId?: string,
+  deliveryOwnerId?: string,
 ): RunSummary {
   if (!existsSync(stateRoot)) {
     return {
@@ -650,7 +694,10 @@ export function summarizeRuns(
   )
     .map((stateDir) => observeRun(stateDir))
     .filter((run): run is RunObservation => Boolean(run))
-    .filter((run) => ownerId === undefined || run.ownerId === ownerId)
+    .filter((run) => deliveryOwnerId !== undefined
+      ? run.deliveryOwnerId === deliveryOwnerId ||
+        (run.deliveryOwnerId === undefined && run.ownerId === deliveryOwnerId)
+      : ownerId === undefined || run.ownerId === ownerId)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
   const processSubagentsByRun = countRunningSubagentsByRun(stateRoot, ownerId);
   const runsWithDescendants = runs.map((run) => {
@@ -1005,6 +1052,7 @@ export function detectRunTransitions(
       transitions.push({
         from: old ?? "running",
         run: run.run,
+        ...(run.deliveryParent ? { deliveryParent: run.deliveryParent } : {}),
         ...(run.stateDir ? { stateDir: run.stateDir } : {}),
         ...(run.artifacts ? { artifacts: run.artifacts } : {}),
         ...(run.launchCorrelation ? { launchCorrelation: run.launchCorrelation } : {}),
@@ -1282,11 +1330,57 @@ export function shouldNotifyRunTransition(transition: RunTransition): boolean {
   );
 }
 
-/** Build exact immutable generation members for owner-journal admission. */
+function deliveryGenerationIdentity(input: {
+  runInstanceId?: string;
+  stateDir?: string;
+}): string | undefined {
+  return input.stateDir && input.runInstanceId
+    ? `${input.stateDir}\0${input.runInstanceId}`
+    : undefined;
+}
+
+function deliveryTreePosition(
+  input: {
+    deliveryParent?: RunObservation["deliveryParent"];
+    runInstanceId?: string;
+    stateDir?: string;
+  },
+  runsByIdentity: Map<string, RunObservation>,
+): { depth: number; rootIdentity: string } | undefined {
+  const ownIdentity = deliveryGenerationIdentity(input);
+  if (!ownIdentity) return undefined;
+  let parent = input.deliveryParent;
+  let depth = 0;
+  let rootIdentity = ownIdentity;
+  const visited = new Set([ownIdentity]);
+  while (parent) {
+    const identity = `${parent.state_dir}\0${parent.run_instance_id}`;
+    if (visited.has(identity)) return undefined;
+    visited.add(identity);
+    const ancestor = runsByIdentity.get(identity);
+    if (!ancestor || ancestor.notificationPolicy === "silent") return undefined;
+    depth += 1;
+    rootIdentity = identity;
+    parent = ancestor.deliveryParent;
+  }
+  return { depth, rootIdentity };
+}
+
+/** Build exact immutable members only after each containing root Run is terminal. */
 export function collectRunCompletionBatchMembers(
   transitions: RunTransition[],
+  deliveryRuns: RunObservation[] = [],
 ): RunCompletionBatchMember[] {
-  return transitions.flatMap((transition) => {
+  const runsByIdentity = new Map(deliveryRuns.flatMap((run) => {
+    const identity = deliveryGenerationIdentity(run);
+    return identity ? [[identity, run] as const] : [];
+  }));
+  const incompleteRoots = new Set(deliveryRuns.flatMap((run) => {
+    if (TERMINAL.has(run.status)) return [];
+    const position = deliveryTreePosition(run, runsByIdentity);
+    return position ? [position.rootIdentity] : [];
+  }));
+  const admitted = transitions.flatMap((transition) => {
     if (
       !shouldNotifyRunTransition(transition) ||
       !transition.stateDir ||
@@ -1294,6 +1388,9 @@ export function collectRunCompletionBatchMembers(
       !transition.terminalAt ||
       Number.isNaN(Date.parse(transition.terminalAt))
     ) return [];
+    const position = deliveryTreePosition(transition, runsByIdentity);
+    if (!position || incompleteRoots.has(position.rootIdentity)) return [];
+    const { depth } = position;
     const artifactEntries = Object.entries(transition.artifacts ?? {})
       .filter((entry): entry is [string, string] =>
         typeof entry[1] === "string" && Boolean(entry[1]))
@@ -1304,6 +1401,20 @@ export function collectRunCompletionBatchMembers(
       ...(artifactEntries.length > 0
         ? { artifacts: Object.fromEntries(artifactEntries) }
         : {}),
+      ...(transition.semanticResult?.body?.trim()
+        ? {
+            output: transition.semanticResult.body.trim().length > 4_000
+              ? `${transition.semanticResult.body.trim().slice(0, 3_999)}…`
+              : transition.semanticResult.body.trim(),
+          }
+        : {}),
+      ...(transition.deliveryParent
+        ? {
+            parent_run: transition.deliveryParent.run,
+            parent_run_instance_id: transition.deliveryParent.run_instance_id,
+            parent_state_dir: transition.deliveryParent.state_dir,
+          }
+        : {}),
       run: transition.run,
       run_instance_id: transition.runInstanceId,
       state_dir: transition.stateDir,
@@ -1312,13 +1423,16 @@ export function collectRunCompletionBatchMembers(
         ? `${rawSummary.slice(0, 999)}…`
         : rawSummary,
       terminal_at: transition.terminalAt,
+      tree_depth: depth,
     }];
-  }).sort((left, right) =>
+  });
+  return admitted.sort((left, right) =>
+    left.tree_depth - right.tree_depth ||
     left.terminal_at.localeCompare(right.terminal_at) ||
     left.run.localeCompare(right.run) ||
     left.run_instance_id.localeCompare(right.run_instance_id) ||
     left.state_dir.localeCompare(right.state_dir)
-  );
+  ).map(({ tree_depth: _depth, ...member }) => member);
 }
 
 const TERMINAL_FOLLOW_UP_ARTIFACT_LIMIT = 4;

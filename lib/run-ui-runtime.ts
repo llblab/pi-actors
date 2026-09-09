@@ -10,6 +10,7 @@ import * as Observability from "./observability.ts";
 import * as Paths from "./paths.ts";
 import * as Pi from "./pi.ts";
 import * as RunDelivery from "./run-delivery.ts";
+import * as RunDeliveryLineage from "./run-delivery-lineage.ts";
 
 export interface RunUiRuntime {
   close(): void;
@@ -43,12 +44,11 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
   let animationInterval: NodeJS.Timeout | undefined;
   let deliveryTimeout: NodeJS.Timeout | undefined;
   let notifyTimeout: NodeJS.Timeout | undefined;
-  let recoverQueuedBatch = false;
   let recoverQueuedSteers = false;
   let running = false;
   let lastWatcherDiagnosticId = 0;
   const observation = Observability.createRunUiObservationState();
-  const deliveryRecoveryDiagnostics = new Set<string>();
+  const deliveryObservation = Observability.createRunUiObservationState();
   const retirementAttempts = new Set<string>();
   const steerDiagnostics = new Set<string>();
 
@@ -70,9 +70,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     notifyTimeout = undefined;
     if (deliveryTimeout) clearTimeout(deliveryTimeout);
     deliveryTimeout = undefined;
-    recoverQueuedBatch = false;
     recoverQueuedSteers = false;
-    deliveryRecoveryDiagnostics.clear();
     steerDiagnostics.clear();
     if (animationInterval) clearInterval(animationInterval);
     animationInterval = undefined;
@@ -228,12 +226,14 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
   };
   const admitCompletionTransitions = (
     ownerId: string,
-    transitions: Observability.RunTransition[],
+    snapshot: Observability.RunUiSnapshot,
   ): boolean => {
     const existing = journal(ownerId).completion_batch;
     if (existing) return true;
-    const members = Observability.collectRunCompletionBatchMembers(transitions)
-      .slice(0, Limits.RUN_DELIVERY_BATCH_MAX_MEMBERS);
+    const members = Observability.collectRunCompletionBatchMembers(
+      snapshot.transitions,
+      snapshot.summary.runs,
+    ).slice(0, Limits.RUN_DELIVERY_BATCH_MAX_MEMBERS);
     if (members.length === 0) return false;
     RunDelivery.admitRunCompletionBatch({
       members,
@@ -244,6 +244,10 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
   };
   const isIdle = (ctx: Pi.ExtensionContext): boolean =>
     typeof ctx.isIdle !== "function" || ctx.isIdle();
+  const isDeliveryRoot = (ownerId: string): boolean => {
+    const inheritedOwner = RunDeliveryLineage.getProcessDeliveryOwnerId();
+    return inheritedOwner === undefined || inheritedOwner === ownerId;
+  };
   let flushCompletionBatch = (_ctx: Pi.ExtensionContext): boolean => false;
   const flushSteers = (ctx: Pi.ExtensionContext, ownerId: string): boolean => {
     const recovering = recoverQueuedSteers;
@@ -334,11 +338,25 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     if (!notify) return false;
     const sink = Pi.createNotificationSink(deps.pi, ctx);
     retireCandidateRuns(ctx, snapshot.summary);
-    const hasCompletionCandidates =
-      Observability.collectRunCompletionBatchMembers(snapshot.transitions).length > 0;
-    const hasCompletionBatch = Boolean(journal(ownerId).completion_batch);
+    const deliverySnapshot = isDeliveryRoot(ownerId)
+      ? Observability.readRunDeliverySnapshot(deliveryObservation, ownerId)
+      : undefined;
+    const hasCompletionCandidates = deliverySnapshot
+      ? Observability.collectRunCompletionBatchMembers(
+          deliverySnapshot.transitions,
+          deliverySnapshot.summary.runs,
+        ).length > 0
+      : false;
+    const hasCompletionBatch = isDeliveryRoot(ownerId) &&
+      Boolean(journal(ownerId).completion_batch);
     admitSteerEvents(ctx, ownerId, snapshot.attentionEvents);
     Observability.pruneRunUiObservationState(observation, snapshot);
+    if (deliverySnapshot) {
+      Observability.pruneRunUiObservationState(
+        deliveryObservation,
+        deliverySnapshot,
+      );
+    }
     if (!terminalOnly) {
       Observability.deliverRunAttentionNotifications(
         snapshot.attentionEvents.filter((event) =>
@@ -403,54 +421,48 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
   });
 
   flushCompletionBatch = (ctx: Pi.ExtensionContext): boolean => {
-    if (!running || activeContext !== ctx || deps.getActiveContext() !== ctx) return false;
     const ownerId = activeOwnerId;
-    if (!ownerId) return false;
+    if (!running || !ownerId) return false;
+    try {
+      if (Pi.getSessionId(ctx) !== ownerId) return false;
+    } catch {
+      return false;
+    }
     if (flushSteers(ctx, ownerId)) return true;
+    if (!isDeliveryRoot(ownerId)) return false;
     let batch = journal(ownerId).completion_batch;
     if (!batch) {
-      const snapshot = Observability.readRunUiSnapshot(observation, ownerId);
-      admitCompletionTransitions(ownerId, snapshot.transitions);
-      Observability.pruneRunUiObservationState(observation, snapshot);
+      const snapshot = Observability.readRunDeliverySnapshot(
+        deliveryObservation,
+        ownerId,
+      );
+      admitCompletionTransitions(ownerId, snapshot);
+      Observability.pruneRunUiObservationState(deliveryObservation, snapshot);
       batch = journal(ownerId).completion_batch;
     }
     if (!batch) return false;
     if (batch.phase === "presented") {
       finishPresentedBatch(ownerId, batch);
-      const snapshot = Observability.readRunUiSnapshot(observation, ownerId);
-      admitCompletionTransitions(ownerId, snapshot.transitions);
-      Observability.pruneRunUiObservationState(observation, snapshot);
+      const snapshot = Observability.readRunDeliverySnapshot(
+        deliveryObservation,
+        ownerId,
+      );
+      admitCompletionTransitions(ownerId, snapshot);
+      Observability.pruneRunUiObservationState(deliveryObservation, snapshot);
       batch = journal(ownerId).completion_batch;
       if (!batch) return false;
     }
     if (!isIdle(ctx)) return true;
     const content = RunDelivery.formatRunCompletionBatchMessage(batch);
     if (batch.phase === "queued") {
-      if (!recoverQueuedBatch) return true;
-      recoverQueuedBatch = false;
-      const evidence = Pi.inspectRunCompletionBatchSessionEvidence(
-        ctx,
-        batch.batch_id,
-        content,
-      );
-      if (evidence.status === "present") return true;
-      if (evidence.status !== "absent") {
-        const diagnosticKey = `${batch.batch_id}:${evidence.status}:${evidence.reason ?? ""}`;
-        if (!deliveryRecoveryDiagnostics.has(diagnosticKey)) {
-          deliveryRecoveryDiagnostics.add(diagnosticKey);
-          ctx.ui.notify(
-            `Actor completion recovery is ${evidence.status}: ${evidence.reason ?? "conflicting session evidence"}. Batch ${batch.batch_id} remains queued.`,
-            "warning",
-          );
-        }
-        return true;
-      }
-      if (!RunDelivery.resetRunCompletionBatchPending({
+      if (!RunDelivery.markRunCompletionBatchPresented({
         batchId: batch.batch_id,
         ownerId,
         tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
       })) return true;
-      batch = journal(ownerId).completion_batch!;
+      const accepted = journal(ownerId).completion_batch;
+      if (accepted) finishPresentedBatch(ownerId, accepted);
+      return flushCompletionBatch(ctx);
     }
     if (!isIdle(ctx)) return true;
     try {
@@ -471,7 +483,19 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     })) {
       throw new Error("Completion batch changed before queue acknowledgment");
     }
-    recoverQueuedBatch = false;
+    if (!RunDelivery.markRunCompletionBatchPresented({
+      batchId: batch.batch_id,
+      ownerId,
+      tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
+    })) {
+      throw new Error("Completion batch changed before durable acceptance");
+    }
+    const accepted = journal(ownerId).completion_batch;
+    if (accepted) finishPresentedBatch(ownerId, accepted);
+    ctx.ui.notify(
+      `Actor completions ready: ${batch.members.length}`,
+      "info",
+    );
     return true;
   };
 
@@ -479,11 +503,13 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     close,
     flushCompletionBatch,
     projectContext(messages, ctx) {
-      if (!running || activeContext !== ctx || deps.getActiveContext() !== ctx) {
+      const ownerId = activeOwnerId;
+      if (!running || !ownerId) return messages;
+      try {
+        if (Pi.getSessionId(ctx) !== ownerId) return messages;
+      } catch {
         return messages;
       }
-      const ownerId = activeOwnerId;
-      if (!ownerId) return messages;
       const steerContext = Pi.dedupeRunSteerContext(messages);
       let contextMessages = steerContext.messages;
       for (const steer of journal(ownerId).steers) {
@@ -560,7 +586,6 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
       close();
       activeContext = ctx;
       activeOwnerId = ownerId;
-      recoverQueuedBatch = true;
       recoverQueuedSteers = true;
       running = true;
       try {

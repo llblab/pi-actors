@@ -1,17 +1,17 @@
 # Coordinator Delivery Scheduler
 
-Status: Accepted next-minor design. Implementation is in progress; public delivery behavior remains unchanged until the complete acceptance boundary passes.
+Status: Implemented coordinator-delivery contract.
 
 ## Goal
 
 Separate durable Run completion truth from the scheduling of model turns:
 
 ```text
-one Run generation -> one root terminal record
-one bounded completion epoch -> one coordinator turn
+one Run generation -> one terminal record with inherited tree lineage
+one ready completion forest per bounded epoch -> one root-coordinator turn
 ```
 
-Ordinary root terminals accumulate while Pi is active and reach the coordinator in one bounded batch after Pi settles. Only an explicitly actor-authored urgent semantic checkpoint may steer an active agent loop.
+Ordinary terminals accumulate across nested actor sessions while Pi is active. Descendants wait for their containing top-level Run, then all ready trees and concurrently completed top-level Runs reach only the root coordinator in one bounded batch after Pi settles. Only an explicitly actor-authored urgent semantic checkpoint may steer an active agent loop.
 
 ## Non-Goals
 
@@ -27,7 +27,7 @@ Ordinary root terminals accumulate while Pi is active and reach the coordinator 
 - `attention: "notify"` remains visible UI status without a model turn.
 - `attention: "followup"` retains its existing explicit semantic follow-up behavior.
 - New `attention: "steer"` requests urgent semantic delivery at Pi's next safe assistant/tool boundary.
-- Root terminal transitions enter durable completion batching instead of sending one follow-up per Run.
+- Terminal transitions inherit exact parent-generation and root-owner lineage; only the root session batches ready completion trees instead of sending one follow-up per Run or descendant session.
 
 `command.done` remains non-projectable even if malformed or legacy Trace attaches any attention value.
 
@@ -81,11 +81,11 @@ Phases are monotonic:
 
 Every journal mutation uses the canonical token-owned lock, expected-phase fencing, owner and generation validation, and atomic replacement. Repeated transitions are idempotent. Corrupt, oversized, foreign-owner, or stale-generation state fails closed with bounded diagnostics.
 
-A queued envelope is not treated as presented merely because `sendMessage()` returned. Only presentation marks completion members through their existing terminal-handled authority. If a member was synchronously archived or pruned after queueing, the bounded delivery snapshot remains sufficient and the missing state write becomes a diagnostic rather than invalidating the batch.
+Completion and steer acknowledgments intentionally differ. Successful `sendMessage()` acceptance finalizes an ordinary completion batch immediately and marks its members through the existing terminal-handled authority; this prevents a missed context callback from blocking every later epoch. Urgent steer still requires exact model-context presentation. If a completion member was synchronously archived or pruned after queueing, the bounded delivery snapshot remains sufficient and the missing state write becomes a diagnostic rather than invalidating acceptance.
 
 ## Completion Collection
 
-Reconciliation admits unhandled root terminal generations with status `done`, `failed`, `killed`, or `exited`.
+Reconciliation admits unhandled terminal generations with status `done`, `failed`, `killed`, or `exited` that belong to the active root delivery owner. A descendant becomes eligible only when its exact parent chain reaches a terminal top-level Run.
 
 It excludes:
 
@@ -97,7 +97,7 @@ It excludes:
 
 Candidates sort by terminal timestamp, then stable Run identity, then `run_instance_id`. Replacement generations with the same logical Run id remain distinct internal members.
 
-While `ctx.isIdle()` is false, candidates remain durable in their Run state and no terminal follow-up is sent. A flush snapshots eligible candidates into one immutable batch. While that batch remains unpresented, newer terminals stay unhandled for the next bounded completion epoch.
+While `ctx.isIdle()` is false, candidates remain durable in their Run state and no terminal follow-up is sent. A flush snapshots eligible candidates into one immutable batch. While transport acceptance is pending, newer terminals stay unhandled for the next bounded completion epoch.
 
 ## Batch Flush
 
@@ -107,25 +107,20 @@ Flush one batch when:
 2. terminals arrive while Pi is already idle and survive one short debounce window;
 3. session restoration discovers unhandled terminal generations or recoverable queued delivery state.
 
-The model-facing custom message uses `customType: "pi-actors-run-batch"`, `deliverAs: "followUp"`, and `triggerTurn: true`. It includes:
+The custom message uses `customType: "pi-actors-run-batch"`, `display: true`, `deliverAs: "followUp"`, and `triggerTurn: true`. It restores the visible gray completion card for the operator while supplying the same single tree-compressed prompt to the model. The bounded content retains the exact batch identity for session evidence and deduplication even though Pi omits private message details from model context. It includes:
 
 - batch ID and completion window;
 - counts by terminal status;
-- stable Run, status, compact semantic summary, and bounded artifact rows;
+- stable parent-child Run rows with status, compact semantic output, and bounded artifacts;
 - explicit overflow evidence and the canonical runtime Inspect route.
 
 The journal may retain at most 256 members and 1 MiB. Model-facing content lists at most 64 exact rows within the centralized model-output bound. Additional members remain represented by exact status counts and supported Inspect guidance. More than 256 unhandled generations form a later batch rather than being discarded.
 
 Completion member details remain redacted through existing terminal projection rules: no raw model policy, secrets, private Recipe paths, or machine-local source paths enter the message.
 
-## Presentation Acknowledgment And Recovery
+## Acceptance, Presentation, And Recovery
 
-Register a `context` lifecycle adapter that scans model-bound messages for exact pi-actors batch and steer IDs. On a matching active-owner envelope it atomically:
-
-1. moves the envelope to `presented`;
-2. marks every still-present member generation terminal-handled;
-3. records a non-attention `delivery.steer_presented` marker in the exact Run generation for a presented steer;
-4. retains a bounded owner receipt sufficient for near-term deduplication and diagnostics.
+Ordinary completion delivery atomically advances through queued acceptance to finalization immediately after `sendMessage()` returns, marks every still-present member generation terminal-handled, and retains a bounded owner receipt. A `context` lifecycle adapter remains for exact urgent-steer presentation and harmless completion deduplication; presented steer writes `delivery.steer_presented` in the exact Run generation.
 
 The generation-fenced Trace marker prevents a retained historical steer from replaying after bounded owner receipts rotate: suffix compaction cannot retain the older steer while discarding its newer presentation marker. Missing, archived, pruned, or replaced Run state needs no marker because it can no longer replay that original generation.
 
@@ -133,9 +128,9 @@ Recovery rules:
 
 - Send failure: keep `pending`, record failure evidence, and retry.
 - Crash after queueing: inspect existing owned Pi session evidence for the exact custom message ID.
-- Queued message exists: do not resend; wait for `context` presentation.
-- Queued message is absent: return the envelope to `pending`.
-- Presented envelope: never resend.
+- Completion send accepted: finalize immediately and release the next epoch.
+- Crash leaves a queued completion: queued itself proves `sendMessage()` acceptance, so finalize without resend or content reformatting.
+- Presented urgent steer: never resend.
 - Session or context replacement: close timers and callbacks; never deliver through stale context.
 - Owner mismatch: do not inspect, acknowledge, or deliver the envelope.
 
@@ -188,8 +183,8 @@ Implementation is complete only when source and packed-extension tests prove:
 2. Idle completions inside the debounce window form one batch.
 3. Completion/settled races project every generation exactly once.
 4. Send failure and restart before queueing retry without a handled marker.
-5. Restart after queueing but before presentation neither loses nor duplicates the batch.
-6. Exact `context` presentation acknowledges members atomically and idempotently.
+5. Restart in the narrow queue-acceptance/finalization boundary neither loses nor duplicates the batch.
+6. Successful completion acceptance acknowledges members atomically and idempotently; urgent steer still requires exact `context` presentation.
 7. Replacement generations sharing a Run id remain distinct.
 8. Silent, stopped, cancelled, handled, and foreign-owner Runs remain excluded.
 9. Legacy or malformed `command.done` attention, including `steer`, remains non-projectable.
@@ -202,6 +197,6 @@ Focused observability and delivery tests precede TypeScript/build/import checks.
 
 ## Rollout
 
-This is one minor release because durable batching, presentation acknowledgment, lifecycle ordering, and explicit steer share one model-delivery invariant. Do not ship partial batching that marks terminals handled at `sendMessage()` acceptance, and do not ship steer before its durable deduplication path exists.
+This is one minor release because durable batching, acceptance acknowledgment, lifecycle ordering, and explicit steer share one model-delivery invariant. Completion acceptance must release later epochs without depending on a context callback; steer must not ship before its durable presentation-deduplication path exists.
 
 Update README and Run documentation only when implementation establishes the new public behavior. Move the accepted outcome from BACKLOG to CHANGELOG only after complete validation.

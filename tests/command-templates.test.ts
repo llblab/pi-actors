@@ -480,6 +480,24 @@ test("Command template timeout escalates when SIGTERM is ignored", async () => {
   assert.ok(Date.now() - startedAt < 2000);
 });
 
+test("Command template timeout terminates descendants retaining stdio", async () => {
+  if (process.platform === "win32") return;
+  const startedAt = Date.now();
+  const script = `
+    const { spawn } = require("node:child_process");
+    spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "inherit" });
+    process.on("SIGTERM", () => {});
+    setInterval(() => {}, 1000);
+  `;
+  const result = await execCommandTemplate(process.execPath, ["-e", script], {
+    timeout: 100,
+    killGrace: 10,
+  });
+  assert.equal(result.killed, true);
+  assert.notEqual(result.code, 0);
+  assert.ok(Date.now() - startedAt < 2000);
+});
+
 test("Command template retry succeeds on second attempt", async () => {
   const counterFile = join(tmpdir(), `ct-retry-${process.pid}.txt`);
   const { writeFileSync, readFileSync, unlinkSync } = await import("node:fs");

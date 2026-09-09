@@ -12,7 +12,11 @@ process.env.PI_ACTORS_AUTOMATIC_REVIEW = "off";
 
 const { createActorExtensionRuntime } = await import("../lib/extension-runtime.ts");
 const { createRunUiRuntime } = await import("../lib/run-ui-runtime.ts");
-const { readRunDeliveryJournal } = await import("../lib/run-delivery.ts");
+const {
+  admitRunCompletionBatch,
+  markRunCompletionBatchQueued,
+  readRunDeliveryJournal,
+} = await import("../lib/run-delivery.ts");
 const { appendRunTraceEvent, readRunTraceEvents } = await import("../lib/runs-trace.ts");
 
 after(async () => {
@@ -29,10 +33,13 @@ after(async () => {
 function staleContext(sessionId = "session-a") {
   let stale = false;
   let statusCalls = 0;
+  const notifications: Array<{ level: string; message: string }> = [];
   let sessionLeaf: Record<string, unknown> | undefined;
   const sessionEntries = new Map<string, Record<string, unknown>>();
   const ui = {
-    notify: () => undefined,
+    notify: (message: string, level: string) => {
+      notifications.push({ level, message });
+    },
     setStatus: () => {
       statusCalls += 1;
     },
@@ -60,6 +67,7 @@ function staleContext(sessionId = "session-a") {
     makeStale: () => {
       stale = true;
     },
+    notifications: () => notifications,
     setSessionBranch: (entries: Record<string, unknown>[]) => {
       sessionEntries.clear();
       for (const entry of entries) sessionEntries.set(String(entry.id), entry);
@@ -162,12 +170,30 @@ async function writeTerminalRun(
   ownerId: string,
   run: string,
   runInstanceId: string,
+  lineage?: {
+    deliveryOwnerId: string;
+    parent?: { run: string; runInstanceId: string; stateDir: string };
+  },
 ): Promise<string> {
   const stateDir = join(extensionTempDir, "runs", run);
   await mkdir(stateDir, { recursive: true });
   await writeFile(join(stateDir, "run.json"), JSON.stringify({
     createdAt: "2026-09-01T12:00:00.000Z",
     cwd: agentDir,
+    ...(lineage
+      ? {
+          delivery_owner_id: lineage.deliveryOwnerId,
+          ...(lineage.parent
+            ? {
+                delivery_parent: {
+                  run: lineage.parent.run,
+                  run_instance_id: lineage.parent.runInstanceId,
+                  state_dir: lineage.parent.stateDir,
+                },
+              }
+            : {}),
+        }
+      : {}),
     ownerId,
     pid: 999_999_999,
     run,
@@ -247,7 +273,7 @@ test("shutdown uses captured owner identity and stale UI notification is no-thro
   assert.doesNotThrow(() => harness.runtime.close());
 });
 
-test("completion batches wait for idle and acknowledge exact presented generations", async () => {
+test("completion batches wait for idle and acknowledge exact accepted generations", async () => {
   const ownerId = "session-batch";
   const firstDir = await writeTerminalRun(ownerId, "batch-first", "generation-first");
   const secondDir = await writeTerminalRun(ownerId, "batch-second", "generation-second");
@@ -280,13 +306,6 @@ test("completion batches wait for idle and acknowledge exact presented generatio
     deliverAs: "followUp",
     triggerTurn: true,
   });
-  await assert.rejects(readFile(join(firstDir, "terminal-handled.json")), /ENOENT/);
-
-  await writeTerminalRun(ownerId, "batch-second", "generation-second-replacement");
-  assert.equal(
-    harness.runtime.projectContext([firstMessage, firstMessage], active.context).length,
-    1,
-  );
   const firstHandled = JSON.parse(
     await readFile(join(firstDir, "terminal-handled.json"), "utf8"),
   );
@@ -294,6 +313,14 @@ test("completion batches wait for idle and acknowledge exact presented generatio
   await assert.rejects(
     readFile(join(firstDir, "terminal-delivery-failure.json")),
     /ENOENT/,
+  );
+
+  await writeTerminalRun(ownerId, "batch-second", "generation-second-replacement");
+  const modelMessage = { ...firstMessage };
+  delete modelMessage.details;
+  assert.equal(
+    harness.runtime.projectContext([modelMessage, modelMessage], active.context).length,
+    1,
   );
   await assert.rejects(readFile(join(secondDir, "terminal-handled.json")), /ENOENT/);
 
@@ -311,6 +338,74 @@ test("completion batches wait for idle and acknowledge exact presented generatio
     "generation-second-replacement",
   );
   assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).receipts.length, 2);
+  harness.runtime.close();
+});
+
+test("hot completion acceptance finalizes without context replay", async () => {
+  const ownerId = "session-hot-settle";
+  const stateDir = await writeTerminalRun(
+    ownerId,
+    "hot-settle",
+    "generation-hot-settle",
+  );
+  const active = staleContext(ownerId);
+  (active.context as any).isIdle = () => true;
+  const harness = runtimeHarness({ deliveryDebounceMs: 5 });
+  harness.setActiveContext(active.context);
+  harness.runtime.start(active.context, ownerId);
+  await delay(20);
+  assert.equal(harness.sentMessages().length, 1);
+
+  assert.equal(
+    JSON.parse(await readFile(join(stateDir, "terminal-handled.json"), "utf8"))
+      .run_instance_id,
+    "generation-hot-settle",
+  );
+  assert.equal(
+    readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch,
+    undefined,
+  );
+  harness.runtime.close();
+});
+
+test("root completion batches compress foreign-owner descendants into one tree", async () => {
+  const ownerId = "session-tree-root";
+  const rootDir = await writeTerminalRun(
+    ownerId,
+    "tree-root",
+    "generation-tree-root",
+    { deliveryOwnerId: ownerId },
+  );
+  await writeTerminalRun(
+    "session-tree-child",
+    "tree-child",
+    "generation-tree-child",
+    {
+      deliveryOwnerId: ownerId,
+      parent: {
+        run: "tree-root",
+        runInstanceId: "generation-tree-root",
+        stateDir: rootDir,
+      },
+    },
+  );
+  const active = staleContext(ownerId);
+  (active.context as any).isIdle = () => true;
+  const harness = runtimeHarness({ deliveryDebounceMs: 5 });
+  harness.setActiveContext(active.context);
+  harness.runtime.start(active.context, ownerId);
+  await delay(20);
+
+  assert.equal(harness.sentMessages().length, 1);
+  const message = harness.sentMessages()[0]!.message;
+  assert.match(message.content, /Actor completions: 2/);
+  assert.match(message.content, /- `tree-root`/);
+  assert.match(message.content, /  - `tree-child`/);
+  assert.deepEqual(active.notifications(), [{
+    level: "info",
+    message: "Actor completions ready: 2",
+  }]);
+  harness.runtime.projectContext([message], active.context);
   harness.runtime.close();
 });
 
@@ -338,88 +433,46 @@ test("idle completion debounce snapshots one immutable completion epoch", async 
   harness.runtime.close();
 });
 
-test("queued completion batches recover with one stable batch id", async () => {
-  const ownerId = "session-recovery";
-  const stateDir = await writeTerminalRun(ownerId, "batch-recovery", "generation-recovery");
-  const active = staleContext(ownerId);
-  (active.context as any).isIdle = () => true;
-  const first = runtimeHarness({ deliveryDebounceMs: 5 });
-  first.setActiveContext(active.context);
-  first.runtime.start(active.context, ownerId);
-  first.watcherOnChange()!();
-  await delay(20);
-  assert.equal(first.sentMessages().length, 1);
-  const batchId = first.sentMessages()[0]!.message.details
-    .pi_actors_delivery.batch_id;
-  assert.equal(
-    readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch?.phase,
-    "queued",
-  );
-  first.runtime.close();
-
-  const recovered = runtimeHarness({ deliveryDebounceMs: 5 });
-  recovered.setActiveContext(active.context);
-  recovered.runtime.start(active.context, ownerId);
-  await delay(20);
-  assert.equal(recovered.sentMessages().length, 1);
-  assert.equal(
-    recovered.sentMessages()[0]!.message.details.pi_actors_delivery.batch_id,
-    batchId,
-  );
-  recovered.runtime.projectContext(
-    [recovered.sentMessages()[0]!.message],
-    active.context,
-  );
-  assert.equal(
-    JSON.parse(await readFile(join(stateDir, "terminal-handled.json"), "utf8"))
-      .run_instance_id,
-    "generation-recovery",
-  );
-  assert.equal(
-    readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch,
-    undefined,
-  );
-  recovered.runtime.close();
-});
-
-test("queued completion recovery waits when exact owned session evidence exists", async () => {
-  const ownerId = "session-recovery-present";
+test("restart finalizes an accepted queued batch without reformatting or resend", async () => {
+  const ownerId = "session-accepted-recovery";
   const stateDir = await writeTerminalRun(
     ownerId,
-    "batch-recovery-present",
-    "generation-recovery-present",
+    "accepted-recovery",
+    "generation-accepted-recovery",
   );
+  admitRunCompletionBatch({
+    batchId: "accepted-before-restart",
+    members: [{
+      run: "accepted-recovery",
+      run_instance_id: "generation-accepted-recovery",
+      state_dir: stateDir,
+      status: "done",
+      summary: "Old formatter content is irrelevant after acceptance.",
+      terminal_at: "2026-09-01T12:01:00.000Z",
+    }],
+    ownerId,
+    tempDir: extensionTempDir,
+  });
+  markRunCompletionBatchQueued({
+    batchId: "accepted-before-restart",
+    ownerId,
+    tempDir: extensionTempDir,
+  });
   const active = staleContext(ownerId);
   (active.context as any).isIdle = () => true;
-  const first = runtimeHarness({ deliveryDebounceMs: 5 });
-  first.setActiveContext(active.context);
-  first.runtime.start(active.context, ownerId);
+  const harness = runtimeHarness({ deliveryDebounceMs: 5 });
+  harness.setActiveContext(active.context);
+  harness.runtime.start(active.context, ownerId);
   await delay(20);
-  const exact = first.sentMessages()[0]!.message;
-  first.runtime.close();
 
-  active.setSessionBranch([{
-    ...exact,
-    id: "session-batch-entry",
-    parentId: null,
-    type: "custom_message",
-  }]);
-  const recovered = runtimeHarness({ deliveryDebounceMs: 5 });
-  recovered.setActiveContext(active.context);
-  recovered.runtime.start(active.context, ownerId);
-  await delay(20);
-  assert.equal(recovered.sentMessages().length, 0);
-  assert.equal(
-    readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch?.phase,
-    "queued",
-  );
-  recovered.runtime.projectContext([exact], active.context);
+  assert.equal(harness.sentMessages().length, 0);
+  assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch, undefined);
   assert.equal(
     JSON.parse(await readFile(join(stateDir, "terminal-handled.json"), "utf8"))
       .run_instance_id,
-    "generation-recovery-present",
+    "generation-accepted-recovery",
   );
-  recovered.runtime.close();
+  harness.runtime.close();
 });
 
 test("pending completion send failures remain durable and retryable", async () => {
@@ -497,11 +550,10 @@ test("explicit urgent steer reaches Pi before the eventual terminal batch", asyn
   );
   await assert.rejects(readFile(join(stateDir, "terminal-handled.json")), /ENOENT/);
 
-  assert.equal(harness.runtime.flushCompletionBatch(active.context), true);
+  harness.runtime.flushCompletionBatch(active.context);
   assert.equal(harness.sentMessages().length, 2);
   const completionMessage = harness.sentMessages()[1]!.message;
   assert.equal(completionMessage.customType, "pi-actors-run-batch");
-  harness.runtime.projectContext([completionMessage], active.context);
   assert.equal(
     JSON.parse(await readFile(join(stateDir, "terminal-handled.json"), "utf8"))
       .run_instance_id,
@@ -585,36 +637,23 @@ test("queued urgent steer waits on exact owned session evidence", async () => {
   recovered.runtime.close();
 });
 
-test("completion context rejects conflicting or altered batch content", async () => {
-  const ownerId = "session-context-fence";
-  await writeTerminalRun(ownerId, "batch-context", "generation-context");
-  const active = staleContext(ownerId);
-  (active.context as any).isIdle = () => true;
+test("settled delivery accepts a fresh context wrapper for the same session owner", async () => {
+  const ownerId = "session-context-wrapper";
+  await writeTerminalRun(
+    ownerId,
+    "context-wrapper",
+    "generation-context-wrapper",
+  );
+  const started = staleContext(ownerId);
+  const settled = staleContext(ownerId);
+  (settled.context as any).isIdle = () => true;
   const harness = runtimeHarness({ deliveryDebounceMs: 5 });
-  harness.setActiveContext(active.context);
-  harness.runtime.start(active.context, ownerId);
-  harness.watcherOnChange()!();
-  await delay(20);
-  const exact = harness.sentMessages()[0]!.message;
-  const altered = { ...exact, content: `${exact.content}\naltered` };
-  assert.deepEqual(harness.runtime.projectContext([altered], active.context), []);
-  assert.equal(
-    readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch?.phase,
-    "queued",
-  );
-  assert.deepEqual(
-    harness.runtime.projectContext([exact, altered], active.context),
-    [],
-  );
-  assert.equal(
-    readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch?.phase,
-    "queued",
-  );
-  harness.runtime.projectContext([exact, exact], active.context);
-  assert.equal(
-    readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch,
-    undefined,
-  );
+  harness.setActiveContext(started.context);
+  harness.runtime.start(started.context, ownerId);
+
+  assert.equal(harness.runtime.flushCompletionBatch(settled.context), true);
+  assert.equal(harness.sentMessages().length, 1);
+  assert.match(harness.sentMessages()[0]!.message.content, /context-wrapper/);
   harness.runtime.close();
 });
 

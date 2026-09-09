@@ -510,6 +510,74 @@ test("Run observability projects sorted exact completion generations", async () 
   }
 });
 
+test("Run completion delivery waits for the terminal root and retains tree lineage", () => {
+  const rootRun = {
+    run: "root",
+    runInstanceId: "generation-root",
+    stateDir: "/runs/root",
+    status: "running" as const,
+  };
+  const childTransition = {
+    deliveryParent: {
+      run: "root",
+      run_instance_id: "generation-root",
+      state_dir: "/runs/root",
+    },
+    from: "running" as const,
+    run: "child",
+    runInstanceId: "generation-child",
+    stateDir: "/runs/child",
+    terminalAt: "2026-01-01T00:00:01.000Z",
+    to: "done" as const,
+  };
+  assert.deepEqual(
+    collectRunCompletionBatchMembers([childTransition], [rootRun]),
+    [],
+  );
+  const terminalRoot = { ...rootRun, status: "done" as const };
+  const runningSibling = {
+    deliveryParent: childTransition.deliveryParent,
+    run: "sibling",
+    runInstanceId: "generation-sibling",
+    stateDir: "/runs/sibling",
+    status: "running" as const,
+  };
+  const rootTransition = {
+    from: "running" as const,
+    run: "root",
+    runInstanceId: "generation-root",
+    stateDir: "/runs/root",
+    terminalAt: "2026-01-01T00:00:02.000Z",
+    to: "done" as const,
+  };
+  assert.deepEqual(
+    collectRunCompletionBatchMembers(
+      [childTransition, rootTransition],
+      [terminalRoot, runningSibling],
+    ),
+    [],
+  );
+  assert.deepEqual(
+    collectRunCompletionBatchMembers(
+      [childTransition, rootTransition],
+      [terminalRoot, {
+        deliveryParent: childTransition.deliveryParent,
+        run: "child",
+        runInstanceId: "generation-child",
+        stateDir: "/runs/child",
+        status: "done",
+      }],
+    ).map((member) => ({
+      parent: member.parent_run,
+      run: member.run,
+    })),
+    [
+      { parent: undefined, run: "root" },
+      { parent: "root", run: "child" },
+    ],
+  );
+});
+
 test("Terminal reconciliation is independent of retained Trace history", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-terminal-trace-"));
   const stateDir = join(root, "review");
@@ -545,7 +613,7 @@ test("Run observability bounds terminal artifact references", () => {
   assert.doesNotMatch(message, /five\.md/);
 });
 
-test("Successful reviews keep semantic output out of follow-up context", async () => {
+test("Successful reviews project bounded semantic output without transport metadata", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-semantic-review-"));
   const stateDir = join(root, "review");
   try {
@@ -582,7 +650,9 @@ test("Successful reviews keep semantic output out of follow-up context", async (
     assert.equal((transition.semanticResult?.body?.length ?? 0) <= 4_000, true);
     const [member] = collectRunCompletionBatchMembers([transition]);
     assert.equal(member.summary, "Run completed.");
-    assert.doesNotMatch(JSON.stringify(member), /Status: complete|Finding:|x{100}/);
+    assert.match(member.output ?? "", /^Status: complete\nFinding: x+/);
+    assert.equal((member.output?.length ?? 0) <= 4_000, true);
+    assert.doesNotMatch(JSON.stringify(member), /chat_id|thread_id|task-42|call-17/);
     assert.equal(transition.semanticResult?.correlationId, "task-42");
     assert.match(transition.semanticResult?.body ?? "", /^Status: complete/);
     assert.deepEqual(transition.semanticResult?.metadata.transport_context, {

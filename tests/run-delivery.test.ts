@@ -214,6 +214,7 @@ test("Run delivery formats bounded model-facing completion rows", async () => {
       { length: Limits.RUN_DELIVERY_BATCH_MAX_MEMBERS },
       (_, index) => ({
         ...member(`run-${String(index).padStart(3, "0")}`),
+        ...(index === 0 ? { output: "Reviewer answer: approved." } : {}),
         status: index % 2 === 0 ? "done" as const : "failed" as const,
         summary: `Completed row ${index} ${"detail ".repeat(100)}`,
       }),
@@ -227,6 +228,7 @@ test("Run delivery formats bounded model-facing completion rows", async () => {
     const message = formatRunCompletionBatchMessage(batch);
     assert.match(message, /^Actor completions: 256\nBatch: `batch-model`/);
     assert.match(message, /Statuses: `done=128 failed=128`/);
+    assert.match(message, /Output:\n  Reviewer answer: approved\./);
     assert.match(message, /more completion\(s\) retained in batch\.$/);
     assert.equal(
       message.split("\n").filter((line) => line.startsWith("- `")).length <=
@@ -244,6 +246,26 @@ test("Run delivery formats bounded model-facing completion rows", async () => {
   } finally {
     await rm(root, { force: true, recursive: true });
   }
+});
+
+test("Run delivery formats each completion tree in stable preorder", () => {
+  const rootA = member("root-a");
+  const rootB = member("root-b");
+  const childA = {
+    ...member("child-a"),
+    parent_run: rootA.run,
+    parent_run_instance_id: rootA.run_instance_id,
+    parent_state_dir: rootA.state_dir,
+  };
+  const message = formatRunCompletionBatchMessage({
+    batch_id: "batch-forest",
+    created_at: "2026-08-31T12:00:00.000Z",
+    members: [rootA, rootB, childA],
+    phase: "pending",
+  });
+  assert.ok(message.indexOf("`root-a`") < message.indexOf("`child-a`"));
+  assert.ok(message.indexOf("`child-a`") < message.indexOf("`root-b`"));
+  assert.match(message, /\n  - `child-a`/);
 });
 
 test("Run delivery rejects invalid duplicate and excessive members", async () => {

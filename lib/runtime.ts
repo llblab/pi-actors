@@ -325,6 +325,7 @@ export function createRecipeToolReloadWatcher(
   let rootWatcher: FSWatcher | undefined;
   let parentWatcher: FSWatcher | undefined;
   let failureNotified = false;
+  let notifyAfterReload = false;
   const setWatchStatus = (watchStatus: RecipeRegistryStatus["watch_status"]): void =>
     runtime.setWatchStatus?.(watchStatus);
   const close = (): void => {
@@ -336,6 +337,7 @@ export function createRecipeToolReloadWatcher(
     closingParent?.close();
     if (reloadTimeout) clearTimeout(reloadTimeout);
     reloadTimeout = undefined;
+    notifyAfterReload = false;
     setWatchStatus("closed");
   };
   const reportCallbackError = (error: unknown): void => {
@@ -358,14 +360,21 @@ export function createRecipeToolReloadWatcher(
       reportCallbackError(error);
     }
   };
-  const scheduleReload = (ctx: RuntimeContext): void => {
+  const scheduleReload = (
+    ctx: RuntimeContext,
+    notifyActiveChange = false,
+  ): void => {
     failureNotified = false;
+    notifyAfterReload ||= notifyActiveChange;
     if (reloadTimeout) clearTimeout(reloadTimeout);
     reloadTimeout = setTimeout(() => {
       reloadTimeout = undefined;
       try {
         runtime.loadTools(ctx, deps.getResolutionContext?.());
-        ctx.ui.notify("Recipe tools refreshed from ~/.pi/agent/recipes", "info");
+        if (notifyAfterReload) {
+          ctx.ui.notify("Recipe tools refreshed from ~/.pi/agent/recipes", "info");
+        }
+        notifyAfterReload = false;
       } catch (error) {
         notifyFailure(ctx);
         reportCallbackError(error);
@@ -394,7 +403,7 @@ export function createRecipeToolReloadWatcher(
         parentWatcher = undefined;
         watcher.close();
         watchRoot(ctx, recipeRoot);
-        scheduleReload(ctx);
+        scheduleReload(ctx, true);
       });
       parentWatcher = watcher;
       setWatchStatus("watching_parent");
@@ -415,16 +424,18 @@ export function createRecipeToolReloadWatcher(
       return;
     }
     try {
-      const watcher = watchPath(recipeRoot, () => {
+      const watcher = watchPath(recipeRoot, (_event, changedFile) => {
         if (rootWatcher !== watcher) return;
         if (!pathExists(recipeRoot)) {
           rootWatcher = undefined;
           watcher.close();
-          scheduleReload(ctx);
+          scheduleReload(ctx, true);
           watchParent(ctx, recipeRoot);
           return;
         }
-        scheduleReload(ctx);
+        const relativeChange = changedFile ? String(changedFile) : "";
+        const firstSegment = relativeChange.split(/[\\/]/u)[0];
+        scheduleReload(ctx, Boolean(relativeChange) && firstSegment !== "drafts");
       });
       rootWatcher = watcher;
       setWatchStatus("watching_root");

@@ -16,6 +16,10 @@ export type RunDeliveryPhase = "pending" | "queued" | "presented";
 
 export interface RunCompletionBatchMember {
   artifacts?: Record<string, string>;
+  parent_run?: string;
+  parent_run_instance_id?: string;
+  parent_state_dir?: string;
+  output?: string;
   run: string;
   run_instance_id: string;
   state_dir: string;
@@ -109,6 +113,10 @@ export interface RunSteerTransitionInput {
 const RUN_DELIVERY_SCHEMA = "run-delivery-v1";
 const MEMBER_FIELDS = new Set([
   "artifacts",
+  "parent_run",
+  "parent_run_instance_id",
+  "parent_state_dir",
+  "output",
   "run",
   "run_instance_id",
   "state_dir",
@@ -216,8 +224,40 @@ function parseMember(value: unknown): RunCompletionBatchMember {
   const record = asRecord(value, "Completion batch member");
   assertExactFields(record, MEMBER_FIELDS, "Completion batch member");
   const parsedArtifacts = artifacts(record.artifacts);
+  const parentRun = record.parent_run === undefined
+    ? undefined
+    : boundedString(record.parent_run, "Completion batch member parent_run", 120);
+  const parentRunInstanceId = record.parent_run_instance_id === undefined
+    ? undefined
+    : boundedString(
+        record.parent_run_instance_id,
+        "Completion batch member parent_run_instance_id",
+        256,
+      );
+  const parentStateDir = record.parent_state_dir === undefined
+    ? undefined
+    : boundedString(
+        record.parent_state_dir,
+        "Completion batch member parent_state_dir",
+        4_096,
+      );
+  if (Boolean(parentRun) !== Boolean(parentRunInstanceId) ||
+    Boolean(parentRun) !== Boolean(parentStateDir)) {
+    throw new Error("Completion batch member parent lineage is incomplete");
+  }
+  const output = record.output === undefined
+    ? undefined
+    : boundedString(record.output, "Completion batch member output", 4_000);
   return {
     ...(parsedArtifacts ? { artifacts: parsedArtifacts } : {}),
+    ...(output ? { output } : {}),
+    ...(parentRun
+      ? {
+          parent_run: parentRun,
+          parent_run_instance_id: parentRunInstanceId!,
+          parent_state_dir: parentStateDir!,
+        }
+      : {}),
     run: boundedString(record.run, "Completion batch member run", 120),
     run_instance_id: boundedString(
       record.run_instance_id,
@@ -740,7 +780,75 @@ function compactModelText(value: string, limit: number): string {
   return compact.length > limit ? `${compact.slice(0, limit - 1)}…` : compact;
 }
 
-function formatCompletionMember(member: RunCompletionBatchMember): string {
+function memberIdentity(member: RunCompletionBatchMember): string {
+  return `${member.state_dir}\0${member.run_instance_id}`;
+}
+
+function completionDepth(
+  member: RunCompletionBatchMember,
+  byIdentity: Map<string, RunCompletionBatchMember>,
+): number {
+  const visited = new Set<string>();
+  let current = member;
+  let depth = 0;
+  while (current.parent_state_dir && current.parent_run_instance_id) {
+    const identity = `${current.parent_state_dir}\0${current.parent_run_instance_id}`;
+    if (visited.has(identity)) break;
+    visited.add(identity);
+    const parent = byIdentity.get(identity);
+    if (!parent) break;
+    depth += 1;
+    current = parent;
+  }
+  return depth;
+}
+
+function orderCompletionForest(
+  members: RunCompletionBatchMember[],
+): RunCompletionBatchMember[] {
+  const byIdentity = new Map(members.map((member) => [memberIdentity(member), member]));
+  const children = new Map<string, RunCompletionBatchMember[]>();
+  const roots: RunCompletionBatchMember[] = [];
+  for (const member of members) {
+    const parentIdentity = member.parent_state_dir && member.parent_run_instance_id
+      ? `${member.parent_state_dir}\0${member.parent_run_instance_id}`
+      : undefined;
+    if (!parentIdentity || !byIdentity.has(parentIdentity)) {
+      roots.push(member);
+      continue;
+    }
+    const siblings = children.get(parentIdentity) ?? [];
+    siblings.push(member);
+    children.set(parentIdentity, siblings);
+  }
+  const ordered: RunCompletionBatchMember[] = [];
+  const visited = new Set<string>();
+  const visit = (member: RunCompletionBatchMember): void => {
+    const identity = memberIdentity(member);
+    if (visited.has(identity)) return;
+    visited.add(identity);
+    ordered.push(member);
+    for (const child of children.get(identity) ?? []) visit(child);
+  };
+  for (const root of roots) visit(root);
+  for (const member of members) visit(member);
+  return ordered;
+}
+
+function formatModelOutput(value: string, indent: string): string {
+  return value
+    .replaceAll("`", "'")
+    .split(/\r?\n/u)
+    .map((line) => line.trimEnd())
+    .filter((line, index, lines) => line || (index > 0 && index < lines.length - 1))
+    .map((line) => `${indent}  ${line}`)
+    .join("\n");
+}
+
+function formatCompletionMember(
+  member: RunCompletionBatchMember,
+  byIdentity: Map<string, RunCompletionBatchMember>,
+): string {
   const summary = compactModelText(member.summary, 200);
   const artifactEntries = Object.entries(member.artifacts ?? {}).slice(0, 4);
   const artifactText = artifactEntries.length === 0
@@ -748,7 +856,11 @@ function formatCompletionMember(member: RunCompletionBatchMember): string {
     : `; artifacts: ${artifactEntries.map(([name, path]) =>
       `${compactModelText(name, 120)}=\`${compactModelText(path, 320)}\``
     ).join(", ")}`;
-  return `- \`${compactModelText(member.run, 120)}\` — \`${member.status}\`: ${summary}${artifactText}`;
+  const indent = "  ".repeat(Math.min(completionDepth(member, byIdentity), 8));
+  const output = member.output
+    ? `\n${indent}  Output:\n${formatModelOutput(member.output, indent)}`
+    : "";
+  return `${indent}- \`${compactModelText(member.run, 120)}\` — \`${member.status}\`: ${summary}${artifactText}${output}`;
 }
 
 function formatStatusCounts(members: RunCompletionBatchMember[]): string {
@@ -772,9 +884,13 @@ export function formatRunCompletionBatchMessage(batch: RunCompletionBatch): stri
     `Window: \`${terminalTimes[0]}\` → \`${terminalTimes.at(-1)}\``,
     `Statuses: \`${formatStatusCounts(safe.members)}\``,
   ];
-  const candidateRows = safe.members
+  const byIdentity = new Map(safe.members.map((member) => [
+    memberIdentity(member),
+    member,
+  ]));
+  const candidateRows = orderCompletionForest(safe.members)
     .slice(0, Limits.RUN_DELIVERY_MODEL_MAX_MEMBERS)
-    .map(formatCompletionMember);
+    .map((member) => formatCompletionMember(member, byIdentity));
   const rows: string[] = [];
   for (const row of candidateRows) {
     const omitted = safe.members.length - rows.length - 1;

@@ -583,7 +583,8 @@ export class ActorInspectorOverlay {
                 const prefix = this.focus === "list" && index === this.rowIndex
                     ? this.theme.fg("accent", " ▶ ")
                     : "   ";
-                const row = `${prefix}${this.theme.fg("text", `#${items.length - index - 1}`)} ${marker} ${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
+                const sequence = item[TraceProjection.TRACE_ITEM_SEQUENCE] ?? items.length - index - 1;
+                const row = `${prefix}${this.theme.fg("text", `#${sequence}`)} ${marker} ${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
                 return this.focus === "list" && index === this.rowIndex
                     ? this.theme.fg("accent", row)
                     : row;

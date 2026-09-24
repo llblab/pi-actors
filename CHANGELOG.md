@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 0.53.2: Stable Inspector Trace Sequences
+
+- `Stable Inspector Trace Sequences`: Actor Inspector now numbers Trace rows from stable source-local chronology before applying the 100-row projection bound. Canonical Trace rows include cumulative compaction offsets and owned Pi turns retain their native sequence, so adding `#100` no longer renumbers the previous `#99`; newest-first ordering, source filters, public Trace JSON, and focus-by-id remain unchanged.
+
 ## 0.53.1: Filterable Skills and drift-safe Git installs
 
 - `Filterable Packaged Skills`: Manifest-loaded runtime leaves all six bundled Skills to `pi.skills`, preserving filters and provenance. Auto-discovered checkouts contribute source Skills even when Pi selects compiled code; resolver regressions cover both modes. Unsupported source manifest aliases are removed, and the committed distributive supports git installs with drift-checking atomic builds.

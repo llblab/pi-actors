@@ -1,0 +1,39 @@
+{
+  "async": true,
+  "imports": {
+    "subagent": "swarm/subagent-prompt"
+  },
+  "args": [
+    "prompts:array",
+    "model:string",
+    "thinking:string",
+    "tools:string",
+    "output_format:string",
+    "report_path:path",
+    "summary_path:path"
+  ],
+  "defaults": {
+    "thinking": "off",
+    "tools": "",
+    "output_format": "Concise Markdown with assumptions and next actions.",
+    "report_path": "{state_dir}/stdout.log",
+    "summary_path": "{state_dir}/result.json"
+  },
+  "artifacts": {
+    "report": "{report_path}",
+    "summary": "{summary_path}"
+  },
+  "repeat": "{prompts.length}",
+  "parallel": true,
+  "failure": "branch",
+  "template": {
+    "name": "subagent",
+    "values": {
+      "prompt": "{prompts[index]}",
+      "model": "{model}",
+      "thinking": "{thinking}",
+      "tools": "{tools}",
+      "output_format": "{output_format}"
+    }
+  }
+}

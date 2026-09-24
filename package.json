@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.53.0",
+  "version": "0.53.1",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -31,9 +31,10 @@
     "test:preservation": "node --experimental-strip-types --test --test-concurrency=1 tests/async-runs.test.ts tests/observability.test.ts tests/session-evidence.test.ts tests/inspector-security.test.ts tests/inspector-overlay.test.ts tests/review-control.test.ts",
     "pack:dry": "npm pack --dry-run",
     "recipes:qa": "node skills/actors/scripts/validate-recipe.mjs skills --skills --qa --summary",
-    "validate": "npx tsc --noEmit && npm run recipes:qa && npm run build && npm run check && npm test && npm run conformance && npm run pack:dry",
+    "validate": "npx tsc --noEmit && npm run recipes:qa && npm run build:check && npm run check && npm test && npm run conformance && npm run pack:dry",
     "audit:dependencies": "npm audit --audit-level=high --omit=peer",
     "build": "node scripts/build-dist.mjs",
+    "build:check": "node scripts/build-dist.mjs --check",
     "prepack": "npm run build"
   },
   "files": [
@@ -54,14 +55,8 @@
     "extensions": [
       "./dist/pi-actors/index.js"
     ],
-    "sourceExtensions": [
-      "./index.ts"
-    ],
     "skills": [
       "./dist/skills"
-    ],
-    "sourceSkills": [
-      "./skills"
     ],
     "image": "https://raw.githubusercontent.com/llblab/pi-actors/main/banner.jpg"
   },

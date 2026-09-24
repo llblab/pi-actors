@@ -1,0 +1,25 @@
+{
+  "async": true,
+  "args": [
+    "lease_ms:int"
+  ],
+  "defaults": {
+    "lease_ms": "600000"
+  },
+  "control": [
+    "enqueue",
+    "claim",
+    "complete",
+    "fail",
+    "acquire",
+    "renew",
+    "release",
+    "stop"
+  ],
+  "artifacts": {
+    "queue": "{state_dir}/queue.json",
+    "locks": "{state_dir}/locks.json",
+    "journal": "{state_dir}/journal.jsonl"
+  },
+  "template": "{skill_dir}/scripts/resource-locker.mjs serve --state-dir {state_dir} --lease-ms {lease_ms}"
+}

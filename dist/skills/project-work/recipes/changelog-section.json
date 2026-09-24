@@ -1,0 +1,11 @@
+{
+  "args": [
+    "file:path",
+    "version:string"
+  ],
+  "defaults": {
+    "file": "CHANGELOG.md",
+    "version": "0.7.1"
+  },
+  "template": "{skill_dir}/scripts/project-utils.mjs changelog-section {file} {version}"
+}

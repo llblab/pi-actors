@@ -1,0 +1,81 @@
+{
+  "async": true,
+  "imports": {
+    "planner": "swarm/subagent-plan",
+    "evidence": "swarm/subagent-evidence-map",
+    "contradictions": "swarm/subagent-contradiction-map",
+    "verifier": "swarm/subagent-verify",
+    "merger": "swarm/subagent-merge",
+    "normalizer": "swarm/subagent-normalize"
+  },
+  "args": [
+    "question:string",
+    "sources:string",
+    "constraints:string",
+    "model:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "sources": "Use provided source notes or artifact paths only; mark missing evidence.",
+    "constraints": "Bound the question, preserve contradictions, and avoid publication-style certainty when evidence is weak.",
+    "tools": ""
+  },
+  "template": [
+    {
+      "name": "planner",
+      "values": {
+        "goal": "Answer research question: {question}",
+        "scope": "Sources: {sources}",
+        "constraints": "{constraints}",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "evidence",
+      "values": {
+        "question": "{question}",
+        "sources": "{sources}",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "contradictions",
+      "values": {
+        "inputs": "Use plan and evidence map from stdin.",
+        "focus": "Contradictions, weak evidence, and missing source classes for question: {question}",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "verifier",
+      "values": {
+        "claim": "The synthesis can answer the research question within the stated constraints.",
+        "evidence": "Use plan, evidence map, and contradiction map from stdin.",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "merger",
+      "values": {
+        "inputs": "Use all previous research outputs from stdin.",
+        "mode": "risk-first",
+        "risk_policy": "Preserve uncertainty and contradictions over forced consensus.",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use merged research synthesis from stdin.",
+        "format": "Markdown sections: Question, Evidence Map, Synthesis, Contradictions, Confidence, Missing Evidence, Next Evidence Slice.",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    }
+  ]
+}

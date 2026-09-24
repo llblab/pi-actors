@@ -2,6 +2,12 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## Unreleased
+
+## 0.53.1: Filterable Skills and drift-safe Git installs
+
+- `Filterable Packaged Skills`: Manifest-loaded runtime leaves all six bundled Skills to `pi.skills`, preserving filters and provenance. Auto-discovered checkouts contribute source Skills even when Pi selects compiled code; resolver regressions cover both modes. Unsupported source manifest aliases are removed, and the committed distributive supports git installs with drift-checking atomic builds.
+
 ## 0.53.0: Tree-Compressed Completion Delivery
 
 - `Quiet Draft Reloads`: Keeps automatic Recipe reload active for draft-directory changes while showing “Recipe tools refreshed” only for active non-draft Recipe changes or registry-root replacement, so ordinary spawn draft capture no longer produces misleading tool-refresh noise.

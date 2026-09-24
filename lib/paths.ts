@@ -93,8 +93,34 @@ export function getExtensionRuntimePaths(
 
 export const EXTENSION_RUNTIME_PATHS = getExtensionRuntimePaths();
 
+export function getExtensionPackageRoot(extensionUrl: string): string {
+  let current = dirname(fileURLToPath(extensionUrl));
+  while (true) {
+    if (existsSync(join(current, "package.json"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return dirname(fileURLToPath(extensionUrl));
+    current = parent;
+  }
+}
+
+export interface RawExtensionCheckoutOptions {
+  agentDir?: string;
+  cwd?: string;
+}
+
+export function isRawExtensionCheckout(
+  extensionUrl: string,
+  options: RawExtensionCheckoutOptions = {},
+): boolean {
+  const packageRoot = resolve(getExtensionPackageRoot(extensionUrl));
+  const agentDir = resolve(options.agentDir ?? getAgentDir());
+  const cwd = resolve(options.cwd ?? process.cwd());
+  return dirname(packageRoot) === join(agentDir, "extensions") ||
+    dirname(packageRoot) === join(cwd, ".pi", "extensions");
+}
+
 export function getExtensionSkillsDir(extensionUrl: string): string {
-  return join(dirname(fileURLToPath(extensionUrl)), "skills");
+  return join(getExtensionPackageRoot(extensionUrl), "skills");
 }
 
 export function getExistingExtensionSkillPaths(extensionUrl: string): string[] {

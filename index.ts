@@ -6,13 +6,16 @@
 
 import * as ExtensionRuntime from "./lib/extension-runtime.ts";
 import * as InspectorCommand from "./lib/inspector-command.ts";
+import * as Paths from "./lib/paths.ts";
 import * as Pi from "./lib/pi.ts";
 
 export default function toolRegistryExtension(pi: Pi.ExtensionAPI) {
   const runtime = ExtensionRuntime.createActorExtensionRuntime(pi);
-  pi.on("resources_discover", async () =>
-    runtime.discoverResources(import.meta.url),
-  );
+  if (Paths.isRawExtensionCheckout(import.meta.url)) {
+    pi.on("resources_discover", async () =>
+      runtime.discoverResources(import.meta.url),
+    );
+  }
   pi.on("session_start", async (_event, ctx) => runtime.onSessionStart(ctx));
   pi.on("agent_settled", async (_event, ctx) => runtime.onAgentSettled(ctx));
   pi.on("context", async (event, ctx) => ({

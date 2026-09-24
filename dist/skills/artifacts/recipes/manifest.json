@@ -1,0 +1,14 @@
+{
+  "args": [
+    "artifact_path:path",
+    "title:string",
+    "status:enum(draft,ready,blocked,accepted)",
+    "summary:string"
+  ],
+  "defaults": {
+    "title": "Artifact",
+    "status": "draft",
+    "summary": "Machine-readable artifact manifest."
+  },
+  "template": "{skill_dir}/scripts/artifact-utils.mjs manifest {artifact_path} {title} {status} {summary}"
+}

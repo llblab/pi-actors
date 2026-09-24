@@ -1,0 +1,9 @@
+{
+  "id": "trace-1",
+  "ts": "2026-01-01T00:00:00.000Z",
+  "kind": "progress.update",
+  "summary": "Work progressed",
+  "data": { "completed": 1 },
+  "level": "info",
+  "attention": "notify"
+}

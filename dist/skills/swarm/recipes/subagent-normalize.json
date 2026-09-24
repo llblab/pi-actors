@@ -1,0 +1,20 @@
+{
+  "async": true,
+  "args": [
+    "input:string",
+    "format:string",
+    "preservation_policy:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "format": "Markdown sections: Summary, Findings, Evidence, Risks, Next Actions.",
+    "preservation_policy": "Do not change meaning, severity, evidence, or uncertainty while normalizing.",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
+    "tools": ""
+  },
+  "accept_output": "review_evidence",
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Normalize this subagent output. Begin the response with ACTOR_REVIEW_RESULT on its own line. Target format: {format}. Preservation policy: {preservation_policy}. Input: {input}"
+}

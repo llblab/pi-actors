@@ -1,0 +1,75 @@
+{
+  "async": true,
+  "imports": {
+    "git_status": "project-work/git-status",
+    "git_log": "project-work/git-log",
+    "docs_index": "project-work/markdown-index",
+    "validation": "actors/command-validate",
+    "normalizer": "swarm/subagent-normalize",
+    "artifact": "artifacts/report"
+  },
+  "args": [
+    "repo:path",
+    "docs_dir:path",
+    "validation_command:string",
+    "artifact_path:path",
+    "model:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "repo": ".",
+    "docs_dir": "docs",
+    "validation_command": "npm run validate",
+    "artifact_path": "./repo-health.md",
+    "tools": ""
+  },
+  "template": [
+    {
+      "name": "git_status",
+      "values": {
+        "repo": "{repo}"
+      }
+    },
+    {
+      "name": "git_log",
+      "values": {
+        "repo": "{repo}",
+        "count": "8"
+      }
+    },
+    {
+      "name": "docs_index",
+      "values": {
+        "directory": "{repo}/{docs_dir}",
+        "title": "Documentation Index"
+      }
+    },
+    {
+      "name": "validation",
+      "values": {
+        "scope": "{repo}",
+        "command": "{validation_command}"
+      }
+    },
+    {
+      "name": "normalizer",
+      "values": {
+        "input": "Use repository status, recent log, docs index, and validation output from stdin. Repo: {repo}.",
+        "format": "Markdown sections: Branch State, Recent Commits, Docs Surface, Validation, Risks, Next Actions.",
+        "model": "{model}",
+        "thinking": "off",
+        "tools": "{tools}"
+      }
+    },
+    {
+      "name": "artifact",
+      "values": {
+        "input": "Use normalized repo health output from stdin.",
+        "artifact_path": "{artifact_path}",
+        "artifact_format": "Markdown sections: Branch State, Validation, Risks, Next Actions.",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    }
+  ]
+}

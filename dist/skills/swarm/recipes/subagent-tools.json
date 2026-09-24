@@ -1,0 +1,15 @@
+{
+  "async": true,
+  "args": [
+    "prompt:string",
+    "tools:string",
+    "model:string",
+    "thinking:string",
+    "output_format:string"
+  ],
+  "defaults": {
+    "thinking": "off",
+    "output_format": "Concise Markdown with assumptions and next actions."
+  },
+  "template": "pi -p --model {model} --thinking {thinking} --tools {tools} {prompt}. Output format: {output_format}"
+}

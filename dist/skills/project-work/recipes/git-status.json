@@ -1,0 +1,9 @@
+{
+  "args": [
+    "repo:path"
+  ],
+  "defaults": {
+    "repo": "."
+  },
+  "template": "git -C {repo} status --short --branch"
+}

@@ -1,0 +1,74 @@
+{
+  "async": true,
+  "imports": {
+    "changelog": "project-work/changelog-section",
+    "package": "project-work/package-summary",
+    "skill": "project-work/skill-summary",
+    "validation": "actors/command-validate",
+    "artifact": "artifacts/report"
+  },
+  "args": [
+    "scope:path",
+    "version:string",
+    "package_json:path",
+    "skill:path",
+    "validation_command:string",
+    "artifact_path:path",
+    "risk_notes:string",
+    "model:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "scope": ".",
+    "package_json": "{scope}/package.json",
+    "skill": "{scope}/skills/actors/SKILL.md",
+    "validation_command": "npm run validate",
+    "artifact_path": "./release-summary.md",
+    "risk_notes": "No extra risk notes supplied.",
+    "tools": ""
+  },
+  "artifacts": {
+    "summary": "{artifact_path}"
+  },
+  "template": [
+    {
+      "name": "changelog",
+      "values": {
+        "file": "{scope}/CHANGELOG.md",
+        "version": "{version}"
+      }
+    },
+    {
+      "name": "package",
+      "values": {
+        "package_json": "{package_json}",
+        "repo": "{scope}"
+      }
+    },
+    {
+      "name": "skill",
+      "values": {
+        "skill": "{skill}",
+        "package_json": "{package_json}",
+        "repo": "{scope}"
+      }
+    },
+    {
+      "name": "validation",
+      "values": {
+        "scope": "{scope}",
+        "command": "{validation_command}"
+      }
+    },
+    {
+      "name": "artifact",
+      "values": {
+        "input": "Prepare an evidence-only release summary for version {version}. Use changelog, package summary, packaged skill summary, validation output, and these risk notes: {risk_notes}. Do not propose or perform commit, PR, merge, tag, publish, or any external release side effect.",
+        "artifact_path": "{artifact_path}",
+        "artifact_format": "Markdown sections: Release Summary, Validation Evidence, Package And Skill Evidence, Risks, PR Body Draft, Operator-Gated Next Steps. The PR Body Draft must be suitable for copy/paste and must not claim that release side effects already happened.",
+        "model": "{model}",
+        "tools": "{tools}"
+      }
+    }
+  ]
+}

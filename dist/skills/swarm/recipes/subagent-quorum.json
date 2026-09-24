@@ -1,0 +1,31 @@
+{
+  "async": true,
+  "imports": {
+    "subagent": "swarm/subagent-prompt"
+  },
+  "args": [
+    "prompt:string",
+    "models:array",
+    "thinking:string",
+    "tools:string",
+    "output_format:string"
+  ],
+  "defaults": {
+    "thinking": "off",
+    "tools": "",
+    "output_format": "Vote-style Markdown: Verdict, Rationale, Evidence, Confidence."
+  },
+  "repeat": "{models.length}",
+  "parallel": true,
+  "failure": "branch",
+  "template": {
+    "name": "subagent",
+    "values": {
+      "prompt": "{prompt}",
+      "model": "{models[index]}",
+      "thinking": "{thinking}",
+      "tools": "{tools}",
+      "output_format": "{output_format}"
+    }
+  }
+}

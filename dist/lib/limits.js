@@ -1,0 +1,38 @@
+/**
+ * Shared output, preview, and Control envelope limits.
+ * Zones: output governance, Trace previews, Inspect defaults, Control portability
+ */
+export const DEFAULT_INSPECT_LINES = 40;
+export const TOOL_OUTPUT_MAX_BYTES = 50 * 1024;
+export const TOOL_OUTPUT_MAX_LINES = 2_000;
+export const COMPACT_PREVIEW_CHARS = 160;
+export const CONTROL_ACTION_MAX_LENGTH = 64;
+export const CONTROL_INPUT_MAX_BYTES = 380;
+export const CONTROL_WIRE_MAX_BYTES = 512;
+export const INSPECTOR_BODY_PREVIEW_CHARS = 320;
+export const DOCTOR_ACTION_PREVIEW_CHARS = 72;
+export const SESSION_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024;
+export const SESSION_EVIDENCE_MAX_TURNS = 100;
+export const SESSION_EVIDENCE_TEXT_CHARS = 4_000;
+export const SESSION_EVIDENCE_MAX_TOOL_CALLS = 100;
+export const TRACE_EVENT_MAX_BYTES = 64 * 1024;
+export const TRACE_EVENT_MAX_READ = 200;
+export const TRACE_JOURNAL_MAX_EVENTS = 2_048;
+export const TRACE_JOURNAL_TARGET_EVENTS = 1_536;
+export const TRACE_JOURNAL_MAX_BYTES = 4 * 1024 * 1024;
+export const TRACE_JOURNAL_TARGET_BYTES = 3 * 1024 * 1024;
+export const RUN_CONTROL_PENDING_LIMIT = 64;
+export const RUN_CONTROL_TERMINAL_LIMIT = 128;
+export const RUN_CONTROL_ERROR_MAX_BYTES = 4 * 1024;
+export const RUN_CONTROL_JOURNAL_MAX_BYTES = 1024 * 1024;
+export const RUN_RETENTION_MAX_RECORDS = 256;
+export const RUN_RETENTION_MAX_BYTES = 1024 * 1024;
+export const RUN_DELIVERY_BATCH_MAX_MEMBERS = 256;
+export const RUN_DELIVERY_MODEL_MAX_MEMBERS = 64;
+export const RUN_DELIVERY_MODEL_MAX_BYTES = 16 * 1024;
+export const RUN_DELIVERY_RECEIPT_LIMIT = 128;
+export const RUN_DELIVERY_SESSION_MAX_ENTRIES = 256;
+export const RUN_DELIVERY_SESSION_MAX_BYTES = 1024 * 1024;
+export const RUN_DELIVERY_STEER_MAX_ENVELOPES = 64;
+export const RUN_DELIVERY_STEER_MAX_BYTES = 16 * 1024;
+export const RUN_DELIVERY_JOURNAL_MAX_BYTES = 1024 * 1024;

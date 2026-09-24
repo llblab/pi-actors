@@ -1,0 +1,21 @@
+{
+  "async": true,
+  "args": [
+    "state:string",
+    "question:string",
+    "options:string",
+    "resume_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "options": "List options considered, recommendation, and risk if the coordinator does not answer.",
+    "resume_policy": "Do not claim same-context resume unless the adapter provides a resumable session id; otherwise emit degraded artifact state.",
+    "output_format": "Markdown sections: Preserved State, Question, Options, Recommendation, Risk If Guessed, Resume Mode.",
+    "thinking": "off",
+    "tools": ""
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Create a bounded coordinator checkpoint. State to preserve: {state}. Question: {question}. Options/risk format: {options}. Resume policy: {resume_policy}. Output format: {output_format}"
+}

@@ -44,6 +44,8 @@ Pi host
 
 `index.ts` wires Pi ports and must not own domain behavior. Keep the local TypeScript import graph acyclic. For architecture-affecting work, load and follow `.agents/skills/domain-dag/SKILL.md`; its validator is local agent tooling, not an npm, CI, or release gate.
 
+The committed `dist/` tree is required for npm and git package installs. `npm run build` compiles into a temporary candidate and atomically replaces the distributive; `npm run build:check` must reject source/artifact drift without rewriting the working tree.
+
 ## Key Domains
 
 - `extension-runtime.ts`: low-level Pi session lifecycle, tool adaptation, and runtime service composition behind the thin `index.ts` event-registration root.
@@ -150,4 +152,5 @@ When deferred Run results gate the next step, wait for their completion batch. I
 - Before release run the normal product validation and dependency audit. Use the project-local Domain DAG Skill during architecture-affecting development, not as publication automation.
 - `.github/workflows/release.yml` owns the immutable sequence reusable validation → npm Trusted Publisher publication/verification → GitHub Release convergence; follow [docs/releasing.md](docs/releasing.md).
 - Keep npm publication tokenless: use the exact npm Trusted Publisher binding and job-scoped OIDC permission, never a long-lived npm token or token fallback.
+- Manifest-loaded packages expose bundled Skills only through `pi.skills`, preserving package resource filters and package-owned provenance. Only a checkout auto-discovered directly below a user or project Pi `extensions/` root may contribute its source Skill root through `resources_discover`; compiled-vs-source filename shape does not determine ownership.
 - Until a stable version beyond `1.x`, prefer clean breaking simplification over compatibility aliases or renamed legacy abstractions.

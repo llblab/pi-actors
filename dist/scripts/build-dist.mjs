@@ -103,10 +103,10 @@ try {
     'export { default } from "../index.js";\n',
     "utf8",
   );
+  normalizeTextFiles(candidate);
   for (const dir of ["scripts", "fixtures", "skills"]) {
     cpSync(dir, join(candidate, dir), { recursive: true });
   }
-  normalizeTextFiles(candidate);
   const builtScripts = [
     ...listModuleScripts(join(candidate, "scripts")),
     ...listModuleScripts(join(candidate, "skills")),

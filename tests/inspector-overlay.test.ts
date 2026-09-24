@@ -434,6 +434,7 @@ test("Actor Inspector preserves newest-first Trace projection across refresh and
     detail: {},
     id: "older",
     kind: "run.start",
+    [TraceProjection.TRACE_ITEM_SEQUENCE]: 0,
     source: "lifecycle",
     summary: "Oldest event",
     ts: "2026-01-01T00:00:00.000Z",
@@ -442,6 +443,7 @@ test("Actor Inspector preserves newest-first Trace projection across refresh and
     detail: {},
     id: "middle",
     kind: "run.progress",
+    [TraceProjection.TRACE_ITEM_SEQUENCE]: 99,
     source: "lifecycle",
     summary: "Middle event",
     ts: "2026-01-02T00:00:00.000Z",
@@ -450,6 +452,7 @@ test("Actor Inspector preserves newest-first Trace projection across refresh and
     detail: { attention: "notify" },
     id: "newest",
     kind: "run.done",
+    [TraceProjection.TRACE_ITEM_SEQUENCE]: 100,
     source: "lifecycle",
     summary: "Newest event",
     ts: "2026-01-03T00:00:00.000Z",
@@ -465,6 +468,7 @@ test("Actor Inspector preserves newest-first Trace projection across refresh and
     instance.handleInput("\u001b[C");
     const initial = instance.render(90).join("\n");
     assert.ok(initial.indexOf("Middle event") < initial.indexOf("Oldest event"));
+    assert.match(initial, /#99.*Middle event/);
     instance.handleInput("\u001b[B");
     instance.render(90);
     instance.handleInput("\u001b[B");
@@ -474,9 +478,9 @@ test("Actor Inspector preserves newest-first Trace projection across refresh and
     const updated = instance.render(90).join("\n");
     assert.ok(updated.indexOf("Newest event") < updated.indexOf("Middle event"));
     assert.ok(updated.indexOf("Middle event") < updated.indexOf("Oldest event"));
-    assert.match(updated, /#2\s+A\s+lifecycle\/run\.done.*Newest event/);
+    assert.match(updated, /#100\s+A\s+lifecycle\/run\.done.*Newest event/);
     assert.doesNotMatch(updated, /[•·]/u);
-    assert.match(updated, /#1.*Middle event/);
+    assert.match(updated, /#99.*Middle event/);
     assert.match(updated, /▶\s+#0.*Oldest event/);
   } finally {
     instance.dispose();

@@ -14,6 +14,7 @@ import { tailFile } from "./runs-status.js";
 import * as RunsTrace from "./runs-trace.js";
 import * as SessionEvidence from "./session-evidence.js";
 import { readJsonFileResilient, } from "./state-readers.js";
+export const TRACE_ITEM_SEQUENCE = Symbol("trace-item-sequence");
 const LIFECYCLE_PREFIXES = ["run.", "command."];
 const SOURCE_LIMIT = 100;
 const SOURCE_RANK = {
@@ -32,7 +33,8 @@ function sourceForEvent(event) {
         ? "lifecycle"
         : "runtime";
 }
-function ordered(item, sourceKey, ordinal) {
+function ordered(item, sourceKey, ordinal, sequence = ordinal) {
+    Object.defineProperty(item, TRACE_ITEM_SEQUENCE, { value: sequence });
     return { item, ordinal, sourceKey };
 }
 function compareTraceItems(left, right) {
@@ -83,6 +85,8 @@ function controlDiagnosticItems(diagnostics) {
 }
 function traceEventItems(stateDir) {
     const read = RunsTrace.readRunTraceJournal(stateDir);
+    const summary = RunsTrace.summarizeRunTraceJournal(read);
+    const sequenceOffset = summary.dropped_events + Math.max(0, summary.compactions_total - 1);
     const retained = read.events.slice(-SOURCE_LIMIT);
     const projected = retained.map(({ event, ordinal }) => ordered({
         id: event.id,
@@ -95,7 +99,7 @@ function traceEventItems(stateDir) {
             ...(event.attention ? { attention: event.attention } : {}),
             ...(event.data !== undefined ? { data: event.data } : {}),
         }),
-    }, "trace", ordinal));
+    }, "trace", ordinal, sequenceOffset + Math.max(0, ordinal - 1)));
     const diagnostics = diagnosticItems(read.diagnostics).map((item, index) => ordered(item, "trace", read.events.length + index + 1));
     const hasMarker = read.events.some(({ event }) => event.kind === "runtime.trace_compacted");
     if (read.omittedPrefixBytes > 0 && !hasMarker) {
@@ -128,7 +132,7 @@ function controlItems(stateDir) {
             summary: `${value.action} ${value.status}`,
             ...(value.status === "failed" ? { level: "error" } : {}),
             detail: value,
-        }, "control", start + index + 1);
+        }, "control", start + index + 1, start + index);
     });
     return [
         ...projected,
@@ -153,7 +157,7 @@ function agentItems(stateDir) {
     });
 }
 function processItems(stateDir) {
-    return ["stdout", "stderr"].flatMap((stream) => {
+    return ["stdout", "stderr"].flatMap((stream, index) => {
         const path = join(stateDir, `${stream}.log`);
         if (!existsSync(path))
             return [];
@@ -169,7 +173,7 @@ function processItems(stateDir) {
                 summary: `${stream} (${stat.size} bytes)`,
                 ...(stream === "stderr" ? { level: "warning" } : {}),
                 detail: redact({ bytes: stat.size, path, tail }),
-            }, `process:${stream}`, 1)];
+            }, `process:${stream}`, 1, index)];
     });
 }
 function resultItems(stateDir) {
@@ -190,7 +194,7 @@ function resultItems(stateDir) {
             summary: failed ? "Run process failed" : "Run process completed",
             ...(failed ? { level: "error" } : {}),
             detail: redact(read.value),
-        }, "process:result", 1), ...diagnosticItems(read.diagnostics).map((item, index) => ordered(item, "process:result", index + 2))];
+        }, "process:result", 1, 2), ...diagnosticItems(read.diagnostics).map((item, index) => ordered(item, "process:result", index + 2))];
 }
 function artifactItems(stateDir, declarations) {
     const manifest = resolveArtifactManifest(declarations);
@@ -211,7 +215,7 @@ function artifactItems(stateDir, declarations) {
             required: artifact.required,
             ...(artifact.size !== undefined ? { size: artifact.size } : {}),
         }),
-    }, "artifact", index + 1));
+    }, "artifact", index + 1, index));
 }
 export function projectRunTrace(stateDir, options = {}) {
     const source = options.source ?? "all";

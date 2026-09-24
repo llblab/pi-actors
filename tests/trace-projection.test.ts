@@ -5,7 +5,32 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { TRACE_JOURNAL_MAX_BYTES } from "../lib/limits.ts";
-import { projectRunTrace } from "../lib/trace-projection.ts";
+import {
+  projectRunTrace,
+  TRACE_ITEM_SEQUENCE,
+} from "../lib/trace-projection.ts";
+
+test("Trace projection retains stable sequences beyond the visible tail", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-sequence-"));
+  try {
+    await writeFile(
+      join(root, "trace.jsonl"),
+      Array.from({ length: 101 }, (_, sequence) => JSON.stringify({
+        id: `trace-${sequence}`,
+        ts: new Date(sequence).toISOString(),
+        kind: "runtime.note",
+      })).join("\n") + "\n",
+    );
+    const items = projectRunTrace(root);
+    assert.equal(items.length, 100);
+    assert.equal(items[0]?.id, "trace-100");
+    assert.equal(items[0]?.[TRACE_ITEM_SEQUENCE], 100);
+    assert.equal(items[1]?.[TRACE_ITEM_SEQUENCE], 99);
+    assert.equal(Object.hasOwn(items[0] ?? {}, "sequence"), false);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
 
 test("Trace projection merges causal Run evidence newest-first", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-projection-"));
@@ -258,14 +283,19 @@ test("Trace projection exposes compaction and legacy history loss without new fi
         dropped_malformed_lines_total: 0,
         dropped_bytes_total: 80,
         dropped_event_count_exact: true,
-        retained_events: 2,
-        retained_bytes: 240,
+        retained_events: 3,
+        retained_bytes: 360,
         history_complete: false,
       },
     };
+    const retainedAfterMarker = {
+      id: "event-4",
+      ts: "2026-01-01T00:00:02.000Z",
+      kind: "runtime.note",
+    };
     await writeFile(
       join(root, "trace.jsonl"),
-      `${JSON.stringify({ id: "event-1", ts: "2026-01-01T00:00:00.000Z", kind: "runtime.note" })}\n${JSON.stringify(marker)}\n`,
+      `${JSON.stringify({ id: "event-2", ts: "2026-01-01T00:00:00.000Z", kind: "runtime.note" })}\n${JSON.stringify(marker)}\n${JSON.stringify(retainedAfterMarker)}\n`,
     );
     const compacted = projectRunTrace(root, { source: "runtime" });
     const projectedMarker = compacted.find(({ kind }) => kind === marker.kind)!;
@@ -277,6 +307,30 @@ test("Trace projection exposes compaction and legacy history loss without new fi
     assert.equal(
       compacted.some(({ kind }) => kind === "runtime.trace_history_incomplete"),
       false,
+    );
+    assert.equal(
+      compacted.find(({ id }) => id === retainedAfterMarker.id)?.[TRACE_ITEM_SEQUENCE],
+      4,
+    );
+    const secondMarker = {
+      ...marker,
+      id: "marker-2",
+      ts: "2026-01-01T00:00:03.000Z",
+      data: {
+        ...marker.data,
+        compactions_total: 2,
+        dropped_valid_events_total: 3,
+        retained_events: 2,
+      },
+    };
+    await writeFile(
+      join(root, "trace.jsonl"),
+      `${JSON.stringify(retainedAfterMarker)}\n${JSON.stringify(secondMarker)}\n`,
+    );
+    assert.equal(
+      projectRunTrace(root, { source: "runtime" })
+        .find(({ id }) => id === retainedAfterMarker.id)?.[TRACE_ITEM_SEQUENCE],
+      4,
     );
     const prefix = Buffer.alloc(TRACE_JOURNAL_MAX_BYTES + 17, 0x61);
     const suffix = `${JSON.stringify({

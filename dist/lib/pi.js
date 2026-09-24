@@ -1,0 +1,192 @@
+/**
+ * Pi SDK adapter boundary.
+ * Zones: pi agent sdk boundary, extension host adapters
+ * Owns direct pi SDK imports and exposes narrow pi-actors-facing helpers/types for the composition root.
+ */
+import * as SessionEvidence from "./session-evidence.js";
+export const RUN_COMPLETION_BATCH_CUSTOM_TYPE = "pi-actors-run-batch";
+export const RUN_STEER_CUSTOM_TYPE = "pi-actors-run-steer";
+export function getSessionId(ctx) {
+    return ctx.sessionManager.getSessionId();
+}
+export function createNotificationSink(pi, ctx) {
+    return {
+        notify: (message, level) => ctx.ui.notify(message, level),
+        sendFollowUp: (message) => pi.sendMessage(message, {
+            deliverAs: "followUp",
+            triggerTurn: true,
+        }),
+    };
+}
+export function sendRunCompletionBatch(pi, batchId, content) {
+    pi.sendMessage({
+        customType: RUN_COMPLETION_BATCH_CUSTOM_TYPE,
+        content,
+        display: true,
+        details: {
+            pi_actors_delivery: {
+                batch_id: batchId,
+                kind: "completion_batch",
+            },
+        },
+    }, {
+        deliverAs: "followUp",
+        triggerTurn: true,
+    });
+}
+export function sendRunSteer(pi, input) {
+    pi.sendMessage({
+        customType: RUN_STEER_CUSTOM_TYPE,
+        content: input.content,
+        display: false,
+        details: {
+            pi_actors_delivery: {
+                event_id: input.eventId,
+                kind: "urgent_steer",
+                steer_id: input.steerId,
+            },
+        },
+    }, {
+        deliverAs: "steer",
+        triggerTurn: true,
+    });
+}
+function completionBatchMessage(message) {
+    if (!message || typeof message !== "object" || Array.isArray(message))
+        return undefined;
+    const record = message;
+    if (record.customType !== RUN_COMPLETION_BATCH_CUSTOM_TYPE ||
+        typeof record.content !== "string")
+        return undefined;
+    const details = record.details;
+    const delivery = details && typeof details === "object" && !Array.isArray(details)
+        ? details.pi_actors_delivery
+        : undefined;
+    const envelope = delivery && typeof delivery === "object" && !Array.isArray(delivery)
+        ? delivery
+        : undefined;
+    const detailedId = envelope?.kind === "completion_batch" &&
+        typeof envelope.batch_id === "string"
+        ? envelope.batch_id
+        : undefined;
+    const contentId = /^Batch: `([^`]{1,128})`$/mu.exec(record.content)?.[1];
+    const batchId = detailedId ?? contentId;
+    if (!batchId || batchId.length > 128)
+        return undefined;
+    return { batchId, content: record.content };
+}
+/** Collapse exact retry duplicates and remove conflicting delivery envelopes. */
+export function dedupeRunCompletionBatchContext(messages) {
+    const batches = new Map();
+    const conflicts = new Set();
+    for (const message of messages) {
+        const batch = completionBatchMessage(message);
+        if (!batch)
+            continue;
+        const existing = batches.get(batch.batchId);
+        if (existing !== undefined && existing !== batch.content) {
+            conflicts.add(batch.batchId);
+        }
+        else if (existing === undefined) {
+            batches.set(batch.batchId, batch.content);
+        }
+    }
+    const retained = new Set();
+    const filtered = messages.filter((message) => {
+        const batch = completionBatchMessage(message);
+        if (!batch)
+            return true;
+        if (conflicts.has(batch.batchId) || retained.has(batch.batchId))
+            return false;
+        retained.add(batch.batchId);
+        return true;
+    });
+    for (const batchId of conflicts)
+        batches.delete(batchId);
+    return { batches, conflicts, messages: filtered };
+}
+export function removeRunCompletionBatchFromContext(messages, batchId) {
+    return messages.filter((message) => completionBatchMessage(message)?.batchId !== batchId);
+}
+function steerMessage(message) {
+    if (!message || typeof message !== "object" || Array.isArray(message))
+        return undefined;
+    const record = message;
+    if (record.customType !== RUN_STEER_CUSTOM_TYPE || typeof record.content !== "string") {
+        return undefined;
+    }
+    const details = record.details;
+    if (!details || typeof details !== "object" || Array.isArray(details))
+        return undefined;
+    const delivery = details.pi_actors_delivery;
+    if (!delivery || typeof delivery !== "object" || Array.isArray(delivery))
+        return undefined;
+    const envelope = delivery;
+    if (envelope.kind !== "urgent_steer" ||
+        typeof envelope.steer_id !== "string" ||
+        !envelope.steer_id ||
+        envelope.steer_id.length > 128 ||
+        typeof envelope.event_id !== "string" ||
+        !envelope.event_id ||
+        envelope.event_id.length > 256)
+        return undefined;
+    return {
+        content: record.content,
+        eventId: envelope.event_id,
+        steerId: envelope.steer_id,
+    };
+}
+export function dedupeRunSteerContext(messages) {
+    const conflicts = new Set();
+    const steers = new Map();
+    for (const message of messages) {
+        const steer = steerMessage(message);
+        if (!steer)
+            continue;
+        const existing = steers.get(steer.steerId);
+        if (existing &&
+            (existing.content !== steer.content || existing.eventId !== steer.eventId)) {
+            conflicts.add(steer.steerId);
+        }
+        else if (!existing) {
+            steers.set(steer.steerId, {
+                content: steer.content,
+                eventId: steer.eventId,
+            });
+        }
+    }
+    const retained = new Set();
+    const filtered = messages.filter((message) => {
+        const steer = steerMessage(message);
+        if (!steer)
+            return true;
+        if (conflicts.has(steer.steerId) || retained.has(steer.steerId))
+            return false;
+        retained.add(steer.steerId);
+        return true;
+    });
+    for (const steerId of conflicts)
+        steers.delete(steerId);
+    return { conflicts, messages: filtered, steers };
+}
+export function removeRunSteerFromContext(messages, steerId) {
+    return messages.filter((message) => steerMessage(message)?.steerId !== steerId);
+}
+export function inspectRunSteerSessionEvidence(ctx, input) {
+    return SessionEvidence.inspectBoundedActiveSessionEntries({
+        getEntry: (id) => ctx.sessionManager.getEntry(id),
+        leaf: ctx.sessionManager.getLeafEntry(),
+        match: (entry) => {
+            const steer = steerMessage(entry);
+            if (!steer || steer.steerId !== input.steerId)
+                return undefined;
+            return steer.content === input.content && steer.eventId === input.eventId
+                ? "present"
+                : "conflict";
+        },
+    });
+}
+export function registerToolDefinitions(pi, definitions) {
+    for (const definition of definitions)
+        pi.registerTool(definition);
+}

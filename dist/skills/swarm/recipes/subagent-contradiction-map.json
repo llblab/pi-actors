@@ -1,0 +1,20 @@
+{
+  "async": true,
+  "args": [
+    "inputs:string",
+    "focus:string",
+    "resolution_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "focus": "Find contradictions, unresolved assumptions, incompatible recommendations, and evidence gaps.",
+    "resolution_policy": "Do not force consensus; preserve unresolved conflicts and name what evidence would resolve them.",
+    "output_format": "Markdown sections: Contradictions, Affected Claims, Resolution Evidence, Unresolved Risks.",
+    "thinking": "medium",
+    "tools": ""
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Map contradictions in these inputs: {inputs}. Focus: {focus}. Resolution policy: {resolution_policy}. Output format: {output_format}"
+}

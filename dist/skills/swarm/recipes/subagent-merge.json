@@ -1,0 +1,24 @@
+{
+  "async": true,
+  "args": [
+    "inputs:string",
+    "mode:enum(consensus-first,risk-first)",
+    "merge_policy:string",
+    "risk_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "mode": "consensus-first",
+    "merge_policy": "Preserve partial reviewer evidence, branch status, and degraded confidence markers.",
+    "risk_policy": "Preserve minority severe findings and mark merger-added claims explicitly.",
+    "output_format": "Markdown sections: Summary, Consensus, Minority Findings, Contradictions, Next Actions.",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
+    "tools": ""
+  },
+  "accept_output": "review_evidence",
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Merge these subagent outputs using mode {mode}: {inputs}. Merge policy: {merge_policy}. Risk policy: {risk_policy}. Begin the response with ACTOR_REVIEW_RESULT on its own line. Output format: {output_format}"
+}

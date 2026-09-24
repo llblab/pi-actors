@@ -101,18 +101,18 @@ async function preparePackedPackage(root: string): Promise<string> {
   return join(root, "node_modules", "@llblab", "pi-actors");
 }
 
-test("package metadata exposes compiled and source extension entrypoints", async () => {
+test("package metadata exposes only Pi-supported compiled resources", async () => {
   const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   assert.deepEqual(pkg.pi.extensions, ["./dist/pi-actors/index.js"]);
-  assert.deepEqual(pkg.pi.sourceExtensions, ["./index.ts"]);
   assert.deepEqual(pkg.pi.skills, ["./dist/skills"]);
-  assert.deepEqual(pkg.pi.sourceSkills, ["./skills"]);
+  assert.equal("sourceExtensions" in pkg.pi, false);
+  assert.equal("sourceSkills" in pkg.pi, false);
   assert.deepEqual(pkg.peerDependencies, {
     "@earendil-works/pi-coding-agent": ">=0.84.4",
     "@earendil-works/pi-tui": ">=0.84.4",
   });
   await access(join(process.cwd(), pkg.pi.extensions[0]));
-  await access(join(process.cwd(), pkg.pi.sourceExtensions[0]));
+  await access(join(process.cwd(), "index.ts"));
 });
 
 test("build output mirrors JS runtime assets under dist", async () => {
@@ -357,7 +357,8 @@ test("packed artifact first session preserves agent-native Skill and tool parity
            },
          };
          mod.default(pi);
-         const resources = await handlers.get("resources_discover")();
+         const resourceHandler = handlers.get("resources_discover");
+         const resources = resourceHandler ? await resourceHandler() : null;
          const context = {
            cwd: packageDir,
            sessionManager: { getSessionId: () => "packed-owner" },
@@ -704,8 +705,8 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     assert.equal(loaded.packedRun.status, "done");
     assert.equal(loaded.packedRun.traceComplete, true);
     assert.equal(loaded.packedRun.controlPending, 0);
-    assert.equal(loaded.resources.skillPaths.length, 1);
-    assert.equal(loaded.resources.skillPaths[0].replaceAll("\\", "/").endsWith("/dist/skills"), true);
+    assert.equal(loaded.resources, null);
+    assert.equal(loaded.lifecycleEvents.includes("resources_discover"), false);
     assert.deepEqual(loaded.tools.map((tool: any) => tool.name), [
       "register_tool",
       "spawn",

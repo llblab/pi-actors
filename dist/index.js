@@ -1,0 +1,23 @@
+/**
+ * pi-actors — actor runtime and persistent local tool registry for pi.
+ * Zones: composition root, pi agent, actor runtime
+ * Owns extension composition and Pi event registration, not domain behavior.
+ */
+import * as ExtensionRuntime from "./lib/extension-runtime.js";
+import * as InspectorCommand from "./lib/inspector-command.js";
+import * as Paths from "./lib/paths.js";
+export default function toolRegistryExtension(pi) {
+    const runtime = ExtensionRuntime.createActorExtensionRuntime(pi);
+    if (Paths.isRawExtensionCheckout(import.meta.url)) {
+        pi.on("resources_discover", async () => runtime.discoverResources(import.meta.url));
+    }
+    pi.on("session_start", async (_event, ctx) => runtime.onSessionStart(ctx));
+    pi.on("agent_settled", async (_event, ctx) => runtime.onAgentSettled(ctx));
+    pi.on("context", async (event, ctx) => ({
+        messages: runtime.onContext(event.messages, ctx),
+    }));
+    pi.on("session_shutdown", async (event, ctx) => runtime.onSessionShutdown(event.reason, ctx));
+    pi.on("before_agent_start", async (event, ctx) => runtime.beforeAgentStart(event.systemPrompt, event.systemPromptOptions.skills ?? [], ctx));
+    InspectorCommand.registerActorInspectorCommand(pi, runtime.getRunOwnerId);
+    runtime.registerCoreTools();
+}

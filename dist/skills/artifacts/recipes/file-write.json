@@ -1,0 +1,14 @@
+{
+  "async": false,
+  "args": [
+    "artifact_path:path",
+    "mode:enum(create,overwrite,append)"
+  ],
+  "defaults": {
+    "mode": "create"
+  },
+  "template": {
+    "template": "{skill_dir}/scripts/artifact-utils.mjs write {artifact_path} {mode}",
+    "output": "stdout"
+  }
+}

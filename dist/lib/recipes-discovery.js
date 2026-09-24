@@ -1,0 +1,783 @@
+/**
+ * File-discovered recipe registry helpers
+ * Zones: recipe discovery, tool exposure, registry diagnostics
+ * Owns filename identity discovery across prioritized recipe roots
+ */
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import * as CommandTemplates from "./command-templates.js";
+import * as ModelContext from "./model-context.js";
+import * as RecipesReferences from "./recipes-references.js";
+import * as RecipesUsage from "./recipes-usage.js";
+import * as Schema from "./schema.js";
+function assertToolSafeRepeatConfig(config, argTypes, defaults) {
+    if (typeof config === "string" || config === undefined || config === null)
+        return;
+    if (Array.isArray(config)) {
+        for (const step of config)
+            assertToolSafeRepeatConfig(step, argTypes, defaults);
+        return;
+    }
+    if (typeof config !== "object")
+        return;
+    const node = config;
+    if (typeof node.repeat === "string") {
+        const trimmed = node.repeat.trim();
+        if (!/^\d+$/.test(trimmed)) {
+            const match = trimmed.match(/^\{?([A-Za-z_][A-Za-z0-9_-]*)\.length\}?$/);
+            if (!match ||
+                (argTypes[match[1]]?.kind !== "array" &&
+                    !Array.isArray(defaults[match[1]])))
+                throw new Error("Command template repeat must be a positive integer or {array.length} with an array argument/default.");
+        }
+    }
+    assertToolSafeRepeatConfig(node.template, argTypes, defaults);
+    assertToolSafeRepeatConfig(node.recover, argTypes, defaults);
+}
+function listRecipeFiles(root) {
+    if (!existsSync(root))
+        return [];
+    return readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isFile() &&
+        (entry.name.endsWith(".json") || entry.name.endsWith(".md")))
+        .map((entry) => join(root, entry.name))
+        .sort((a, b) => a
+        .replace(/\.md$/, ".json")
+        .localeCompare(b.replace(/\.md$/, ".json")) ||
+        (a.endsWith(".json") ? -1 : 1));
+}
+function getRecipeCommandTemplateConfig(config) {
+    return (typeof config.template === "object" && config.template !== null
+        ? config.template
+        : config);
+}
+function getRecipeDiagnosticTemplateConfig(config) {
+    const templateConfig = getRecipeCommandTemplateConfig(config);
+    return typeof templateConfig === "object" && !Array.isArray(templateConfig)
+        ? {
+            ...templateConfig,
+            defaults: {
+                ...(templateConfig.defaults ?? {}),
+                ...(config.defaults ?? {}),
+                ...(config.values ?? {}),
+            },
+        }
+        : {
+            defaults: { ...(config.defaults ?? {}), ...(config.values ?? {}) },
+            template: templateConfig,
+        };
+}
+function getRecipeConfigDiagnostics(file, config) {
+    if (!config) {
+        const reason = RecipesReferences.diagnoseRawRecipeConfigFailure(file);
+        return [`Invalid recipe: ${file}${reason ? `: ${reason}` : ""}`];
+    }
+    return CommandTemplates.getCommandTemplateWarnings(getRecipeDiagnosticTemplateConfig(config)).map((warning) => `Recipe ${file}: ${warning}`);
+}
+function getRecipeRiskLabels(config) {
+    if (!config)
+        return [];
+    const labels = new Set(CommandTemplates.getCommandTemplateRiskLabels(getRecipeDiagnosticTemplateConfig(config)));
+    if (config.async === true)
+        labels.add("risk.long_running");
+    return [
+        "risk.shell",
+        "risk.eval",
+        "risk.destructive_fs",
+        "risk.broad_fs_write",
+        "risk.external_side_effect",
+        "risk.secret_touching",
+        "risk.network",
+        "risk.long_running",
+        "risk.platform_specific",
+    ].filter((label) => labels.has(label));
+}
+function readDiscoveredRecipe(root, file, priority, defaultTool = false, mutableUsage = false, resolutionContext) {
+    const id = RecipesReferences.getRecipeIdFromPath(file);
+    try {
+        const config = RecipesReferences.readResolvedRecipeConfig(file, [], {
+            skillContext: resolutionContext?.activeSkills,
+        });
+        const invalid = !config;
+        const disabled = config?.disabled === true;
+        return {
+            id,
+            path: file,
+            root,
+            priority,
+            config,
+            active: false,
+            shadowed: false,
+            invalid,
+            disabled,
+            tool: defaultTool && !disabled && !invalid,
+            mutableUsage,
+            resolutionContext,
+            diagnostics: getRecipeConfigDiagnostics(file, config),
+            riskLabels: getRecipeRiskLabels(config),
+            shadows: [],
+        };
+    }
+    catch (error) {
+        return {
+            id,
+            path: file,
+            root,
+            priority,
+            active: false,
+            shadowed: false,
+            invalid: true,
+            disabled: false,
+            tool: false,
+            mutableUsage,
+            resolutionContext,
+            diagnostics: [
+                `Recipe ${id} rejected: ${error instanceof Error ? error.message : String(error)}`,
+            ],
+            riskLabels: [],
+            shadows: [],
+        };
+    }
+}
+function filesForSource(source) {
+    const defaultTool = source.defaultTool === true;
+    const mutableUsage = source.mutableUsage === true;
+    if (source.file)
+        return [
+            {
+                root: source.root ?? source.file,
+                file: source.file,
+                defaultTool,
+                mutableUsage,
+                resolutionContext: source.resolutionContext,
+            },
+        ];
+    return source.root
+        ? listRecipeFiles(source.root).map((file) => ({
+            root: source.root,
+            file,
+            defaultTool,
+            mutableUsage,
+            resolutionContext: source.resolutionContext,
+        }))
+        : [];
+}
+const WINDOWS_BROAD_WRITE_PRINCIPALS = [
+    "Everyone",
+    "BUILTIN\\Users",
+    "Authenticated Users",
+    "S-1-1-0",
+    "S-1-5-11",
+    "S-1-5-32-545",
+];
+const WINDOWS_WRITE_ACL_PATTERN = /\((?:[^)]*,)?(?:F|M|W|WD|AD|DC|GA|GW)(?:,[^)]*)?\)/i;
+export function hasBroadWindowsWriteAcl(icaclsOutput) {
+    return icaclsOutput
+        .split(/\r?\n/)
+        .some((line) => WINDOWS_BROAD_WRITE_PRINCIPALS.some((principal) => line.includes(principal)) && WINDOWS_WRITE_ACL_PATTERN.test(line));
+}
+function getWindowsRecipeRootDiagnostics(root) {
+    try {
+        const output = execFileSync("icacls", [root], {
+            encoding: "utf8",
+            windowsHide: true,
+            timeout: 5000,
+        });
+        if (!hasBroadWindowsWriteAcl(output))
+            return [];
+        return [
+            `Recipe root grants write access to broad Windows principals; review ACLs: ${root}`,
+        ];
+    }
+    catch (error) {
+        return [
+            `Failed to inspect Windows ACL for recipe root ${root}: ${error instanceof Error ? error.message : String(error)}`,
+        ];
+    }
+}
+function getPosixRecipeRootDiagnostics(root) {
+    const diagnostics = [];
+    const stat = statSync(root);
+    if ((stat.mode & 0o002) !== 0) {
+        diagnostics.push(`Recipe root is world-writable; review permissions: ${root}`);
+    }
+    if ((stat.mode & 0o020) !== 0) {
+        diagnostics.push(`Recipe root is group-writable; review ownership and permissions: ${root}`);
+    }
+    return diagnostics;
+}
+function getRecipeRootDiagnostics(sources) {
+    const diagnostics = [];
+    const roots = new Set(sources
+        .map((source) => source.root)
+        .filter((root) => typeof root === "string"));
+    for (const root of roots) {
+        try {
+            if (!existsSync(root))
+                continue;
+            diagnostics.push(...(process.platform === "win32"
+                ? getWindowsRecipeRootDiagnostics(root)
+                : getPosixRecipeRootDiagnostics(root)));
+        }
+        catch (error) {
+            diagnostics.push(`Failed to inspect recipe root ${root}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    return diagnostics;
+}
+export function discoverRecipeSources(sources) {
+    const entries = sources.flatMap((source, priority) => filesForSource(source).map(({ root, file, defaultTool, mutableUsage, resolutionContext }) => readDiscoveredRecipe(root, file, priority, defaultTool, mutableUsage, resolutionContext)));
+    const byId = new Map();
+    for (const entry of entries) {
+        const bucket = byId.get(entry.id) ?? [];
+        bucket.push(entry);
+        byId.set(entry.id, bucket);
+    }
+    const active = new Map();
+    const diagnostics = getRecipeRootDiagnostics(sources);
+    for (const [id, bucket] of byId) {
+        bucket.sort((a, b) => a.priority - b.priority ||
+            a.path
+                .replace(/\.md$/, ".json")
+                .localeCompare(b.path.replace(/\.md$/, ".json")) ||
+            (a.path.endsWith(".json") ? -1 : 1));
+        const winner = bucket[0];
+        winner.active = true;
+        winner.shadows = bucket.slice(1).map((entry) => entry.path);
+        active.set(id, winner);
+        for (const shadow of bucket.slice(1)) {
+            shadow.shadowed = true;
+            if (winner.path.endsWith(".json") && shadow.path.endsWith(".md"))
+                shadow.diagnostics.push(`Markdown recipe ${shadow.path} is shadowed by JSON recipe ${winner.path}`);
+        }
+        if (winner.invalid)
+            diagnostics.push(`Recipe ${id} is invalid and blocks lower-priority recipes`);
+        if (winner.disabled)
+            diagnostics.push(`Recipe ${id} is disabled and blocks lower-priority recipes`);
+        if (winner.shadows.length > 0)
+            diagnostics.push(`Recipe ${id} shadows ${winner.shadows.length} lower-priority recipe(s)`);
+        diagnostics.push(...winner.diagnostics);
+    }
+    return { active, entries, diagnostics };
+}
+export function discoverRecipes(roots) {
+    return discoverRecipeSources(roots.map((root) => ({ root })));
+}
+function recipeUsage(entry) {
+    const stored = entry.mutableUsage
+        ? RecipesUsage.readRecipeUsage(entry.path)
+        : undefined;
+    if (stored)
+        return stored;
+    const usage = entry.config?.usage;
+    return usage && typeof usage === "object" && !Array.isArray(usage)
+        ? usage
+        : undefined;
+}
+function cleanupRecommendation(entry) {
+    if (entry.invalid) {
+        return {
+            id: entry.id,
+            path: entry.path,
+            reason: "invalid recipe blocks lower-priority entries with the same id",
+            actions: ["fix", "delete", "archive"],
+        };
+    }
+    if (entry.shadowed) {
+        return {
+            id: entry.id,
+            path: entry.path,
+            reason: "shadowed by a higher-priority recipe",
+            actions: ["merge", "delete", "archive"],
+        };
+    }
+    if (entry.disabled) {
+        return {
+            id: entry.id,
+            path: entry.path,
+            reason: "disabled recipe is retained but not exposed as a tool",
+            actions: ["keep disabled", "delete", "archive"],
+        };
+    }
+    const usage = recipeUsage(entry);
+    const calls = Number(usage?.calls ?? 0);
+    if (entry.mutableUsage && entry.tool && calls === 0) {
+        return {
+            id: entry.id,
+            path: entry.path,
+            reason: "active user tool has no recorded launches",
+            actions: ["keep as tool", "move out of tool root", "delete", "archive"],
+        };
+    }
+    if (entry.mutableUsage && !entry.tool) {
+        return {
+            id: entry.id,
+            path: entry.path,
+            reason: "user recipe is a component, not an active tool",
+            actions: [
+                "keep component",
+                "move into tool root",
+                "merge",
+                "delete",
+                "archive",
+            ],
+        };
+    }
+    if (entry.shadows.length > 0) {
+        return {
+            id: entry.id,
+            path: entry.path,
+            reason: `overrides ${entry.shadows.length} lower-priority recipe(s)`,
+            actions: ["keep override", "merge", "delete", "archive"],
+        };
+    }
+    return undefined;
+}
+export function createRecipeIntegrityManifest(result) {
+    return result.entries
+        .map((entry) => {
+        const bytes = readFileSync(entry.path);
+        return {
+            active: entry.active,
+            disabled: entry.disabled,
+            id: entry.id,
+            invalid: entry.invalid,
+            path: entry.path,
+            root: entry.root,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            shadowed: entry.shadowed,
+            size: bytes.byteLength,
+            tool: entry.tool,
+        };
+    })
+        .sort((a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path));
+}
+function diagnosticSeverity(message) {
+    if (/invalid|failed to load|not found|cyclic|exceeds|must define|repeat must/i.test(message)) {
+        return "error";
+    }
+    if (/world-writable|group-writable|invokes bash|eval|destructive|broad filesystem|unsafe/i.test(message)) {
+        return "warning";
+    }
+    return "info";
+}
+function diagnosticSuggestedAction(message) {
+    if (/world-writable|group-writable/i.test(message))
+        return "tighten recipe root permissions";
+    if (/invokes bash/i.test(message))
+        return "audit the trusted shell boundary and keep only if intentional";
+    if (/must define template/i.test(message))
+        return "add a template field or remove the recipe";
+    if (/JSON|Expected|parse/i.test(message))
+        return "fix recipe syntax or archive the file";
+    if (/Markdown recipe/i.test(message))
+        return "fix frontmatter and add a fenced template or recipe block";
+    if (/cyclic/i.test(message))
+        return "break the import cycle";
+    if (/exceeds.*size/i.test(message))
+        return "split large prompt or data into separate files";
+    if (/recipe\.mailbox was removed/i.test(message))
+        return "replace mailbox.accepts with control actions and route outputs to Trace events";
+    if (/repeat must/i.test(message))
+        return "use a positive repeat count or an array-typed repeat source";
+    if (/shadows/i.test(message))
+        return "confirm the active override or rename one recipe";
+    if (/disabled/i.test(message))
+        return "keep disabled intentionally or delete/archive the file";
+    return "inspect the recipe and fix or archive it if unexpected";
+}
+function diagnosticDetails(result) {
+    const details = [];
+    const seen = new Set();
+    const push = (message, entry) => {
+        const key = `${entry?.path ?? "root"}\n${message}`;
+        if (seen.has(key))
+            return;
+        seen.add(key);
+        details.push({
+            ...(entry ? { id: entry.id, path: entry.path } : {}),
+            ...(entry?.riskLabels.length ? { risk_labels: entry.riskLabels } : {}),
+            action: diagnosticSuggestedAction(message),
+            message,
+            severity: diagnosticSeverity(message),
+        });
+    };
+    for (const message of result.diagnostics)
+        push(message);
+    for (const entry of result.entries) {
+        for (const message of entry.diagnostics)
+            push(message, entry);
+    }
+    return details.sort((a, b) => {
+        const rank = { error: 0, warning: 1, info: 2 };
+        return (rank[a.severity] -
+            rank[b.severity] ||
+            String(a.message).localeCompare(String(b.message)));
+    });
+}
+function remediationForEntry(entry, activePath) {
+    const riskyDiagnostics = entry.diagnostics.filter((message) => diagnosticSeverity(message) === "warning");
+    const blockedFallback = entry.shadows[0];
+    if (entry.invalid) {
+        return {
+            id: entry.id,
+            kind: blockedFallback ? "blocking_invalid" : "invalid",
+            severity: "error",
+            path: entry.path,
+            ...(blockedFallback ? { blocked_fallback: blockedFallback } : {}),
+            reason: blockedFallback
+                ? "invalid higher-priority recipe blocks a lower-priority fallback"
+                : "recipe is invalid and cannot be exposed as a tool",
+            action: "fix recipe syntax/config, or disable/delete/archive it to restore fallback",
+        };
+    }
+    if (entry.disabled && entry.active) {
+        return {
+            id: entry.id,
+            kind: blockedFallback ? "blocking_disabled" : "disabled",
+            severity: "warning",
+            path: entry.path,
+            ...(blockedFallback ? { blocked_fallback: blockedFallback } : {}),
+            reason: blockedFallback
+                ? "disabled higher-priority recipe intentionally blocks a lower-priority fallback"
+                : "recipe is disabled and not exposed as a tool",
+            action: "keep disabled intentionally, re-enable, or delete/archive the file",
+        };
+    }
+    if (riskyDiagnostics.length > 0) {
+        return {
+            id: entry.id,
+            kind: "risky_shell_boundary",
+            severity: "warning",
+            path: entry.path,
+            ...(entry.riskLabels.length ? { risk_labels: entry.riskLabels } : {}),
+            reason: riskyDiagnostics[0],
+            action: "audit trusted command boundary; keep only if the recipe is local and intentional",
+        };
+    }
+    if (entry.shadowed) {
+        return {
+            id: entry.id,
+            kind: "shadowed",
+            severity: "info",
+            path: entry.path,
+            ...(activePath ? { active_path: activePath } : {}),
+            reason: activePath
+                ? `shadowed by ${activePath}`
+                : "shadowed by a higher-priority recipe",
+            action: "keep as fallback/component, merge, rename, delete, or archive",
+        };
+    }
+    return undefined;
+}
+function remediationRank(item) {
+    const kind = String(item.kind ?? "");
+    if (kind === "blocking_invalid")
+        return 0;
+    if (kind === "invalid")
+        return 1;
+    if (kind === "blocking_disabled")
+        return 2;
+    if (kind === "risky_shell_boundary")
+        return 3;
+    if (kind === "disabled")
+        return 4;
+    if (kind === "shadowed")
+        return 5;
+    return 6;
+}
+function discoveryRemediations(result) {
+    return result.entries
+        .map((entry) => remediationForEntry(entry, result.active.get(entry.id)?.path))
+        .filter((entry) => Boolean(entry))
+        .sort((a, b) => remediationRank(a) - remediationRank(b) ||
+        String(a.id).localeCompare(String(b.id)) ||
+        String(a.path).localeCompare(String(b.path)));
+}
+function summarizeRiskLabels(entries) {
+    const counts = new Map();
+    for (const entry of entries) {
+        for (const label of entry.riskLabels) {
+            const current = counts.get(label) ?? { count: 0, ids: new Set() };
+            current.count += 1;
+            current.ids.add(entry.id);
+            counts.set(label, current);
+        }
+    }
+    return [...counts.entries()]
+        .map(([label, value]) => ({
+        label,
+        count: value.count,
+        recipes: [...value.ids].sort(),
+    }))
+        .sort((a, b) => Number(b.count) - Number(a.count) ||
+        String(a.label).localeCompare(String(b.label)));
+}
+function recommendationForEntry(entry, activePath) {
+    const recommendation = cleanupRecommendation(entry);
+    if (!recommendation)
+        return undefined;
+    if (entry.shadowed && activePath) {
+        return {
+            ...recommendation,
+            reason: `shadowed by ${activePath}`,
+        };
+    }
+    return recommendation;
+}
+export function getShadowedLaunchDiagnostic(result, id) {
+    const active = result.active.get(id.trim());
+    if (!active || active.shadows.length === 0)
+        return undefined;
+    if (!active.invalid && !active.disabled)
+        return undefined;
+    return {
+        active_path: active.path,
+        blocked_fallback: active.shadows[0],
+        hint: "inspect_recipes_doctor",
+        reason: active.invalid ? "shadowed_invalid" : "shadowed_disabled",
+    };
+}
+function templatePreview(value) {
+    const rendered = typeof value === "string"
+        ? value
+        : value === undefined
+            ? undefined
+            : JSON.stringify(value);
+    return rendered && rendered.length > 120
+        ? `${rendered.slice(0, 117)}...`
+        : rendered;
+}
+export function listDraftRecipes(root) {
+    return listRecipeFiles(root).map((path) => {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            const id = RecipesReferences.getRecipeIdFromPath(path);
+            const bytes = readFileSync(path);
+            const fingerprint = createHash("sha256").update(bytes).digest("hex");
+            const stat = statSync(path);
+            const config = RecipesReferences.readRawRecipeConfig(path);
+            const resolved = RecipesReferences.readResolvedRecipeConfig(path);
+            const diagnostics = getRecipeConfigDiagnostics(path, resolved);
+            const after = readFileSync(path);
+            if (createHash("sha256").update(after).digest("hex") !== fingerprint) {
+                continue;
+            }
+            const sourceRun = String(config?.description ?? "").match(/spawn run ([^\s]+)/)?.[1];
+            const preview = templatePreview(config?.template);
+            const riskLabels = getRecipeRiskLabels(resolved);
+            return {
+                id,
+                path,
+                sha256: fingerprint,
+                size: bytes.byteLength,
+                created_at: stat.birthtime.toISOString(),
+                modified_at: stat.mtime.toISOString(),
+                valid: Boolean(resolved),
+                diagnostics,
+                ...(riskLabels.length ? { risk_labels: riskLabels } : {}),
+                ...(config?.description ? { description: config.description } : {}),
+                ...(sourceRun ? { source_run: sourceRun } : {}),
+                ...(config?.async !== undefined ? { async: config.async } : {}),
+                ...(preview ? { template_preview: preview } : {}),
+            };
+        }
+        throw new Error(`Draft changed repeatedly during inventory: ${path}`);
+    });
+}
+export function summarizeDiscovery(result) {
+    const recommendations = result.entries
+        .map((entry) => recommendationForEntry(entry, result.active.get(entry.id)?.path))
+        .filter((entry) => Boolean(entry))
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)) ||
+        String(a.path).localeCompare(String(b.path)));
+    const remediations = discoveryRemediations(result);
+    return {
+        active: [...result.active.values()]
+            .map((entry) => ({
+            id: entry.id,
+            path: entry.path,
+            description: entry.config?.description,
+            tool: entry.tool,
+            disabled: entry.disabled,
+            invalid: entry.invalid,
+            shadows: entry.shadows,
+            ...(entry.riskLabels.length ? { risk_labels: entry.riskLabels } : {}),
+            ...(entry.config &&
+                ModelContext.describeRecipeCurrentPolicy({
+                    args: entry.config.args,
+                    defaults: entry.config.defaults,
+                    template: entry.config.template,
+                })
+                ? {
+                    current_policy: ModelContext.describeRecipeCurrentPolicy({
+                        args: entry.config.args,
+                        defaults: entry.config.defaults,
+                        template: entry.config.template,
+                    }),
+                }
+                : {}),
+            ...(entry.config?.imports ? { imports: entry.config.imports } : {}),
+            ...(recipeUsage(entry)
+                ? { usage: recipeUsage(entry) }
+                : {}),
+        }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+        shadowed: result.entries
+            .filter((entry) => entry.shadowed)
+            .map((entry) => ({
+            id: entry.id,
+            path: entry.path,
+            shadowedBy: result.active.get(entry.id)?.path,
+        }))
+            .sort((a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path)),
+        invalid: result.entries
+            .filter((entry) => entry.invalid)
+            .map((entry) => ({
+            id: entry.id,
+            path: entry.path,
+            diagnostics: entry.diagnostics,
+        }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+        disabled: result.entries
+            .filter((entry) => entry.disabled)
+            .map((entry) => ({ id: entry.id, path: entry.path }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+        risk_summary: summarizeRiskLabels(result.entries),
+        recommendations,
+        remediations,
+        top_action: remediations[0],
+        diagnostics: result.diagnostics,
+        diagnostic_details: diagnosticDetails(result),
+        integrity_manifest: createRecipeIntegrityManifest(result),
+    };
+}
+function projectRegisteredTool(identity, path, cfg, mutableUsage) {
+    const description = cfg.description ?? `Execute template recipe: ${identity}`;
+    const argTemplate = cfg.template;
+    const argTemplateConfig = typeof argTemplate === "object" && !Array.isArray(argTemplate)
+        ? {
+            ...argTemplate,
+            ...(cfg.args !== undefined ? { args: cfg.args } : {}),
+            defaults: {
+                ...(argTemplate.defaults ?? {}),
+                ...(cfg.defaults ?? {}),
+            },
+        }
+        : { args: cfg.args, defaults: cfg.defaults ?? {}, template: argTemplate };
+    const explicitArgTypes = Object.fromEntries((cfg.args ?? []).map((arg) => {
+        const parsed = Schema.parseToolArgToken(String(arg));
+        return [parsed.arg, parsed.type];
+    }));
+    assertToolSafeRepeatConfig(argTemplateConfig, explicitArgTypes, { ...(cfg.defaults ?? {}), ...(cfg.values ?? {}) });
+    const inferredArgTypes = Schema.getTemplateArgTypes(argTemplateConfig);
+    Schema.assertCompatibleToolArgTypes(explicitArgTypes, inferredArgTypes);
+    const effectiveArgTypes = { ...inferredArgTypes, ...explicitArgTypes };
+    const args = Schema.getToolArgNames(argTemplateConfig).filter((arg) => !RecipesReferences.isRuntimeOwnedRecipeInput(arg));
+    const callerArgSet = new Set(args);
+    const argTypes = Object.fromEntries(Object.entries(effectiveArgTypes).filter(([arg]) => callerArgSet.has(arg)));
+    const defaults = Object.fromEntries(Object.entries(cfg.defaults ?? {}).filter(([arg]) => callerArgSet.has(arg)));
+    const storedArgs = cfg.args?.filter((arg) => callerArgSet.has(Schema.parseToolArgToken(String(arg)).arg));
+    return {
+        name: identity,
+        description,
+        template: path,
+        recipe: cfg,
+        args,
+        defaults: Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, String(value)])),
+        ...(Object.keys(argTypes).length > 0 ? { argTypes } : {}),
+        ...(mutableUsage ? { sourcePath: path } : {}),
+        ...(storedArgs ? { storedArgs } : {}),
+        ...(Object.keys(defaults).length > 0
+            ? {
+                storedDefaults: Object.fromEntries(Object.entries(defaults).map(([key, value]) => [
+                    key,
+                    String(value),
+                ])),
+            }
+            : {}),
+    };
+}
+export function summarizeRegisteredToolArgs(tool) {
+    const publicArgs = tool.args.filter((arg) => !RecipesReferences.isRuntimeOwnedRecipeInput(arg));
+    const inlineDefaults = Schema.getExplicitToolArgDefaults(tool.recipe?.args);
+    const required = publicArgs.filter((arg) => !Object.hasOwn(tool.defaults, arg) &&
+        !Object.hasOwn(inlineDefaults, arg));
+    const requiredSet = new Set(required);
+    const optional = publicArgs.filter((arg) => !requiredSet.has(arg));
+    if (tool.recipe?.async === true) {
+        if (tool.recipe.singleton !== true)
+            optional.push("run_id");
+        optional.push("transport_context");
+    }
+    return { optional, required };
+}
+function boundedAdmissionDiagnostic(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.length <= 4096 ? message : `${message.slice(0, 4095)}…`;
+}
+export function admitUserRecipe(sourcePath, resolutionContext, authoredRecipe, mutableUsage = true) {
+    const identity = RecipesReferences.getRecipeIdFromPath(sourcePath);
+    try {
+        const effectiveRecipe = RecipesReferences.readResolvedRecipeConfig(sourcePath, [], {
+            ...(authoredRecipe
+                ? { authoredEntry: { path: sourcePath, recipe: authoredRecipe } }
+                : {}),
+            skillContext: resolutionContext.activeSkills,
+        });
+        if (!effectiveRecipe) {
+            return {
+                diagnostics: [
+                    authoredRecipe
+                        ? "Recipe must define a valid template."
+                        : RecipesReferences.diagnoseRawRecipeConfigFailure(sourcePath) ??
+                            "Recipe must define a valid template.",
+                ],
+                identity,
+                sourcePath,
+                validated: false,
+            };
+        }
+        if (effectiveRecipe.disabled === true) {
+            return {
+                diagnostics: ["Recipe is disabled."],
+                effectiveRecipe,
+                identity,
+                sourcePath,
+                validated: false,
+            };
+        }
+        const tool = projectRegisteredTool(identity, sourcePath, effectiveRecipe, mutableUsage);
+        return {
+            args: tool.args,
+            argTypes: tool.argTypes,
+            artifacts: effectiveRecipe.artifacts,
+            async: effectiveRecipe.async === true,
+            control: effectiveRecipe.control,
+            defaults: effectiveRecipe.defaults,
+            diagnostics: [],
+            effectiveRecipe,
+            identity,
+            sourcePath,
+            tool,
+            validated: true,
+        };
+    }
+    catch (error) {
+        return {
+            diagnostics: [boundedAdmissionDiagnostic(error)],
+            identity,
+            sourcePath,
+            validated: false,
+        };
+    }
+}
+export function toRegisteredTool(entry) {
+    if (!entry.tool || entry.invalid || entry.disabled || !entry.config)
+        return undefined;
+    if (entry.resolutionContext) {
+        return admitUserRecipe(entry.path, entry.resolutionContext, undefined, entry.mutableUsage).tool;
+    }
+    return projectRegisteredTool(entry.id, entry.path, entry.config, entry.mutableUsage);
+}

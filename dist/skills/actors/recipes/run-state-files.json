@@ -1,0 +1,13 @@
+{
+  "args": [
+    "state_root:path",
+    "file_name:string",
+    "max_depth:int"
+  ],
+  "defaults": {
+    "state_root": "~/.pi/agent/tmp/pi-actors/runs",
+    "file_name": "run.json",
+    "max_depth": "2"
+  },
+  "template": "find {state_root} -maxdepth {max_depth} -name {file_name} -type f -print"
+}

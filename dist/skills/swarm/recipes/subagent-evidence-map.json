@@ -1,0 +1,20 @@
+{
+  "async": true,
+  "args": [
+    "question:string",
+    "sources:string",
+    "source_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "sources": "Use only provided source notes, inspected artifacts, or explicit uncertainty.",
+    "source_policy": "Separate direct evidence, weak evidence, contradictions, and missing evidence.",
+    "output_format": "Markdown sections: Question, Evidence Map, Contradictions, Missing Evidence, Confidence.",
+    "thinking": "medium",
+    "tools": ""
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Build an evidence map for question: {question}. Sources: {sources}. Source policy: {source_policy}. Output format: {output_format}"
+}

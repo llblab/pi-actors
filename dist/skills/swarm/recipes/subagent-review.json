@@ -1,0 +1,26 @@
+{
+  "async": true,
+  "args": [
+    "scope:string",
+    "lens:string",
+    "instructions:string",
+    "evidence_policy:string",
+    "risk_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "lens": "evidence-grounded review",
+    "instructions": "Return findings with evidence, risk, and recommended next action.",
+    "evidence_policy": "Cite inspected files, command output, or explicit uncertainty for every material claim.",
+    "risk_policy": "Preserve minority high-impact risks and separate confirmed issues from hypotheses.",
+    "output_format": "Markdown sections: Findings, Evidence, Risks, Next Actions.",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
+    "tools": ""
+  },
+  "accept_output": "review_evidence",
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Review {scope} through this lens: {lens}. Instructions: {instructions}. Evidence policy: {evidence_policy}. Risk policy: {risk_policy}. Begin the response with ACTOR_REVIEW_RESULT on its own line. Output format: {output_format}"
+}

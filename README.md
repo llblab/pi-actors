@@ -31,7 +31,7 @@ For local development:
 pi install /path/to/pi-actors
 ```
 
-The package contributes the extension and six capability-owning Skills for actors, artifacts, music playback, project work, Recipe memory, and swarm orchestration.
+The package contributes the extension and six capability-owning Skills for actors, artifacts, music playback, project work, Recipe memory, and swarm orchestration. Manifest-loaded packages expose those Skills through the package manifest so Pi resource filters and package provenance remain authoritative; a checkout auto-discovered directly under Pi's user or project extensions directory contributes its source Skills even when Pi selects the checkout's compiled entrypoint.
 
 ## Public Tools
 
@@ -238,7 +238,7 @@ npm run validate
 npm run test:preservation
 ```
 
-The build produces the JavaScript runtime used by detached Actor processes in npm installations. Pi can load a TypeScript extension entrypoint, but standalone Node processes cannot type-strip modules under `node_modules`; keeping compiled Run modules preserves process isolation without a runtime TypeScript loader.
+The atomic build produces the committed JavaScript runtime used by npm and git installs; `npm run build:check` verifies that `dist/` matches source without rewriting it. Pi can load a TypeScript extension entrypoint, but standalone Node processes cannot type-strip modules under `node_modules`; keeping compiled Run modules preserves process isolation without a runtime TypeScript loader.
 
 See the [documentation index](./docs/README.md), [Run lifecycle](./docs/async-runs.md), and [Recipe library](./docs/recipe-library.md).
 

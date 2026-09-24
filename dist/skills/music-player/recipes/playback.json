@@ -1,0 +1,29 @@
+{
+  "async": true,
+  "singleton": true,
+  "args": [
+    "source:string",
+    "loop:bool",
+    "volume:int",
+    "player:enum(auto,mpv,afplay,ffplay,cvlc,play,wmp)",
+    "state_dir:path"
+  ],
+  "defaults": {
+    "loop": "true",
+    "volume": "70",
+    "player": "auto"
+  },
+  "control": [
+    "play",
+    "pause",
+    "resume",
+    "toggle",
+    "next",
+    "previous",
+    "seek",
+    "volume",
+    "stop",
+    "status"
+  ],
+  "template": "{skill_dir}/scripts/playback.mjs play {source} {loop} {volume} {player} {state_dir}"
+}

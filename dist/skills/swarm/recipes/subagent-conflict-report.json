@@ -1,0 +1,19 @@
+{
+  "async": true,
+  "args": [
+    "change:string",
+    "conflict:string",
+    "preserve_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "preserve_policy": "Describe what must be preserved, what can be discarded, and suggested resolver action.",
+    "output_format": "Markdown sections: Conflict, My Changes, Other Changes, Preserve, Discard, Suggested Resolution, Risks.",
+    "thinking": "off",
+    "tools": ""
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Write a bounded conflict report. My change: {change}. Conflict: {conflict}. Preserve policy: {preserve_policy}. Output format: {output_format}"
+}

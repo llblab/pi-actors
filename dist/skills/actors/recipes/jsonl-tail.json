@@ -1,0 +1,10 @@
+{
+  "args": [
+    "file:path",
+    "lines:int"
+  ],
+  "defaults": {
+    "lines": "40"
+  },
+  "template": "tail -n {lines} {file}"
+}

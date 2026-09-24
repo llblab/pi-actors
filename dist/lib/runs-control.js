@@ -1,0 +1,89 @@
+/**
+ * Async run process control primitives.
+ * Owns: platform signal planning, owned-process signalling, and terminal control markers.
+ */
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { writeJsonAtomic } from "./file-state.js";
+import { verifyRunProcessIdentity, } from "./runs-process.js";
+export function getRunProcessSignalPlan(pid, signal, runtimePlatform = process.platform) {
+    if (runtimePlatform === "win32") {
+        return {
+            args: [
+                "/PID",
+                String(pid),
+                "/T",
+                ...(signal === "SIGKILL" ? ["/F"] : []),
+            ],
+            command: "taskkill",
+            signalTarget: "processTree",
+        };
+    }
+    return { signalTarget: "processGroup" };
+}
+export function signalOwnedRunProcess(pid, signal, expectedIdentity, deps = {}) {
+    const runtimePlatform = deps.runtimePlatform ?? process.platform;
+    if (expectedIdentity) {
+        const proof = (deps.verifyIdentity ?? verifyRunProcessIdentity)(pid, expectedIdentity, runtimePlatform);
+        if (!proof.valid) {
+            throw new Error(`Run process identity changed before signaling: ${proof.status.replaceAll("_", " ")}`);
+        }
+    }
+    const plan = getRunProcessSignalPlan(pid, signal, runtimePlatform);
+    if (plan.command && plan.args) {
+        const spawnProcess = deps.spawnProcess ?? spawnSync;
+        let result = spawnProcess(plan.command, plan.args, { encoding: "utf8" });
+        if (runtimePlatform === "win32" &&
+            result.status !== 0 &&
+            !plan.args.includes("/F")) {
+            result = spawnProcess(plan.command, [...plan.args, "/F"], {
+                encoding: "utf8",
+            });
+        }
+        if (result.status !== 0) {
+            if (expectedIdentity) {
+                const finalProof = (deps.verifyIdentity ?? verifyRunProcessIdentity)(pid, expectedIdentity, runtimePlatform);
+                if (finalProof.status === "dead_pid")
+                    return plan;
+            }
+            throw new Error(result.stderr?.trim() ||
+                result.stdout?.trim() ||
+                `${plan.command} failed`);
+        }
+        return plan;
+    }
+    const killProcess = deps.killProcess ?? process.kill.bind(process);
+    try {
+        killProcess(-pid, signal);
+        return { signalTarget: "processGroup" };
+    }
+    catch (error) {
+        if (error.code !== "ESRCH")
+            throw error;
+        if (expectedIdentity) {
+            const fallbackProof = (deps.verifyIdentity ?? verifyRunProcessIdentity)(pid, expectedIdentity, runtimePlatform);
+            if (!fallbackProof.valid) {
+                throw new Error(`Run process identity changed before pid fallback: ${fallbackProof.status.replaceAll("_", " ")}`);
+            }
+        }
+        killProcess(pid, signal);
+        return { signalTarget: "process" };
+    }
+}
+export function markTerminalHandled(stateDir, details) {
+    writeJsonAtomic(join(stateDir, "terminal-handled.json"), {
+        ...details,
+        ts: new Date().toISOString(),
+    });
+}
+export function buildTerminalProgress(existing, phase) {
+    const progress = existing ?? {};
+    const { activeSubagents: _activeSubagents, ...rest } = progress;
+    return {
+        ...rest,
+        completed: typeof progress.completed === "number" ? progress.completed : 0,
+        failures: Array.isArray(progress.failures) ? progress.failures : [],
+        phase,
+        updatedAt: new Date().toISOString(),
+    };
+}

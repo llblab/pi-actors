@@ -1,0 +1,9 @@
+{
+  "id": "control-1",
+  "run_instance_id": "generation-1",
+  "action": "pause",
+  "input": { "reason": "operator" },
+  "status": "handled",
+  "queued_at": "2026-01-01T00:00:00.000Z",
+  "handled_at": "2026-01-01T00:00:01.000Z"
+}

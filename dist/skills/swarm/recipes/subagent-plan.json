@@ -1,0 +1,20 @@
+{
+  "async": true,
+  "args": [
+    "goal:string",
+    "constraints:string",
+    "scope:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "constraints": "Prefer small reversible slices, explicit validation gates, and no broad speculative rewrites.",
+    "scope": "Use the provided problem statement and any named artifact paths.",
+    "output_format": "Markdown sections: Goal, Constraints, Plan Slices, Risks, Validation Gates, Stop Conditions.",
+    "thinking": "medium",
+    "tools": ""
+  },
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Plan how to reach this goal: {goal}. Scope: {scope}. Constraints: {constraints}. Output format: {output_format}"
+}

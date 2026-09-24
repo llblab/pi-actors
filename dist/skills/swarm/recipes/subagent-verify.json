@@ -1,0 +1,23 @@
+{
+  "async": true,
+  "args": [
+    "claim:string",
+    "evidence:string",
+    "acceptance:string",
+    "evidence_policy:string",
+    "output_format:string",
+    "model:string",
+    "thinking:string",
+    "tools:string"
+  ],
+  "defaults": {
+    "acceptance": "Separate proven, disproven, unknown, and missing evidence.",
+    "evidence_policy": "Do not infer beyond provided evidence or inspected artifacts.",
+    "output_format": "Markdown sections: Verdict, Evidence, Gaps, Confidence.",
+    "model": "{current_model}",
+    "thinking": "{current_thinking}",
+    "tools": ""
+  },
+  "accept_output": "review_evidence",
+  "template": "pi -p --model {model} --thinking {thinking} {tools?--tools:--no-tools} {tools} Verify this claim against the provided evidence. Claim: {claim}. Evidence or artifact paths: {evidence}. Acceptance: {acceptance}. Evidence policy: {evidence_policy}. Begin the response with ACTOR_REVIEW_RESULT on its own line. Output format: {output_format}"
+}

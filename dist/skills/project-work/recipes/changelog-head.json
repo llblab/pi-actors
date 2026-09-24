@@ -1,0 +1,11 @@
+{
+  "args": [
+    "file:path",
+    "lines:int"
+  ],
+  "defaults": {
+    "file": "CHANGELOG.md",
+    "lines": "80"
+  },
+  "template": "head -n {lines} {file}"
+}

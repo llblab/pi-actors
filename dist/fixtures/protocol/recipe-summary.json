@@ -1,0 +1,8 @@
+{
+  "id": "music-player",
+  "path": "skills/media/recipes/player.json",
+  "location": "packaged",
+  "active": true,
+  "args": ["repo", "command", "source", "loop", "volume", "player", "state_dir"],
+  "control": ["play", "pause", "resume", "toggle", "next", "previous", "stop", "status"]
+}

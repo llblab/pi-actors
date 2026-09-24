@@ -4,10 +4,24 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+  getExtensionSkillsDir,
+  isRawExtensionCheckout,
+} from "../lib/paths.ts";
 import packageJson from "../package.json" with { type: "json" };
 
 const packagedSkillPaths = readdirSync("skills", { withFileTypes: true })
@@ -32,16 +46,16 @@ function readSkillDescription(path: string): string {
   return readSkillFrontmatter(path).match(/^description:\s*(.+)$/m)?.[1] ?? "";
 }
 
-test("Package extension entrypoint uses compiled dist output", () => {
+test("Package manifest uses only Pi-supported compiled resources", () => {
   assert.deepEqual(packageJson.pi.extensions, ["./dist/pi-actors/index.js"]);
+  assert.deepEqual(packageJson.pi.skills, ["./dist/skills"]);
+  assert.equal("sourceExtensions" in packageJson.pi, false);
+  assert.equal("sourceSkills" in packageJson.pi, false);
   assert.equal(packageJson.files.includes("index.ts"), true);
   assert.equal(packageJson.files.includes("dist"), true);
   assert.equal(packageJson.files.includes("index.js"), false);
   assert.equal(existsSync("index.ts"), true);
   assert.equal(existsSync("index.js"), false);
-});
-
-test("Packaged skills are registered through dist metadata", () => {
   assert.deepEqual(packagedSkillPaths, [
     "skills/actors/SKILL.md",
     "skills/artifacts/SKILL.md",
@@ -50,18 +64,150 @@ test("Packaged skills are registered through dist metadata", () => {
     "skills/recipe-memory/SKILL.md",
     "skills/swarm/SKILL.md",
   ]);
-  assert.deepEqual(packageJson.pi.skills, ["./dist/skills"]);
-  assert.deepEqual(packageJson.pi.sourceSkills, ["./skills"]);
 });
 
-test("Auto-discovered extension contributes co-located skills", () => {
+test("Extension gates dynamic Skill discovery on checkout provenance", () => {
   const extensionSource = readFileSync("index.ts", "utf8");
   const extensionRuntimeSource = readFileSync("lib/extension-runtime.ts", "utf8");
-  const pathsSource = readFileSync("lib/paths.ts", "utf8");
+  const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+  const compiledUrl = new URL("../dist/index.js", import.meta.url).href;
+  assert.match(extensionSource, /Paths\.isRawExtensionCheckout\(import\.meta\.url\)/);
   assert.match(extensionSource, /pi\.on\("resources_discover"/);
   assert.match(extensionSource, /runtime\.discoverResources/);
   assert.match(extensionRuntimeSource, /Paths\.getExistingExtensionSkillPaths/);
-  assert.match(pathsSource, /getExtensionSkillsDir/);
+  assert.equal(
+    getExtensionSkillsDir(compiledUrl),
+    join(packageRoot, "skills"),
+  );
+});
+
+test("Pi resolver distinguishes an auto checkout from a filtered package install", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-actors-resolver-"));
+  try {
+    const packageManagerModule = await import(
+      "../node_modules/@earendil-works/pi-coding-agent/dist/core/package-manager.js"
+    );
+    const settingsModule = await import(
+      "../node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js"
+    );
+    const cwd = join(root, "cwd");
+    const agentDir = join(root, "agent");
+    const checkoutRoot = join(agentDir, "extensions", "pi-actors");
+    const compiledEntry = join(checkoutRoot, "dist", "pi-actors", "index.js");
+    const sourceSkillRoot = join(checkoutRoot, "skills");
+    mkdirSync(dirname(compiledEntry), { recursive: true });
+    mkdirSync(join(checkoutRoot, "dist", "skills", "actors"), { recursive: true });
+    mkdirSync(join(sourceSkillRoot, "actors"), { recursive: true });
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(join(checkoutRoot, "package.json"), JSON.stringify({
+      name: "@llblab/pi-actors-fixture",
+      pi: {
+        extensions: ["./dist/pi-actors/index.js"],
+        skills: ["./dist/skills"],
+      },
+    }));
+    writeFileSync(compiledEntry, "export default function () {}\n");
+    writeFileSync(
+      join(checkoutRoot, "dist", "skills", "actors", "SKILL.md"),
+      "---\nname: actors\ndescription: fixture\n---\n",
+    );
+    writeFileSync(
+      join(sourceSkillRoot, "actors", "SKILL.md"),
+      "---\nname: actors\ndescription: source fixture\n---\n",
+    );
+
+    const autoManager = new packageManagerModule.DefaultPackageManager({
+      cwd,
+      agentDir,
+      settingsManager: settingsModule.SettingsManager.inMemory(),
+    });
+    const autoResolved = await autoManager.resolve();
+    assert.equal(autoResolved.extensions.some((entry: { path: string }) => entry.path === compiledEntry), true);
+    assert.equal(autoResolved.skills.some((entry: { path: string }) => entry.path.startsWith(checkoutRoot)), false);
+    const compiledUrl = pathToFileURL(compiledEntry).href;
+    assert.equal(isRawExtensionCheckout(compiledUrl, { agentDir, cwd }), true);
+    assert.equal(isRawExtensionCheckout(pathToFileURL(join(checkoutRoot, "index.ts")).href, { agentDir, cwd }), true);
+    assert.equal(getExtensionSkillsDir(compiledUrl), sourceSkillRoot);
+
+    const managedRoot = join(root, "managed", "pi-actors");
+    const managedEntry = join(managedRoot, "dist", "pi-actors", "index.js");
+    mkdirSync(dirname(managedEntry), { recursive: true });
+    mkdirSync(join(managedRoot, "dist", "skills", "actors"), { recursive: true });
+    writeFileSync(join(managedRoot, "package.json"), JSON.stringify({
+      name: "@llblab/pi-actors-managed-fixture",
+      pi: {
+        extensions: ["./dist/pi-actors/index.js"],
+        skills: ["./dist/skills"],
+      },
+    }));
+    writeFileSync(managedEntry, "export default function () {}\n");
+    writeFileSync(
+      join(managedRoot, "dist", "skills", "actors", "SKILL.md"),
+      "---\nname: actors\ndescription: managed fixture\n---\n",
+    );
+    const managedAgentDir = join(root, "managed-agent");
+    const managedManager = new packageManagerModule.DefaultPackageManager({
+      cwd,
+      agentDir: managedAgentDir,
+      settingsManager: settingsModule.SettingsManager.inMemory({
+        packages: [{ source: managedRoot, skills: [] }],
+      }),
+    });
+    const managedResolved = await managedManager.resolve();
+    assert.equal(managedResolved.extensions.some(
+      (entry: { path: string; enabled: boolean }) => entry.path.startsWith(managedRoot) && entry.enabled,
+    ), true);
+    const managedSkill = managedResolved.skills.find(
+      (entry: { path: string }) => entry.path.startsWith(managedRoot),
+    );
+    assert.ok(managedSkill);
+    assert.equal(managedSkill.enabled, false);
+    assert.equal(managedSkill.metadata.origin, "package");
+    assert.equal(isRawExtensionCheckout(
+      pathToFileURL(managedEntry).href,
+      { agentDir: managedAgentDir, cwd },
+    ), false);
+
+    const kitRoot = join(root, "pi-kit");
+    const nestedActorsRoot = join(kitRoot, "node_modules", "@llblab", "pi-actors");
+    const kitEntry = join(nestedActorsRoot, "dist", "pi-actors", "index.js");
+    const kitSkill = join(nestedActorsRoot, "dist", "skills", "actors", "SKILL.md");
+    mkdirSync(dirname(kitEntry), { recursive: true });
+    mkdirSync(dirname(kitSkill), { recursive: true });
+    writeFileSync(kitEntry, "export default function () {}\n");
+    writeFileSync(kitSkill, "---\nname: actors\ndescription: kit fixture\n---\n");
+    writeFileSync(join(nestedActorsRoot, "package.json"), JSON.stringify({
+      name: "@llblab/pi-actors",
+    }));
+    writeFileSync(join(kitRoot, "package.json"), JSON.stringify({
+      name: "@llblab/pi-kit-fixture",
+      pi: {
+        extensions: ["./node_modules/@llblab/pi-actors/dist/pi-actors/index.js"],
+        skills: ["./node_modules/@llblab/pi-actors/dist/skills"],
+      },
+    }));
+    const kitAgentDir = join(root, "kit-agent");
+    const kitManager = new packageManagerModule.DefaultPackageManager({
+      cwd,
+      agentDir: kitAgentDir,
+      settingsManager: settingsModule.SettingsManager.inMemory({
+        packages: [{ source: kitRoot, skills: [] }],
+      }),
+    });
+    const kitResolved = await kitManager.resolve();
+    const kitResolvedSkill = kitResolved.skills.find(
+      (entry: { path: string }) => entry.path === kitSkill,
+    );
+    assert.ok(kitResolvedSkill);
+    assert.equal(kitResolvedSkill.enabled, false);
+    assert.equal(kitResolvedSkill.metadata.origin, "package");
+    assert.equal(isRawExtensionCheckout(pathToFileURL(kitEntry).href, {
+      agentDir: kitAgentDir,
+      cwd,
+    }), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("Packaged Skill identity matches its directory exactly", () => {

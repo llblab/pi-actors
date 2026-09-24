@@ -66,27 +66,19 @@ test("Package manifest uses only Pi-supported compiled resources", () => {
   ]);
 });
 
-test("Only an auto-discovered checkout contributes source Skills dynamically", () => {
+test("Extension gates dynamic Skill discovery on checkout provenance", () => {
   const extensionSource = readFileSync("index.ts", "utf8");
   const extensionRuntimeSource = readFileSync("lib/extension-runtime.ts", "utf8");
   const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-  const checkoutOptions = {
-    agentDir: dirname(dirname(packageRoot)),
-    cwd: join(packageRoot, "unrelated-cwd"),
-  };
-  const sourceUrl = new URL("../index.ts", import.meta.url).href;
   const compiledUrl = new URL("../dist/index.js", import.meta.url).href;
   assert.match(extensionSource, /Paths\.isRawExtensionCheckout\(import\.meta\.url\)/);
   assert.match(extensionSource, /pi\.on\("resources_discover"/);
   assert.match(extensionSource, /runtime\.discoverResources/);
   assert.match(extensionRuntimeSource, /Paths\.getExistingExtensionSkillPaths/);
-  assert.equal(isRawExtensionCheckout(sourceUrl, checkoutOptions), true);
-  assert.equal(isRawExtensionCheckout(compiledUrl, checkoutOptions), true);
-  assert.equal(isRawExtensionCheckout(compiledUrl, {
-    agentDir: join(packageRoot, "managed-agent"),
-    cwd: join(packageRoot, "managed-cwd"),
-  }), false);
-  assert.equal(getExtensionSkillsDir(compiledUrl), join(packageRoot, "skills"));
+  assert.equal(
+    getExtensionSkillsDir(compiledUrl),
+    join(packageRoot, "skills"),
+  );
 });
 
 test("Pi resolver distinguishes an auto checkout from a filtered package install", async () => {
@@ -134,6 +126,7 @@ test("Pi resolver distinguishes an auto checkout from a filtered package install
     assert.equal(autoResolved.skills.some((entry: { path: string }) => entry.path.startsWith(checkoutRoot)), false);
     const compiledUrl = pathToFileURL(compiledEntry).href;
     assert.equal(isRawExtensionCheckout(compiledUrl, { agentDir, cwd }), true);
+    assert.equal(isRawExtensionCheckout(pathToFileURL(join(checkoutRoot, "index.ts")).href, { agentDir, cwd }), true);
     assert.equal(getExtensionSkillsDir(compiledUrl), sourceSkillRoot);
 
     const managedRoot = join(root, "managed", "pi-actors");

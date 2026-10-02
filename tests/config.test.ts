@@ -6,9 +6,8 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 
 import {
   loadToolConfig,
@@ -19,6 +18,15 @@ import {
 } from "../lib/config.ts";
 
 const reserved = new Set(["bash", "register_tool"]);
+const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+const agentDir = await mkdtemp(join(tmpdir(), "pi-actors-config-agent-"));
+await mkdir(join(agentDir, "recipes"), { recursive: true });
+process.env.PI_CODING_AGENT_DIR = agentDir;
+after(async () => {
+  if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  await rm(agentDir, { recursive: true, force: true });
+});
 
 test("Stored tool normalization accepts template-backed tools", () => {
   const result = normalizeStoredTool(
@@ -175,17 +183,8 @@ test("Stored tool normalization ignores legacy custom recipe state dirs", () => 
 });
 
 test("Stored tool normalization derives args from existing template recipe files", async () => {
-  const path = join(
-    homedir(),
-    ".pi",
-    "agent",
-    "recipes",
-    "derive-args-test.json",
-  );
+  const path = join(agentDir, "recipes", "derive-args-test.json");
   try {
-    await mkdir(join(homedir(), ".pi", "agent", "recipes"), {
-      recursive: true,
-    });
     await writeFile(
       path,
       JSON.stringify({
@@ -208,17 +207,8 @@ test("Stored tool normalization derives args from existing template recipe files
 });
 
 test("Stored tool normalization derives args from compact repeated template recipe files", async () => {
-  const path = join(
-    homedir(),
-    ".pi",
-    "agent",
-    "recipes",
-    "derive-repeat-args-test.json",
-  );
+  const path = join(agentDir, "recipes", "derive-repeat-args-test.json");
   try {
-    await mkdir(join(homedir(), ".pi", "agent", "recipes"), {
-      recursive: true,
-    });
     await writeFile(
       path,
       JSON.stringify({
@@ -245,17 +235,8 @@ test("Stored tool normalization derives args from compact repeated template reci
 });
 
 test("Stored tool normalization derives args from template recipe recover fields", async () => {
-  const path = join(
-    homedir(),
-    ".pi",
-    "agent",
-    "recipes",
-    "derive-recover-args-test.json",
-  );
+  const path = join(agentDir, "recipes", "derive-recover-args-test.json");
   try {
-    await mkdir(join(homedir(), ".pi", "agent", "recipes"), {
-      recursive: true,
-    });
     await writeFile(
       path,
       JSON.stringify({

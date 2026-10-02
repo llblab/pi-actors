@@ -26,6 +26,8 @@ Public Run verbs remain `spawn`, `message`, and `inspect`.
 
 ## Core Structure
 
+Require Pi ≥1.0.0 for all declared Pi peers. Keep source and packed lifecycle tests aligned with that baseline; do not restore an older host floor independently of those checks. Validation fixtures must use temporary agent directories, never write into the operator's live Recipe registry.
+
 ```text
 Pi host
   -> index.ts                         composition root

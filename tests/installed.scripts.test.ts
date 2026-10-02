@@ -108,8 +108,8 @@ test("package metadata exposes only Pi-supported compiled resources", async () =
   assert.equal("sourceExtensions" in pkg.pi, false);
   assert.equal("sourceSkills" in pkg.pi, false);
   assert.deepEqual(pkg.peerDependencies, {
-    "@earendil-works/pi-coding-agent": ">=0.84.4",
-    "@earendil-works/pi-tui": ">=0.84.4",
+    "@earendil-works/pi-coding-agent": ">=1.0.0",
+    "@earendil-works/pi-tui": ">=1.0.0",
   });
   await access(join(process.cwd(), pkg.pi.extensions[0]));
   await access(join(process.cwd(), "index.ts"));
@@ -566,8 +566,8 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     assert.deepEqual(pkg.pi.extensions, ["./dist/pi-actors/index.js"]);
     assert.deepEqual(pkg.pi.skills, ["./dist/skills"]);
     assert.deepEqual(pkg.peerDependencies, {
-      "@earendil-works/pi-coding-agent": ">=0.84.4",
-      "@earendil-works/pi-tui": ">=0.84.4",
+      "@earendil-works/pi-coding-agent": ">=1.0.0",
+      "@earendil-works/pi-tui": ">=1.0.0",
     });
     const loaded = JSON.parse(stdout);
     assert.equal(loaded.lifecycleEvents.includes("agent_settled"), true);

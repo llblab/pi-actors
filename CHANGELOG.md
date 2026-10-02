@@ -2,7 +2,10 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
-## Unreleased
+## 0.54.0: Pi 1.0 Baseline and Package Licensing
+
+- `Licensing`: Includes the MIT LICENSE in source checkouts and npm packages, preserving existing author attribution.
+- `Pi Baseline`: Requires Pi 1.0.0 or newer for both coding-agent and TUI peers. Source and installed-package lifecycle checks use the same baseline; runtime ownership, Recipe/Run semantics and persistent registries are unchanged. Stored-tool normalization tests now use a temporary agent registry rather than writing fixtures into the operator's home.
 
 ## 0.53.2: Stable Inspector Trace Sequences
 

@@ -19,7 +19,7 @@ This topology does not require every task to become a subagent. Short work with 
 
 ## Install
 
-Requires Node.js 22.19.0 or newer and Pi 0.84.4 or newer.
+Requires Node.js 22.19.0 or newer and Pi 1.0.0 or newer.
 
 ```bash
 pi install npm:@llblab/pi-actors

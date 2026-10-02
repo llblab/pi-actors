@@ -170,8 +170,8 @@ test("Urgent steer remains explicit durable and safe-boundary delivered", () => 
 
 test("Package requires the settled Pi host baseline", () => {
   assert.deepEqual(packageJson.peerDependencies, {
-    "@earendil-works/pi-coding-agent": ">=0.84.4",
-    "@earendil-works/pi-tui": ">=0.84.4",
+    "@earendil-works/pi-coding-agent": ">=1.0.0",
+    "@earendil-works/pi-tui": ">=1.0.0",
   });
 });
 
@@ -219,7 +219,7 @@ test("README first-run actor uses a shell-free command template", () => {
 test("Public guidance preserves monotonic Run completion projection", () => {
   const readme = readFileSync("README.md", "utf8");
   const asyncRuns = readFileSync("docs/async-runs.md", "utf8");
-  assert.match(readme, /Pi 0\.84\.4 or newer/);
+  assert.match(readme, /Pi 1\.0\.0 or newer/);
   for (const content of [readme, asyncRuns]) {
     assert.match(content, /Generic command lifecycle is Trace-only/);
     assert.match(content, /completion scheduler/);

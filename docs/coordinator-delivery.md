@@ -191,7 +191,7 @@ Implementation is complete only when source and packed-extension tests prove:
 10. Explicit steer reaches the next safe Pi boundary once and root terminal still batches later.
 11. Overflow, corruption, journal backpressure, archive/prune races, and stale contexts fail safely.
 12. Completion flushing precedes automatic Recipe review.
-13. Pi 0.84.4 remains the exact minimum source and packed lifecycle baseline.
+13. Pi 1.0.0 is the minimum source and packed lifecycle baseline; coding-agent and TUI peers share that floor.
 
 Focused observability and delivery tests precede TypeScript/build/import checks. The acceptance checkpoint then runs full product validation, dependency audit, package dry-run, and ABCd context validation.
 

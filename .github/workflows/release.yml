@@ -135,16 +135,26 @@ jobs:
         if: steps.npm-state.outputs.publish == 'true'
         run: npm publish --access public --provenance
       - name: Verify public npm package and packed manifest
+        timeout-minutes: 11
         env:
           PACKAGE_NAME: "@llblab/pi-actors"
           TAG_COMMIT: ${{ steps.preflight.outputs.tag_commit }}
           VERSION: ${{ steps.preflight.outputs.version }}
         run: |
           verified=false
-          for attempt in $(seq 1 20); do
-            if npm view "$PACKAGE_NAME@$VERSION" --json version gitHead pi > npm-published.json 2> npm-published.err &&
-               npm pack "$PACKAGE_NAME@$VERSION" --dry-run --json > npm-pack.json 2> npm-pack.err &&
-               node --input-type=module <<'NODE'
+          attempt=0
+          verification_deadline=$((SECONDS + 600))
+          npm_within_deadline() {
+            local remaining=$((verification_deadline - SECONDS))
+            if [ "$remaining" -le 0 ]; then return 124; fi
+            timeout --kill-after=5s "${remaining}s" npm "$@"
+          }
+          echo "npm publication was accepted or already exists; allowing up to 600s for public registry verification. This step never republishes."
+          while [ "$SECONDS" -lt "$verification_deadline" ]; do
+            attempt=$((attempt + 1))
+            if npm_within_deadline view "$PACKAGE_NAME@$VERSION" --prefer-online --json version gitHead pi > npm-published.json 2> npm-published.err &&
+               npm_within_deadline pack "$PACKAGE_NAME@$VERSION" --prefer-online --dry-run --json > npm-pack.json 2> npm-pack.err; then
+              node --input-type=module <<'NODE'
           import { readFileSync } from "node:fs";
 
           const published = JSON.parse(readFileSync("npm-published.json", "utf8"));
@@ -163,13 +173,16 @@ jobs:
             throw new Error("Published npm tarball is missing the expected package identity or runtime manifests.");
           }
           NODE
-            then
               verified=true
               break
             fi
-            sleep 3
+            remaining=$((verification_deadline - SECONDS))
+            echo "Public npm verification is not ready for $PACKAGE_NAME@$VERSION (attempt $attempt, elapsed $((600 - remaining))s); waiting without republishing."
+            if [ "$remaining" -le 0 ]; then break; fi
+            sleep "$((remaining < 10 ? remaining : 10))"
           done
           if [ "$verified" != "true" ]; then
+            echo "::error::Public npm verification did not complete within 600s after publication acceptance. Do not republish or move the tag; wait for registry processing, then rerun only after the exact version and gitHead are visible."
             cat npm-published.err npm-pack.err >&2 2>/dev/null || true
             exit 1
           fi

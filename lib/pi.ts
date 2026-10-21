@@ -7,11 +7,14 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
+  CustomMessageEntryDraft,
+  TurnEndEvent,
+  TurnEndEventResult,
 } from "@earendil-works/pi-coding-agent";
 
 import * as SessionEvidence from "./session-evidence.ts";
 
-export type { ExtensionAPI, ExtensionContext };
+export type { ExtensionAPI, ExtensionContext, TurnEndEvent, TurnEndEventResult };
 
 export const RUN_COMPLETION_BATCH_CUSTOM_TYPE = "pi-actors-run-batch";
 export const RUN_STEER_CUSTOM_TYPE = "pi-actors-run-steer";
@@ -44,12 +47,12 @@ export function createNotificationSink(
   };
 }
 
-export function sendRunCompletionBatch(
-  pi: ExtensionAPI,
+export function createRunCompletionBatchEntry(
   batchId: string,
   content: string,
-): void {
-  pi.sendMessage({
+): CustomMessageEntryDraft {
+  return {
+    type: "custom_message",
     customType: RUN_COMPLETION_BATCH_CUSTOM_TYPE,
     content,
     display: true,
@@ -59,10 +62,16 @@ export function sendRunCompletionBatch(
         kind: "completion_batch",
       },
     },
-  }, {
-    deliverAs: "followUp",
-    triggerTurn: true,
-  });
+  };
+}
+
+export function sendRunCompletionBatch(
+  pi: ExtensionAPI,
+  batchId: string,
+  content: string,
+): void {
+  const { type: _type, ...message } = createRunCompletionBatchEntry(batchId, content);
+  pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 }
 
 export function sendRunSteer(
@@ -217,6 +226,21 @@ export function removeRunSteerFromContext(
   steerId: string,
 ): unknown[] {
   return messages.filter((message) => steerMessage(message)?.steerId !== steerId);
+}
+
+export function inspectRunCompletionBatchSessionEvidence(
+  ctx: ExtensionContext,
+  input: { batchId: string; content: string },
+): SessionEvidence.ActiveSessionEntryEvidence {
+  return SessionEvidence.inspectBoundedActiveSessionEntries({
+    getEntry: (id) => ctx.sessionManager.getEntry(id),
+    leaf: ctx.sessionManager.getLeafEntry(),
+    match: (entry) => {
+      const batch = completionBatchMessage(entry);
+      if (!batch || batch.batchId !== input.batchId) return undefined;
+      return batch.content === input.content ? "present" : "conflict";
+    },
+  });
 }
 
 export function inspectRunSteerSessionEvidence(

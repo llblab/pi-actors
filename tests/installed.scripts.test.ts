@@ -1646,6 +1646,35 @@ test("packed extension presents explicit steer before its exact completion epoch
   }
 });
 
+test("packed extension delivers active completion batches through the public SDK boundary", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-packed-boundary-"));
+  try {
+    const packageDir = await preparePackedPackage(root);
+    const agentDir = join(root, "agent");
+    const { stdout, stderr } = await execFileAsync(process.execPath, [
+      join(process.cwd(), "tests", "fixtures", "completion-boundary-sdk.mjs"),
+      packageDir,
+      agentDir,
+    ], {
+      env: {
+        ...process.env,
+        HOME: root,
+        PI_ACTORS_AUTOMATIC_REVIEW: "off",
+        PI_CODING_AGENT_DIR: agentDir,
+        USERPROFILE: root,
+      },
+      timeout: 30_000,
+    });
+    assert.equal(stderr, "");
+    assert.deepEqual(JSON.parse(stdout), [
+      { mode: "tools", requests: 2, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 2 },
+      { mode: "final", requests: 2, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 0 },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("installed validate-recipe resolves explicit file imports", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-imports-"));
   try {

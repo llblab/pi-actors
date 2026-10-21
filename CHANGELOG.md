@@ -2,6 +2,10 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.55.0: Active Completion Overlays
+
+- `Active Completion Overlays`: Batches ready Actor trees at the next completed model-step boundary, after the full tool batch, so the running coordinator receives fresh results before idle without native steering. Preserves prior boundary entries, exact owner/generation fences, and debounced idle wakeups. Proposed entries remain pending until exact context or bounded session evidence proves acceptance; dropped proposals retry without premature handled markers or duplicate accepted reports.
+
 ## 0.54.0: Pi 1.0 Baseline and Package Licensing
 
 - `Licensing`: Includes the MIT LICENSE in source checkouts and npm packages, preserving existing author attribution.

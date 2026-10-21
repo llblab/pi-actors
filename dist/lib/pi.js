@@ -18,8 +18,9 @@ export function createNotificationSink(pi, ctx) {
         }),
     };
 }
-export function sendRunCompletionBatch(pi, batchId, content) {
-    pi.sendMessage({
+export function createRunCompletionBatchEntry(batchId, content) {
+    return {
+        type: "custom_message",
         customType: RUN_COMPLETION_BATCH_CUSTOM_TYPE,
         content,
         display: true,
@@ -29,10 +30,11 @@ export function sendRunCompletionBatch(pi, batchId, content) {
                 kind: "completion_batch",
             },
         },
-    }, {
-        deliverAs: "followUp",
-        triggerTurn: true,
-    });
+    };
+}
+export function sendRunCompletionBatch(pi, batchId, content) {
+    const { type: _type, ...message } = createRunCompletionBatchEntry(batchId, content);
+    pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 }
 export function sendRunSteer(pi, input) {
     pi.sendMessage({
@@ -171,6 +173,18 @@ export function dedupeRunSteerContext(messages) {
 }
 export function removeRunSteerFromContext(messages, steerId) {
     return messages.filter((message) => steerMessage(message)?.steerId !== steerId);
+}
+export function inspectRunCompletionBatchSessionEvidence(ctx, input) {
+    return SessionEvidence.inspectBoundedActiveSessionEntries({
+        getEntry: (id) => ctx.sessionManager.getEntry(id),
+        leaf: ctx.sessionManager.getLeafEntry(),
+        match: (entry) => {
+            const batch = completionBatchMessage(entry);
+            if (!batch || batch.batchId !== input.batchId)
+                return undefined;
+            return batch.content === input.content ? "present" : "conflict";
+        },
+    });
 }
 export function inspectRunSteerSessionEvidence(ctx, input) {
     return SessionEvidence.inspectBoundedActiveSessionEntries({

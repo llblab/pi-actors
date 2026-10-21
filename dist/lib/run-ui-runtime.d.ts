@@ -9,6 +9,7 @@ import * as Pi from "./pi.ts";
 export interface RunUiRuntime {
     close(): void;
     flushCompletionBatch(ctx: Pi.ExtensionContext): boolean;
+    onTurnEnd(event: Pi.TurnEndEvent, ctx: Pi.ExtensionContext): Pi.TurnEndEventResult | undefined;
     projectContext(messages: unknown[], ctx: Pi.ExtensionContext): unknown[];
     shutdown(eventReason: string, ownerId: string | undefined, ctx?: Pi.ExtensionContext): void;
     start(ctx: Pi.ExtensionContext, ownerId: string): void;

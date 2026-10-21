@@ -15,6 +15,7 @@ import * as RunDeliveryLineage from "./run-delivery-lineage.ts";
 export interface RunUiRuntime {
   close(): void;
   flushCompletionBatch(ctx: Pi.ExtensionContext): boolean;
+  onTurnEnd(event: Pi.TurnEndEvent, ctx: Pi.ExtensionContext): Pi.TurnEndEventResult | undefined;
   projectContext(messages: unknown[], ctx: Pi.ExtensionContext): unknown[];
   shutdown(
     eventReason: string,
@@ -51,6 +52,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
   const deliveryObservation = Observability.createRunUiObservationState();
   const retirementAttempts = new Set<string>();
   const steerDiagnostics = new Set<string>();
+  const completionDiagnostics = new Set<string>();
 
   const close = (): void => {
     running = false;
@@ -72,6 +74,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     deliveryTimeout = undefined;
     recoverQueuedSteers = false;
     steerDiagnostics.clear();
+    completionDiagnostics.clear();
     if (animationInterval) clearInterval(animationInterval);
     animationInterval = undefined;
   };
@@ -241,6 +244,53 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
       tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
     });
     return true;
+  };
+  const acceptCompletionBatch = (ownerId: string, batchId: string): boolean => {
+    const input = { batchId, ownerId, tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir };
+    if (!RunDelivery.markRunCompletionBatchQueued(input)) return false;
+    if (!RunDelivery.markRunCompletionBatchPresented(input)) return false;
+    const accepted = journal(ownerId).completion_batch;
+    return accepted ? finishPresentedBatch(ownerId, accepted) : false;
+  };
+  const reconcileCompletionBatch = (ctx: Pi.ExtensionContext, ownerId: string): boolean => {
+    const batch = journal(ownerId).completion_batch;
+    if (!batch) return false;
+    if (batch.phase === "pending") {
+      // Returning boundary drafts is not acceptance: prove the exact entry before acknowledging it.
+      const evidence = Pi.inspectRunCompletionBatchSessionEvidence(ctx, {
+        batchId: batch.batch_id,
+        content: RunDelivery.formatRunCompletionBatchMessage(batch),
+      });
+      if (evidence.status === "absent") return false;
+      if (evidence.status !== "present") {
+        const key = `${batch.batch_id}:${evidence.status}:${evidence.reason ?? ""}`;
+        if (!completionDiagnostics.has(key)) {
+          completionDiagnostics.add(key);
+          ctx.ui.notify(
+            `Actor completion recovery is ${evidence.status}: ${evidence.reason ?? "conflicting session evidence"}. Batch ${batch.batch_id} remains pending.`,
+            "warning",
+          );
+        }
+        return true;
+      }
+    }
+    return !acceptCompletionBatch(ownerId, batch.batch_id);
+  };
+  const pendingCompletionBatch = (ownerId: string): RunDelivery.RunCompletionBatch | undefined => {
+    const existing = journal(ownerId).completion_batch;
+    if (existing) return existing;
+    const snapshot = Observability.readRunDeliverySnapshot(deliveryObservation, ownerId);
+    admitCompletionTransitions(ownerId, snapshot);
+    Observability.pruneRunUiObservationState(deliveryObservation, snapshot);
+    return journal(ownerId).completion_batch;
+  };
+  const isCurrentOwner = (ctx: Pi.ExtensionContext): boolean => {
+    if (!running || !activeOwnerId) return false;
+    try {
+      return Pi.getSessionId(ctx) === activeOwnerId;
+    } catch {
+      return false;
+    }
   };
   const isIdle = (ctx: Pi.ExtensionContext): boolean =>
     typeof ctx.isIdle !== "function" || ctx.isIdle();
@@ -422,48 +472,14 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
 
   flushCompletionBatch = (ctx: Pi.ExtensionContext): boolean => {
     const ownerId = activeOwnerId;
-    if (!running || !ownerId) return false;
-    try {
-      if (Pi.getSessionId(ctx) !== ownerId) return false;
-    } catch {
-      return false;
-    }
+    if (!ownerId || !isCurrentOwner(ctx)) return false;
     if (flushSteers(ctx, ownerId)) return true;
     if (!isDeliveryRoot(ownerId)) return false;
-    let batch = journal(ownerId).completion_batch;
-    if (!batch) {
-      const snapshot = Observability.readRunDeliverySnapshot(
-        deliveryObservation,
-        ownerId,
-      );
-      admitCompletionTransitions(ownerId, snapshot);
-      Observability.pruneRunUiObservationState(deliveryObservation, snapshot);
-      batch = journal(ownerId).completion_batch;
-    }
+    if (reconcileCompletionBatch(ctx, ownerId)) return true;
+    const batch = pendingCompletionBatch(ownerId);
     if (!batch) return false;
-    if (batch.phase === "presented") {
-      finishPresentedBatch(ownerId, batch);
-      const snapshot = Observability.readRunDeliverySnapshot(
-        deliveryObservation,
-        ownerId,
-      );
-      admitCompletionTransitions(ownerId, snapshot);
-      Observability.pruneRunUiObservationState(deliveryObservation, snapshot);
-      batch = journal(ownerId).completion_batch;
-      if (!batch) return false;
-    }
     if (!isIdle(ctx)) return true;
     const content = RunDelivery.formatRunCompletionBatchMessage(batch);
-    if (batch.phase === "queued") {
-      if (!RunDelivery.markRunCompletionBatchPresented({
-        batchId: batch.batch_id,
-        ownerId,
-        tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
-      })) return true;
-      const accepted = journal(ownerId).completion_batch;
-      if (accepted) finishPresentedBatch(ownerId, accepted);
-      return flushCompletionBatch(ctx);
-    }
     if (!isIdle(ctx)) return true;
     try {
       Pi.sendRunCompletionBatch(deps.pi, batch.batch_id, content);
@@ -476,22 +492,9 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
       });
       throw error;
     }
-    if (!RunDelivery.markRunCompletionBatchQueued({
-      batchId: batch.batch_id,
-      ownerId,
-      tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
-    })) {
-      throw new Error("Completion batch changed before queue acknowledgment");
-    }
-    if (!RunDelivery.markRunCompletionBatchPresented({
-      batchId: batch.batch_id,
-      ownerId,
-      tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
-    })) {
+    if (!acceptCompletionBatch(ownerId, batch.batch_id)) {
       throw new Error("Completion batch changed before durable acceptance");
     }
-    const accepted = journal(ownerId).completion_batch;
-    if (accepted) finishPresentedBatch(ownerId, accepted);
     ctx.ui.notify(
       `Actor completions ready: ${batch.members.length}`,
       "info",
@@ -502,14 +505,25 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
   return {
     close,
     flushCompletionBatch,
+    onTurnEnd(event, ctx) {
+      const ownerId = activeOwnerId;
+      if (
+        !ownerId || !isCurrentOwner(ctx) || !isDeliveryRoot(ownerId) ||
+        event.outcome !== "completed" || isIdle(ctx) || ctx.signal?.aborted ||
+        ctx.hasPendingMessages?.() || event.context.pendingMessages.length > 0
+      ) return undefined;
+      if (flushSteers(ctx, ownerId) || reconcileCompletionBatch(ctx, ownerId)) return undefined;
+      const batch = pendingCompletionBatch(ownerId);
+      if (!batch) return undefined;
+      const entry = Pi.createRunCompletionBatchEntry(
+        batch.batch_id,
+        RunDelivery.formatRunCompletionBatchMessage(batch),
+      );
+      return { entries: [...event.entries, entry], continue: true };
+    },
     projectContext(messages, ctx) {
       const ownerId = activeOwnerId;
-      if (!running || !ownerId) return messages;
-      try {
-        if (Pi.getSessionId(ctx) !== ownerId) return messages;
-      } catch {
-        return messages;
-      }
+      if (!ownerId || !isCurrentOwner(ctx)) return messages;
       const steerContext = Pi.dedupeRunSteerContext(messages);
       let contextMessages = steerContext.messages;
       for (const steer of journal(ownerId).steers) {
@@ -549,18 +563,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
           batch.batch_id,
         );
       }
-      if (!RunDelivery.markRunCompletionBatchQueued({
-        batchId: batch.batch_id,
-        ownerId,
-        tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
-      })) return projected.messages;
-      if (!RunDelivery.markRunCompletionBatchPresented({
-        batchId: batch.batch_id,
-        ownerId,
-        tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
-      })) return projected.messages;
-      const presented = journal(ownerId).completion_batch;
-      if (presented) finishPresentedBatch(ownerId, presented);
+      acceptCompletionBatch(ownerId, batch.batch_id);
       return projected.messages;
     },
     shutdown(eventReason, ownerId, ctx) {

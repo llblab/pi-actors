@@ -2,6 +2,10 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## Unreleased
+
+- `Release CI`: Allows ten minutes for npm to expose an accepted publication, with deadline-bounded online metadata/tarball reads and explicit processing diagnostics. Availability retries never republish; exact package identity and manifest mismatches still fail closed. No package version or published release is changed by this maintenance fix.
+
 ## 0.55.0: Active Completion Overlays
 
 - `Active Completion Overlays`: Batches ready Actor trees at the next completed model-step boundary, after the full tool batch, so the running coordinator receives fresh results before idle without native steering. Preserves prior boundary entries, exact owner/generation fences, and debounced idle wakeups. Proposed entries remain pending until exact context or bounded session evidence proves acceptance; dropped proposals retry without premature handled markers or duplicate accepted reports.

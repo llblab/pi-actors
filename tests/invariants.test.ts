@@ -331,9 +331,11 @@ test("Release publishes through tokenless npm Trusted Publisher before GitHub Re
   assert.match(publishJob, /published\.gitHead !== process\.env\.TAG_COMMIT/);
   assert.match(publishJob, /grep -Eq 'E404\|404 Not Found'/);
   assert.match(publishJob, /npm publish --access public --provenance/);
-  assert.match(publishJob, /for attempt in \$\(seq 1 20\)/);
-  assert.match(publishJob, /npm view[\s\S]*&&\n\s*npm pack[\s\S]*&&\n\s*node --input-type=module/);
-  assert.match(publishJob, /npm pack "\$PACKAGE_NAME@\$VERSION" --dry-run --json/);
+  assert.match(publishJob, /timeout-minutes: 11/);
+  assert.match(publishJob, /verification_deadline=\$\(\(SECONDS \+ 600\)\)/);
+  assert.match(publishJob, /timeout --kill-after=5s "\$\{remaining\}s" npm/);
+  assert.match(publishJob, /npm_within_deadline view[\s\S]*&&\n\s*npm_within_deadline pack[\s\S]*; then\n\s*node --input-type=module/);
+  assert.match(publishJob, /pack "\$PACKAGE_NAME@\$VERSION" --prefer-online --dry-run --json/);
   assert.match(publishJob, /dist\/pi-actors\/index\.js/);
   assert.match(publishJob, /dist\/skills\/actors\/SKILL\.md/);
   const npmVerification = publishJob.indexOf("Verify public npm package and packed manifest");

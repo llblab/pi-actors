@@ -14,6 +14,7 @@ export interface ActorExtensionRuntime {
     } | undefined;
     getRunOwnerId(ctx: Pi.ExtensionContext): string;
     onAgentSettled(ctx: Pi.ExtensionContext): void;
+    onTurnEnd(event: Pi.TurnEndEvent, ctx: Pi.ExtensionContext): Pi.TurnEndEventResult | undefined;
     onContext(messages: unknown[], ctx: Pi.ExtensionContext): unknown[];
     onSessionShutdown(reason: string, ctx: Pi.ExtensionContext): void;
     onSessionStart(ctx: Pi.ExtensionContext): Promise<void>;

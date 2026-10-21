@@ -273,6 +273,160 @@ test("shutdown uses captured owner identity and stale UI notification is no-thro
   assert.doesNotThrow(() => harness.runtime.close());
 });
 
+function completedBoundary(entries: any[] = []): any {
+  return { entries, outcome: "completed", context: { pendingMessages: [] }, turnIndex: 1 };
+}
+
+test("active boundaries batch fresh completions without native steering or early acknowledgment", async () => {
+  const ownerId = "session-active-boundary";
+  const active = staleContext(ownerId);
+  let idle = false;
+  active.context.isIdle = () => idle;
+  const harness = runtimeHarness();
+  harness.setActiveContext(active.context);
+  harness.runtime.start(active.context, ownerId);
+  const firstDir = await writeTerminalRun(ownerId, "boundary-first", "boundary-generation-first");
+  const secondDir = await writeTerminalRun(ownerId, "boundary-second", "boundary-generation-second");
+  const priorEntry = { type: "custom", customType: "another-extension", data: { keep: true } };
+  // No watcher event: the boundary itself must discover the latest durable results.
+  const freshContext = { ...active.context };
+  const result = harness.runtime.onTurnEnd(completedBoundary([priorEntry]), freshContext)!;
+  assert.equal(result.continue, true);
+  assert.equal(result.entries!.length, 2);
+  assert.equal(result.entries![0], priorEntry);
+  const entry = result.entries![1] as any;
+  assert.equal(entry.type, "custom_message");
+  assert.equal(entry.customType, "pi-actors-run-batch");
+  assert.equal(entry.display, true);
+  assert.match(entry.content, /Actor completions: 2/);
+  assert.equal(harness.sendAttempts(), 0);
+  const pending = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
+  assert.equal(pending.phase, "pending");
+  await assert.rejects(readFile(join(firstDir, "terminal-handled.json")), /ENOENT/);
+  await assert.rejects(readFile(join(secondDir, "terminal-handled.json")), /ENOENT/);
+
+  const thirdDir = await writeTerminalRun(ownerId, "boundary-third", "boundary-generation-third");
+  assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!.members.length, 2);
+  const { details: _details, ...modelEntry } = entry;
+  harness.runtime.projectContext([modelEntry], freshContext);
+  assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch, undefined);
+  assert.equal(JSON.parse(await readFile(join(firstDir, "terminal-handled.json"), "utf8")).run_instance_id,
+    "boundary-generation-first");
+  const next = harness.runtime.onTurnEnd(completedBoundary(), freshContext)!;
+  assert.match((next.entries![0] as any).content, /Actor completions: 1/);
+  assert.match((next.entries![0] as any).content, /boundary-third/);
+  harness.runtime.projectContext(next.entries!, freshContext);
+  assert.equal(JSON.parse(await readFile(join(thirdDir, "terminal-handled.json"), "utf8")).run_instance_id,
+    "boundary-generation-third");
+  idle = true;
+  assert.equal(harness.runtime.flushCompletionBatch(freshContext), false);
+  assert.equal(harness.sendAttempts(), 0);
+  harness.runtime.close();
+});
+
+test("active completion boundaries refuse unsafe outcomes, native pending input and foreign owners", async () => {
+  const ownerId = "session-boundary-guards";
+  const active = staleContext(ownerId);
+  active.context.isIdle = () => false;
+  const harness = runtimeHarness();
+  harness.setActiveContext(active.context);
+  harness.runtime.start(active.context, ownerId);
+  await writeTerminalRun(ownerId, "boundary-guarded", "boundary-generation-guarded");
+  const event = completedBoundary();
+  for (const outcome of ["aborted", "error"]) {
+    assert.equal(harness.runtime.onTurnEnd({ ...event, outcome }, active.context), undefined);
+  }
+  const aborted = new AbortController();
+  aborted.abort();
+  for (const override of [
+    { signal: aborted.signal },
+    { hasPendingMessages: () => true },
+    { isIdle: () => true },
+    { sessionManager: { getSessionId: () => "foreign-owner" } },
+  ]) {
+    assert.equal(harness.runtime.onTurnEnd(event, { ...active.context, ...override }), undefined);
+  }
+  assert.equal(harness.runtime.onTurnEnd({
+    ...event, context: { pendingMessages: [{ role: "user", content: "native input" }] },
+  }, active.context), undefined);
+  assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch, undefined);
+  assert.equal(harness.sendAttempts(), 0);
+  assert.ok(harness.runtime.onTurnEnd(event, active.context));
+  harness.runtime.close();
+  assert.equal(harness.runtime.onTurnEnd(event, active.context), undefined);
+});
+
+test("a dropped boundary proposal retries the same immutable batch without acknowledging it", async () => {
+  const ownerId = "session-boundary-dropped";
+  const active = staleContext(ownerId);
+  active.context.isIdle = () => false;
+  const harness = runtimeHarness();
+  harness.setActiveContext(active.context);
+  harness.runtime.start(active.context, ownerId);
+  const stateDir = await writeTerminalRun(ownerId, "boundary-dropped", "boundary-generation-dropped");
+  const first = harness.runtime.onTurnEnd(completedBoundary(), active.context)!;
+  // A later extension can replace the draft chain before Pi commits it.
+  const retry = harness.runtime.onTurnEnd(completedBoundary(), active.context)!;
+  assert.deepEqual(retry, first);
+  await assert.rejects(readFile(join(stateDir, "terminal-handled.json")), /ENOENT/);
+  harness.runtime.projectContext(retry.entries!, active.context);
+  assert.equal(harness.runtime.onTurnEnd(completedBoundary(), active.context), undefined);
+  assert.equal(harness.sendAttempts(), 0);
+  harness.runtime.close();
+});
+
+test("restart acknowledges a committed boundary entry even when its context callback was missed", async () => {
+  const ownerId = "session-boundary-restart";
+  const active = staleContext(ownerId);
+  active.context.isIdle = () => false;
+  const first = runtimeHarness();
+  first.setActiveContext(active.context);
+  first.runtime.start(active.context, ownerId);
+  const stateDir = await writeTerminalRun(ownerId, "boundary-restart", "boundary-generation-restart");
+  const proposed = first.runtime.onTurnEnd(completedBoundary(), active.context)!;
+  const entry = proposed.entries![0] as any;
+  active.setSessionBranch([{ ...entry, id: "committed-boundary", parentId: null }]);
+  first.runtime.close();
+  await assert.rejects(readFile(join(stateDir, "terminal-handled.json")), /ENOENT/);
+
+  const recovered = runtimeHarness();
+  recovered.setActiveContext(active.context);
+  recovered.runtime.start(active.context, ownerId);
+  assert.equal(recovered.runtime.onTurnEnd(completedBoundary(), active.context), undefined);
+  assert.equal(recovered.sendAttempts(), 0);
+  assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch, undefined);
+  assert.equal(JSON.parse(await readFile(join(stateDir, "terminal-handled.json"), "utf8")).run_instance_id,
+    "boundary-generation-restart");
+  active.context.isIdle = () => true;
+  assert.equal(recovered.runtime.flushCompletionBatch(active.context), false);
+  recovered.runtime.close();
+});
+
+test("uncertain boundary acceptance fails closed instead of resending or marking terminals handled", async () => {
+  const ownerId = "session-boundary-uncertain";
+  const active = staleContext(ownerId);
+  active.context.isIdle = () => false;
+  const harness = runtimeHarness();
+  harness.setActiveContext(active.context);
+  harness.runtime.start(active.context, ownerId);
+  const stateDir = await writeTerminalRun(ownerId, "boundary-uncertain", "boundary-generation-uncertain");
+  const result = harness.runtime.onTurnEnd(completedBoundary(), active.context)!;
+  const entry = result.entries![0] as any;
+  for (const sessionEntry of [
+    { ...entry, content: `${entry.content}\nconflicting output`, id: "conflict", parentId: null },
+    { type: "custom", id: "missing-parent", parentId: "unavailable" },
+  ]) {
+    active.setSessionBranch([sessionEntry]);
+    assert.equal(harness.runtime.onTurnEnd(completedBoundary(), active.context), undefined);
+    assert.equal(harness.runtime.onTurnEnd(completedBoundary(), active.context), undefined);
+    assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!.phase, "pending");
+  }
+  assert.equal(active.notifications().filter(item => /completion recovery/.test(item.message)).length, 2);
+  await assert.rejects(readFile(join(stateDir, "terminal-handled.json")), /ENOENT/);
+  assert.equal(harness.sendAttempts(), 0);
+  harness.runtime.close();
+});
+
 test("completion batches wait for idle and acknowledge exact accepted generations", async () => {
   const ownerId = "session-batch";
   const firstDir = await writeTerminalRun(ownerId, "batch-first", "generation-first");

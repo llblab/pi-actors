@@ -118,6 +118,9 @@ export function createActorExtensionRuntime(pi) {
             if (!runUiRuntime.flushCompletionBatch(ctx))
                 automaticReview.schedule();
         },
+        onTurnEnd(event, ctx) {
+            return runUiRuntime.onTurnEnd(event, ctx);
+        },
         onContext(messages, ctx) {
             return runUiRuntime.projectContext(messages, ctx);
         },

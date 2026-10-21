@@ -8,10 +8,10 @@ Separate durable Run completion truth from the scheduling of model turns:
 
 ```text
 one Run generation -> one terminal record with inherited tree lineage
-one ready completion forest per bounded epoch -> one root-coordinator turn
+one ready completion forest per bounded epoch -> one root-coordinator model step
 ```
 
-Ordinary terminals accumulate across nested actor sessions while Pi is active. Descendants wait for their containing top-level Run, then all ready trees and concurrently completed top-level Runs reach only the root coordinator in one bounded batch after Pi settles. Only an explicitly actor-authored urgent semantic checkpoint may steer an active agent loop.
+Ordinary terminals accumulate across nested actor sessions. Descendants wait for their complete containing top-level tree, then all ready trees and concurrently completed top-level Runs reach only the root coordinator in one bounded batch. During active work, a public `turn_end` overlay supplies fresh results to the next model request after the full tool batch, without waiting for idle or using native steering. Already-idle Pi retains debounced follow-up wakeups. Explicit actor-authored urgent semantic checkpoints remain a separate native-steer delivery class.
 
 ## Non-Goals
 
@@ -27,7 +27,7 @@ Ordinary terminals accumulate across nested actor sessions while Pi is active. D
 - `attention: "notify"` remains visible UI status without a model turn.
 - `attention: "followup"` retains its existing explicit semantic follow-up behavior.
 - New `attention: "steer"` requests urgent semantic delivery at Pi's next safe assistant/tool boundary.
-- Terminal transitions inherit exact parent-generation and root-owner lineage; only the root session batches ready completion trees instead of sending one follow-up per Run or descendant session.
+- Terminal transitions inherit exact parent-generation and root-owner lineage; only the root session batches ready completion trees into a model-step overlay or an already-idle follow-up, never one turn per Run or descendant session.
 
 `command.done` remains non-projectable even if malformed or legacy Trace attaches any attention value.
 
@@ -37,7 +37,7 @@ Ordinary terminals accumulate across nested actor sessions while Pi is active. D
 - `runs-trace.ts` owns admission of the new `steer` attention value.
 - `observability.ts` discovers terminal candidates and explicit semantic attention without deciding Pi delivery timing.
 - A new `run-delivery.ts` domain owns the owner-scoped delivery journal, batch construction, bounds, phases, formatting, recovery, and acknowledgments.
-- `run-ui-runtime.ts` owns idle detection, debounce, reconciliation, flushing, and stale-context containment.
+- `run-ui-runtime.ts` owns active model-step boundaries, idle detection, debounce, reconciliation, flushing, and stale-context containment.
 - `extension-runtime.ts` orders completion flushes before automatic Recipe review.
 - `index.ts` remains a thin registration root and adds only the required Pi lifecycle adapter.
 - `pi.ts` exposes narrow ports for batched follow-up and urgent steer delivery.
@@ -75,13 +75,13 @@ Completion batch shape:
 
 Phases are monotonic:
 
-1. `pending`: The exact member snapshot is durable but no Pi message has been accepted.
+1. `pending`: The exact member snapshot is durable but Pi acceptance is unproven. Returning a boundary draft does not advance this phase.
 2. `queued`: Pi accepted a custom message carrying the exact batch or steer ID.
-3. `presented`: A Pi `context` event observed that ID in messages being supplied to an LLM call.
+3. `presented`: Exact completion acceptance is proven, or a Pi `context` event observed the urgent-steer ID in messages being supplied to an LLM call.
 
 Every journal mutation uses the canonical token-owned lock, expected-phase fencing, owner and generation validation, and atomic replacement. Repeated transitions are idempotent. Corrupt, oversized, foreign-owner, or stale-generation state fails closed with bounded diagnostics.
 
-Completion and steer acknowledgments intentionally differ. Successful `sendMessage()` acceptance finalizes an ordinary completion batch immediately and marks its members through the existing terminal-handled authority; this prevents a missed context callback from blocking every later epoch. Urgent steer still requires exact model-context presentation. If a completion member was synchronously archived or pruned after queueing, the bounded delivery snapshot remains sufficient and the missing state write becomes a diagnostic rather than invalidating acceptance.
+Completion and steer acknowledgments intentionally differ. An active completion overlay remains pending until exact model context or bounded active-session evidence proves its committed entry. Successful idle `sendMessage()` acceptance finalizes an ordinary completion batch immediately; durable queued phase also proves acceptance. Both paths mark members through the existing terminal-handled authority, so a missed context callback cannot block every later epoch. Urgent steer still requires exact model-context presentation. If a completion member was synchronously archived or pruned after acceptance, the bounded delivery snapshot remains sufficient and the missing state write becomes a diagnostic rather than invalidating acceptance.
 
 ## Completion Collection
 
@@ -97,17 +97,20 @@ It excludes:
 
 Candidates sort by terminal timestamp, then stable Run identity, then `run_instance_id`. Replacement generations with the same logical Run id remain distinct internal members.
 
-While `ctx.isIdle()` is false, candidates remain durable in their Run state and no terminal follow-up is sent. A flush snapshots eligible candidates into one immutable batch. While transport acceptance is pending, newer terminals stay unhandled for the next bounded completion epoch.
+While Pi is active, candidates remain durable until the next completed `turn_end`; watchers do not enqueue ordinary terminal follow-ups into the native message queue. The boundary itself reads current Run state, so a missed watcher cannot make the next step stale. A flush snapshots eligible candidates into one immutable batch. While acceptance is pending, newer terminals stay unhandled for the next bounded completion epoch.
 
 ## Batch Flush
 
 Flush one batch when:
 
-1. `agent_settled` fires for the still-active context and `ctx.isIdle()` remains true;
-2. terminals arrive while Pi is already idle and survive one short debounce window;
-3. session restoration discovers unhandled terminal generations or recoverable queued delivery state.
+1. A completed active `turn_end` reaches the exact root owner without an aborted signal or native pending input;
+2. `agent_settled` fires for the still-active owner and `ctx.isIdle()` remains true;
+3. Terminals arrive while Pi is already idle and survive the 100 ms default debounce window;
+4. Session restoration discovers unhandled terminal generations or recoverable delivery state.
 
-The custom message uses `customType: "pi-actors-run-batch"`, `display: true`, `deliverAs: "followUp"`, and `triggerTurn: true`. It restores the visible gray completion card for the operator while supplying the same single tree-compressed prompt to the model. The bounded content retains the exact batch identity for session evidence and deduplication even though Pi omits private message details from model context. It includes:
+Active delivery returns `{ entries: [...event.entries, entry], continue: true }`, where `entry` is one `custom_message` with `customType: "pi-actors-run-batch"` and `display: true`. It preserves previous extensions' boundary entries and requests one next model step in the same agent run after the entire tool batch. Aborted/error boundaries, queued native input, and outstanding urgent steer defer the overlay. It never uses `sendMessage(..., { deliverAs: "steer" })` or a native follow-up queue for active completion delivery.
+
+Already-idle delivery uses the same custom message with `deliverAs: "followUp"` and `triggerTurn: true` to wake Pi. Both paths render one gray operator card and supply the same tree-compressed prompt to the model. The bounded content retains the exact batch identity for session evidence and deduplication even though Pi omits private message details from model context. It includes:
 
 - batch ID and completion window;
 - counts by terminal status;
@@ -120,14 +123,14 @@ Completion member details remain redacted through existing terminal projection r
 
 ## Acceptance, Presentation, And Recovery
 
-Ordinary completion delivery atomically advances through queued acceptance to finalization immediately after `sendMessage()` returns, marks every still-present member generation terminal-handled, and retains a bounded owner receipt. A `context` lifecycle adapter remains for exact urgent-steer presentation and harmless completion deduplication; presented steer writes `delivery.steer_presented` in the exact Run generation.
+Returning boundary drafts is a proposal, not an SDK receipt. An active completion batch advances through queued acceptance to finalization only when exact model-bound `context` or a bounded active-session parent-chain read proves the committed entry. If another extension replaces or invalidates the proposed draft chain, the absent batch remains pending and can retry with the same identity. Idle delivery advances immediately after `sendMessage()` returns. Acceptance marks every still-present member generation terminal-handled and retains a bounded owner receipt. The `context` lifecycle adapter also deduplicates completion envelopes and handles exact urgent-steer presentation; presented steer writes `delivery.steer_presented` in the exact Run generation.
 
 The generation-fenced Trace marker prevents a retained historical steer from replaying after bounded owner receipts rotate: suffix compaction cannot retain the older steer while discarding its newer presentation marker. Missing, archived, pruned, or replaced Run state needs no marker because it can no longer replay that original generation.
 
 Recovery rules:
 
 - Send failure: keep `pending`, record failure evidence, and retry.
-- Crash after queueing: inspect existing owned Pi session evidence for the exact custom message ID.
+- Pending batch after a boundary attempt or restart: inspect the bounded active Pi session chain for the exact batch ID and content. Proven presence finalizes; proven absence permits retry; incomplete or conflicting evidence stays pending with a diagnostic.
 - Completion send accepted: finalize immediately and release the next epoch.
 - Crash leaves a queued completion: queued itself proves `sendMessage()` acceptance, so finalize without resend or content reformatting.
 - Presented urgent steer: never resend.
@@ -179,12 +182,12 @@ Another extension may start work during `agent_settled`; recheck `ctx.isIdle()` 
 
 Implementation is complete only when source and packed-extension tests prove:
 
-1. Multiple Runs finishing during one agent run cause no immediate terminal turns and one settled batch.
+1. Multiple Runs finishing during active work produce one boundary entry and one next model request before idle, after all tools in the current batch finish; no native steering/follow-up enqueue occurs.
 2. Idle completions inside the debounce window form one batch.
 3. Completion/settled races project every generation exactly once.
 4. Send failure and restart before queueing retry without a handled marker.
 5. Restart in the narrow queue-acceptance/finalization boundary neither loses nor duplicates the batch.
-6. Successful completion acceptance acknowledges members atomically and idempotently; urgent steer still requires exact `context` presentation.
+6. Boundary proposals do not acknowledge terminals early. Exact committed-entry evidence or idle send acceptance acknowledges members atomically and idempotently; urgent steer still requires exact `context` presentation.
 7. Replacement generations sharing a Run id remain distinct.
 8. Silent, stopped, cancelled, handled, and foreign-owner Runs remain excluded.
 9. Legacy or malformed `command.done` attention, including `steer`, remains non-projectable.
@@ -192,11 +195,10 @@ Implementation is complete only when source and packed-extension tests prove:
 11. Overflow, corruption, journal backpressure, archive/prune races, and stale contexts fail safely.
 12. Completion flushing precedes automatic Recipe review.
 13. Pi 1.0.0 is the minimum source and packed lifecycle baseline; coding-agent and TUI peers share that floor.
+14. The packed extension runs through the public SDK with a synthetic provider, proving one batch reaches the next request before settlement for both a full tool batch and a tool-free final answer, while preserving preceding boundary entries.
 
 Focused observability and delivery tests precede TypeScript/build/import checks. The acceptance checkpoint then runs full product validation, dependency audit, package dry-run, and ABCd context validation.
 
-## Rollout
+## Product Boundaries
 
-This is one minor release because durable batching, acceptance acknowledgment, lifecycle ordering, and explicit steer share one model-delivery invariant. Completion acceptance must release later epochs without depending on a context callback; steer must not ship before its durable presentation-deduplication path exists.
-
-Update README and Run documentation only when implementation establishes the new public behavior. Move the accepted outcome from BACKLOG to CHANGELOG only after complete validation.
+Active overlays and idle follow-ups share the same batch identity, bounds, lineage, terminal authority, and acceptance journal. They differ only in the Pi scheduling port and its acceptance evidence. Urgent semantic steer remains independent; completion status never implies urgency. The extension has no dependency on Telegram and does not modify Telegram reply or preview ownership.

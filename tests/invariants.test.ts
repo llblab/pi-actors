@@ -149,6 +149,12 @@ test("Entrypoint waits for settled Pi lifecycle before automatic reviews", () =>
   );
 });
 
+test("Entrypoint delegates active completion boundaries without owning delivery policy", () => {
+  assert.match(indexSource, /pi\.on\("turn_end", \(event, ctx\) => runtime\.onTurnEnd\(event, ctx\)\)/);
+  assert.match(extensionRuntimeSource, /runUiRuntime\.onTurnEnd\(event, ctx\)/);
+  assert.match(runUiRuntimeSource, /entries: \[\.\.\.event\.entries, entry\], continue: true/);
+});
+
 test("Entrypoint delegates model-bound completion presentation", () => {
   assert.match(indexSource, /pi\.on\("context"/);
   assert.match(indexSource, /runtime\.onContext\(event\.messages, ctx\)/);

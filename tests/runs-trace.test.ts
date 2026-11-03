@@ -20,6 +20,7 @@ import {
   readRunTraceEvents,
   readRunTraceJournal,
   runTraceFile,
+  summarizeRunTraceJournal,
 } from "../lib/runs-trace.ts";
 
 const worker = fileURLToPath(
@@ -76,6 +77,20 @@ function runTraceWorker(
   });
 }
 
+test("Trace history accounts for read-event omissions and invalid lines without claiming completeness", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-read-coverage-"));
+  try {
+    const events = Array.from({ length: TRACE_JOURNAL_MAX_EVENTS + 25 }, (_, i) => encodeFixture(traceFixture(i)));
+    await writeFile(runTraceFile(root), events.join(""));
+    const read = readRunTraceJournal(root);
+    assert.equal(read.events.length, TRACE_JOURNAL_MAX_EVENTS);
+    assert.equal(read.omittedEvents, 25);
+    assert.equal(summarizeRunTraceJournal(read).history_complete, false);
+    await writeFile(runTraceFile(root), events[0] + "{invalid}\n");
+    assert.equal(summarizeRunTraceJournal(readRunTraceJournal(root)).history_complete, false);
+  } finally { await rm(root, { force: true, recursive: true }); }
+});
+
 test("Run Trace appends canonical structured events", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-"));
   try {
@@ -89,6 +104,70 @@ test("Run Trace appends canonical structured events", async () => {
     assert.equal(typeof event.id, "string");
     assert.equal(typeof event.ts, "string");
     assert.deepEqual(readRunTraceEvents(root), [event]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Run Trace clips new summaries at scalar boundaries within the existing UTF-16 allowance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-summary-"));
+  try {
+    const inputs = ["", "a".repeat(999), "a".repeat(1_000), "a".repeat(1_001),
+      "😀".repeat(501), "\uFEFF\r\n\uFFFD`e\u0301".repeat(200),
+      "a".repeat(999) + "\uD800x", "a".repeat(999) + "\uDC00x"];
+    for (const point of ["𐀀", "😀", "\u{10FFFF}"]) {
+      for (const prefix of [997, 998, 999, 1_000, 1_001]) inputs.push("a".repeat(prefix) + point + "tail");
+    }
+    const expected = inputs.map(input => {
+      let prefix = "";
+      for (const point of input) {
+        if (prefix.length + point.length > 1_000) break;
+        prefix += point;
+      }
+      const event = appendRunTraceEvent(root, { kind: "runtime.summary", summary: input });
+      const summary = event.summary;
+      assert.ok(typeof summary === "string");
+      assert.equal(summary, prefix);
+      assert.ok(summary.length <= 1_000 && input.startsWith(summary));
+      if (input.isWellFormed()) assert.equal(summary.isWellFormed(), true);
+      assert.deepEqual(Object.keys(event).sort(), ["id", "kind", "summary", "ts"]);
+      return event;
+    });
+    const read = readRunTraceJournal(root);
+    assert.deepEqual(read.diagnostics, []);
+    assert.deepEqual(read.events.map(({ event }) => event), expected);
+    const bytes = await readFile(runTraceFile(root));
+    const records = new TextDecoder("utf-8", { fatal: true }).decode(bytes).trimEnd().split("\n").map(line => JSON.parse(line));
+    assert.deepEqual(records, expected);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Run Trace preserves retained legacy summary bytes through read append and compaction", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-trace-summary-legacy-"));
+  try {
+    const legacy = [
+      { ...traceFixture(1), summary: "a".repeat(999) + "\uD83D" },
+      { ...traceFixture(2), summary: "b".repeat(1_001) + "😀" },
+    ];
+    const original = legacy.map(event => ` ${JSON.stringify(event)} \n`).join("");
+    await writeFile(runTraceFile(root), original);
+    assert.deepEqual(readRunTraceJournal(root).events.map(({ event }) => event), legacy);
+    assert.equal(await readFile(runTraceFile(root), "utf8"), original);
+    const appended = appendRunTraceEvent(root, { kind: "runtime.summary", summary: "a".repeat(999) + "😀tail" });
+    assert.equal(appended.summary, "a".repeat(999));
+    const beforeCompaction = await readFile(runTraceFile(root), "utf8");
+    assert.ok(beforeCompaction.startsWith(original));
+    await writeFile(runTraceFile(root), beforeCompaction + "{bad json}\n");
+    const last = appendRunTraceEvent(root, { kind: "runtime.compaction_trigger" });
+    const afterCompaction = await readFile(runTraceFile(root), "utf8");
+    assert.ok(afterCompaction.startsWith(original));
+    const read = readRunTraceJournal(root);
+    assert.deepEqual(read.diagnostics, []);
+    assert.deepEqual(read.events.slice(0, 4).map(({ event }) => event), [...legacy, appended, last]);
+    assert.equal(read.events.at(-1)?.event.kind, "runtime.trace_compacted");
+    assert.equal((read.events.at(-1)?.event.data as Record<string, unknown>).dropped_malformed_lines_total, 1);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

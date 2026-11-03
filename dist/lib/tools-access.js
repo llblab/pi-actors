@@ -4,8 +4,21 @@
  * Owns consistent session-mismatch diagnostics for public tool execution paths
  */
 import * as AsyncRuns from "./async-runs.js";
+import * as RunIndex from "./runs-index.js";
 export function getContextSessionId(ctx) {
     return ctx?.sessionManager?.getSessionId?.();
+}
+/** Optional post-launch navigation never fails or rolls back work already admitted by the launch owner. */
+export function readRunFileNavigationForContext(status, ctx) {
+    try {
+        const sessionId = getContextSessionId(ctx);
+        const directory = Object.getOwnPropertyDescriptor(status, "state_dir");
+        const navigation = RunIndex.readRunDirectoryNavigation(typeof directory?.value === "string" ? directory.value : "", status, sessionId);
+        return getContextSessionId(ctx) === sessionId ? navigation : Object.freeze({ state: "unavailable", reason: "session_changed" });
+    }
+    catch {
+        return Object.freeze({ state: "unavailable", reason: "navigation_unavailable" });
+    }
 }
 export function requireContextSessionId(ctx, actor) {
     const sessionId = getContextSessionId(ctx);

@@ -77,6 +77,11 @@ export declare function readRunUiSnapshot(state: RunUiObservationState, ownerId:
 }): RunUiSnapshot;
 /** Observe every Run generation routed to one root coordinator. */
 export declare function readRunDeliverySnapshot(state: RunUiObservationState, deliveryOwnerId: string, stateRoot?: string): RunUiSnapshot;
+/** Same-pass display/candidate projections only. No frame escapes or native fact is reused by flush/publication/control. */
+export declare function readRunUiAndDeliverySnapshots(uiState: RunUiObservationState, deliveryState: RunUiObservationState, ownerId: string, stateRoot?: string): {
+    ui: RunUiSnapshot;
+    delivery: RunUiSnapshot;
+};
 export declare function pruneRunUiObservationState(state: RunUiObservationState, snapshot: Pick<RunUiSnapshot, "summary" | "transitions">): void;
 export declare function deliverRunAttentionNotifications(events: RunAttentionEvent[], sink: RunUiNotificationSink): void;
 export interface RunRetirementCandidate {
@@ -132,6 +137,7 @@ export interface RunRetirementExecutorOptions {
     sendStop: (candidate: RunRetirementCandidate) => Promise<unknown>;
 }
 export interface RunTransition {
+    ownerId?: string;
     deliveryParent?: {
         run: string;
         run_instance_id: string;
@@ -154,6 +160,10 @@ export interface RunTransition {
 }
 export interface RunTerminalSemanticResult {
     body?: string;
+    /** Marker hints only; source admission belongs to eligible packet collection, never ambient observation. */
+    hasPrimaryText?: true;
+    hasArtifactInventory?: true;
+    hasResultDiagnostics?: true;
     correlationId?: string;
     metadata: Record<string, unknown>;
     summary: string;
@@ -190,9 +200,13 @@ export declare function shouldNotifyRunAttentionEvent(event: RunAttentionEvent):
 export declare function isRunSteerAttentionEvent(event: RunAttentionEvent): boolean;
 export declare function retryRunAttentionEvent(state: RunUiObservationState, event: Pick<RunAttentionEvent, "id" | "stateDir">): void;
 export declare function shouldSendRunAttentionFollowUp(event: RunAttentionEvent): boolean;
+/** Ordinary selection has no urgent-steer or compact-output byte/depth allowance. */
 export declare function formatRunAttentionMessage(event: RunAttentionEvent): string;
+/** Saved envelope.content is replayed before this formatter; only fresh complete candidates are fitted. */
+export declare function formatRunSteerMessage(event: RunAttentionEvent): string;
 export declare function getRunTransitionNotificationType(transition: RunTransition): RunTransitionNotificationType;
 export declare function shouldNotifyRunTransition(transition: RunTransition): boolean;
-/** Build exact immutable members only after each containing root Run is terminal. */
+export declare function hasRunCompletionBatchMembers(transitions: RunTransition[], deliveryRuns?: RunObservation[]): boolean;
+/** Freeze primary/artifact source observations only for eligible members entering packet admission. */
 export declare function collectRunCompletionBatchMembers(transitions: RunTransition[], deliveryRuns?: RunObservation[]): RunCompletionBatchMember[];
 export declare function formatRunTransitionMessage(transition: RunTransition): string;

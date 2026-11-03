@@ -11,6 +11,7 @@ import * as RecipesReferences from "./recipes-references.js";
 import * as RecipesUsage from "./recipes-usage.js";
 import * as Schema from "./schema.js";
 import * as ToolsResponse from "./tools-response.js";
+import { readRunFileNavigationForContext } from "./tools-access.js";
 function getRunOwnerId(ctx) {
     return ctx.sessionManager?.getSessionId?.();
 }
@@ -138,6 +139,11 @@ export function createRuntimeToolDefinition(cfg, exec) {
             ? Prompts.formatRecipeToolPromptSnippet(cfg.recipe?.name ?? String(cfg.template), isAsyncRecipe)
             : Prompts.formatRegisteredToolPromptSnippet(cfg.template),
         async execute(toolCallId, params, signal, _onUpdate, ctx) {
+            let dispatchEntered = false;
+            const execute = (...args) => {
+                dispatchEntered = true;
+                return exec(...args);
+            };
             try {
                 if (cfg.sourcePath &&
                     !RecipesUsage.recordRecipeLaunch(cfg.sourcePath, new Date(), "tool")) {
@@ -152,7 +158,7 @@ export function createRuntimeToolDefinition(cfg, exec) {
                         : typeof run_id === "string" && run_id.trim()
                             ? run_id.trim()
                             : `${cfg.name}-${Date.now()}`;
-                    const meta = AsyncRuns.startRun({
+                    const startParams = {
                         ...base,
                         launch_source: "tool",
                         launch_correlation: { tool_call_id: toolCallId },
@@ -167,23 +173,29 @@ export function createRuntimeToolDefinition(cfg, exec) {
                         tool: cfg.name,
                         policy_values: ModelContext.withCurrentModelValues({ ...(cfg.recipe?.values ?? {}), ...values }, ctx),
                         values: resolveRecipeToolValues(cfg, values, ctx),
-                    }, ctx.cwd, { skillContext: ctx.recipeResolutionContext?.activeSkills });
+                    };
+                    dispatchEntered = true;
+                    const meta = AsyncRuns.startRun(startParams, ctx.cwd, { skillContext: ctx.recipeResolutionContext?.activeSkills, onSupervisionClockCaptured: ctx.onSupervisionClockCaptured });
+                    const details = { ...meta, file_navigation: readRunFileNavigationForContext(meta, ctx) };
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: ToolsResponse.compactAsyncRunStatus(meta),
+                                text: ToolsResponse.compactAsyncRunStatus(details),
                             },
                         ],
-                        details: meta,
+                        details,
                     };
                 }
                 if (isRecipe && recipeTemplate) {
-                    return await Execution.executeRegisteredTool({ ...cfg, template: recipeTemplate }, resolveRecipeToolValues(cfg, params, ctx), exec, ctx.cwd, signal);
+                    return await Execution.executeRegisteredTool({ ...cfg, template: recipeTemplate }, resolveRecipeToolValues(cfg, params, ctx), execute, ctx.cwd, signal);
                 }
-                return await Execution.executeRegisteredTool(cfg, Schema.normalizeRuntimeValues(ModelContext.withCurrentModelValues(params, ctx), cfg.argTypes), exec, ctx.cwd, signal);
+                return await Execution.executeRegisteredTool(cfg, Schema.normalizeRuntimeValues(ModelContext.withCurrentModelValues(params, ctx), cfg.argTypes), execute, ctx.cwd, signal);
             }
             catch (error) {
+                // Dispatch entry is not effect/closure proof; matching error text cannot justify argument repair or retry.
+                if (dispatchEntered)
+                    throw error;
                 throw formatRuntimeToolArgumentError(cfg, error, required, isAsyncRecipe && !isSingletonRecipe);
             }
         },

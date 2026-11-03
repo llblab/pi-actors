@@ -1,6 +1,8 @@
 /** Pi-facing kernel tool contract tests. */
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { observeFixtureBirth, captureFixtureBirths, bindFixtureBirth, joinFixtureRunners, requireFreshFixtureAbsence, throwFixtureErrors } from "./fixtures/runner-completion.ts";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,17 +29,63 @@ function createRegistryDeps() {
   };
 }
 
-async function waitForFile(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      await readFile(path, "utf8");
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+test("Synthetic runner completion gates require original close, canonical zero and fresh dead under one watchdog", async () => {
+  for (const outcome of ["success", "missing", "malformed", "nonzero", "bad-close", "signal", "alive", "unknown", "timeout"] as const) {
+    const child = Object.assign(new EventEmitter(), { pid: 123 });
+    const birth = observeFixtureBirth(child);
+    let reads = 0, probes = 0, canceled = 0, expire!: () => void;
+    const missing = Object.assign(new Error("missing canonical result"), { code: "ENOENT" });
+    const joined = joinFixtureRunners([{ birth, path: "synthetic/result.json" }], {
+      async read() {
+        reads++;
+        if (outcome === "missing") throw missing;
+        return outcome === "malformed" ? "{" : JSON.stringify({ code: outcome === "nonzero" ? 7 : 0 });
+      },
+      liveness() { probes++; return outcome === "alive" ? "alive" : outcome === "unknown" ? "unknown" : "dead"; },
+      watchdog(callback, ms) { assert.equal(ms, 10_000); expire = callback; return () => { canceled++; }; },
+    });
+    // A readable result alone cannot admit; no result read occurs before close.
+    await Promise.resolve();
+    assert.equal(reads, 0); assert.equal(probes, 0);
+    let admitted = false;
+    const settled = joined.then(() => { admitted = true; return { ok: true as const }; }, (error: unknown) => ({ ok: false as const, error }));
+    if (outcome === "timeout") expire();
+    else child.emit("close", outcome === "bad-close" ? 1 : 0, outcome === "signal" ? "SIGTERM" : null);
+    const result = await settled;
+    assert.equal(admitted, outcome === "success");
+    assert.equal(result.ok, outcome === "success");
+    assert.equal(canceled, 1);
+    if (outcome === "timeout") {
+      if (!result.ok) assert.deepEqual(JSON.parse((result.error as Error).message.split("entries_at_join=")[1]),
+        [{ path: "synthetic/result.json", pid: 123 }]);
+      assert.equal(birth.close, undefined); assert.equal(reads, 0);
+      child.emit("close", 0, null); await Promise.resolve();
+      assert.equal(reads, 0); // Expiry cannot later admit or read a result.
+    } else assert.equal(reads, outcome === "bad-close" || outcome === "signal" ? 0 : 1); // Missing/invalid after close is a prompt failure, not readiness polling.
+    if (!result.ok && outcome === "missing") assert.equal(result.error, missing);
+    if (outcome === "success") {
+      assert.equal(probes, 1);
+      assert.throws(() => requireFreshFixtureAbsence(birth, () => "alive"));
+      requireFreshFixtureAbsence(birth, () => "dead");
     }
+    assert.throws(() => bindFixtureBirth([], 123));
+    assert.throws(() => bindFixtureBirth([birth, birth], 123));
+    assert.equal(bindFixtureBirth([birth], 123), birth);
   }
-  throw new Error(`file did not appear: ${path}`);
-}
+  const child = Object.assign(new EventEmitter(), { pid: 456 }), birth = observeFixtureBirth(child);
+  let releaseRead!: (text: string) => void, expire!: () => void, probes = 0;
+  const joined = joinFixtureRunners([{ birth, path: "synthetic/deferred-result.json" }], {
+    read: () => new Promise<string>(resolve => { releaseRead = resolve; }),
+    liveness: () => { probes++; return "dead"; },
+    watchdog: callback => { expire = callback; return () => undefined; },
+  });
+  const rejected = assert.rejects(joined, /watchdog expired/);
+  child.emit("close", 0, null); await Promise.resolve();
+  assert.equal(typeof releaseRead, "function");
+  expire(); await rejected;
+  releaseRead(JSON.stringify({ code: 0 })); await Promise.resolve();
+  assert.equal(probes, 0, "A read resolving after expiry cannot admit or probe liveness");
+});
 
 test("Register tool definition exposes an optional exact schema", () => {
   const definition = createRegisterToolDefinition(createRegistryDeps());
@@ -56,6 +104,8 @@ test("Spawn tool definition exposes Run creation without communication fields", 
   const definition = createSpawnToolDefinition();
   const properties = definition.parameters.properties as Record<string, unknown>;
   assert.equal(definition.name, "spawn");
+  assert.deepEqual(definition.parameters.required, []);
+  assert.deepEqual(properties.verbose, { type: "boolean", description: "Return full YAML instead of compact text." });
   assert.ok(properties.recipe);
   assert.ok(properties.template);
   assert.ok(properties.values);
@@ -63,19 +113,21 @@ test("Spawn tool definition exposes Run creation without communication fields", 
   assert.ok(properties.transport_context);
 });
 
-test("Spawn launches a qualified active-Skill Recipe", async () => {
+test("Spawn launches a qualified active-Skill Recipe", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-spawn-skill-"));
   const skillDir = join(root, "skill");
   const recipeDir = join(skillDir, "recipes");
   const runId = `spawn-skill-${process.pid}-${Date.now()}`;
   const stateDir = join(getRunStateRoot(), runId);
+  const capture = captureFixtureBirths(t); let dispatched = false, accepted = false;
+  const errors: unknown[] = [];
   try {
     await mkdir(recipeDir, { recursive: true });
     await writeFile(join(skillDir, "SKILL.md"), "# Skill\n");
     await writeFile(
       join(recipeDir, "task.json"),
       JSON.stringify({
-        template: `${process.execPath} -e "console.log(process.argv[1])" {skill_dir}`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log(process.argv[1])" {skill_dir}`,
       }),
     );
     const activeSkillRecipeContext = createActiveSkillRecipeContext([
@@ -87,6 +139,7 @@ test("Spawn launches a qualified active-Skill Recipe", async () => {
       activeSkillRecipeContext,
     );
     const spawn = createSpawnToolDefinition();
+    dispatched = true;
     const result = await spawn.execute(
       "call-skill-spawn",
       { as: `run:${runId}`, recipe: "sample/task" },
@@ -97,11 +150,24 @@ test("Spawn launches a qualified active-Skill Recipe", async () => {
     assert.equal(result.details.launch_kind, "spawn");
     assert.equal(result.details.recipe_file, join(recipeDir, "task.json"));
     assert.equal(result.details.values.skill_dir, skillDir);
-    await waitForFile(join(stateDir, "result.json"));
-  } finally {
-    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    assert.equal(capture.births.length, 1); assert.equal(capture.births[0].pid, result.details.pid);
+    await joinFixtureRunners([{ path: join(stateDir, "result.json"), birth: bindFixtureBirth(capture.births, result.details.pid) }]);
+    assert.equal(JSON.parse(await readFile(join(stateDir, "result.json"), "utf8")).code, 0);
+    assert.deepEqual(capture.births[0].close, { code: 0, signal: null }); accepted = true;
+  } catch (error) { errors.push(error); }
+  finally {
+    try { capture.restore(); } catch (error) { errors.push(error); }
+    if (errors.length === 0) try {
+      if (accepted) {
+        requireFreshFixtureAbsence(capture.births[0]);
+        await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+        requireFreshFixtureAbsence(capture.births[0]);
+        await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      } else if (!dispatched) await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    } catch (error) { errors.push(error); }
+    // Failed/unknown launches retain both state and Skill files.
   }
+  throwFixtureErrors(errors);
 });
 
 test("Runtime async Recipe tools expose optional run_id", () => {
@@ -144,7 +210,7 @@ test("Runtime sync delegated Recipe tools use the resolved contract without ambi
   assert.match(definition.promptSnippet, /Execute template recipe: validate_context/);
 });
 
-test("Runtime async tools persist inherited policy provenance", async () => {
+test("Runtime async tools persist inherited policy provenance", async (t) => {
   const definition = createRuntimeToolDefinition(
     {
       args: ["model", "thinking"],
@@ -155,7 +221,7 @@ test("Runtime async tools persist inherited policy provenance", async () => {
         args: ["model:string", "thinking:string"],
         defaults: { model: "{current_model}", thinking: "{current_thinking}" },
         name: "policy",
-        template: `${process.execPath} -e "console.log(process.argv[1], process.argv[2])" {model} {thinking}`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log(process.argv[1], process.argv[2])" {model} {thinking}`,
       },
       name: "policy_run",
       template: "policy",
@@ -164,6 +230,8 @@ test("Runtime async tools persist inherited policy provenance", async () => {
   );
   const runId = `runtime-policy-${process.pid}-${Date.now()}`;
   const stateDir = join(getRunStateRoot(), runId);
+  const capture = captureFixtureBirths(t); let accepted = false;
+  const errors: unknown[] = [];
   try {
     const result = await definition.execute(
       "call-runtime-current-policy",
@@ -183,10 +251,19 @@ test("Runtime async tools persist inherited policy provenance", async () => {
     assert.equal(result.details.launch_kind, "tool");
     assert.equal(result.details.model_policy.model.source, "inherited");
     assert.equal(result.details.model_policy.thinking.source, "inherited");
-    await waitForFile(join(stateDir, "result.json"));
-  } finally {
-    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    assert.equal(capture.births.length, 1); assert.equal(capture.births[0].pid, result.details.pid);
+    await joinFixtureRunners([{ path: join(stateDir, "result.json"), birth: bindFixtureBirth(capture.births, result.details.pid) }]);
+    assert.equal(JSON.parse(await readFile(join(stateDir, "result.json"), "utf8")).code, 0);
+    assert.deepEqual(capture.births[0].close, { code: 0, signal: null }); accepted = true;
+  } catch (error) { errors.push(error); }
+  finally {
+    try { capture.restore(); } catch (error) { errors.push(error); }
+    if (errors.length === 0 && accepted) try {
+      requireFreshFixtureAbsence(capture.births[0]);
+      await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    } catch (error) { errors.push(error); }
   }
+  throwFixtureErrors(errors);
 });
 
 test("Runtime tool definition exposes typed arg schemas", () => {

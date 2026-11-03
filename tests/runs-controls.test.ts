@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +76,42 @@ test("Run Control journal appends canonical generation-bound records", async () 
     assert.equal(typeof record.id, "string");
     assert.equal(typeof record.queued_at, "string");
     assert.deepEqual(readRunControlsFromStateDir(root), [record]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Run Control journal distinguishes empty regular files from zero-sized nonregular descriptors", async t => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-controls-descriptor-"));
+  try {
+    assert.deepEqual(readRunControlJournalFromStateDir(root), { diagnostics: [], records: [] });
+    await writeFile(runControlsFile(root), "");
+    assert.deepEqual(readRunControlJournalFromStateDir(root), { diagnostics: [], records: [] });
+    const originalFstat = fs.fstatSync;
+    const nonregular = fs.statSync(root);
+    Object.defineProperty(nonregular, "size", { value: 0 });
+    assert.equal(nonregular.isDirectory(), true);
+    let descriptor: number | undefined;
+    // Model a successful Windows directory open with size0 without relying on host directory-size semantics.
+    const mocked = t.mock.method(fs, "fstatSync", ((fd: number) => {
+      descriptor = fd;
+      return nonregular;
+    }) as typeof fs.fstatSync);
+    syncBuiltinESMExports();
+    let journal: ReturnType<typeof readRunControlJournalFromStateDir>;
+    try { journal = readRunControlJournalFromStateDir(root); }
+    finally { mocked.mock.restore(); syncBuiltinESMExports(); }
+    assert.equal(typeof descriptor, "number");
+    assert.throws(() => originalFstat(descriptor!), { code: "EBADF" });
+    assert.deepEqual(journal.records, []);
+    assert.equal(journal.diagnostics.length, 1);
+    assert.match(journal.diagnostics[0]!.message, /not a regular file/);
+    await rm(runControlsFile(root));
+    await mkdir(runControlsFile(root));
+    assert.equal(readRunControlJournalFromStateDir(root).diagnostics.length > 0, true);
+    assert.throws(() => appendRunControlInStateDir(root, { action: "pause", run_instance_id: "generation-a" }),
+      (error: unknown) => (error as Record<string, unknown>).reason === "control_journal_integrity");
+    assert.equal((await stat(runControlsFile(root))).isDirectory(), true);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

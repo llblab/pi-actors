@@ -1,10 +1,76 @@
 /**
  * Async run artifact declarations and manifest resolution.
- * Owns: artifact path template expansion and filesystem-backed artifact metadata.
+ * Owns: artifact path expansion, captured-reference validation, body-free metadata observation and explicit hashing.
+ * Excludes: generation admission, export publication, directory scans and production/immutable-content proof.
  */
 import { createHash } from "node:crypto";
-import { closeSync, fstatSync, openSync, readSync, } from "node:fs";
+import { closeSync, fstatSync, lstatSync, openSync, readSync, } from "node:fs";
+import { isAbsolute, sep } from "node:path";
 import { substituteCommandTemplateToken } from "./command-templates.js";
+/** Captured paths only: no placeholder/environment expansion, directory discovery or fallback to this process's cwd. */
+export function describeRunArtifactReferences(artifacts, cwd) {
+    if (artifacts === undefined)
+        return Object.freeze({ state: "available", references: Object.freeze([]) });
+    const invalid = () => Object.freeze({ state: "unavailable", reason: "artifact_declarations_invalid" });
+    if (!artifacts || typeof artifacts !== "object" || Array.isArray(artifacts))
+        return invalid();
+    const references = [];
+    for (const [name, value] of Object.entries(artifacts)) {
+        if (!name.trim() || /[\u0000-\u001f\u007f]/u.test(name))
+            return invalid();
+        const declaration = typeof value === "string" ? { path: value } : value;
+        if (!declaration || typeof declaration !== "object" || Array.isArray(declaration))
+            return invalid();
+        const item = declaration;
+        if (Object.keys(item).some(key => !["path", "kind", "media_type", "required"].includes(key)) || !Object.hasOwn(item, "path") ||
+            typeof item.path !== "string" || !item.path || /[\u0000-\u001f\u007f]/u.test(item.path) ||
+            (item.kind !== undefined && typeof item.kind !== "string") || (item.media_type !== undefined && typeof item.media_type !== "string") ||
+            (item.required !== undefined && typeof item.required !== "boolean"))
+            return invalid();
+        if (!isAbsolute(item.path) && (typeof cwd !== "string" || !isAbsolute(cwd) || /[\u0000-\u001f\u007f]/u.test(cwd))) {
+            return Object.freeze({ state: "unavailable", reason: "artifact_base_unavailable" });
+        }
+        // Lexical normalization can retarget symlink/.. references; anchor cwd without rewriting the declared path.
+        const path = isAbsolute(item.path) ? item.path : `${cwd}${cwd.endsWith(sep) ? "" : sep}${item.path}`;
+        references.push(Object.freeze({ name, path,
+            ...(typeof item.kind === "string" ? { kind: item.kind } : {}),
+            ...(typeof item.media_type === "string" ? { media_type: item.media_type } : {}),
+            ...(typeof item.required === "boolean" ? { required: item.required } : {}) }));
+    }
+    return Object.freeze({ state: "available", references: Object.freeze(references) });
+}
+/** Readability/stat evidence only. A declared file need not have been created by this Run and is never hashed here. */
+export function observeRunArtifactReference(reference) {
+    const unavailable = (reason) => Object.freeze({ ...reference, availability: "unavailable", reason });
+    let observed = false;
+    try {
+        const before = lstatSync(reference.path, { bigint: true });
+        observed = true;
+        if (!before.isFile())
+            return unavailable("artifact_not_regular");
+        const same = (right) => right.isFile() && before.dev === right.dev && before.ino === right.ino &&
+            before.size === right.size && before.mtimeNs === right.mtimeNs && before.ctimeNs === right.ctimeNs;
+        const fd = openSync(reference.path, "r");
+        try {
+            if (!same(fstatSync(fd, { bigint: true })))
+                return unavailable("artifact_changed");
+            if (before.size < 0n || before.size > BigInt(Number.MAX_SAFE_INTEGER))
+                return unavailable("artifact_size_unavailable");
+            if (!same(fstatSync(fd, { bigint: true })) || !same(lstatSync(reference.path, { bigint: true })))
+                return unavailable("artifact_changed");
+            return Object.freeze({ ...reference, availability: "available", bytes_total: Number(before.size), modified_at: before.mtime.toISOString() });
+        }
+        finally {
+            closeSync(fd);
+        }
+    }
+    catch (error) {
+        if (error.code === "ENOENT")
+            return observed ? unavailable("artifact_changed")
+                : Object.freeze({ ...reference, availability: "missing" });
+        return unavailable("artifact_unreadable");
+    }
+}
 function hashArtifactFile(path) {
     const fd = openSync(path, "r");
     try {

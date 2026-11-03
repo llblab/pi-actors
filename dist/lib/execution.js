@@ -674,7 +674,7 @@ function getCaptureDetails(result) {
         ...(result.stderrTruncated ? { stderrTruncated: true } : {}),
     };
 }
-export async function executeRegisteredTool(cfg, params, exec, cwd, signal) {
+export async function executeRegisteredTool(cfg, params, exec, cwd, signal, kernel) {
     const executed = await executeTemplateSteps(cfg, Schema.normalizeRuntimeValues(params, cfg.argTypes), exec, cwd, signal);
     const command = formatCommandDetail(executed.commands);
     const result = executed.result;
@@ -700,6 +700,11 @@ export async function executeRegisteredTool(cfg, params, exec, cwd, signal) {
             },
         });
     }
+    // Only the plain successful leaf is admitted initially; compositions/acceptance policies are separate contracts.
+    if (typeof cfg.template === "string" && executed.commands.length === 1 && !executed.failures.length) {
+        await kernel?.onPrimaryCommandSelected?.(result);
+    }
+    await kernel?.onFinalResponseSelected?.(result.stdout, result.stdoutTruncated === true || executed.branches.some(branch => branch.status !== "done" && (branch.stderrTruncated === true || branch.stderrBytes > Buffer.byteLength(branch.stderr ?? ""))));
     const formatted = formatOutput(cfg.name, "stdout", result.stdout);
     const templateWarnings = CommandTemplates.getCommandTemplateWarnings(createTemplateConfig(cfg));
     return {

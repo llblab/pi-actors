@@ -260,10 +260,19 @@ export function withFileMutationLock<T>(
   options: FileMutationLockOptions = {},
 ): T {
   const release = acquireFileMutationLock(path, options);
+  let mutationFailed = false, mutationFailure: unknown;
   try {
     return mutate();
+  } catch (error) {
+    mutationFailed = true; mutationFailure = error;
+    throw error;
   } finally {
-    release();
+    try { release(); }
+    catch (releaseError) {
+      if (mutationFailed) throw new AggregateError([mutationFailure, releaseError],
+        "File mutation callback and lock release failed; effects may already exist.", { cause: mutationFailure });
+      throw releaseError;
+    }
   }
 }
 
@@ -273,7 +282,12 @@ function replaceFileWithRetry(source: string, target: string): void {
       renameSync(source, target);
       return;
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
+      let code: unknown;
+      try { code = (error as NodeJS.ErrnoException | null | undefined)?.code; }
+      catch (observationError) {
+        throw new AggregateError([error, observationError],
+          "File replacement failed and retry-code inspection also failed; effects may already exist.", { cause: error });
+      }
       if ((code !== "EPERM" && code !== "EBUSY") || attempt >= 19) throw error;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }

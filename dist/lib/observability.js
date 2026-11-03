@@ -7,8 +7,12 @@ import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, 
 import { basename, dirname, isAbsolute, join, relative, } from "node:path";
 import * as AsyncRuns from "./async-runs.js";
 import * as Paths from "./paths.js";
+import * as Limits from "./limits.js";
 import * as RunsTrace from "./runs-trace.js";
+import { readRunCompletionTextSource, readRunResultArtifactInventory, readRunResultDiagnosticOutcome } from "./runs-context-exports.js";
 import { readJsonlFileResilient } from "./state-readers.js";
+import { Document } from "yaml";
+import { formatLiteralBlock, formatMarkdownField } from "./tools-response.js";
 export function createRunUiObservationState() {
     return {
         attentionEventIds: new Map(),
@@ -21,10 +25,12 @@ export function primeRunAttentionState(state, ownerId, stateRoot) {
     detectRunAttentionEvents(state.legacyEventLines, summarizeRuns(stateRoot, ownerId), state.attentionEventIds, true);
 }
 export function readRunUiSnapshot(state, ownerId, options = {}) {
-    const summary = summarizeRuns(options.stateRoot, ownerId);
+    return projectRunUiSnapshot(state, summarizeRuns(options.stateRoot, ownerId), options.includeAttention);
+}
+function projectRunUiSnapshot(state, summary, includeAttention) {
     const status = renderRunStatus(summary, state.frame++);
     return {
-        attentionEvents: options.includeAttention === false
+        attentionEvents: includeAttention === false
             ? []
             : detectRunAttentionEvents(state.legacyEventLines, summary, state.attentionEventIds),
         status,
@@ -34,12 +40,22 @@ export function readRunUiSnapshot(state, ownerId, options = {}) {
 }
 /** Observe every Run generation routed to one root coordinator. */
 export function readRunDeliverySnapshot(state, deliveryOwnerId, stateRoot) {
-    const summary = summarizeRuns(stateRoot, undefined, deliveryOwnerId);
+    return projectRunDeliverySnapshot(state, summarizeRuns(stateRoot, undefined, deliveryOwnerId));
+}
+function projectRunDeliverySnapshot(state, summary) {
     return {
         attentionEvents: [],
         status: undefined,
         summary,
         transitions: detectRunTransitions(state.observed, summary),
+    };
+}
+/** Same-pass display/candidate projections only. No frame escapes or native fact is reused by flush/publication/control. */
+export function readRunUiAndDeliverySnapshots(uiState, deliveryState, ownerId, stateRoot = Paths.getRunStateRoot()) {
+    const runs = readRunObservations(stateRoot);
+    return {
+        ui: projectRunUiSnapshot(uiState, summarizeRunObservations(runs, stateRoot, ownerId)),
+        delivery: projectRunDeliverySnapshot(deliveryState, summarizeRunObservations(runs, stateRoot, undefined, ownerId)),
     };
 }
 export function pruneRunUiObservationState(state, snapshot) {
@@ -90,7 +106,10 @@ export function createRunStateWatcher(input) {
         diagnostics.push({
             code,
             id: ++diagnosticId,
-            message: `Run-state ${scope} watcher ${code.replace("_", " ")} for ${path}${detail}${recovery}`,
+            message: [formatMarkdownField("watcher", code), formatMarkdownField("scope", scope),
+                formatMarkdownField("path", formatLiteralBlock(path)),
+                ...(detail ? [formatMarkdownField("diagnostic", detail.slice(2))] : []),
+                formatMarkdownField("recovery", recovery.slice(2))].join("\n"),
             path,
             scope,
             ts: new Date().toISOString(),
@@ -317,12 +336,14 @@ function terminalSemanticResult(status, stateDir, observedStatus) {
     const type = reviewCompleted
         ? "review.completed"
         : observedStatus === "done" ? "run.done" : "run.failed";
-    const stdoutBody = observedStatus === "done"
-        ? semanticBodyFromStdout(stateDir) : undefined;
+    const hasPrimary = Object.hasOwn(result, "primary_text_protocol");
+    const hasDiagnostics = Object.hasOwn(result, "result_diagnostics_protocol");
+    const stdoutBody = !hasPrimary && !hasDiagnostics && observedStatus === "done" ? semanticBodyFromStdout(stateDir) : undefined;
     return {
-        ...(stdoutBody
-            ? { body: stdoutBody }
-            : typeof result.error === "string" ? { body: result.error } : {}),
+        ...(hasPrimary ? { hasPrimaryText: true } : {}),
+        ...(Object.hasOwn(result, "artifact_inventory_protocol") ? { hasArtifactInventory: true } : {}),
+        ...(hasDiagnostics ? { hasResultDiagnostics: true } : {}),
+        ...(!hasDiagnostics && (stdoutBody || typeof result.error === "string") ? { body: stdoutBody ?? result.error } : {}),
         ...(correlationId ? { correlationId } : {}),
         metadata: {
             ...(status.transport_context &&
@@ -339,9 +360,9 @@ function terminalSemanticResult(status, stateDir, observedStatus) {
         type,
     };
 }
-function observeRun(stateDir) {
+function observeRun(stateDir, observed) {
     try {
-        const status = AsyncRuns.getRunStatus(stateDir);
+        const status = observed ?? AsyncRuns.getRunStatus(stateDir);
         const progress = getProgress(status);
         const run = typeof status.run === "string" ? status.run : undefined;
         if (!run)
@@ -414,8 +435,19 @@ function observeRun(stateDir) {
         return undefined;
     }
 }
+function readRunObservations(stateRoot) {
+    if (!existsSync(stateRoot))
+        return undefined;
+    const directories = AsyncRuns.readRunStateIndex(stateRoot)?.map((entry) => entry.state_dir) ?? scanRunStateDirs(stateRoot);
+    return AsyncRuns.getRunInventoryStatuses(directories)
+        .map((status, index) => status ? observeRun(directories[index], status) : undefined)
+        .filter((run) => Boolean(run));
+}
 export function summarizeRuns(stateRoot = Paths.getRunStateRoot(), ownerId, deliveryOwnerId) {
-    if (!existsSync(stateRoot)) {
+    return summarizeRunObservations(readRunObservations(stateRoot), stateRoot, ownerId, deliveryOwnerId);
+}
+function summarizeRunObservations(observations, stateRoot, ownerId, deliveryOwnerId) {
+    if (observations === undefined) {
         return {
             cancelled: 0,
             done: 0,
@@ -428,10 +460,7 @@ export function summarizeRuns(stateRoot = Paths.getRunStateRoot(), ownerId, deli
             total: 0,
         };
     }
-    const runs = (AsyncRuns.readRunStateIndex(stateRoot)?.map((entry) => entry.state_dir) ??
-        scanRunStateDirs(stateRoot))
-        .map((stateDir) => observeRun(stateDir))
-        .filter((run) => Boolean(run))
+    const runs = observations
         .filter((run) => deliveryOwnerId !== undefined
         ? run.deliveryOwnerId === deliveryOwnerId ||
             (run.deliveryOwnerId === undefined && run.ownerId === deliveryOwnerId)
@@ -532,8 +561,12 @@ function summarizeRunsWithoutSubagents(stateRoot, ownerId) {
     };
 }
 export function countRunningSubagentsByRun(stateRoot = Paths.getRunStateRoot(), ownerId) {
+    // This backend cannot contribute without procfs; do not pay for native Run
+    // identity probes (notably synchronous Windows/macOS probes) just to discard them.
+    if (!existsSync("/proc"))
+        return new Map();
     const runPidMap = getRunningRunPidMap(stateRoot, ownerId);
-    if (runPidMap.size === 0 || !existsSync("/proc"))
+    if (runPidMap.size === 0)
         return new Map();
     const signature = [...runPidMap.keys()].sort().join(",");
     const cacheKey = `${stateRoot}\0${ownerId ?? ""}`;
@@ -639,6 +672,17 @@ export function findRunRetirementCandidates(summary) {
         terminalChildRuns: item.terminalChildRuns,
     }));
 }
+function formatRunRetirementNotice(run, action, message = "") {
+    const fields = [formatMarkdownField("run", run.startsWith("run:") ? run.slice(4) : run), formatMarkdownField("retirement", action)];
+    if (action === "stop")
+        fields.push(formatMarkdownField("result", "request returned"), formatMarkdownField("reason", "child runs reached terminal state"));
+    else if (action === "cancel")
+        fields.push(formatMarkdownField("result", "cancellation reported"), formatMarkdownField("reason", "stop path failed"));
+    else
+        fields.push(formatMarkdownField("result", action === "skip" ? "skipped" : "failed"), formatMarkdownField("diagnostic", message));
+    fields.push(formatMarkdownField("closure", "unconfirmed"));
+    return fields.join("\n");
+}
 export async function executeRunRetirements(summary, options) {
     const results = [];
     for (const candidate of findRunRetirementCandidates(summary)) {
@@ -653,7 +697,7 @@ export async function executeRunRetirements(summary, options) {
         options.attempted?.add(candidate.stateDir);
         try {
             await options.sendStop(candidate);
-            options.notify?.(`Retiring actor ${candidate.run} after child runs reached terminal state`, "info");
+            options.notify?.(formatRunRetirementNotice(candidate.run, "stop"), "info");
             results.push({
                 action: "stop",
                 run: candidate.run,
@@ -666,8 +710,8 @@ export async function executeRunRetirements(summary, options) {
                 const cancelResult = options.cancelRun(candidate);
                 const cancelled = Boolean(cancelResult.cancelled);
                 options.notify?.(cancelled
-                    ? `Retiring actor ${candidate.run} by cancellation after graceful stop failed`
-                    : `Actor retirement skipped for ${candidate.run}: ${error instanceof Error ? error.message : String(error)}`, cancelled ? "warning" : "error");
+                    ? formatRunRetirementNotice(candidate.run, "cancel")
+                    : formatRunRetirementNotice(candidate.run, "skip", `${error instanceof Error ? error.message : String(error)}`), cancelled ? "warning" : "error");
                 results.push({
                     action: cancelled ? "cancel" : "skip",
                     ...(cancelled
@@ -683,7 +727,7 @@ export async function executeRunRetirements(summary, options) {
                 const message = cancelError instanceof Error
                     ? cancelError.message
                     : String(cancelError);
-                options.notify?.(`Actor retirement failed for ${candidate.run}: ${message}`, "error");
+                options.notify?.(formatRunRetirementNotice(candidate.run, "failed", `${message}`), "error");
                 results.push({
                     action: "failed",
                     error: message,
@@ -709,6 +753,7 @@ export function detectRunTransitions(previous, summary) {
             transitions.push({
                 from: old ?? "running",
                 run: run.run,
+                ...(run.ownerId === undefined ? {} : { ownerId: run.ownerId }),
                 ...(run.deliveryParent ? { deliveryParent: run.deliveryParent } : {}),
                 ...(run.stateDir ? { stateDir: run.stateDir } : {}),
                 ...(run.artifacts ? { artifacts: run.artifacts } : {}),
@@ -892,26 +937,6 @@ function relativeName(base, path) {
     const name = relative(base, path);
     return name && !name.startsWith("..") ? name : basename(path) || path;
 }
-function formatPathGroup(label, paths) {
-    const unique = [...new Set(paths.filter(Boolean))].slice(0, 8);
-    if (unique.length === 0)
-        return "";
-    const base = commonDirectory(unique);
-    const names = unique
-        .map((path) => `\`${relativeName(base, path)}\``)
-        .join(", ");
-    return `\n${label}:\n- Base: ${base ? `\`${base}\`` : "current run"}\n- Files: ${names}`;
-}
-function formatRunFileList(files) {
-    if (!Array.isArray(files))
-        return "";
-    return formatPathGroup("Run files", files.filter((file) => typeof file === "string"));
-}
-function formatNamedArtifacts(artifacts) {
-    if (!artifacts || typeof artifacts !== "object" || Array.isArray(artifacts))
-        return "";
-    return formatPathGroup("Artifacts", Object.values(artifacts).filter((path) => typeof path === "string"));
-}
 function getAttentionDataField(event, key) {
     return event.data &&
         typeof event.data === "object" &&
@@ -919,19 +944,96 @@ function getAttentionDataField(event, key) {
         ? event.data[key]
         : undefined;
 }
-function formatBodyPreview(body) {
-    if (body === undefined)
-        return "";
-    const rendered = typeof body === "string" ? body : JSON.stringify(body);
-    const compact = rendered.replaceAll(/\s+/g, " ").trim();
-    if (!compact)
-        return "";
-    return `\nBody: ${compact.length > 500 ? `${compact.slice(0, 500)}…` : compact}`;
+/** Only selected shallow compiler fields enter YAML; the selected body stays opaque and unindented. */
+function renderAttention({ metadata, body }) {
+    const header = new Document(metadata).toString({ lineWidth: 0, defaultStringType: "QUOTE_DOUBLE", defaultKeyType: "PLAIN" }).slice(0, -1);
+    return body === undefined ? header : `---\n${header}\n---\n${body}`;
 }
+/** Ordinary selection has no urgent-steer or compact-output byte/depth allowance. */
 export function formatRunAttentionMessage(event) {
+    const checkpoint = formatAXAttentionCheckpoint(event);
     if (event.kind === "command.done")
-        return `Run ${event.run}: ${event.summary}`;
-    return `Run ${event.run}: ${event.summary}${formatBodyPreview(event.body)}${formatNamedArtifacts(getAttentionDataField(event, "artifacts"))}${formatRunFileList(getAttentionDataField(event, "run_files"))}`;
+        return renderAttention(checkpoint);
+    for (const section of attentionPathSections(event)) {
+        checkpoint.metadata[section.key] = formatAXAttentionPaths(section.paths.slice(0, 8).filter(path => Buffer.from(path).toString("utf8") === path), section.paths.length);
+    }
+    return renderAttention(checkpoint);
+}
+function formatAXAttentionCheckpoint(event) {
+    const run = event.run.startsWith("run:") ? event.run.slice(4) : event.run;
+    const metadata = { run, checkpoint: event.summary };
+    const checkpoint = { metadata };
+    if (event.kind === "command.done" || event.body === undefined)
+        return checkpoint;
+    const rendered = typeof event.body === "string" ? event.body : JSON.stringify(event.body);
+    if (!rendered.trim())
+        return checkpoint;
+    let end = Math.min(rendered.length, 500);
+    const last = rendered.charCodeAt(end - 1), next = rendered.charCodeAt(end);
+    if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff)
+        end--;
+    const preview = rendered.slice(0, end), clipped = end < rendered.length;
+    if (Buffer.from(preview).toString("utf8") !== preview) {
+        metadata.body = "unavailable";
+        metadata.body_reason = "malformed_legacy_preview";
+        metadata.body_omission = "[omitted: unknown]";
+    }
+    else {
+        // Retain the old final body observation and structured-preview ellipsis placement, not its compiler fence.
+        checkpoint.body = typeof event.body === "string" ? preview + (clipped ? "…" : "") : preview + (clipped ? "\n…" : "");
+        if (clipped)
+            metadata.body_omission = "[omitted: unknown]";
+    }
+    metadata.body_basis = "Legacy record; original completeness/privacy unproven.";
+    metadata.body_upstream = "[omitted: unknown]";
+    return checkpoint;
+}
+function attentionPathSections(event) {
+    const artifacts = getAttentionDataField(event, "artifacts"), files = getAttentionDataField(event, "run_files");
+    if (event.kind === "command.done")
+        return [];
+    return [
+        { key: "artifacts", values: artifacts && typeof artifacts === "object" && !Array.isArray(artifacts) ? Object.values(artifacts) : [] },
+        { key: "run_files", values: Array.isArray(files) ? files : [] },
+    ].map(({ key, values }) => ({ key,
+        paths: [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))],
+    })).filter(section => section.paths.length > 0);
+}
+function formatAXAttentionPaths(paths, total) {
+    return { shown: paths.length, omitted: total - paths.length, total, ...(paths.length ? { paths } : {}) };
+}
+/** Saved envelope.content is replayed before this formatter; only fresh complete candidates are fitted. */
+export function formatRunSteerMessage(event) {
+    const limit = Limits.RUN_DELIVERY_STEER_MAX_BYTES;
+    const checkpoint = formatAXAttentionCheckpoint(event);
+    // YAML can escape malformed UTF-16: validate essential source values before serialization or reference reads.
+    if ([checkpoint.metadata.run, checkpoint.metadata.checkpoint].some(value => Buffer.from(value).toString("utf8") !== value)
+        || Buffer.byteLength(renderAttention(checkpoint)) > limit) {
+        throw new Error("Urgent steer checkpoint text exceeds its Unicode/byte delivery limits");
+    }
+    const sections = attentionPathSections(event);
+    if (event.kind === "command.done")
+        return renderAttention(checkpoint);
+    const selected = { ...checkpoint.metadata };
+    for (const [index, section] of sections.entries()) {
+        const reserve = {};
+        for (const next of sections.slice(index + 1))
+            reserve[next.key] = formatAXAttentionPaths([], next.paths.length);
+        const candidates = section.paths.slice(0, 8).filter(path => Buffer.from(path).toString("utf8") === path);
+        let fitted = false;
+        for (let shown = candidates.length; shown >= 0; shown -= 1) {
+            const group = formatAXAttentionPaths(candidates.slice(0, shown), section.paths.length);
+            const candidate = { ...selected, [section.key]: group, ...reserve };
+            if (Buffer.byteLength(renderAttention({ ...checkpoint, metadata: candidate })) <= limit) {
+                selected[section.key] = group;
+                fitted = true;
+                break;
+            }
+        }
+        if (!fitted)
+            throw new Error("Urgent steer checkpoint and reference coverage exceed the delivery byte limit");
+    }
+    return renderAttention({ ...checkpoint, metadata: selected });
 }
 export function getRunTransitionNotificationType(transition) {
     if (transition.to === "done" || transition.to === "cancelled")
@@ -975,68 +1077,83 @@ function deliveryTreePosition(input, runsByIdentity) {
     }
     return { depth, rootIdentity };
 }
-/** Build exact immutable members only after each containing root Run is terminal. */
-export function collectRunCompletionBatchMembers(transitions, deliveryRuns = []) {
-    const runsByIdentity = new Map(deliveryRuns.flatMap((run) => {
+/** Eligibility is metadata-only; ambient candidate checks must not read full primary bodies. */
+function readyRunCompletions(transitions, deliveryRuns) {
+    const runsByIdentity = new Map(deliveryRuns.flatMap(run => {
         const identity = deliveryGenerationIdentity(run);
         return identity ? [[identity, run]] : [];
     }));
-    const incompleteRoots = new Set(deliveryRuns.flatMap((run) => {
+    const incompleteRoots = new Set(deliveryRuns.flatMap(run => {
         if (TERMINAL.has(run.status))
             return [];
         const position = deliveryTreePosition(run, runsByIdentity);
         return position ? [position.rootIdentity] : [];
     }));
-    const admitted = transitions.flatMap((transition) => {
-        if (!shouldNotifyRunTransition(transition) ||
-            !transition.stateDir ||
-            !transition.runInstanceId ||
-            !transition.terminalAt ||
-            Number.isNaN(Date.parse(transition.terminalAt)))
+    return transitions.flatMap(transition => {
+        if (!shouldNotifyRunTransition(transition) || !transition.stateDir || !transition.runInstanceId ||
+            !transition.terminalAt || Number.isNaN(Date.parse(transition.terminalAt)))
             return [];
         const position = deliveryTreePosition(transition, runsByIdentity);
         if (!position || incompleteRoots.has(position.rootIdentity))
             return [];
-        const { depth } = position;
-        const artifactEntries = Object.entries(transition.artifacts ?? {})
-            .filter((entry) => typeof entry[1] === "string" && Boolean(entry[1]))
-            .slice(0, 4);
-        const rawSummary = transition.semanticResult?.summary.trim() ||
-            `Run ${transition.to}.`;
-        return [{
-                ...(artifactEntries.length > 0
-                    ? { artifacts: Object.fromEntries(artifactEntries) }
-                    : {}),
-                ...(transition.semanticResult?.body?.trim()
-                    ? {
-                        output: transition.semanticResult.body.trim().length > 4_000
-                            ? `${transition.semanticResult.body.trim().slice(0, 3_999)}…`
-                            : transition.semanticResult.body.trim(),
-                    }
-                    : {}),
-                ...(transition.deliveryParent
-                    ? {
-                        parent_run: transition.deliveryParent.run,
-                        parent_run_instance_id: transition.deliveryParent.run_instance_id,
-                        parent_state_dir: transition.deliveryParent.state_dir,
-                    }
-                    : {}),
-                run: transition.run,
-                run_instance_id: transition.runInstanceId,
-                state_dir: transition.stateDir,
-                status: transition.to,
-                summary: rawSummary.length > 1_000
-                    ? `${rawSummary.slice(0, 999)}…`
-                    : rawSummary,
-                terminal_at: transition.terminalAt,
-                tree_depth: depth,
-            }];
+        return [{ transition: { ...transition, stateDir: transition.stateDir, runInstanceId: transition.runInstanceId,
+                    terminalAt: transition.terminalAt }, depth: position.depth }];
+    });
+}
+export function hasRunCompletionBatchMembers(transitions, deliveryRuns = []) {
+    return readyRunCompletions(transitions, deliveryRuns).length > 0;
+}
+/** Freeze primary/artifact source observations only for eligible members entering packet admission. */
+export function collectRunCompletionBatchMembers(transitions, deliveryRuns = []) {
+    const admitted = readyRunCompletions(transitions, deliveryRuns).map(({ transition, depth }) => {
+        const hasPrimary = transition.semanticResult?.hasPrimaryText === true;
+        const hasDiagnostics = transition.semanticResult?.hasResultDiagnostics === true;
+        const diagnosticReading = hasDiagnostics ? readRunResultDiagnosticOutcome(transition.stateDir, { run: transition.run,
+            run_instance_id: transition.runInstanceId, ...(transition.ownerId === undefined ? {} : { ownerId: transition.ownerId }) }, transition.to) : undefined;
+        const diagnostics = diagnosticReading?.state === "available" && diagnosticReading.terminal_status === transition.to && diagnosticReading.unchanged()
+            ? { ...diagnosticReading.binding, diagnostic_excerpt: diagnosticReading.excerpt } : diagnosticReading
+            ? { result_diagnostics: null, result_diagnostics_unavailable: diagnosticReading.state === "unavailable"
+                    ? diagnosticReading.result_diagnostics_unavailable ?? diagnosticReading.reason : diagnosticReading.terminal_status !== transition.to ? "outcome_mismatch" : "observation_changed" } : undefined;
+        const reading = hasPrimary ? readRunCompletionTextSource(transition.stateDir, { run: transition.run,
+            run_instance_id: transition.runInstanceId, ...(transition.ownerId === undefined ? {} : { ownerId: transition.ownerId }) }) : undefined;
+        const primary = !reading ? undefined
+            : reading.state === "available" && reading.result_acceptance === "natural" && transition.to === "done" && reading.unchanged()
+                ? Object.freeze({ output: reading.original_output ?? reading.output })
+                : Object.freeze({ output: null, output_unavailable: reading.state === "unavailable"
+                        ? reading.output_unavailable ?? reading.reason : reading.result_acceptance !== "natural" ? "nonterminal_capture" : "observation_changed" });
+        // Existing unsupported session/composition/failure displays stay diagnostics, never substitute for a lost source.
+        const legacyDisplay = !hasPrimary || (reading?.state === "unavailable" && reading.reason === "output_unavailable" &&
+            ["not_selected", "selection_not_supported", "primary_not_selected_for_failure"].includes(reading.output_unavailable ?? ""));
+        const body = !hasDiagnostics && legacyDisplay ? transition.semanticResult?.body ??
+            (hasPrimary && transition.to === "done" ? semanticBodyFromStdout(transition.stateDir) : undefined) : undefined;
+        const hasInventory = transition.semanticResult?.hasArtifactInventory === true;
+        const inventoryReading = hasInventory ? readRunResultArtifactInventory(transition.stateDir, { run: transition.run,
+            run_instance_id: transition.runInstanceId, ...(transition.ownerId === undefined ? {} : { ownerId: transition.ownerId }) }) : undefined;
+        const inventory = inventoryReading?.state === "available" && inventoryReading.terminal_status === transition.to && inventoryReading.unchanged() ? inventoryReading.binding : inventoryReading
+            ? { artifact_inventory: null, artifact_inventory_unavailable: inventoryReading.state === "unavailable"
+                    ? inventoryReading.artifact_inventory_unavailable ?? inventoryReading.reason : inventoryReading.terminal_status !== transition.to ? "outcome_mismatch" : "observation_changed" } : undefined;
+        const artifactEntries = hasInventory ? [] : Object.entries(transition.artifacts ?? {})
+            .filter((entry) => typeof entry[1] === "string" && Boolean(entry[1])).slice(0, 4);
+        const rawSummary = transition.semanticResult?.summary.trim() || `Run ${transition.to}.`;
+        return {
+            ...(artifactEntries.length > 0 ? { artifacts: Object.fromEntries(artifactEntries) } : {}),
+            ...(primary ? { primary_text: primary } : {}),
+            ...(primary?.output && reading?.state === "available" ? { completion_text: Object.freeze({ text: reading.output.preview,
+                    shown_bytes: reading.output.shown_bytes }) } : {}),
+            ...inventory,
+            ...diagnostics,
+            ...(body?.trim() ? { output: body.trim().length > 4_000 ? `${body.trim().slice(0, 3_999)}…` : body.trim() } : {}),
+            ...(transition.deliveryParent ? { parent_run: transition.deliveryParent.run,
+                parent_run_instance_id: transition.deliveryParent.run_instance_id, parent_state_dir: transition.deliveryParent.state_dir } : {}),
+            run: transition.run, run_instance_id: transition.runInstanceId, state_dir: transition.stateDir,
+            status: transition.to,
+            summary: rawSummary.length > 1_000 ? `${rawSummary.slice(0, 999)}…` : rawSummary,
+            terminal_at: transition.terminalAt, tree_depth: depth,
+        };
     });
     return admitted.sort((left, right) => left.tree_depth - right.tree_depth ||
-        left.terminal_at.localeCompare(right.terminal_at) ||
-        left.run.localeCompare(right.run) ||
-        left.run_instance_id.localeCompare(right.run_instance_id) ||
-        left.state_dir.localeCompare(right.state_dir)).map(({ tree_depth: _depth, ...member }) => member);
+        left.terminal_at.localeCompare(right.terminal_at) || left.run.localeCompare(right.run) ||
+        left.run_instance_id.localeCompare(right.run_instance_id) || left.state_dir.localeCompare(right.state_dir)).map(({ tree_depth: _depth, ...member }) => member);
 }
 const TERMINAL_FOLLOW_UP_ARTIFACT_LIMIT = 4;
 const TERMINAL_FOLLOW_UP_IDENTIFIER_CHARS = 120;

@@ -7,14 +7,17 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
+  SessionStartEvent,
   CustomMessageEntryDraft,
   TurnEndEvent,
   TurnEndEventResult,
 } from "@earendil-works/pi-coding-agent";
 
 import * as SessionEvidence from "./session-evidence.ts";
+import * as RunDelivery from "./run-delivery.ts";
 
-export type { ExtensionAPI, ExtensionContext, TurnEndEvent, TurnEndEventResult };
+export type { ExtensionAPI, ExtensionContext, SessionStartEvent, TurnEndEvent, TurnEndEventResult };
+export { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 
 export const RUN_COMPLETION_BATCH_CUSTOM_TYPE = "pi-actors-run-batch";
 export const RUN_STEER_CUSTOM_TYPE = "pi-actors-run-steer";
@@ -50,6 +53,7 @@ export function createNotificationSink(
 export function createRunCompletionBatchEntry(
   batchId: string,
   content: string,
+  presentation?: unknown,
 ): CustomMessageEntryDraft {
   return {
     type: "custom_message",
@@ -61,6 +65,7 @@ export function createRunCompletionBatchEntry(
         batch_id: batchId,
         kind: "completion_batch",
       },
+      ...(presentation === undefined ? {} : { pi_actors_presentation: presentation }),
     },
   };
 }
@@ -69,8 +74,9 @@ export function sendRunCompletionBatch(
   pi: ExtensionAPI,
   batchId: string,
   content: string,
+  presentation?: unknown,
 ): void {
-  const { type: _type, ...message } = createRunCompletionBatchEntry(batchId, content);
+  const { type: _type, ...message } = createRunCompletionBatchEntry(batchId, content, presentation);
   pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 }
 
@@ -95,9 +101,39 @@ export function sendRunSteer(
   });
 }
 
+function hasCompletionFrontmatterPrefix(content: string): boolean {
+  const opening = /^\uFEFF?---[ \t]*(?:\r\n|\r|\n)/u.exec(content);
+  if (!opening) return false;
+  for (const line of content.slice(opening[0].length).split(/\r\n|\r|\n/u)) {
+    const field = line.trim();
+    if (field === "---") return false;
+    if (!field) continue;
+    if (/^(?:index|run|state|kind)[ \t]*:/iu.test(field) ||
+      ["index", "run", "state", "kind"].some(key => key.startsWith(field.toLowerCase()))) return true;
+    // Continue through plausible metadata, not arbitrary thematic-break prose.
+    if (!/^[a-z_][a-z0-9_-]*[ \t]*:/iu.test(field)) return false;
+  }
+  return false;
+}
+
+function unheaderedCompletionId(content: string): string | { malformed: true } | undefined {
+  // Preserve the existing legacy RegExp coercion before inspecting compiler-owned record framing.
+  const legacyId = /^Batch: `([^`]{1,128})`$/mu.exec(content)?.[1];
+  if (typeof content === "string") {
+    const core = RunDelivery.readCompletionYamlCarrier(content);
+    if (core.state === "available") return core.packet.batchId;
+    // Initial compiler headers only: never recover identity by scanning authored bodies.
+    if (/^(?:index: (?:\d+|"\?")\nrun: [^\n]*\nstate:|_completion:\n  (?:codec|batch_id):)/u.test(content)) return { malformed: true };
+  }
+  if (typeof content === "string" && (hasCompletionFrontmatterPrefix(content) || /^(?:#|Run #|— Новый поток|- run:|- #0:\n|- result: omitted \(model byte limit\)\n|- omitted_results:)/u.test(content))) {
+    return RunDelivery.readRunCompletionRecordMarker(content)?.batchId ?? { malformed: true };
+  }
+  return legacyId;
+}
+
 function completionBatchMessage(
   message: unknown,
-): { batchId: string; content: string } | undefined {
+): { batchId: string; content: string } | { malformed: true } | undefined {
   if (!message || typeof message !== "object" || Array.isArray(message)) return undefined;
   const record = message as Record<string, unknown>;
   if (
@@ -115,9 +151,14 @@ function completionBatchMessage(
     typeof envelope.batch_id === "string"
     ? envelope.batch_id
     : undefined;
-  const contentId = /^Batch: `([^`]{1,128})`$/mu.exec(record.content)?.[1];
-  const batchId = detailedId ?? contentId;
-  if (!batchId || batchId.length > 128) return undefined;
+  // Retained headers or the new closed footer identify delivery; authored labels never override either.
+  const contentId = record.content.startsWith("- completion:")
+    ? /^- completion: ([^\r\n\u2028\u2029]{1,128})\n- presentation: ax_records\n/u.exec(record.content)?.[1]
+    : record.content.startsWith("- completions:")
+      ? /^- completions: [1-9]\d{0,2}\n- batch: ([^\r\n\u2028\u2029]{1,128})\n/u.exec(record.content)?.[1]
+      : unheaderedCompletionId(record.content);
+  const batchId = detailedId ?? (typeof contentId === "string" ? contentId : undefined);
+  if (!batchId || batchId.length > 128) return contentId && typeof contentId === "object" ? contentId : undefined;
   return { batchId, content: record.content };
 }
 
@@ -131,7 +172,7 @@ export function dedupeRunCompletionBatchContext(messages: unknown[]): {
   const conflicts = new Set<string>();
   for (const message of messages) {
     const batch = completionBatchMessage(message);
-    if (!batch) continue;
+    if (!batch || "malformed" in batch) continue;
     const existing = batches.get(batch.batchId);
     if (existing !== undefined && existing !== batch.content) {
       conflicts.add(batch.batchId);
@@ -142,7 +183,7 @@ export function dedupeRunCompletionBatchContext(messages: unknown[]): {
   const retained = new Set<string>();
   const filtered = messages.filter((message) => {
     const batch = completionBatchMessage(message);
-    if (!batch) return true;
+    if (!batch || "malformed" in batch) return true;
     if (conflicts.has(batch.batchId) || retained.has(batch.batchId)) return false;
     retained.add(batch.batchId);
     return true;
@@ -155,8 +196,10 @@ export function removeRunCompletionBatchFromContext(
   messages: unknown[],
   batchId: string,
 ): unknown[] {
-  return messages.filter((message) =>
-    completionBatchMessage(message)?.batchId !== batchId);
+  return messages.filter((message) => {
+    const batch = completionBatchMessage(message);
+    return !batch || "malformed" in batch || batch.batchId !== batchId;
+  });
 }
 
 function steerMessage(
@@ -232,15 +275,20 @@ export function inspectRunCompletionBatchSessionEvidence(
   ctx: ExtensionContext,
   input: { batchId: string; content: string },
 ): SessionEvidence.ActiveSessionEntryEvidence {
-  return SessionEvidence.inspectBoundedActiveSessionEntries({
+  let unidentifiedRecord = false;
+  const evidence = SessionEvidence.inspectBoundedActiveSessionEntries({
     getEntry: (id) => ctx.sessionManager.getEntry(id),
     leaf: ctx.sessionManager.getLeafEntry(),
     match: (entry) => {
       const batch = completionBatchMessage(entry);
+      if (batch && "malformed" in batch) { unidentifiedRecord = true; return undefined; }
       if (!batch || batch.batchId !== input.batchId) return undefined;
       return batch.content === input.content ? "present" : "conflict";
     },
   });
+  // An unidentified new record may be this pending epoch; it cannot prove absence or permit replay.
+  return evidence.status === "absent" && unidentifiedRecord
+    ? { ...evidence, status: "unknown", reason: "completion record correlation is unavailable" } : evidence;
 }
 
 export function inspectRunSteerSessionEvidence(

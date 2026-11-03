@@ -1,0 +1,116 @@
+name: Inert Windows native MI observation
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-native-observation.yml'
+      - 'native/windows-mi/windows-mi.cpp'
+      - 'tests/fixtures/windows-native-mi-producer-properties.cpp'
+      - 'tests/fixtures/windows-native-mi-prototype.mjs'
+      - 'tests/installed.scripts.test.ts'
+      - 'lib/runs-process.ts'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+jobs:
+  native-mi-prototype:
+    name: Inert MI differential experiment (Windows x64)
+    runs-on: windows-latest
+    # Administrative bound only: cancellation proves neither helper nor child absence.
+    timeout-minutes: 15
+    env:
+      npm_config_offline: 'true'
+      npm_config_ignore_scripts: 'false'
+    steps:
+      - name: Check out repository
+        # Same v7 SHAs already recorded by macos-spi-pilot-a.yml; validate.yml uses v7 tags.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up Node.js x64
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.21.0
+          architecture: x64
+      - name: Install existing test dependencies
+        # Dependency installation is not native compilation; ordinary prepack is untouched.
+        env:
+          npm_config_offline: 'false'
+        run: npm ci
+      - name: Compile excluded source with installed Visual Studio SDK only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ARCH -ne 'X64') { throw 'Unexecuted: x64 runner required' }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (!(Test-Path -LiteralPath $vswhere -PathType Leaf)) { throw 'Unexecuted: installed vswhere unavailable' }
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or !$vs -or @($vs).Count -ne 1) { throw 'Unexecuted: installed compiler unavailable' }
+          $dev = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          if (!(Test-Path -LiteralPath $dev -PathType Leaf)) { throw 'Unexecuted: installed developer environment unavailable' }
+          $out = Join-Path $env:RUNNER_TEMP 'native-mi-prototype'
+          New-Item -ItemType Directory -Path $out -ErrorAction Stop | Out-Null
+          # Only runner-owned paths and constant arguments reach cmd. No PR text becomes shell code.
+          $env:NATIVE_MI_VS = $vs
+          $env:NATIVE_MI_OUT = $out
+          $build = @'
+          @echo off
+          call "%NATIVE_MI_VS%\Common7\Tools\VsDevCmd.bat" -no_logo -arch=x64 -host_arch=x64 > "%NATIVE_MI_OUT%\environment.log" 2>&1
+          if errorlevel 1 (node "%GITHUB_WORKSPACE%\tests\fixtures\windows-native-mi-prototype.mjs" --build-failure environment %errorlevel% "%NATIVE_MI_OUT%\environment.log" & exit /b 1)
+          cd /d "%NATIVE_MI_OUT%"
+          cl.exe /nologo /Bv /std:c++17 /EHsc /W4 /MT /DUNICODE /D_UNICODE /DMI_CHAR_TYPE=2 /c "%GITHUB_WORKSPACE%\native\windows-mi\windows-mi.cpp" /Fo:prototype.obj > compile.log 2>&1
+          if errorlevel 1 (node "%GITHUB_WORKSPACE%\tests\fixtures\windows-native-mi-prototype.mjs" --build-failure compile %errorlevel% "%NATIVE_MI_OUT%\compile.log" & exit /b 1)
+          link.exe /nologo prototype.obj Mi.lib /out:prototype.exe > link.log 2>&1
+          if errorlevel 1 (node "%GITHUB_WORKSPACE%\tests\fixtures\windows-native-mi-prototype.mjs" --build-failure link %errorlevel% "%NATIVE_MI_OUT%\link.log" & exit /b 1)
+          cl.exe /nologo /Bv /std:c++17 /EHsc /W4 /MT /DUNICODE /D_UNICODE /DMI_CHAR_TYPE=2 /c "%GITHUB_WORKSPACE%\tests\fixtures\windows-native-mi-producer-properties.cpp" /Fo:producer-properties.obj > producer-properties-compile.log 2>&1
+          if errorlevel 1 (node "%GITHUB_WORKSPACE%\tests\fixtures\windows-native-mi-prototype.mjs" --build-failure compile %errorlevel% "%NATIVE_MI_OUT%\producer-properties-compile.log" & exit /b 1)
+          link.exe /nologo producer-properties.obj Mi.lib /out:producer-properties.exe > producer-properties-link.log 2>&1
+          if errorlevel 1 (node "%GITHUB_WORKSPACE%\tests\fixtures\windows-native-mi-prototype.mjs" --build-failure link %errorlevel% "%NATIVE_MI_OUT%\producer-properties-link.log" & exit /b 1)
+          dumpbin.exe /dependents prototype.exe > dependencies.log 2>&1
+          if errorlevel 1 (node "%GITHUB_WORKSPACE%\tests\fixtures\windows-native-mi-prototype.mjs" --build-failure dumpbin %errorlevel% "%NATIVE_MI_OUT%\dependencies.log" & exit /b 1)
+          (echo toolset=%VCToolsVersion%& echo sdk=%WindowsSDKVersion%& echo target=%VSCMD_ARG_TGT_ARCH%& echo host=%VSCMD_ARG_HOST_ARCH%) > toolchain.txt
+          '@
+          $buildPath = Join-Path $out 'build.cmd'
+          Set-Content -LiteralPath $buildPath -Value $build -Encoding ascii
+          & "$env:SystemRoot\System32\cmd.exe" /d /s /c '""%NATIVE_MI_OUT%\build.cmd""'
+          if ($LASTEXITCODE -ne 0) { throw 'Native compilation unproven; private logs retained on runner' }
+          $toolchain = Get-Content -LiteralPath (Join-Path $out 'toolchain.txt')
+          if (!($toolchain -contains 'target=x64') -or !($toolchain -contains 'host=x64')) {
+            node tests/fixtures/windows-native-mi-prototype.mjs --build-failure environment 1 (Join-Path $out 'environment.log')
+            throw 'Unproven toolchain architecture'
+          }
+          $deps = Get-Content -LiteralPath (Join-Path $out 'dependencies.log')
+          $dlls = @($deps | ForEach-Object { if ($_ -match '^\s+([A-Za-z0-9_.-]+\.dll)\s*$') { $Matches[1].ToLowerInvariant() } } | Sort-Object -Unique)
+          if (!($dlls -contains 'mi.dll') -or $dlls.Count -eq 0 -or @($dlls | Where-Object { $_ -match '^(vcruntime|msvcp|ucrtbase)' }).Count -ne 0) {
+            node tests/fixtures/windows-native-mi-prototype.mjs --build-failure dependency-profile 1 (Join-Path $out 'dependencies.log')
+            throw 'Unproven MI dependency profile'
+          }
+          $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath 'native/windows-mi/windows-mi.cpp').Hash.ToLowerInvariant()
+          $artifactHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $out 'prototype.exe')).Hash.ToLowerInvariant()
+          $propertySourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath 'tests/fixtures/windows-native-mi-producer-properties.cpp').Hash.ToLowerInvariant()
+          $propertyArtifactHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $out 'producer-properties.exe')).Hash.ToLowerInvariant()
+          # Toolchain/dependency provenance is separate from private process identity evidence.
+          @{ schema='native-mi-build-v1'; architecture='x64'; toolchain=$toolchain; dependencies=$dlls; source_sha256=$sourceHash; artifact_sha256=$artifactHash } | ConvertTo-Json -Compress
+          @{ schema='native-mi-producer-build-v1'; architecture='x64'; toolchain=$toolchain; owner_source_sha256=$sourceHash; fixture_source_sha256=$propertySourceHash; artifact_sha256=$propertyArtifactHash; ports='synthetic-MI'; proof='producer-controlflow-not-provider-or-physical-cleanup-parity' } | ConvertTo-Json -Compress
+      - name: Actual producer properties with synthetic MI ports (not provider parity)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:RUNNER_TEMP 'native-mi-prototype/producer-properties.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Actual producer synthetic-port properties failed; no provider parity claimed' }
+      - name: Focused protocol properties and inert differential experiment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($key in @('PI_ACTORS_DELIVERY_OWNER_ID','PI_ACTORS_DELIVERY_PARENT_RUN','PI_ACTORS_DELIVERY_PARENT_INSTANCE','PI_ACTORS_DELIVERY_PARENT_STATE_DIR')) {
+            Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
+          }
+          $env:npm_execpath = Join-Path (Split-Path (Get-Command node.exe).Source) 'node_modules/npm/bin/npm-cli.js'
+          if (!(Test-Path -LiteralPath $env:npm_execpath -PathType Leaf)) { throw 'Real npm CLI required' }
+          node --check tests/fixtures/windows-native-mi-prototype.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Harness syntax failed' }
+          node --import ./tests/test-environment.mjs --experimental-strip-types --test --test-concurrency=1 --test-name-pattern '^Native MI prototype properties:' tests/installed.scripts.test.ts
+          if ($LASTEXITCODE -ne 0) { throw 'Protocol properties failed' }
+          node --disable-warning=ExperimentalWarning --import ./tests/test-environment.mjs --experimental-strip-types tests/fixtures/windows-native-mi-prototype.mjs (Join-Path $env:RUNNER_TEMP 'native-mi-prototype/prototype.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Native differential unproven; retain uncertain fixture state' }

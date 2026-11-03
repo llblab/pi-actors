@@ -10,21 +10,38 @@ import * as Config from "./config.js";
 import * as ExecutionOutput from "./execution-output.js";
 import { withFileMutationLock, writeJsonAtomic, writeTextAtomic, } from "./file-state.js";
 import * as Identity from "./identity.js";
+import * as Limits from "./limits.js";
 import * as Paths from "./paths.js";
 import * as RecipesContext from "./recipes-context.js";
 import * as RecipesDiscovery from "./recipes-discovery.js";
 import * as RecipesReferences from "./recipes-references.js";
 import * as Schema from "./schema.js";
+import * as ToolsResponse from "./tools-response.js";
 function textContent(text) {
     return { type: "text", text };
 }
+function registryListText(rows) {
+    const coverage = (shown, reason) => "\n- registered_tools_coverage:" +
+        (reason ? `\n  - reason: ${reason}` : "") + `\n  - shown: ${shown}\n  - omitted: ${rows.length - shown}\n  - total: ${rows.length}`;
+    const malformed = rows.some(row => !row.isWellFormed());
+    if (!malformed) {
+        // Rows already contain the old compiler-owned bullet and selected key coercion.
+        const body = rows.length ? "- registered_tools:\n" + rows.map(row => "  " + row.replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ")).join("\n")
+            : "- registered_tools: none";
+        const complete = body + coverage(rows.length);
+        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            return complete;
+    }
+    return `- registered_tools: [${malformed ? "unavailable" : "omitted"}]` + coverage(0, malformed ? "malformed_selected_text" : "response_too_large");
+}
 function listTools(deps) {
     const names = [...deps.getTools().keys()].sort();
+    const rows = names.length > 0 ? names.map((name) => `- ${name}`) : [];
+    // Retain the original conditional map/join observations before read-time projection.
+    void (names.length > 0 ? `Registered tools:\n${rows.join("\n")}` : "No registered tools.");
     return {
         content: [
-            textContent(ExecutionOutput.formatToolText(names.length > 0
-                ? `Registered tools:\n${names.map((name) => `- ${name}`).join("\n")}`
-                : "No registered tools.")),
+            textContent(ExecutionOutput.formatToolText(registryListText(rows))),
         ],
         details: { tool: "register_tool" },
     };
@@ -65,11 +82,152 @@ function registrationNextActions(tool, source, callableNow) {
             : [recipeDoctorAction(source)]),
     ];
 }
+/** Read-time text only: callers supply the original post-activation selections, not live ports. */
+function registrationReceiptText(data) {
+    const field = ToolsResponse.formatMarkdownField;
+    const omission = (key, count, malformed) => `- ${key}: [${malformed ? "unavailable" : "omitted"}]\n- ${key}_omission:\n  - reason: ${malformed ? "malformed_selected_text" : "response_too_large"}\n  - shown: 0\n  - omitted: ${count}\n  - total: ${count}`;
+    const part = (full, omitted) => ({ full, selected: Buffer.byteLength(full) <= Buffer.byteLength(omitted) ? full : omitted });
+    const scalar = (key, value, literal = false) => {
+        const wellFormed = value.isWellFormed();
+        const omitted = omission(key, 1, !wellFormed);
+        return part(wellFormed ? field(key, literal ? ToolsResponse.formatLiteralBlock(value) : value) : omitted, omitted);
+    };
+    const sequence = (key, values) => {
+        const rows = [];
+        let malformed = false;
+        for (let index = 0; index < values.length; index++) {
+            const value = values[index];
+            if (typeof value !== "string" || !value.isWellFormed()) {
+                malformed = true;
+                break;
+            }
+            rows.push("  - " + value.replaceAll(/\r\n|\r|\n/gu, newline => newline + "    "));
+        }
+        const omitted = omission(key, values.length, malformed);
+        return part(malformed ? omitted : rows.length ? `- ${key}:\n${rows.join("\n")}` : field(key, "none"), omitted);
+    };
+    const tool = scalar("tool", data.tool);
+    const source = scalar("source", data.source, data.source !== "template");
+    const required = sequence("required_args", data.required), optional = sequence("optional_args", data.optional);
+    const warnings = data.warnings.length ? sequence("warnings", data.warnings) : undefined;
+    const nextWellFormed = data.next.isWellFormed();
+    const omittedNext = omission("next_action", 1, !nextWellFormed);
+    // This producer knows only its existing status hint; invocation advice stays opaque.
+    const next = part(nextWellFormed
+        ? data.callable ? field("instruction", data.next) : ToolsResponse.formatInspectNextAction(`tool:${data.tool}`, "status")
+        : omittedNext, omittedNext);
+    const render = () => [tool.selected, field("result", data.result), source.selected, field("callable_now", data.callable ? "true" : "false"),
+        ...(data.boundary === undefined ? [] : [field("activation_boundary", data.boundary)]), required.selected, optional.selected,
+        ...(warnings ? [warnings.selected] : []), next.selected].join("\n");
+    // Preserve complete safety notes before large argument lists; all seeds are monotone.
+    for (const current of [...(warnings ? [warnings] : []), tool, source, next, required, optional]) {
+        if (current.selected === current.full)
+            continue;
+        const previous = current.selected;
+        current.selected = current.full;
+        if (Buffer.byteLength(render()) > Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            current.selected = previous;
+    }
+    return render();
+}
+function registryNoticeText(kind, name) {
+    const report = { activated: "Tool activated", promoted: "Promoted draft recipe", deleted: "Deleted tool" }[kind];
+    const selected = name.isWellFormed() ? ToolsResponse.formatMarkdownField("tool", name)
+        : "- tool: [unavailable]\n- tool_omission:\n  - reason: malformed_selected_text\n  - shown: 0\n  - omitted: 1\n  - total: 1";
+    return ToolsResponse.formatMarkdownField("report", report) + "\n" + selected;
+}
+function registrationTransactionFailureText(stage, generation, summary, error) {
+    const field = ToolsResponse.formatMarkdownField;
+    const part = (key, value) => {
+        const wellFormed = value.isWellFormed();
+        const omitted = `- ${key}: [${wellFormed ? "omitted" : "unavailable"}]\n- ${key}_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
+        const full = wellFormed ? field(key, value) : omitted;
+        return { full, selected: Buffer.byteLength(full) <= Buffer.byteLength(omitted) ? full : omitted };
+    };
+    const selectedGeneration = part("resolution_generation", generation);
+    const selectedSummary = part("active_skills_summary", summary);
+    const selectedError = part("error", error);
+    const render = () => [field("result", "Tool registration transaction failed."), field("stage", stage),
+        selectedGeneration.selected, selectedSummary.selected, selectedError.selected].join("\n");
+    // Keep a fitting surfaced error before large optional resolution metadata.
+    for (const current of [selectedError, selectedGeneration, selectedSummary]) {
+        if (current.selected === current.full)
+            continue;
+        const previous = current.selected;
+        current.selected = current.full;
+        if (Buffer.byteLength(render()) > Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            current.selected = previous;
+    }
+    return render();
+}
+function candidateAdmissionFailureText(data) {
+    const field = ToolsResponse.formatMarkdownField;
+    const part = (key, value, literal = false) => {
+        const wellFormed = value.isWellFormed();
+        const omitted = `- ${key}: [${wellFormed ? "omitted" : "unavailable"}]\n- ${key}_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
+        const full = wellFormed ? field(key, literal ? ToolsResponse.formatLiteralBlock(value) : value) : omitted;
+        return { full, selected: Buffer.byteLength(full) <= Buffer.byteLength(omitted) ? full : omitted };
+    };
+    const diagnostics = part("diagnostics_summary", data.diagnostics);
+    const source = data.kind === "source" ? part("source", data.source, true) : undefined;
+    const summary = data.kind === "source" ? part("active_skills_summary", data.summary) : undefined;
+    const instruction = data.kind === "source" ? part("instruction", data.instruction) : undefined;
+    const render = () => [field("field", "recipe"), ...(source ? [source.selected] : []),
+        field("result", data.kind === "source" ? "Recipe source validation failed." : "Tool recipe validation failed."),
+        diagnostics.selected, ...(summary ? [summary.selected] : []), ...(instruction ? [instruction.selected] : [])].join("\n");
+    // Preserve fitting diagnostics before large optional source/context/advice fields.
+    for (const current of [diagnostics, source, summary, instruction]) {
+        if (!current || current.selected === current.full)
+            continue;
+        const previous = current.selected;
+        current.selected = current.full;
+        if (Buffer.byteLength(render()) > Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            current.selected = previous;
+    }
+    return render();
+}
+function sourceNormalizationFailureText(source, reason, summary, instruction) {
+    const field = ToolsResponse.formatMarkdownField;
+    const part = (key, value, literal = false) => {
+        const wellFormed = value.isWellFormed();
+        const omitted = `- ${key}: [${wellFormed ? "omitted" : "unavailable"}]\n- ${key}_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
+        const full = wellFormed ? field(key, literal ? ToolsResponse.formatLiteralBlock(value) : value) : omitted;
+        return { full, selected: Buffer.byteLength(full) <= Buffer.byteLength(omitted) ? full : omitted };
+    };
+    const selectedSource = part("source", source, true);
+    const selectedReason = part("reason", reason);
+    const selectedSummary = part("active_skills_summary", summary);
+    const selectedInstruction = part("instruction", instruction);
+    const render = () => [field("field", "from"), selectedSource.selected, field("result", "Recipe source is invalid."),
+        selectedReason.selected, selectedSummary.selected, selectedInstruction.selected].join("\n");
+    for (const current of [selectedSource, selectedReason, selectedSummary, selectedInstruction]) {
+        if (current.selected === current.full)
+            continue;
+        const previous = current.selected;
+        current.selected = current.full;
+        if (Buffer.byteLength(render()) > Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            current.selected = previous;
+    }
+    return render();
+}
 function activeSkillSummary(resolutionContext) {
     const names = Object.keys(RecipesReferences.getActiveSkillRecipeNamespaces(resolutionContext.activeSkills))
         .sort()
         .slice(0, 20);
     return names.length > 0 ? names.join(", ") : "<none>";
+}
+function draftPathFailureText(kind, reference) {
+    const key = kind === "root" ? "allowed_root" : "path";
+    const render = (selected) => "- field: draft\n" + selected + (kind === "root"
+        ? "\n- result: Draft must be under the allowed root.\n- instruction: Use inspect target=recipes view=summary to list drafts."
+        : "\n- result: Draft not found.");
+    const wellFormed = reference.isWellFormed();
+    if (wellFormed) {
+        const complete = render(ToolsResponse.formatMarkdownField(key, ToolsResponse.formatLiteralBlock(reference)));
+        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            return complete;
+    }
+    return render(`- ${key}: [${wellFormed ? "omitted" : "unavailable"}]\n- ${key}_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`);
 }
 function assertDraftPath(deps, draft) {
     const draftRoot = resolve(getRecipeRoot(deps), "drafts");
@@ -78,12 +236,58 @@ function assertDraftPath(deps, draft) {
     if (relation === "" ||
         relation.startsWith("..") ||
         resolve(relation) === relation) {
-        throw new Error(ExecutionOutput.formatToolText(`Draft must be under ${draftRoot}. Use inspect target=recipes view=summary to list drafts.`));
+        throw new Error(ExecutionOutput.formatToolText(draftPathFailureText("root", `${draftRoot}`)));
     }
     if (!existsSync(path)) {
-        throw new Error(ExecutionOutput.formatToolText(`Draft not found: ${path}`));
+        throw new Error(ExecutionOutput.formatToolText(draftPathFailureText("missing", `${path}`)));
     }
     return path;
+}
+function draftReceiptText(result, tool, callable, next) {
+    const field = ToolsResponse.formatMarkdownField;
+    const part = (key, value, rendered) => {
+        const wellFormed = value.isWellFormed();
+        const omitted = `- ${key}: [${wellFormed ? "omitted" : "unavailable"}]\n- ${key}_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
+        const full = wellFormed ? rendered : omitted;
+        return { full, selected: Buffer.byteLength(full) <= Buffer.byteLength(omitted) ? full : omitted };
+    };
+    const identity = part("tool", tool, field("tool", tool));
+    const flag = part("callable_now", callable, field("callable_now", callable));
+    // Only this producer's exact canonical read-only status hint is typed, never body advice.
+    const status = /^inspect target=(tool:[a-z][a-z0-9_]{0,63}) view=status$/u.exec(next);
+    const hint = part("next_action", next, status ? ToolsResponse.formatInspectNextAction(status[1], "status") : field("instruction", next));
+    const render = () => [identity.selected, field("result", result), field("source", "draft"), flag.selected, hint.selected].join("\n");
+    for (const current of [identity, flag, hint]) {
+        if (current.selected === current.full)
+            continue;
+        const previous = current.selected;
+        current.selected = current.full;
+        if (Buffer.byteLength(render()) > Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            current.selected = previous;
+    }
+    return render();
+}
+function duplicateRegistrationText(value) {
+    const render = (selected) => "- field: name\n" + selected + "\n- result: Tool already registered.\n- instruction: Use update=true to overwrite.";
+    const wellFormed = value.isWellFormed();
+    if (wellFormed) {
+        const complete = render(ToolsResponse.formatMarkdownField("value", value));
+        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            return complete;
+    }
+    return render(`- value: [${wellFormed ? "omitted" : "unavailable"}]\n- value_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`);
+}
+function draftRecipeFailureText(key, value) {
+    const header = "- field: draft\n- result: Draft recipe is invalid.";
+    if (value === undefined)
+        return header;
+    const wellFormed = value.isWellFormed();
+    if (wellFormed) {
+        const complete = header + "\n" + ToolsResponse.formatMarkdownField(key, value);
+        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            return complete;
+    }
+    return header + `\n- ${key}: [${wellFormed ? "omitted" : "unavailable"}]\n- ${key}_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
 }
 function promoteDraftRecipe(name, input, ctx, deps) {
     const draftPath = assertDraftPath(deps, String(input.draft ?? ""));
@@ -94,12 +298,12 @@ function promoteDraftRecipe(name, input, ctx, deps) {
     if (blocker)
         throw new Error(ExecutionOutput.formatToolText(blocker));
     if ((existing || existsSync(targetPath)) && !input.update) {
-        throw new Error(ExecutionOutput.formatToolText(`Tool "${name}" already registered. Use update=true to overwrite.`));
+        throw new Error(ExecutionOutput.formatToolText(duplicateRegistrationText(`${name}`)));
     }
     const raw = RecipesReferences.readRawRecipeConfig(draftPath);
     if (!raw) {
         const reason = RecipesReferences.diagnoseRawRecipeConfigFailure(draftPath);
-        throw new Error(ExecutionOutput.formatToolText(`Draft recipe is invalid${reason ? `: ${reason}` : "."}`));
+        throw new Error(ExecutionOutput.formatToolText(draftRecipeFailureText("reason", reason ? `${reason}` : undefined)));
     }
     const authoredRecipe = buildAuthoredRecipe({
         ...input,
@@ -109,7 +313,7 @@ function promoteDraftRecipe(name, input, ctx, deps) {
     const resolutionContext = getRegistrationResolutionContext(ctx, deps);
     const candidate = RecipesDiscovery.admitUserRecipe(targetPath, resolutionContext, authoredRecipe);
     if (!candidate.validated || !candidate.tool) {
-        throw new Error(ExecutionOutput.formatToolText(`Draft recipe is invalid: ${candidate.diagnostics.join("; ")}`));
+        throw new Error(ExecutionOutput.formatToolText(draftRecipeFailureText("diagnostics_summary", `${candidate.diagnostics.join("; ")}`)));
     }
     mkdirSync(dirname(targetPath), { recursive: true });
     writeJsonAtomic(targetPath, authoredRecipe);
@@ -119,10 +323,12 @@ function promoteDraftRecipe(name, input, ctx, deps) {
     const argSummary = RecipesDiscovery.summarizeRegisteredToolArgs(promoted);
     const callableNow = activation?.callable_now ?? false;
     const nextActions = registrationNextActions(name, "draft", callableNow);
-    deps.notify(ctx, `Promoted draft recipe: ${name}`, "info");
+    deps.notify(ctx, registryNoticeText("promoted", `${name}`), "info");
     return {
         content: [
-            textContent(ExecutionOutput.formatToolText(`${existing ? "Updated" : "Registered"} tool "${name}" from draft; callable_now=${callableNow}; next=${nextActions[0]}.`)),
+            textContent(ExecutionOutput.formatToolText(
+            // Preserve the old name→flag→hint template conversions here, after notify.
+            draftReceiptText(existing ? "updated" : "registered", `${name}`, `${callableNow}`, `${nextActions[0]}`))),
         ],
         details: {
             active_tool: activation?.active_tool ?? false,
@@ -151,12 +357,25 @@ function persistToolRecipe(deps, name, recipe) {
     writeJsonAtomic(path, recipe);
     return path;
 }
+function registryDeletionText(name, result) {
+    const field = ToolsResponse.formatMarkdownField;
+    const facts = [field("result", result), ...(result === "deleted"
+            ? [field("instruction", "Reload to remove it from the complete registry.")] : [])];
+    const render = (identity) => [identity, ...facts].join("\n");
+    const wellFormed = name.isWellFormed();
+    if (wellFormed) {
+        const complete = render(field("tool", name));
+        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            return complete;
+    }
+    return render(`- tool: [${wellFormed ? "omitted" : "unavailable"}]\n- tool_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`);
+}
 function deleteTool(name, ctx, deps) {
     const tools = deps.getTools();
     if (!tools.has(name)) {
         return {
             content: [
-                textContent(ExecutionOutput.formatToolText(`Tool "${name}" not found.`)),
+                textContent(ExecutionOutput.formatToolText(registryDeletionText(`${name}`, "not found"))),
             ],
             details: { tool: name },
         };
@@ -166,10 +385,10 @@ function deleteTool(name, ctx, deps) {
         unlinkSync(recipePath);
     tools.delete(name);
     deps.setActiveTools(deps.getActiveTools().filter((toolName) => toolName !== name));
-    deps.notify(ctx, `Deleted tool: ${name}`, "info");
+    deps.notify(ctx, registryNoticeText("deleted", `${name}`), "info");
     return {
         content: [
-            textContent(ExecutionOutput.formatToolText(`Deleted tool "${name}". Reload to remove it from the complete registry.`)),
+            textContent(ExecutionOutput.formatToolText(registryDeletionText(`${name}`, "deleted"))),
         ],
         details: { tool: name },
     };
@@ -209,7 +428,7 @@ function assertTemplateIsNotNestedRecipe(value) {
         looksLikeRecipeReference(record.template) &&
         (Object.keys(record).length === 1 ||
             ["artifacts", "async", "control", "description", "imports", "values"].some((key) => Object.hasOwn(record, key)))) {
-        throw new Error(ExecutionOutput.formatToolText("Nested Recipe-shaped templates are not a register_tool source mode. Next: retry with from=<skill>/<recipe> and defaults={...}."));
+        throw new Error(ExecutionOutput.formatToolText("- field: template\n- result: Nested Recipe-shaped templates are not a register_tool source mode.\n- instruction: retry with from=<skill>/<recipe> and defaults={...}."));
     }
 }
 function getInputTemplate(value) {
@@ -223,14 +442,14 @@ function getInputTemplate(value) {
             template: value,
         });
         if (steps.length === 0)
-            throw new Error(ExecutionOutput.formatToolText("Tool template sequence is empty."));
+            throw new Error(ExecutionOutput.formatToolText("- field: template\n- result: Tool template sequence is empty."));
         return value;
     }
     if (value && typeof value === "object") {
         CommandTemplates.expandCommandTemplateConfigs(value);
         return value;
     }
-    throw new Error(ExecutionOutput.formatToolText("Tool template must be a string, object, or sequence."));
+    throw new Error(ExecutionOutput.formatToolText("- field: template\n- result: unsupported template type\n- supported_types:\n  - string\n  - object\n  - sequence"));
 }
 function getRegistrationResolutionContext(ctx, deps) {
     const runtimeContext = deps.getRecipeResolutionContext?.();
@@ -247,7 +466,7 @@ function normalizeDefaults(value) {
     if (value === undefined)
         return undefined;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new Error(ExecutionOutput.formatToolText("Tool defaults must be an object."));
+        throw new Error(ExecutionOutput.formatToolText("- field: defaults\n- result: Tool defaults must be an object."));
     }
     return { ...value };
 }
@@ -279,13 +498,13 @@ function buildAuthoredRecipe(input, existing, existingRecipe) {
     const from = typeof input.from === "string" ? input.from.trim() : "";
     const description = (input.description ?? existing?.description ?? "").trim();
     if (!description && !from) {
-        throw new Error(ExecutionOutput.formatToolText("Tool description is required for command-template registration."));
+        throw new Error(ExecutionOutput.formatToolText("- field: description\n- result: Tool description is required for command-template registration."));
     }
     const inputDefaults = normalizeDefaults(input.defaults);
     if (from) {
         const runtimeOwnedDefault = Object.keys(inputDefaults ?? {}).find((key) => RecipesReferences.isRuntimeOwnedRecipeInput(key));
         if (runtimeOwnedDefault) {
-            throw new Error(ExecutionOutput.formatToolText(`Tool defaults cannot set runtime-owned input: ${runtimeOwnedDefault}. Next: remove that default and retry register_tool; the runtime supplies it.`));
+            throw new Error(ExecutionOutput.formatToolText(`- field: defaults\n- key: ${runtimeOwnedDefault}\n- result: Tool defaults cannot set runtime-owned input.\n- instruction: remove that default and retry register_tool; the runtime supplies it.`));
         }
         const authored = {
             ...(description ? { description } : {}),
@@ -301,13 +520,13 @@ function buildAuthoredRecipe(input, existing, existingRecipe) {
     }
     const template = getInputTemplate(input.template);
     if (template === null) {
-        throw new Error(ExecutionOutput.formatToolText("Tool template cannot be null here."));
+        throw new Error(ExecutionOutput.formatToolText("- field: template\n- result: Tool template cannot be null here."));
     }
     const finalTemplate = template === undefined || template === ""
         ? existingRecipe?.template ?? existing?.template
         : template;
     if (!finalTemplate) {
-        throw new Error(ExecutionOutput.formatToolText("Tool template is required."));
+        throw new Error(ExecutionOutput.formatToolText("- field: template\n- result: Tool template is required."));
     }
     const authored = {
         ...(existingRecipe ?? {}),
@@ -335,23 +554,33 @@ function buildAuthoredRecipe(input, existing, existingRecipe) {
 function assertRegisterToolInputModes(input) {
     const record = input;
     if (Object.hasOwn(record, "values")) {
-        throw new Error(ExecutionOutput.formatToolText("register_tool values was removed. Next: retry register_tool with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition."));
+        throw new Error(ExecutionOutput.formatToolText("- field: values\n- result: register_tool values was removed.\n- replacement_fields:\n  - defaults\n  - from\n- instruction: retry register_tool with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition."));
     }
     const fromProvided = Object.hasOwn(record, "from");
     if (fromProvided &&
         (typeof input.from !== "string" || input.from.trim().length === 0)) {
-        throw new Error(ExecutionOutput.formatToolText("Tool from must be a non-empty Recipe reference. Next: retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path."));
+        throw new Error(ExecutionOutput.formatToolText("- field: from\n- result: Tool from must be a non-empty Recipe reference.\n- reference_forms:\n  - <skill>/<recipe>\n  - explicit .json path\n  - explicit .md path\n- instruction: retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path."));
     }
     const draftProvided = typeof input.draft === "string" && input.draft.trim().length > 0;
     const templateProvided = Object.hasOwn(record, "template");
     const modeCount = Number(fromProvided) + Number(draftProvided) + Number(templateProvided);
     if (modeCount > 1) {
-        throw new Error(ExecutionOutput.formatToolText("Use exactly one register_tool source mode: from, template, or draft. Next: remove the extra source fields and retry register_tool."));
+        throw new Error(ExecutionOutput.formatToolText("- result: Use exactly one register_tool source mode.\n- source_modes:\n  - from\n  - template\n  - draft\n- instruction: remove the extra source fields and retry register_tool."));
     }
     if (fromProvided &&
         (Object.hasOwn(record, "args") || Object.hasOwn(record, "async"))) {
-        throw new Error(ExecutionOutput.formatToolText("register_tool from inherits args and async behavior. Next: retry register_tool with from and optional defaults only; omit args and async."));
+        throw new Error(ExecutionOutput.formatToolText("- field: from\n- result: register_tool from inherits args and async behavior.\n- inherited_fields:\n  - args\n  - async\n- instruction: retry register_tool with from and optional defaults only; omit args and async."));
     }
+}
+function reservedRegistrationNameText(value) {
+    const render = (selected) => "- field: name\n" + selected + "\n- result: Reserved tool name.";
+    const wellFormed = value.isWellFormed();
+    if (wellFormed) {
+        const complete = render(ToolsResponse.formatMarkdownField("value", value));
+        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+            return complete;
+    }
+    return render(`- value: [${wellFormed ? "omitted" : "unavailable"}]\n- value_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`);
 }
 function executeRegisterToolUnlocked(params, ctx, deps) {
     const rawInput = params && typeof params === "object"
@@ -363,9 +592,9 @@ function executeRegisterToolUnlocked(params, ctx, deps) {
         return listTools(deps);
     const name = Identity.normalizeToolName(input.name);
     if (!name)
-        throw new Error(ExecutionOutput.formatToolText("Invalid tool name."));
+        throw new Error(ExecutionOutput.formatToolText("- field: name\n- result: Invalid tool name."));
     if (deps.reservedToolNames.has(name)) {
-        throw new Error(ExecutionOutput.formatToolText(`Reserved tool name: ${name}`));
+        throw new Error(ExecutionOutput.formatToolText(reservedRegistrationNameText(`${name}`)));
     }
     if (typeof input.draft === "string" && input.draft.trim()) {
         return promoteDraftRecipe(name, input, ctx, deps);
@@ -384,7 +613,7 @@ function executeRegisterToolUnlocked(params, ctx, deps) {
             const diagnosticSource = requestedSource?.startsWith("skill:")
                 ? requestedSource.slice("skill:".length)
                 : requestedSource ?? "";
-            throw new Error(ExecutionOutput.formatToolText(`Recipe source "${requestedSource}" is invalid: ${reason}. Active Skills: ${activeSkillSummary(resolutionContext)}. Next: ${recipeDoctorAction(diagnosticSource)}`));
+            throw new Error(ExecutionOutput.formatToolText(sourceNormalizationFailureText(`${requestedSource}`, `${reason}`, `${activeSkillSummary(resolutionContext)}`, `${recipeDoctorAction(diagnosticSource)}`)));
         }
     }
     const templateProvided = Object.hasOwn(input, "template");
@@ -398,18 +627,18 @@ function executeRegisterToolUnlocked(params, ctx, deps) {
     if (blocker)
         throw new Error(ExecutionOutput.formatToolText(blocker));
     if ((authoritative.exists || existing) && !input.update) {
-        throw new Error(ExecutionOutput.formatToolText(`Tool "${name}" already registered. Use update=true to overwrite.`));
+        throw new Error(ExecutionOutput.formatToolText(duplicateRegistrationText(`${name}`)));
     }
     if (template === undefined && !input.from && !existing) {
-        throw new Error(ExecutionOutput.formatToolText("New registration requires exactly one source mode: from, template, or draft. Next: retry register_tool with one source field."));
+        throw new Error(ExecutionOutput.formatToolText("- result: New registration requires exactly one source mode.\n- source_modes:\n  - from\n  - template\n  - draft\n- instruction: retry register_tool with one source field."));
     }
     const recipePath = getToolRecipePath(deps, name);
     const authoredRecipe = buildAuthoredRecipe(input, existing, authoritative.recipe);
     const candidate = RecipesDiscovery.admitUserRecipe(recipePath, resolutionContext, authoredRecipe);
     if (!candidate.validated || !candidate.tool) {
         const sourceDiagnostic = requestedSource
-            ? `Recipe source "${requestedSource}" validation failed: ${candidate.diagnostics.join("; ")}. Active Skills: ${activeSkillSummary(resolutionContext)}. Next: ${recipeDoctorAction(requestedSource)}`
-            : `Tool recipe validation failed: ${candidate.diagnostics.join("; ")}`;
+            ? candidateAdmissionFailureText({ kind: "source", source: `${requestedSource}`, diagnostics: `${candidate.diagnostics.join("; ")}`, summary: `${activeSkillSummary(resolutionContext)}`, instruction: `${recipeDoctorAction(requestedSource)}` })
+            : candidateAdmissionFailureText({ kind: "recipe", diagnostics: `${candidate.diagnostics.join("; ")}` });
         throw new Error(ExecutionOutput.formatToolText(sourceDiagnostic));
     }
     const activeBefore = deps.getActiveTools();
@@ -451,9 +680,9 @@ function executeRegisterToolUnlocked(params, ctx, deps) {
             tools.delete(name);
         }
         deps.setActiveTools(activeBefore);
-        throw new Error(ExecutionOutput.formatToolText(`Tool registration transaction failed at ${transactionStage} (${resolutionContext.generation}; active Skills: ${activeSkillSummary(resolutionContext)}): ${error instanceof Error ? error.message : String(error)}`));
+        throw new Error(ExecutionOutput.formatToolText(registrationTransactionFailureText(`${transactionStage}`, `${resolutionContext.generation}`, `${activeSkillSummary(resolutionContext)}`, `${error instanceof Error ? error.message : String(error)}`)));
     }
-    deps.notify(ctx, `Tool activated: ${name}`, "info");
+    deps.notify(ctx, registryNoticeText("activated", `${name}`), "info");
     const templateWarnings = CommandTemplates.getCommandTemplateWarnings(typeof cfg.recipe?.template === "object" && !Array.isArray(cfg.recipe.template)
         ? cfg.recipe.template
         : { template: cfg.recipe?.template ?? cfg.template });
@@ -464,12 +693,17 @@ function executeRegisterToolUnlocked(params, ctx, deps) {
     const source = requestedSource ?? "template";
     const argSummary = RecipesDiscovery.summarizeRegisteredToolArgs(cfg);
     const nextActions = registrationNextActions(name, source, callableNow);
+    let displayBoundary;
     const outcomeText = callableNow
         ? `${existing ? "Updated" : "Registered"} tool "${name}" from ${source}; callable_now=true`
-        : `Persisted tool "${name}" from ${source}; callable_now=false; activation_boundary=${activationBoundary(activation)}`;
+        : `Persisted tool "${name}" from ${source}; callable_now=false; activation_boundary=${displayBoundary = activationBoundary(activation)}`;
+    // Keep original fallible advisory evaluation/order after effects, before the new text.
+    void `${outcomeText}; required=${Schema.formatToolArgs(argSummary.required)}; optional=${Schema.formatToolArgs(argSummary.optional)}; next=${nextActions[0]}.${warningText}`;
     return {
         content: [
-            textContent(ExecutionOutput.formatToolText(`${outcomeText}; required=${Schema.formatToolArgs(argSummary.required)}; optional=${Schema.formatToolArgs(argSummary.optional)}; next=${nextActions[0]}.${warningText}`)),
+            textContent(ExecutionOutput.formatToolText(registrationReceiptText({ tool: name, result: callableNow ? existing ? "updated" : "registered" : "persisted",
+                source, callable: Boolean(callableNow), boundary: displayBoundary, required: argSummary.required,
+                optional: argSummary.optional, warnings: templateWarnings, next: nextActions[0] }))),
         ],
         details: {
             active_tool: activation?.active_tool ?? false,

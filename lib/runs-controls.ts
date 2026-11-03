@@ -57,7 +57,9 @@ export function readRunControlJournalFromStateDir(stateDir: string): JsonlReadRe
     return { diagnostics: [{ message: String(error), path }], records: [] };
   }
   try {
-    const bytes = fstatSync(fd).size;
+    const descriptor = fstatSync(fd);
+    if (!descriptor.isFile()) return { diagnostics: [{ message: "Run Control journal is not a regular file", path }], records: [] };
+    const bytes = descriptor.size;
     if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > Limits.RUN_CONTROL_JOURNAL_MAX_BYTES) {
       return { diagnostics: [{ message: "Run Control journal exceeds bounded read limit", path }], records: [] };
     }

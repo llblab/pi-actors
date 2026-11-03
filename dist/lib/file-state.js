@@ -266,11 +266,24 @@ export function acquireFileMutationLock(path, options = {}) {
 }
 export function withFileMutationLock(path, mutate, options = {}) {
     const release = acquireFileMutationLock(path, options);
+    let mutationFailed = false, mutationFailure;
     try {
         return mutate();
     }
+    catch (error) {
+        mutationFailed = true;
+        mutationFailure = error;
+        throw error;
+    }
     finally {
-        release();
+        try {
+            release();
+        }
+        catch (releaseError) {
+            if (mutationFailed)
+                throw new AggregateError([mutationFailure, releaseError], "File mutation callback and lock release failed; effects may already exist.", { cause: mutationFailure });
+            throw releaseError;
+        }
     }
 }
 function replaceFileWithRetry(source, target) {
@@ -280,7 +293,13 @@ function replaceFileWithRetry(source, target) {
             return;
         }
         catch (error) {
-            const code = error.code;
+            let code;
+            try {
+                code = error?.code;
+            }
+            catch (observationError) {
+                throw new AggregateError([error, observationError], "File replacement failed and retry-code inspection also failed; effects may already exist.", { cause: error });
+            }
             if ((code !== "EPERM" && code !== "EBUSY") || attempt >= 19)
                 throw error;
             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);

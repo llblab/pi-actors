@@ -3,11 +3,14 @@
  * Zones: actor launch, draft recipe capture, launch diagnostics
  * Owns the public spawn execution path for run-backed actors
  */
+import * as AsyncRuns from "./async-runs.ts";
 import * as ModelContext from "./model-context.ts";
 import type * as RecipeResolution from "./recipes-context.ts";
 export interface SpawnToolContext extends ModelContext.CurrentModelContext {
     recipeResolutionContext?: RecipeResolution.RecipeResolutionContext;
     cwd: string;
+    /** Kernel-injected only; never sourced from tool input/actor values. */
+    onSupervisionClockCaptured?: AsyncRuns.AsyncRunStartOptions["onSupervisionClockCaptured"];
     sessionManager?: {
         getSessionId?: () => string;
     };

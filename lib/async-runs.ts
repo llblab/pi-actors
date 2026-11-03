@@ -10,15 +10,13 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readdirSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDeepStrictEqual } from "node:util";
+import { isDeepStrictEqual, types as UtilTypes } from "node:util";
 
 import type {
   CommandTemplateFailureScope,
@@ -37,33 +35,32 @@ import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as Schema from "./schema.ts";
 import {
-  resolveArtifactManifest,
   resolveArtifactPaths,
   type RunArtifactDeclaration,
-  type RunArtifactManifestEntry,
 } from "./runs-artifacts.ts";
 import { safeRunId } from "./runs-identity.ts";
+import { recordRunDescendantLaunchIntentUnderLock, recordRunDescendantPreparationUnderLock, RUN_DESCENDANT_PREPARED_META_FILE, type RunDescendantLaunchIntent, type RunDescendantLaunchTarget, type RunDescendantPreparation } from "./runs-descendant-launches.ts";
+import { RUN_OUTCOME_PROTOCOL } from "./runs-outcomes.ts";
 import {
   buildTerminalProgress,
-  getRunProcessSignalPlan,
   markTerminalHandled,
   signalOwnedRunProcess,
   type RunProcessSignalPlan,
 } from "./runs-control.ts";
-import { claimRunStateDirectory } from "./runs-ownership.ts";
+import { assertDistinctRunStateDirectories, assertOwnedRunStateDirectory, claimRunStateDirectory } from "./runs-ownership.ts";
+import { reportRunProducerCleanupFailure, revalidateRunWorkAdmission, withRunWorkAdmission, type RunResultProducer } from "./runs-results.ts";
 import {
-  appendRunRetentionEvidence,
-  archiveTerminalRun,
-  pruneTerminalRun,
-  type RunRetentionAction,
+  retainRun,
 } from "./runs-retention.ts";
 import {
-  captureRunProcessIdentity,
+  captureSpawnedRunProcessIdentity,
   verifyRunProcessIdentity,
   type RunProcessIdentity,
 } from "./runs-process.ts";
 import * as RuntimeIdentity from "./runtime-identity.ts";
 import * as RunsStart from "./runs-start.ts";
+import { captureRunAdmissionSnapshotReferences, type RunSnapshotReferenceReader } from "./runs-context-exports.ts";
+import * as RunSupervision from "./run-supervision.ts";
 import { appendRunTraceEvent } from "./runs-trace.ts";
 import * as RunsIndex from "./runs-index.ts";
 import * as RunsParentTeardown from "./runs-parent-teardown.ts";
@@ -74,6 +71,7 @@ import {
 } from "./runs-control-delivery.ts";
 import {
   buildRunStatus,
+  readRunInventoryStatuses,
   tailFile,
   type AsyncRunStatus,
 } from "./runs-status.ts";
@@ -165,6 +163,9 @@ export type { AsyncRunStatus } from "./runs-status.ts";
 export interface AsyncRunMeta {
   argv: string[];
   createdAt: string;
+  started_at?: string;
+  supervision?: RunSupervision.RunSupervisionState;
+  supervision_provenance?: RunSupervision.ResolvedRunSupervisionPolicy["provenance"];
   cwd: string;
   launch_kind?: AsyncRunLaunchSource;
   launch_source?: AsyncRunLaunchSource;
@@ -180,6 +181,7 @@ export interface AsyncRunMeta {
   run_instance_id: string;
   state_dir: string;
   state_schema: typeof RuntimeIdentity.RUN_STATE_SCHEMA;
+  outcome_protocol?: typeof RUN_OUTCOME_PROTOCOL;
   status: AsyncRunStatus;
   tool?: string;
   template: CommandTemplateValue;
@@ -199,6 +201,10 @@ export interface AsyncRunMeta {
   singleton_recipe_id?: string;
   singleton_values?: Record<string, unknown>;
   transport_context?: Record<string, unknown>;
+  /** Launch-return observation only; never persisted Run truth or a navigation/read capability. */
+  catalog_registration?: Readonly<{ state: "unavailable"; reason: "catalog_registration_failed" }>;
+  /** Original Kernel-local cause, non-enumerable on the return object and excluded from tool details/JSON. */
+  catalog_registration_error?: unknown;
 }
 
 const DEFAULT_STATE_ROOT = Paths.getRunStateRoot();
@@ -275,6 +281,7 @@ function reuseCompatibleSingletonRun(
   stateDir: string,
   startParams: AsyncRunStartParams,
   singletonValues: Record<string, unknown>,
+  supervisionPolicy: RunSupervision.RunSupervisionPolicy,
 ): AsyncRunMeta | undefined {
   const existing = RunsStart.readActiveOwnedRunState(
     stateDir,
@@ -293,6 +300,13 @@ function reuseCompatibleSingletonRun(
       `Active singleton Run ${String(existing.run ?? stateDir)} has incompatible Recipe identity, owner, startup values, or Control contract. Stop it before changing singleton configuration.`,
     );
   }
+  const clock = RunSupervision.readRunSupervisionClock(existing);
+  const existingPolicy = clock?.supervision ?? RunSupervision.resolveRunSupervisionPolicy();
+  if (!RunSupervision.sameRunSupervisionPolicy(existingPolicy, supervisionPolicy)) {
+    throw new Error(
+      `Active singleton Run ${String(existing.run ?? stateDir)} has incompatible supervision policy. Stop it before changing singleton configuration.`,
+    );
+  }
   return {
     ...(existing as unknown as AsyncRunMeta),
     ...(startParams.launch_source
@@ -308,8 +322,21 @@ function reuseCompatibleSingletonRun(
   };
 }
 
+export interface AsyncRunAdmissionClock {
+  readonly kind: "run_clock_origin_captured";
+  readonly visibility: "kernel_only";
+  readonly publication: "unpublished";
+  readonly work_started: false;
+  readonly identity: Readonly<{ run: string; run_instance_id: string; ownerId?: string }>;
+  readonly state_dir: string;
+  readonly clock: Readonly<RunSupervision.RunSupervisionClock>;
+  readonly origin: Readonly<RunSupervision.RunSupervisionTimeOrigin>;
+  readonly snapshot_references?: Readonly<RunSnapshotReferenceReader>;
+}
 export interface AsyncRunStartOptions {
   skillContext?: RecipesReferences.ActiveSkillRecipeContext;
+  /** Ordinary fresh launches only: synchronously retain the exact origin; this is not a published/started Run receipt. */
+  onSupervisionClockCaptured?: (event: Readonly<AsyncRunAdmissionClock>) => void;
 }
 
 function resolveRecipeFile(
@@ -555,10 +582,67 @@ export function startRun(
   cwd: string,
   options: AsyncRunStartOptions = {},
 ): AsyncRunMeta {
+  const meta = startRunInternal(params, cwd, options);
+  // Internal return includes lifecycle release. Catalog failure must not retry or undo the accepted launch/attachment.
+  delete meta.catalog_registration;
+  delete meta.catalog_registration_error;
+  try { RunsIndex.registerRunStateDirectory(DEFAULT_STATE_ROOT, meta.state_dir, meta as unknown as Record<string, unknown>); }
+  catch (error) {
+    meta.catalog_registration = Object.freeze({ state: "unavailable", reason: "catalog_registration_failed" });
+    Object.defineProperty(meta, "catalog_registration_error", { value: error, enumerable: false });
+  }
+  return meta;
+}
+
+interface DescendantGenerationPreparation<T> {
+  readonly parent: Readonly<RunDescendantLaunchTarget>;
+  readonly producer: RunResultProducer;
+  observe(meta: Readonly<AsyncRunMeta>, preparation: Readonly<RunDescendantPreparation>): T;
+  onCleanupFailure(error: unknown): void;
+}
+
+/** Kernel-only prepare path: real generation creation, but no native process, workload, launch receipt, or membership authority. */
+export function prepareDescendantRunGeneration(
+  parentStateDir: string,
+  producer: RunResultProducer,
+  params: AsyncRunStartParams,
+  cwd: string,
+  options: AsyncRunStartOptions = {},
+): Readonly<RunDescendantLaunchIntent> {
+  return withRunWorkAdmission(parentStateDir, producer, () => {
+    const parent = Object.freeze({ run: producer.run, run_instance_id: producer.runInstanceId,
+      ...(producer.ownerId === undefined ? {} : { ownerId: producer.ownerId }),
+      state_dir: assertOwnedRunStateDirectory(parentStateDir, producer.run) });
+    return startRunInternal(params, cwd, options, {
+      parent, producer,
+      observe: (meta, preparation) => {
+        revalidateRunWorkAdmission(parentStateDir, producer);
+        return recordRunDescendantLaunchIntentUnderLock(parent.state_dir, producer, {
+          run: meta.run, runInstanceId: meta.run_instance_id, ownerId: meta.ownerId, stateDir: meta.state_dir,
+        }, preparation);
+      },
+      onCleanupFailure: (error) => reportRunProducerCleanupFailure(producer, error),
+    });
+  });
+}
+
+function startRunInternal(params: AsyncRunStartParams, cwd: string, options: AsyncRunStartOptions): AsyncRunMeta;
+function startRunInternal<T>(
+  params: AsyncRunStartParams, cwd: string, options: AsyncRunStartOptions, prepared: DescendantGenerationPreparation<T>,
+): T;
+function startRunInternal<T>(
+  params: AsyncRunStartParams,
+  cwd: string,
+  options: AsyncRunStartOptions,
+  prepared?: DescendantGenerationPreparation<T>,
+): AsyncRunMeta | T {
   const startParams = resolveStartParams(params, cwd, options);
+  // Policy ingress stays closed until runtime enforcement is implemented.
+  const supervisionPolicy = RunSupervision.resolveRunSupervisionPolicy();
   const resolved = resolveRunTemplate(startParams);
   const run = safeRunId(startParams.run_id);
   const stateDir = resolveStateDir(startParams, run);
+  if (prepared) assertDistinctRunStateDirectories(prepared.parent.state_dir, stateDir);
   const recipeFile = startParams.file
     ? resolveRecipeFile(startParams.file, cwd, options)
     : undefined;
@@ -606,15 +690,17 @@ export function startRun(
   const singletonValues = Object.fromEntries(
     [...declaredArgs].map((key) => [key, values[key]]),
   );
-  if (startParams.singleton !== true) assertNoActiveRunState(stateDir);
+  if (startParams.singleton !== true || prepared) assertNoActiveRunState(stateDir);
+  if (prepared) RunsStart.assertFreshRunPreparationState(stateDir);
   mkdirSync(stateDir, { recursive: true });
   const releaseStartLock = acquireStateStartLock(stateDir, {
     onContention: startParams.lifecycleHooks?.onLockContention,
   });
   try {
     claimRunStateDirectory(stateDir, run);
+    if (prepared) RunsStart.assertFreshRunPreparationState(stateDir);
     if (
-      recipeFile &&
+      !prepared && recipeFile &&
       isMutableUsageRecipeFile(recipeFile) &&
       !RecipesUsage.recordRecipeLaunch(
         recipeFile,
@@ -631,10 +717,17 @@ export function startRun(
         stateDir,
         startParams,
         singletonValues,
+        supervisionPolicy,
       );
-      if (existing) return existing;
+      if (existing) {
+        if (prepared) throw new Error("Run descendant preparation requires a new generation, not singleton attachment.");
+        return existing;
+      }
     } else assertNoActiveRunState(stateDir);
-    prepareStateDirForStart(stateDir);
+    const clockObserver = prepared ? undefined : options.onSupervisionClockCaptured;
+    const timeOrigin = clockObserver ? RunSupervision.captureRunSupervisionTimeOrigin() : undefined;
+    const capturedGeneration = timeOrigin ? randomUUID() : undefined;
+    const clock = RunSupervision.createRunSupervisionClock(supervisionPolicy, timeOrigin?.wall_ms ?? Date.now());
     const stdout = join(stateDir, "stdout.log");
     const stderr = join(stateDir, "stderr.log");
     const recipe = startParams.name || getRunIdFromFile(recipeFile);
@@ -658,8 +751,6 @@ export function startRun(
               : record,
           )
         : undefined;
-    const outFd = openSync(stdout, "a");
-    const errFd = openSync(stderr, "a");
     const argv = asyncRunnerArgv(stateDir);
     const outputValues = {
       ...(startParams.defaults || {}),
@@ -669,13 +760,15 @@ export function startRun(
       startParams.transport_context,
     );
     const artifacts = resolveArtifactPaths(startParams.artifacts, outputValues);
-    const runInstanceId = randomUUID();
+    const runInstanceId = capturedGeneration ?? randomUUID();
     const deliveryLineage = RunDeliveryLineage.inheritedRunDeliveryLineage(
       startParams.ownerId,
     );
     const meta: AsyncRunMeta = {
       argv: [process.execPath, ...argv],
-      createdAt: new Date().toISOString(),
+      createdAt: clock.started_at,
+      ...clock,
+      supervision_provenance: supervisionPolicy.provenance,
       cwd,
       ...(startParams.launch_source
         ? {
@@ -693,6 +786,7 @@ export function startRun(
       run_instance_id: runInstanceId,
       state_dir: stateDir,
       state_schema: RuntimeIdentity.RUN_STATE_SCHEMA,
+    outcome_protocol: RUN_OUTCOME_PROTOCOL,
       status: "running",
       ...(startParams.tool ? { tool: startParams.tool } : {}),
       template: runtimeTemplate,
@@ -723,7 +817,32 @@ export function startRun(
       ...(transportContext
         ? { transport_context: transportContext } : {}),
     };
-    writeJsonAtomic(join(stateDir, "run.json"), meta);
+    // Finish fallible metadata assembly before handing off admission, clearing retained evidence or opening captures.
+    if (clockObserver && timeOrigin && capturedGeneration) {
+      const observation: Readonly<AsyncRunAdmissionClock> = Object.freeze({ kind: "run_clock_origin_captured", visibility: "kernel_only",
+        publication: "unpublished", work_started: false, state_dir: stateDir,
+        identity: Object.freeze({ run, run_instance_id: capturedGeneration, ...(startParams.ownerId ? { ownerId: startParams.ownerId } : {}) }),
+        clock: Object.freeze({ started_at: clock.started_at, supervision: Object.freeze({ ...clock.supervision }) }), origin: timeOrigin,
+        snapshot_references: captureRunAdmissionSnapshotReferences(stateDir, meta, timeOrigin) });
+      const returned: unknown = clockObserver.call(options, observation);
+      if (UtilTypes.isPromise(returned)) {
+        // Unsupported async retention may already have started; settle rejection without awaiting it under the lock.
+        void Promise.prototype.then.call(returned, undefined, () => undefined);
+        throw new Error("Run supervision admission observer must complete synchronously.");
+      }
+      if (returned && (typeof returned === "object" || typeof returned === "function") && "then" in returned) {
+        throw new Error("Run supervision admission observer must complete synchronously.");
+      }
+    }
+    if (!prepared) prepareStateDirForStart(stateDir);
+    const captureFds = prepared ? undefined : [openSync(stdout, "a"), openSync(stderr, "a")] as const;
+    writeJsonAtomic(join(stateDir, prepared ? RUN_DESCENDANT_PREPARED_META_FILE : "run.json"), meta);
+    if (prepared) {
+      const target = Object.freeze({ run: meta.run, run_instance_id: meta.run_instance_id,
+        ...(meta.ownerId === undefined ? {} : { ownerId: meta.ownerId }), state_dir: meta.state_dir });
+      const preparation = recordRunDescendantPreparationUnderLock(stateDir, target, prepared.parent, prepared.producer);
+      return prepared.observe(meta, preparation);
+    }
     writeJsonAtomic(join(stateDir, "progress.json"), {
       completed: 0,
       failures: [],
@@ -731,6 +850,7 @@ export function startRun(
       phase: "starting",
       updatedAt: new Date().toISOString(),
     });
+    const [outFd, errFd] = captureFds!;
     const child = spawn(process.execPath, argv, {
       cwd,
       detached: true,
@@ -748,8 +868,8 @@ export function startRun(
     closeSync(outFd);
     closeSync(errFd);
     meta.pid = child.pid ?? 0;
-    const processIdentity = captureRunProcessIdentity(
-      meta.pid,
+    const processIdentity = captureSpawnedRunProcessIdentity(
+      child,
       cwd,
       stateDir,
       RUNNER_PATH,
@@ -767,7 +887,10 @@ export function startRun(
     child.unref();
     return meta;
   } finally {
-    releaseStartLock();
+    if (prepared) {
+      try { releaseStartLock(); }
+      catch (error) { prepared.onCleanupFailure(error); }
+    } else releaseStartLock();
   }
 }
 
@@ -791,6 +914,11 @@ export function getRunStatus(runOrDir: string): Record<string, unknown> {
     RUNNER_PATH,
     RUNNER_IDENTITY_GRACE_MS,
   );
+}
+
+/** Internal inventory acquisition; direct status and lifecycle readers remain independently scalar. */
+export function getRunInventoryStatuses(stateDirs: readonly string[]): (Record<string, unknown> | undefined)[] {
+  return readRunInventoryStatuses(stateDirs, readJson, getRunStatus);
 }
 
 export type { RunStateIndexEntry } from "./runs-index.ts";
@@ -942,6 +1070,7 @@ export async function sendRunControl(
 ): Promise<Record<string, unknown>> {
   const stateDir = resolveRunStateDir(runOrDir);
   const releaseControlLock = RunsStart.acquireStateStartLock(stateDir);
+  let requestFailed = false, requestFailure: unknown;
   try {
     const status = getRunStatus(stateDir);
     const run = String(status.run ?? runOrDir);
@@ -972,8 +1101,16 @@ export async function sendRunControl(
       );
     }
     return await deliverRunControl(run, stateDir, request, options);
+  } catch (error) {
+    requestFailed = true; requestFailure = error;
+    throw error;
   } finally {
-    releaseControlLock();
+    try { releaseControlLock(); }
+    catch (releaseError) {
+      if (requestFailed) throw new AggregateError([requestFailure, releaseError],
+        "Run Control request and lifecycle release failed; effects may already exist.", { cause: requestFailure });
+      throw releaseError;
+    }
   }
 }
 
@@ -1210,58 +1347,12 @@ export function cancelRun(
     : result;
 }
 
-function retainRun(
-  runOrDir: string,
-  action: RunRetentionAction,
-  expected: RunControlExpectation,
-  options: { preserveArtifacts?: boolean } = {},
-): Record<string, unknown> {
-  const stateDir = resolveRunStateDir(runOrDir);
-  const releaseControlLock = RunsStart.acquireStateStartLock(stateDir);
-  let status: Record<string, unknown> | undefined;
-  let evidenceId: string | undefined;
-  try {
-    expected.onLocked?.();
-    status = getRunStatus(stateDir);
-    if (expected.ownerId !== undefined && status.ownerId !== expected.ownerId) {
-      return { [`${action}d`]: false, reason: "ownership changed", status };
-    }
-    if (
-      expected.runInstanceId !== undefined &&
-      status.run_instance_id !== expected.runInstanceId
-    ) {
-      return { [`${action}d`]: false, reason: "run generation changed", status };
-    }
-    if (status.status === "running") {
-      throw new Error("Only terminal runs can be archived or pruned.");
-    }
-    evidenceId = appendRunRetentionEvidence(status, action, "queued");
-    const result = action === "archive"
-      ? archiveTerminalRun(status)
-      : pruneTerminalRun(status, options);
-    appendRunRetentionEvidence(status, action, "handled", {
-      id: evidenceId,
-      result,
-    });
-    return { ...result, retention_id: evidenceId };
-  } catch (error) {
-    if (status && evidenceId) {
-      appendRunRetentionEvidence(status, action, "failed", {
-        error: error instanceof Error ? error.message : String(error),
-        id: evidenceId,
-      });
-    }
-    throw error;
-  } finally {
-    releaseControlLock();
-  }
-}
 
 export function archiveRun(
   runOrDir: string,
   expected: RunControlExpectation = {},
 ): Record<string, unknown> {
-  return retainRun(runOrDir, "archive", expected);
+  return retainRun(resolveRunStateDir(runOrDir), "archive", expected, getRunStatus);
 }
 
 export function pruneRun(
@@ -1269,7 +1360,7 @@ export function pruneRun(
   options: { preserveArtifacts?: boolean } = {},
   expected: RunControlExpectation = {},
 ): Record<string, unknown> {
-  return retainRun(runOrDir, "prune", expected, options);
+  return retainRun(resolveRunStateDir(runOrDir), "prune", expected, getRunStatus, options);
 }
 
 export function killRun(

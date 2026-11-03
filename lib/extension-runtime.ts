@@ -4,6 +4,8 @@
  * Owns low-level Pi lifecycle effects and tool wrapping without owning event registration.
  */
 
+import { join } from "node:path";
+
 import * as AutomaticReviewRuntime from "./automatic-review-runtime.ts";
 import * as CommandTemplates from "./command-templates.ts";
 import * as Paths from "./paths.ts";
@@ -14,8 +16,16 @@ import * as RecipesReferences from "./recipes-references.ts";
 import * as RunUiRuntime from "./run-ui-runtime.ts";
 import * as Runtime from "./runtime.ts";
 import * as Temp from "./temp.ts";
+import * as RunRetention from "./runs-retention.ts";
 import * as Tools from "./tools.ts";
 import * as ToolsResponse from "./tools-response.ts";
+import {
+  createRunSupervisionOwner,
+  type RunSupervisionOwner,
+  type RunSupervisionOwnerSnapshotReading,
+} from "./runs-supervision.ts";
+import type { RunSupervisionControllerPorts } from "./run-supervision.ts";
+import type { AsyncRunStartOptions } from "./async-runs.ts";
 
 export interface ActorExtensionRuntime {
   beforeAgentStart(
@@ -29,21 +39,59 @@ export interface ActorExtensionRuntime {
   onTurnEnd(event: Pi.TurnEndEvent, ctx: Pi.ExtensionContext): Pi.TurnEndEventResult | undefined;
   onContext(messages: unknown[], ctx: Pi.ExtensionContext): unknown[];
   onSessionShutdown(reason: string, ctx: Pi.ExtensionContext): void;
-  onSessionStart(ctx: Pi.ExtensionContext): Promise<void>;
+  onSessionStart(ctx: Pi.ExtensionContext, event?: Pi.SessionStartEvent): Promise<void>;
   registerCoreTools(): void;
+  /** Private kernel observation only; no public tool route or reconstructed origin. */
+  observeRunSnapshot(expected: unknown, capturedAt: unknown, stateDir?: string): Readonly<RunSupervisionOwnerSnapshotReading>;
+  getRunAdmissionObserver(ctx: Pi.ExtensionContext): AsyncRunStartOptions["onSupervisionClockCaptured"];
 }
 
 export function createActorExtensionRuntime(
   pi: Pi.ExtensionAPI,
+  supervisionPorts?: Omit<RunSupervisionControllerPorts, "readCurrent">,
+  completionStreamSessionAdmission?: RunUiRuntime.RunUiRuntimeDeps["completionStreamSessionAdmission"],
+  captureCompletionBatch?: RunUiRuntime.RunUiRuntimeDeps["captureCompletionBatch"],
 ): ActorExtensionRuntime {
   let activeRunContext: Pi.ExtensionContext | undefined;
   let activeRunOwnerId: string | undefined;
-  const runOwnerIdsByContext = new WeakMap<Pi.ExtensionContext, string>();
+  let sessionStartTicket: object | undefined;
+  type ParentSession = {
+    ownerId: string;
+    sessionManager: Pi.ExtensionContext["sessionManager"];
+    shutdownAdmitted: boolean;
+  };
+  let parentSession: ParentSession | undefined;
+  const parentSessionsByContext = new WeakMap<Pi.ExtensionContext, ParentSession>();
+  const seenParentManagers = new WeakSet<Pi.ExtensionContext["sessionManager"]>();
   const recipeResolutionContextsBySession = new Map<
     string,
     RecipeResolution.RecipeResolutionContext
   >();
   const getRunOwnerId = Pi.getSessionId;
+  let supervision: {
+    context: Pi.ExtensionContext;
+    ownerId: string;
+    owner: Readonly<RunSupervisionOwner>;
+    ready: boolean;
+    sessionManager: Pi.ExtensionContext["sessionManager"];
+  } | undefined;
+  const closeSupervision = (): void => {
+    const scope = supervision;
+    supervision = undefined;
+    scope?.owner.close();
+  };
+  const getRunAdmissionObserver = (ctx: Pi.ExtensionContext): AsyncRunStartOptions["onSupervisionClockCaptured"] => {
+    if (!supervisionPorts) return undefined;
+    const scope = supervision;
+    const sessionManager = ctx.sessionManager;
+    const ownerId = sessionManager.getSessionId();
+    return capture => {
+      if (!scope || supervision !== scope || !scope.ready || scope.sessionManager !== sessionManager || scope.ownerId !== ownerId || capture.identity.ownerId !== ownerId) {
+        throw new Error("Run supervision coordinator admission is unavailable or changed.");
+      }
+      scope.owner.onSupervisionClockCaptured(capture);
+    };
+  };
   const getRecipeResolutionContext = (ctx: Pi.ExtensionContext) => {
     const sessionId = getRunOwnerId(ctx);
     const resolutionContext = recipeResolutionContextsBySession.get(sessionId);
@@ -58,6 +106,7 @@ export function createActorExtensionRuntime(
     getActiveContext: () => activeRunContext,
     getRunOwnerId,
     getThinkingLevel: () => pi.getThinkingLevel(),
+    getRunAdmissionObserver,
   });
   let recipeReload: Runtime.RecipeToolReloadWatcher | undefined;
   let runUiRuntime: RunUiRuntime.RunUiRuntime;
@@ -65,12 +114,16 @@ export function createActorExtensionRuntime(
     const ownerId = activeRunOwnerId;
     activeRunContext = undefined;
     activeRunOwnerId = undefined;
+    sessionStartTicket = undefined;
     runUiRuntime?.close();
     automaticReview.close();
     recipeReload?.close();
     if (ownerId) recipeResolutionContextsBySession.delete(ownerId);
   };
+  RunUiRuntime.registerRunCompletionRenderer(pi);
   runUiRuntime = RunUiRuntime.createRunUiRuntime({
+    completionStreamSessionAdmission,
+    captureCompletionBatch,
     getActiveContext: () => activeRunContext,
     onCallbackError: closeActiveSessionRuntimes,
     onRunEvent: automaticReview.schedule,
@@ -94,6 +147,7 @@ export function createActorExtensionRuntime(
               ctx as Pi.ExtensionContext,
             ),
             getThinkingLevel: () => pi.getThinkingLevel(),
+            onSupervisionClockCaptured: getRunAdmissionObserver(ctx as Pi.ExtensionContext),
           };
         }
         try {
@@ -143,7 +197,12 @@ export function createActorExtensionRuntime(
       return skillPaths.length > 0 ? { skillPaths } : undefined;
     },
     getRunOwnerId,
+    getRunAdmissionObserver,
+    observeRunSnapshot(expected, capturedAt, stateDir) {
+      return supervision?.owner.observeSnapshot(expected, capturedAt, stateDir) ?? Object.freeze({ state: "unavailable", reason: "origin_not_retained" });
+    },
     onAgentSettled(ctx) {
+      if ((completionStreamSessionAdmission || captureCompletionBatch) && !runUiRuntime.isCurrentSessionContext(ctx)) return;
       if (!activeRunOwnerId || getRunOwnerId(ctx) !== activeRunOwnerId) return;
       if (!runUiRuntime.flushCompletionBatch(ctx)) automaticReview.schedule();
     },
@@ -154,14 +213,39 @@ export function createActorExtensionRuntime(
       return runUiRuntime.projectContext(messages, ctx);
     },
     onSessionShutdown(reason, ctx) {
-      const ownerId = runOwnerIdsByContext.get(ctx);
-      runOwnerIdsByContext.delete(ctx);
-      if (activeRunContext === ctx) closeActiveSessionRuntimes();
-      if (ownerId) recipeResolutionContextsBySession.delete(ownerId);
-      runUiRuntime.shutdown(reason, ownerId, ctx);
+      const scope = parentSession;
+      if (!scope?.shutdownAdmitted) return;
+      const known = parentSessionsByContext.get(ctx);
+      if (known && known !== scope) return;
+      if (!known) {
+        try {
+          if (ctx.sessionManager !== scope.sessionManager || scope.sessionManager.getSessionId() !== scope.ownerId) return;
+        } catch { return; /* Unknown invalidated wrappers cannot identify this lifetime. */ }
+      }
+      if (parentSession !== scope) return;
+      // Consume before cleanup/teardown: stale or reentrant callbacks cannot stop a replacement.
+      scope.shutdownAdmitted = false;
+      parentSessionsByContext.set(ctx, scope);
+      closeSupervision();
+      if (parentSession !== scope) return;
+      closeActiveSessionRuntimes();
+      if (parentSession !== scope) return;
+      recipeResolutionContextsBySession.delete(scope.ownerId);
+      runUiRuntime.shutdown(reason, scope.ownerId, ctx);
     },
-    async onSessionStart(ctx) {
-      const sessionId = getRunOwnerId(ctx);
+    async onSessionStart(ctx, event) {
+      const ticket = {};
+      sessionStartTicket = ticket;
+      parentSession = undefined;
+      const sessionManager = ctx.sessionManager;
+      const sessionId = sessionManager.getSessionId();
+      if (sessionStartTicket !== ticket) return;
+      const scopeBinding: ParentSession = { ownerId: sessionId, sessionManager,
+        shutdownAdmitted: !seenParentManagers.has(sessionManager) && !parentSessionsByContext.has(ctx) };
+      seenParentManagers.add(sessionManager);
+      if (!parentSessionsByContext.has(ctx)) parentSessionsByContext.set(ctx, scopeBinding);
+      parentSession = scopeBinding;
+      closeSupervision();
       recipeResolutionContextsBySession.set(
         sessionId,
         RecipeResolution.createEmptyRecipeResolutionContext(sessionId, ctx.cwd),
@@ -169,14 +253,20 @@ export function createActorExtensionRuntime(
       ctx.ui.setWidget("zz-pi-actors-comms", undefined);
       activeRunContext = ctx;
       activeRunOwnerId = sessionId;
-      runOwnerIdsByContext.set(ctx, sessionId);
       runUiRuntime.close();
       automaticReview.close();
       recipeReload.close();
+      const scope = supervisionPorts ? {
+        context: ctx, ownerId: sessionId, owner: createRunSupervisionOwner(supervisionPorts),
+        ready: false, sessionManager,
+      } : undefined;
+      supervision = scope;
       await Temp.prepareExtensionTempDir(Paths.EXTENSION_RUNTIME_PATHS.tempDir);
-      if (activeRunContext !== ctx || activeRunOwnerId !== sessionId) return;
+      await RunRetention.cleanupStaleRunEntries(join(Paths.EXTENSION_RUNTIME_PATHS.tempDir, "runs"));
+      if (sessionStartTicket !== ticket || activeRunContext !== ctx || activeRunOwnerId !== sessionId || supervision !== scope) return;
+      if (scope) scope.ready = true;
       automaticReview.start(ctx);
-      runUiRuntime.start(ctx, sessionId);
+      runUiRuntime.start(ctx, sessionId, event);
       recipeReload.watch(ctx);
     },
     registerCoreTools() {

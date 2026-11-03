@@ -1,0 +1,165 @@
+name: Research macOS SPI pilot A
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute_pilot_a:
+        description: Separately approved native trial only; authoring is not execution admission
+        type: boolean
+        required: true
+        default: false
+      inventory_only:
+        description: Separately approved metadata-only CI; no pilot, C compilation or SPI
+        type: boolean
+        required: true
+        default: false
+      approved_commit:
+        description: Reviewed full commit SHA; must equal the dispatch and workflow SHA
+        type: string
+        required: true
+      reviewed_profile_json:
+        description: Required for pilot A only; inventory mode must leave this empty
+        type: string
+        required: false
+        default: ''
+      reviewed_profile_sha256:
+        description: Required for pilot A only; exact UTF-8 digest, never inferred from inventory
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-macos-spi-pilot-a
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    if: github.event_name == 'workflow_dispatch' && (inputs.execute_pilot_a == true || inputs.inventory_only == true)
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      RESEARCH_EXECUTE: ${{ inputs.execute_pilot_a }}
+      RESEARCH_INVENTORY_ONLY: ${{ inputs.inventory_only }}
+      RESEARCH_APPROVED_COMMIT: ${{ inputs.approved_commit }}
+      RESEARCH_PROFILE_JSON: ${{ inputs.reviewed_profile_json }}
+      RESEARCH_PROFILE_SHA256: ${{ inputs.reviewed_profile_sha256 }}
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - name: Refuse replay or changed dispatch before checkout
+        env:
+          APPROVED_COMMIT: ${{ inputs.approved_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_SHA" = "$APPROVED_COMMIT"
+          test "$GITHUB_WORKFLOW_SHA" = "$APPROVED_COMMIT"
+          test "$RESEARCH_EXECUTE:$RESEARCH_INVENTORY_ONLY" = true:false || test "$RESEARCH_EXECUTE:$RESEARCH_INVENTORY_ONLY" = false:true
+          if test "$RESEARCH_INVENTORY_ONLY" = true; then
+            test -z "$RESEARCH_PROFILE_JSON"
+            test -z "$RESEARCH_PROFILE_SHA256"
+          fi
+      - name: Claim a fresh job-owned evidence root
+        id: evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e /tmp/pi-actors-validation
+          test ! -L /tmp/pi-actors-validation
+          umask 077
+          export LC_ALL=C
+          marker_bytes=$((${#GITHUB_RUN_ID} + ${#GITHUB_RUN_ATTEMPT} + ${#GITHUB_SHA} + ${#GITHUB_WORKFLOW_SHA} + ${#GITHUB_REPOSITORY} + 5))
+          test "$marker_bytes" -le 1024
+          mkdir /tmp/pi-actors-validation
+          mkdir /tmp/pi-actors-validation/workflow
+          printf '%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SHA" "$GITHUB_WORKFLOW_SHA" "$GITHUB_REPOSITORY" > /tmp/pi-actors-validation/workflow/job-owner.txt
+          printf 'owned=true\n' >> "$GITHUB_OUTPUT"
+      - name: Check out exact dispatch commit
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7; official ref verified during authoring
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: false
+      - name: Set up Node24 without package-manager work
+        id: node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7; official ref verified during authoring
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Verify reviewed request and source bindings
+        id: prepare
+        timeout-minutes: 1
+        run: |
+          node tests/fixtures/macos-spi-research.mjs prepare > /tmp/pi-actors-validation/workflow/prepare.stdout 2> /tmp/pi-actors-validation/workflow/prepare.stderr
+      - name: Collect metadata only without a pilot or SPI
+        id: inventory
+        if: success() && inputs.inventory_only == true && inputs.execute_pilot_a == false && steps.prepare.outcome == 'success'
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          mkdir /tmp/pi-actors-validation/inventory-scratch
+          mkdir /tmp/pi-actors-validation/inventory-scratch/home /tmp/pi-actors-validation/inventory-scratch/tmp /tmp/pi-actors-validation/inventory-scratch/clang-cache
+          export HOME=/tmp/pi-actors-validation/inventory-scratch/home
+          export TMPDIR=/tmp/pi-actors-validation/inventory-scratch/tmp
+          export CLANG_MODULE_CACHE_PATH=/tmp/pi-actors-validation/inventory-scratch/clang-cache
+          export LANG=C LC_ALL=C
+          capture_inventory() {
+            local name="$1" code
+            shift
+            if "$@" > "/tmp/pi-actors-validation/workflow/inventory-$name.stdout" 2> "/tmp/pi-actors-validation/workflow/inventory-$name.stderr"; then
+              code=0
+            else
+              code=$?
+            fi
+            printf '%s\n' "$code" > "/tmp/pi-actors-validation/workflow/inventory-$name.code"
+            return "$code"
+          }
+          capture_inventory git-status /usr/bin/git status --porcelain --untracked-files=normal
+          capture_inventory git-head /usr/bin/git rev-parse HEAD
+          capture_inventory os-version /usr/bin/sw_vers -productVersion
+          capture_inventory os-build /usr/bin/sw_vers -buildVersion
+          capture_inventory darwin-release /usr/bin/uname -r
+          capture_inventory native-arch /usr/bin/uname -m
+          capture_inventory xcode /usr/bin/xcodebuild -version
+          capture_inventory sdk-version /usr/bin/xcrun --sdk macosx --show-sdk-version
+          capture_inventory sdk-build /usr/bin/xcrun --sdk macosx --show-sdk-build-version
+          capture_inventory compiler /usr/bin/xcrun --sdk macosx clang --version
+      - name: Execute the independently admitted first-profile trial
+        id: native
+        if: success() && inputs.execute_pilot_a == true && inputs.inventory_only == false && steps.prepare.outcome == 'success'
+        timeout-minutes: 5
+        run: |
+          node tests/fixtures/macos-spi-pilot.mjs --execute-readonly-pilot-a /tmp/pi-actors-validation/workflow/requested-profile.json /Applications/Xcode_16.4.app/Contents/Developer > /tmp/pi-actors-validation/workflow/harness.stdout 2> /tmp/pi-actors-validation/workflow/harness.stderr
+      - name: Freeze bounded evidence and retain original step outcome
+        id: collector
+        if: always() && steps.evidence.outputs.owned == 'true' && steps.checkout.outcome == 'success' && steps.node.outcome == 'success'
+        timeout-minutes: 1
+        env:
+          RESEARCH_NATIVE_OUTCOME: ${{ steps.native.outcome }}
+          RESEARCH_INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}
+        run: node tests/fixtures/macos-spi-research.mjs collect
+      - name: Admit complete export using external step outcomes
+        id: admission
+        if: always() && steps.evidence.outputs.owned == 'true' && steps.checkout.outcome == 'success' && steps.node.outcome == 'success'
+        timeout-minutes: 1
+        env:
+          RESEARCH_NATIVE_OUTCOME: ${{ steps.native.outcome }}
+          RESEARCH_COLLECTOR_OUTCOME: ${{ steps.collector.outcome }}
+          RESEARCH_INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}
+        run: node tests/fixtures/macos-spi-research.mjs admit
+      - name: Preserve bounded job-owned evidence
+        if: always() && steps.evidence.outputs.owned == 'true'
+        timeout-minutes: 3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7; official ref verified during authoring
+        with:
+          name: macos-spi-a-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/pi-actors-validation/bundle/
+            /tmp/pi-actors-validation/workflow/job-owner.txt
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: true

@@ -10,6 +10,7 @@ export interface InspectToolDeps<TContext = unknown> {
     getToolStatus?: (name: string) => Record<string, unknown> | undefined;
     listRuns?: () => Array<Record<string, any>>;
     recipeRoot?: string;
+    runStateRoot?: string;
     registryStatus?: () => Runtime.RecipeRegistryStatus;
 }
 export declare function createInspectToolDefinition<TContext = unknown>(deps?: InspectToolDeps<TContext>): any;

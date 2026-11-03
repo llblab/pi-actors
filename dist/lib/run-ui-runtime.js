@@ -1,8 +1,9 @@
 /**
  * Ambient run observability runtime.
  * Zones: run watcher lifecycle, terminal reconciliation, status animation, shutdown teardown
- * Owns event-driven run UI coordination without owning actor execution semantics.
+ * Owns event-driven run UI/delivery coordination and callback-generation fences; excludes actor execution semantics and public stream activation.
  */
+import { Container, Markdown, Spacer, Text, stripTerminalSequences } from "@earendil-works/pi-tui";
 import * as AsyncRuns from "./async-runs.js";
 import * as Limits from "./limits.js";
 import * as Observability from "./observability.js";
@@ -10,10 +11,101 @@ import * as Paths from "./paths.js";
 import * as Pi from "./pi.js";
 import * as RunDelivery from "./run-delivery.js";
 import * as RunDeliveryLineage from "./run-delivery-lineage.js";
+import * as RunIndex from "./runs-index.js";
+import { formatLiteralBlock, formatMarkdownField } from "./tools-response.js";
+function formatSteerDiagnosticMessage(eventId, stage, message) {
+    const fields = [formatMarkdownField("event", eventId), formatMarkdownField("attention", "steer"),
+        formatMarkdownField("stage", stage), formatMarkdownField("result", stage === "admission" ? "remains retryable" : "request failed")];
+    if (stage === "delivery")
+        fields.push(formatMarkdownField("delivery", "unconfirmed"), formatMarkdownField("presentation", "unconfirmed"));
+    let end = Math.min(message.length, 240);
+    const last = message.charCodeAt(end - 1), next = message.charCodeAt(end);
+    if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff)
+        end -= 1;
+    const preview = message.slice(0, end), clipped = end < message.length;
+    if (Buffer.from(preview).toString("utf8") !== preview) {
+        fields.push(formatMarkdownField("diagnostic", "unavailable"), formatMarkdownField("diagnostic_reason", "malformed legacy preview"), formatMarkdownField("diagnostic_omission", "[omitted: unknown]"));
+    }
+    else {
+        fields.push(formatMarkdownField("diagnostic", preview + (clipped ? "…" : "")));
+        if (clipped)
+            fields.push(formatMarkdownField("diagnostic_omission", "[omitted: unknown]"));
+    }
+    return fields.join("\n");
+}
+/** Transcript-only view of the exact delivered content; never re-read a Run or infer body labels. */
+export function registerRunCompletionRenderer(pi) {
+    pi.registerMessageRenderer(Pi.RUN_COMPLETION_BATCH_CUSTOM_TYPE, (message, { expanded, outputPad }, theme) => {
+        if (typeof message.content !== "string")
+            return undefined;
+        let presentation;
+        try {
+            presentation = Object.getOwnPropertyDescriptor(message.details, "pi_actors_presentation")?.value;
+        }
+        catch { /* no layout hint */ }
+        const view = RunDelivery.readRunCompletionPresentation(message.content, presentation);
+        if (!view)
+            return undefined;
+        if (!expanded && view.segments) {
+            const component = new Container(), markdownTheme = { ...Pi.getMarkdownTheme(), codeBlockIndent: "" };
+            component.addChild(new Spacer(1));
+            let pieces = 0;
+            for (const segment of view.segments) {
+                // Only compiler separator/marker chunks drive spacing; whitespace bodies remain Markdown.
+                if (segment.kind === "separator" || (segment.kind === "marker" && /^\n+$/u.test(segment.text)))
+                    continue;
+                if (pieces++)
+                    component.addChild(new Spacer(1));
+                const text = stripTerminalSequences(segment.text).replaceAll(/\r\n|\r/gu, "\n");
+                component.addChild(segment.kind === "body"
+                    ? new Markdown(text, outputPad, 0, markdownTheme, { color: value => theme.fg("customMessageText", value) })
+                    : new Text(theme.fg("muted", text), outputPad, 0));
+            }
+            component.addChild(new Spacer(1));
+            component.addChild(new Text(theme.fg("muted", "Expand message for technical details."), outputPad, 0));
+            component.addChild(new Spacer(1));
+            return component;
+        }
+        if (!expanded && view.blocks) {
+            const component = new Container(), markdownTheme = { ...Pi.getMarkdownTheme(), codeBlockIndent: "" };
+            component.addChild(new Spacer(1));
+            for (const [index, [kind, start, end]] of view.blocks.entries()) {
+                if (index)
+                    component.addChild(new Spacer(1));
+                let text = stripTerminalSequences(message.content.slice(start, end)).replaceAll(/\r\n|\r/gu, "\n");
+                if (kind === "header") {
+                    // Only validated compiler headers may hide whole reference rows; body lookalikes stay visible.
+                    text = text.split("\n").filter(line => !line.startsWith("references: ") && !line.startsWith("run_files: ")).join("\n").replace(/\n$/u, "");
+                }
+                component.addChild(kind === "body"
+                    ? new Markdown(text, outputPad, 0, markdownTheme, { color: value => theme.fg("customMessageText", value) })
+                    : new Text(theme.fg(kind === "header" || kind === "marker" ? "muted" : "customMessageText", text), outputPad, 0));
+            }
+            component.addChild(new Spacer(1));
+            component.addChild(new Text(theme.fg("muted", "Expand message for technical details."), outputPad, 0));
+            component.addChild(new Spacer(1));
+            return component;
+        }
+        const text = expanded ? message.content : view.text;
+        const label = view.yaml || (view.records && !view.single) ? "" : theme.fg("customMessageLabel", view.single ? "Run result" : "Run Batch") + "\n\n";
+        return new Text(label + theme.fg("customMessageText", stripTerminalSequences(text).replaceAll(/\r\n|\r/gu, "\n"))
+            + (!expanded && view.compact ? "\n\n" + theme.fg("muted", "Expand message for technical details.") : ""), outputPad, 1);
+    });
+}
 export function createRunUiRuntime(deps) {
+    if (deps.captureCompletionBatch && deps.completionStreamSessionAdmission)
+        throw new Error("Candidate completion capture cannot use completion streams");
+    const fencedCompletionSession = Boolean(deps.captureCompletionBatch || deps.completionStreamSessionAdmission);
     let activeContext;
     let activeOwnerId;
+    let sessionTicket;
+    let sessionManager;
+    let streamSessionAdmitted = false;
+    const contextTickets = new WeakMap();
+    const seenManagers = new WeakSet();
     let animationInterval;
+    let displayRunningSubagents = 0;
+    let displayFrame = 0;
     let deliveryTimeout;
     let notifyTimeout;
     let recoverQueuedSteers = false;
@@ -26,6 +118,11 @@ export function createRunUiRuntime(deps) {
     const completionDiagnostics = new Set();
     const close = () => {
         running = false;
+        displayRunningSubagents = 0;
+        displayFrame = 0;
+        sessionTicket = undefined;
+        sessionManager = undefined;
+        streamSessionAdmitted = false;
         activeContext = undefined;
         activeOwnerId = undefined;
         try {
@@ -65,14 +162,15 @@ export function createRunUiRuntime(deps) {
         }
         const message = error instanceof Error ? error.message : String(error);
         try {
-            expectedContext.ui.notify(`Actor ${label} failed: ${message}`, "error");
+            expectedContext.ui.notify([formatMarkdownField("callback", label), formatMarkdownField("result", "failed"),
+                formatMarkdownField("diagnostic", message)].join("\n"), "error");
         }
         catch {
             /* stale context or unavailable UI */
         }
     };
-    const runActiveCallback = (label, callback) => {
-        if (!running || !activeContext || !activeOwnerId)
+    const runActiveCallback = (label, callback, expectedTicket) => {
+        if (expectedTicket !== sessionTicket || !running || !activeContext || !activeOwnerId)
             return;
         const ctx = activeContext;
         try {
@@ -81,7 +179,8 @@ export function createRunUiRuntime(deps) {
             callback(ctx, activeOwnerId);
         }
         catch (error) {
-            stopAfterCallbackFailure(label, error, ctx);
+            if (expectedTicket === sessionTicket)
+                stopAfterCallbackFailure(label, error, ctx);
         }
     };
     const retireCandidateRuns = (ctx, summary) => {
@@ -126,17 +225,6 @@ export function createRunUiRuntime(deps) {
                 finishPresentedSteer(ownerId, steer);
         }
     };
-    const boundedSteerContent = (event) => {
-        const text = Observability.formatRunAttentionMessage(event);
-        if (Buffer.byteLength(text, "utf8") <= Limits.RUN_DELIVERY_STEER_MAX_BYTES) {
-            return text;
-        }
-        let end = Math.min(text.length, Limits.RUN_DELIVERY_STEER_MAX_BYTES - 3);
-        while (end > 0 && Buffer.byteLength(text.slice(0, end), "utf8") >
-            Limits.RUN_DELIVERY_STEER_MAX_BYTES - 3)
-            end -= 1;
-        return `${text.slice(0, end)}…`;
-    };
     const admitSteerEvents = (ctx, ownerId, events) => {
         for (const event of events.filter(Observability.isRunSteerAttentionEvent)) {
             if (!event.runInstanceId) {
@@ -144,13 +232,16 @@ export function createRunUiRuntime(deps) {
                 const key = `${event.stateDir}:${event.id}:missing_generation`;
                 if (!steerDiagnostics.has(key)) {
                     steerDiagnostics.add(key);
-                    ctx.ui.notify(`Actor urgent steer ${event.id} remains retryable because its Run generation is unavailable.`, "warning");
+                    ctx.ui.notify(formatSteerDiagnosticMessage(event.id, "admission", "Run generation unavailable."), "warning");
                 }
                 continue;
             }
             try {
+                if (journal(ownerId).steers.some(steer => steer.run === event.run && steer.state_dir === event.stateDir &&
+                    steer.run_instance_id === event.runInstanceId && steer.event_id === event.id))
+                    continue;
                 RunDelivery.admitRunSteerEnvelope({
-                    content: boundedSteerContent(event),
+                    content: Observability.formatRunSteerMessage(event),
                     eventId: event.id,
                     kind: event.kind,
                     level: event.level,
@@ -168,20 +259,44 @@ export function createRunUiRuntime(deps) {
                 const key = `${event.stateDir}:${event.id}:${message}`;
                 if (!steerDiagnostics.has(key)) {
                     steerDiagnostics.add(key);
-                    ctx.ui.notify(`Actor urgent steer ${event.id} remains retryable: ${message.replaceAll(/\s+/g, " ").slice(0, 240)}`, "warning");
+                    ctx.ui.notify(formatSteerDiagnosticMessage(event.id, "admission", message), "warning");
                 }
             }
         }
     };
-    const admitCompletionTransitions = (ownerId, snapshot) => {
+    const admitCompletionTransitions = (ctx, ownerId, snapshot) => {
         const existing = journal(ownerId).completion_batch;
         if (existing)
             return true;
         const members = Observability.collectRunCompletionBatchMembers(snapshot.transitions, snapshot.summary.runs).slice(0, Limits.RUN_DELIVERY_BATCH_MAX_MEMBERS);
-        if (members.length === 0)
+        if (members.length === 0 || !isCurrentOwner(ctx))
             return false;
-        RunDelivery.admitRunCompletionBatch({
+        const fileNavigation = [];
+        for (const member of RunDelivery.orderRunCompletionMembers(members, true)) {
+            let locations;
+            try {
+                const observed = snapshot.summary.runs.find(run => run.run === member.run && run.runInstanceId === member.run_instance_id && run.stateDir === member.state_dir);
+                locations = !observed ? Object.freeze({ state: "unavailable", reason: "identity_unavailable" })
+                    : observed.ownerId !== ownerId ? Object.freeze({ state: "unavailable", reason: "session_mismatch" })
+                        : RunIndex.readRunDirectoryNavigation(member.state_dir, { run: member.run, run_instance_id: member.run_instance_id, ownerId: observed.ownerId }, Pi.getSessionId(ctx));
+            }
+            catch {
+                locations = Object.freeze({ state: "unavailable", reason: "navigation_unavailable" });
+            }
+            fileNavigation.push({ member_index: members.indexOf(member), locations });
+            if (Buffer.byteLength(JSON.stringify(fileNavigation), "utf8") > Limits.RUN_DELIVERY_MODEL_MAX_BYTES) {
+                fileNavigation.pop();
+                break;
+            }
+        }
+        if (!isCurrentOwner(ctx))
+            return false;
+        if (!canUseCompletionSession(ctx, ownerId))
+            return false;
+        const capture = deps.completionStreamSessionAdmission ? RunDelivery.captureRunCompletionStreamBatch : deps.captureCompletionBatch ?? RunDelivery.admitRunCompletionBatch;
+        capture({
             members,
+            fileNavigation,
             ownerId,
             tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
         });
@@ -212,31 +327,63 @@ export function createRunUiRuntime(deps) {
                 const key = `${batch.batch_id}:${evidence.status}:${evidence.reason ?? ""}`;
                 if (!completionDiagnostics.has(key)) {
                     completionDiagnostics.add(key);
-                    ctx.ui.notify(`Actor completion recovery is ${evidence.status}: ${evidence.reason ?? "conflicting session evidence"}. Batch ${batch.batch_id} remains pending.`, "warning");
+                    ctx.ui.notify("\n" + [formatMarkdownField("batch", batch.batch_id), formatMarkdownField("stage", "completion recovery"),
+                        formatMarkdownField("evidence", evidence.status), formatMarkdownField("phase", "pending"),
+                        formatMarkdownField("reason", evidence.reason ?? "conflicting session evidence")].join("\n"), "warning");
                 }
                 return true;
             }
         }
+        if (fencedCompletionSession && !canUseCompletionSession(ctx, ownerId))
+            return true;
         return !acceptCompletionBatch(ownerId, batch.batch_id);
     };
-    const pendingCompletionBatch = (ownerId) => {
+    const pendingCompletionBatch = (ctx, ownerId) => {
         const existing = journal(ownerId).completion_batch;
         if (existing)
             return existing;
         const snapshot = Observability.readRunDeliverySnapshot(deliveryObservation, ownerId);
-        admitCompletionTransitions(ownerId, snapshot);
+        admitCompletionTransitions(ctx, ownerId, snapshot);
         Observability.pruneRunUiObservationState(deliveryObservation, snapshot);
         return journal(ownerId).completion_batch;
     };
     const isCurrentOwner = (ctx) => {
         if (!running || !activeOwnerId)
             return false;
+        if (!fencedCompletionSession) {
+            try {
+                return Pi.getSessionId(ctx) === activeOwnerId;
+            }
+            catch {
+                return false;
+            }
+        }
+        const ticket = sessionTicket, ownerId = activeOwnerId, known = contextTickets.get(ctx);
+        if (!ticket || (known && known !== ticket))
+            return false;
         try {
-            return Pi.getSessionId(ctx) === activeOwnerId;
+            if (deps.getActiveContext() !== activeContext)
+                return false;
+            const manager = ctx.sessionManager;
+            if (manager !== sessionManager || manager.getSessionId() !== ownerId || ticket !== sessionTicket || !running)
+                return false;
+            contextTickets.set(ctx, ticket);
+            return true;
         }
         catch {
             return false;
         }
+    };
+    const canUseCompletionSession = (ctx, ownerId) => {
+        if (deps.captureCompletionBatch && !isCurrentOwner(ctx))
+            return false;
+        if (!deps.completionStreamSessionAdmission)
+            return !journal(ownerId).completion_stream;
+        if (!isCurrentOwner(ctx))
+            return false;
+        const ticket = sessionTicket, state = journal(ownerId).completion_stream;
+        // No metadata is not disconnected. The opt-in path never bootstraps or falls back to local indices.
+        return streamSessionAdmitted && Boolean(state) && ticket === sessionTicket && isCurrentOwner(ctx);
     };
     const isIdle = (ctx) => typeof ctx.isIdle !== "function" || ctx.isIdle();
     const isDeliveryRoot = (ownerId) => {
@@ -266,7 +413,9 @@ export function createRunUiRuntime(deps) {
                     const key = `${steer.steer_id}:${evidence.status}:${evidence.reason ?? ""}`;
                     if (!steerDiagnostics.has(key)) {
                         steerDiagnostics.add(key);
-                        ctx.ui.notify(`Actor urgent steer recovery is ${evidence.status}: ${evidence.reason ?? "conflicting session evidence"}. Event ${steer.event_id} remains queued.`, "warning");
+                        ctx.ui.notify([formatMarkdownField("event", steer.event_id), formatMarkdownField("attention", "steer"),
+                            formatMarkdownField("stage", "recovery"), formatMarkdownField("evidence", evidence.status),
+                            formatMarkdownField("phase", "queued"), formatMarkdownField("reason", evidence.reason ?? "conflicting session evidence")].join("\n"), "warning");
                     }
                     continue;
                 }
@@ -295,7 +444,7 @@ export function createRunUiRuntime(deps) {
                     tempDir: Paths.EXTENSION_RUNTIME_PATHS.tempDir,
                 });
                 const message = error instanceof Error ? error.message : String(error);
-                ctx.ui.notify(`Actor urgent steer delivery failed for event ${steer.event_id}: ${message.replaceAll(/\s+/g, " ").slice(0, 240)}`, "error");
+                ctx.ui.notify(formatSteerDiagnosticMessage(steer.event_id, "delivery", message), "error");
                 continue;
             }
             RunDelivery.markRunSteerQueued({
@@ -310,28 +459,45 @@ export function createRunUiRuntime(deps) {
     const scheduleCompletionFlush = () => {
         if (!running)
             return;
+        const ticket = sessionTicket;
         if (deliveryTimeout)
             clearTimeout(deliveryTimeout);
         deliveryTimeout = setTimeout(() => {
+            if (ticket !== sessionTicket)
+                return;
             deliveryTimeout = undefined;
             runActiveCallback("completion delivery callback", (ctx) => {
                 flushCompletionBatch(ctx);
-            });
+            }, ticket);
         }, deps.deliveryDebounceMs ?? 100);
         deliveryTimeout.unref?.();
     };
     const update = (ctx, ownerId, notify = false, terminalOnly = false) => {
-        const snapshot = Observability.readRunUiSnapshot(observation, ownerId);
-        ctx.ui.setStatus("zz-pi-actors-runs", snapshot.status ? ctx.ui.theme.fg("dim", snapshot.status) : undefined);
-        if (!notify)
+        // Derive both projections before any UI/retirement callback. The subsequent
+        // flush still observes afresh; these facts only drive display/candidate scheduling.
+        const ticket = sessionTicket;
+        const pair = notify && isDeliveryRoot(ownerId)
+            ? Observability.readRunUiAndDeliverySnapshots(observation, deliveryObservation, ownerId)
+            : undefined;
+        const snapshot = pair?.ui ?? Observability.readRunUiSnapshot(observation, ownerId);
+        if (ticket !== sessionTicket || (fencedCompletionSession && !isCurrentOwner(ctx)))
+            return false;
+        // Animation retains display data only; all admission paths continue observing independently.
+        displayRunningSubagents = snapshot.summary.runningSubagents;
+        displayFrame = 0;
+        const status = snapshot.status && ctx.mode === "tui" ? ctx.ui.theme.fg("dim", snapshot.status) : snapshot.status;
+        if (ticket !== sessionTicket)
+            return false;
+        ctx.ui.setStatus("zz-pi-actors-runs", status);
+        if (ticket !== sessionTicket)
+            return false;
+        if (!notify || (fencedCompletionSession && !isCurrentOwner(ctx)))
             return false;
         const sink = Pi.createNotificationSink(deps.pi, ctx);
         retireCandidateRuns(ctx, snapshot.summary);
-        const deliverySnapshot = isDeliveryRoot(ownerId)
-            ? Observability.readRunDeliverySnapshot(deliveryObservation, ownerId)
-            : undefined;
+        const deliverySnapshot = pair?.delivery;
         const hasCompletionCandidates = deliverySnapshot
-            ? Observability.collectRunCompletionBatchMembers(deliverySnapshot.transitions, deliverySnapshot.summary.runs).length > 0
+            ? Observability.hasRunCompletionBatchMembers(deliverySnapshot.transitions, deliverySnapshot.summary.runs)
             : false;
         const hasCompletionBatch = isDeliveryRoot(ownerId) &&
             Boolean(journal(ownerId).completion_batch);
@@ -357,30 +523,35 @@ export function createRunUiRuntime(deps) {
             ctx.ui.notify(diagnostic.message, diagnostic.code === "rearmed" ? "info" : "warning");
         }
     };
-    const scheduleUpdate = () => {
-        if (!running)
+    const scheduleUpdate = (ticket) => {
+        if (ticket !== sessionTicket || !running)
             return;
         if (notifyTimeout)
             clearTimeout(notifyTimeout);
         notifyTimeout = setTimeout(() => {
+            if (ticket !== sessionTicket)
+                return;
             runActiveCallback("Run watcher callback", (ctx, ownerId) => {
                 watcher.refresh();
                 const completionDeferred = update(ctx, ownerId, true);
+                if (ticket !== sessionTicket)
+                    return;
                 if (!completionDeferred)
                     deps.onRunEvent();
-                reportDiagnostics(ctx);
-            });
+                if (ticket === sessionTicket)
+                    reportDiagnostics(ctx);
+            }, ticket);
         }, deps.notificationDelayMs ?? 50);
         notifyTimeout.unref?.();
     };
-    const watcher = (deps.createRunStateWatcher ?? Observability.createRunStateWatcher)({
+    const createWatcher = (ticket) => (deps.createRunStateWatcher ?? Observability.createRunStateWatcher)({
         stateRoot: Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,
-        onChange: scheduleUpdate,
+        onChange: () => scheduleUpdate(ticket),
     });
-    const reconciliation = (deps.createRunTerminalReconciliationLoop ??
+    const createReconciliation = (ticket) => (deps.createRunTerminalReconciliationLoop ??
         Observability.createRunTerminalReconciliationLoop)({
         onError: (error) => {
-            if (!running || !activeContext)
+            if (ticket !== sessionTicket || !running || !activeContext)
                 return;
             stopAfterCallbackFailure("terminal reconciliation callback", error, activeContext);
         },
@@ -388,13 +559,15 @@ export function createRunUiRuntime(deps) {
             runActiveCallback("terminal reconciliation callback", (ctx, ownerId) => {
                 update(ctx, ownerId, true);
                 reportDiagnostics(ctx);
-            });
+            }, ticket);
         },
         refreshWatcher: () => {
-            if (running)
+            if (ticket === sessionTicket && running)
                 watcher.refresh();
         },
     });
+    let watcher = createWatcher(undefined);
+    let reconciliation = createReconciliation(undefined);
     flushCompletionBatch = (ctx) => {
         const ownerId = activeOwnerId;
         if (!ownerId || !isCurrentOwner(ctx))
@@ -403,20 +576,24 @@ export function createRunUiRuntime(deps) {
             return true;
         if (!isDeliveryRoot(ownerId))
             return false;
+        if (!canUseCompletionSession(ctx, ownerId))
+            return true;
         if (reconcileCompletionBatch(ctx, ownerId))
             return true;
-        const batch = pendingCompletionBatch(ownerId);
+        const batch = pendingCompletionBatch(ctx, ownerId);
         if (!batch)
             return false;
         if (!isIdle(ctx))
             return true;
-        const content = RunDelivery.formatRunCompletionBatchMessage(batch);
-        if (!isIdle(ctx))
+        const projected = RunDelivery.projectRunCompletionBatchPresentation(batch);
+        if (!isIdle(ctx) || !isCurrentOwner(ctx))
             return true;
         try {
-            Pi.sendRunCompletionBatch(deps.pi, batch.batch_id, content);
+            Pi.sendRunCompletionBatch(deps.pi, batch.batch_id, projected.content, projected.presentation);
         }
         catch (error) {
+            if (fencedCompletionSession && !isCurrentOwner(ctx))
+                throw error;
             RunDelivery.recordRunCompletionBatchDeliveryFailure({
                 batchId: batch.batch_id,
                 error,
@@ -425,14 +602,16 @@ export function createRunUiRuntime(deps) {
             });
             throw error;
         }
+        if (fencedCompletionSession && !canUseCompletionSession(ctx, ownerId))
+            return true;
         if (!acceptCompletionBatch(ownerId, batch.batch_id)) {
             throw new Error("Completion batch changed before durable acceptance");
         }
-        ctx.ui.notify(`Actor completions ready: ${batch.members.length}`, "info");
         return true;
     };
     return {
         close,
+        isCurrentSessionContext: isCurrentOwner,
         flushCompletionBatch,
         onTurnEnd(event, ctx) {
             const ownerId = activeOwnerId;
@@ -440,12 +619,15 @@ export function createRunUiRuntime(deps) {
                 event.outcome !== "completed" || isIdle(ctx) || ctx.signal?.aborted ||
                 ctx.hasPendingMessages?.() || event.context.pendingMessages.length > 0)
                 return undefined;
-            if (flushSteers(ctx, ownerId) || reconcileCompletionBatch(ctx, ownerId))
+            if (flushSteers(ctx, ownerId) || !canUseCompletionSession(ctx, ownerId) || reconcileCompletionBatch(ctx, ownerId))
                 return undefined;
-            const batch = pendingCompletionBatch(ownerId);
-            if (!batch)
+            const batch = pendingCompletionBatch(ctx, ownerId);
+            if (!batch || !isCurrentOwner(ctx))
                 return undefined;
-            const entry = Pi.createRunCompletionBatchEntry(batch.batch_id, RunDelivery.formatRunCompletionBatchMessage(batch));
+            const projected = RunDelivery.projectRunCompletionBatchPresentation(batch);
+            const entry = Pi.createRunCompletionBatchEntry(batch.batch_id, projected.content, projected.presentation);
+            if (!canUseCompletionSession(ctx, ownerId))
+                return undefined;
             return { entries: [...event.entries, entry], continue: true };
         },
         projectContext(messages, ctx) {
@@ -478,6 +660,8 @@ export function createRunUiRuntime(deps) {
                 if (durable)
                     finishPresentedSteer(ownerId, durable);
             }
+            if (!canUseCompletionSession(ctx, ownerId))
+                return contextMessages;
             const projected = Pi.dedupeRunCompletionBatchContext(contextMessages);
             const batch = journal(ownerId).completion_batch;
             if (!batch)
@@ -486,7 +670,8 @@ export function createRunUiRuntime(deps) {
             if (content !== RunDelivery.formatRunCompletionBatchMessage(batch)) {
                 return Pi.removeRunCompletionBatchFromContext(projected.messages, batch.batch_id);
             }
-            acceptCompletionBatch(ownerId, batch.batch_id);
+            if (!fencedCompletionSession || canUseCompletionSession(ctx, ownerId))
+                acceptCompletionBatch(ownerId, batch.batch_id);
             return projected.messages;
         },
         shutdown(eventReason, ownerId, ctx) {
@@ -496,27 +681,65 @@ export function createRunUiRuntime(deps) {
             if (teardown.failed === 0 || !ctx)
                 return;
             try {
-                ctx.ui.notify(`Actor shutdown teardown: killed=${teardown.killed} failed=${teardown.failed} skipped=${teardown.skipped} discovery_failed=${teardown.discoveryFailed}. Summary: ${teardown.summaryPath ?? "unavailable"}.`, "warning");
+                ctx.ui.notify([formatMarkdownField("stage", "shutdown teardown"), formatMarkdownField("killed", String(teardown.killed)),
+                    formatMarkdownField("failed", String(teardown.failed)), formatMarkdownField("skipped", String(teardown.skipped)),
+                    formatMarkdownField("discovery_failed", String(teardown.discoveryFailed)),
+                    formatMarkdownField("summary", teardown.summaryPath == null ? "unavailable" : formatLiteralBlock(teardown.summaryPath)),
+                    formatMarkdownField("basis", "teardown report; not scope closure")].join("\n"), "warning");
             }
             catch {
                 /* stale shutdown context */
             }
         },
-        start(ctx, ownerId) {
+        start(ctx, ownerId, event) {
             close();
+            const ticket = {};
+            sessionTicket = ticket;
             activeContext = ctx;
             activeOwnerId = ownerId;
             recoverQueuedSteers = true;
             running = true;
             try {
-                recoverPresentedBatch(ownerId);
+                if (fencedCompletionSession) {
+                    sessionManager = ctx.sessionManager;
+                    const fresh = !seenManagers.has(sessionManager) && !contextTickets.has(ctx);
+                    seenManagers.add(sessionManager);
+                    if (!contextTickets.has(ctx))
+                        contextTickets.set(ctx, ticket);
+                    if (deps.captureCompletionBatch && !fresh)
+                        sessionManager = undefined;
+                    if (deps.completionStreamSessionAdmission && fresh && event && (event.reason === "new" || event.reason === "fork") && isCurrentOwner(ctx)) {
+                        const admitted = deps.completionStreamSessionAdmission(ctx, event) === true && isCurrentOwner(ctx);
+                        if (ticket !== sessionTicket)
+                            return;
+                        streamSessionAdmitted = admitted;
+                    }
+                }
+                if (ticket !== sessionTicket)
+                    return;
+                watcher = createWatcher(ticket);
+                reconciliation = createReconciliation(ticket);
+                if (canUseCompletionSession(ctx, ownerId))
+                    recoverPresentedBatch(ownerId);
                 recoverPresentedSteers(ownerId);
                 Observability.primeRunAttentionState(observation, ownerId);
                 update(ctx, ownerId, true, true);
+                if (ticket !== sessionTicket)
+                    return;
                 watcher.refresh();
+                if (ticket !== sessionTicket)
+                    return;
                 reconciliation.start();
+                if (ticket !== sessionTicket || ctx.mode !== "tui")
+                    return;
                 animationInterval = setInterval(() => {
-                    runActiveCallback("status animation callback", (current, currentOwnerId) => update(current, currentOwnerId));
+                    runActiveCallback("status animation callback", (current) => {
+                        const status = Observability.renderSubagentStatus(displayRunningSubagents, ++displayFrame);
+                        const themed = status ? current.ui.theme.fg("dim", status) : status;
+                        if (ticket !== sessionTicket)
+                            return;
+                        current.ui.setStatus("zz-pi-actors-runs", themed);
+                    }, ticket);
                 }, deps.animationIntervalMs ?? 1000);
                 animationInterval.unref?.();
             }

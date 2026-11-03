@@ -7,13 +7,15 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as AsyncRuns from "./async-runs.js";
 import { withFileMutationLock } from "./file-state.js";
+import * as Limits from "./limits.js";
 import * as ModelContext from "./model-context.js";
 import * as Paths from "./paths.js";
 import * as RecipesUsage from "./recipes-usage.js";
 import * as Schema from "./schema.js";
 import * as ToolsResponse from "./tools-response.js";
+import { readRunFileNavigationForContext } from "./tools-access.js";
 const asRecord = ToolsResponse.asRecord;
-const maybeJsonText = ToolsResponse.maybeJsonText;
+const spawnMetadataText = ToolsResponse.spawnMetadataText;
 function getRunOwnerId(ctx) {
     return ctx.sessionManager?.getSessionId?.();
 }
@@ -48,15 +50,34 @@ function writeSpawnDraftRecipe(input, meta) {
     RecipesUsage.recordRecipeLaunch(path, new Date(), "spawn", Paths.getRecipeRoot());
     return path;
 }
+/** Compiler-owned pre-launch diagnostics only; selected caller values are not admitted Run ids. */
+function spawnGuardText(kind, value) {
+    const field = ToolsResponse.formatMarkdownField;
+    const facts = kind === "state_dir"
+        ? [field("result", "unsupported field"), field("reason", "Run state is runtime-owned; run:<id> remains addressable and retention-safe.")]
+        : [field("result", kind === "namespace" ? "unsupported Run target" : "invalid Run target"), field("accepted_format", "run:<id>"),
+            ...(kind === "id" ? [field("id_rule", "nonempty ASCII letters, digits, underscore, dot or hyphen")] : [])];
+    const render = (selected) => ToolsResponse.withLeadingLineBreak([field("field", kind === "state_dir" ? "state_dir" : "as"), ...(selected === undefined ? [] : [selected]), ...facts].join("\n"));
+    if (value === undefined)
+        return render();
+    const wellFormed = value.isWellFormed();
+    if (wellFormed) {
+        const complete = render(field("value", value));
+        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES)
+            return complete;
+    }
+    const reason = wellFormed ? "response_too_large" : "malformed_selected_text";
+    return render(`- value: [${reason === "response_too_large" ? "omitted" : "unavailable"}]\n- value_omission:\n  - reason: ${reason}\n  - shown: 0\n  - omitted: 1\n  - total: 1`);
+}
 function runIdFromTarget(target) {
     if (!target)
         return undefined;
     if (!target.startsWith("run:")) {
-        throw new Error(`spawn.as accepts only run:<id>; received: ${target}`);
+        throw new Error(spawnGuardText("namespace", `${target}`));
     }
     const run = target.slice(4);
     if (!run || !/^[A-Za-z0-9_.-]+$/.test(run)) {
-        throw new Error(`invalid spawn Run target: ${target}`);
+        throw new Error(spawnGuardText("id", `${target}`));
     }
     return run;
 }
@@ -77,12 +98,12 @@ export function createSpawnToolDefinition() {
             ]),
             values: Schema.looseObjectSchema("Runtime placeholder values passed to the actor."),
             transport_context: Schema.looseObjectSchema("Optional originating transport route preserved for detached terminal follow-up, e.g. Telegram chat_id and thread_id."),
-            verbose: Schema.booleanSchema("Return full JSON instead of compact text."),
+            verbose: Schema.booleanSchema("Return full YAML instead of compact text."),
         }, []),
         async execute(toolCallId, params, _signal, _onUpdate, ctx) {
             const input = asRecord(params);
             if (input.state_dir !== undefined) {
-                throw new Error("spawn.state_dir is not supported; run state is runtime-owned so run:<id> remains addressable and retention-safe.");
+                throw new Error(spawnGuardText("state_dir"));
             }
             const runId = runIdFromTarget(typeof input.as === "string" ? input.as : undefined);
             const recipe = typeof input.file === "string"
@@ -111,11 +132,12 @@ export function createSpawnToolDefinition() {
                         artifacts: input.artifacts,
                     }
                     : {}),
-            }, ctx.cwd, { skillContext: ctx.recipeResolutionContext?.activeSkills });
+            }, ctx.cwd, { skillContext: ctx.recipeResolutionContext?.activeSkills, onSupervisionClockCaptured: ctx.onSupervisionClockCaptured });
             const draftRecipe = writeSpawnDraftRecipe(input, meta);
             const nextActions = ToolsResponse.runNextActions(meta.run);
             const details = {
                 ...meta,
+                file_navigation: readRunFileNavigationForContext(meta, ctx),
                 ...(draftRecipe ? { draft_recipe: draftRecipe } : {}),
                 next_actions: nextActions,
             };
@@ -123,7 +145,7 @@ export function createSpawnToolDefinition() {
                 content: [
                     {
                         type: "text",
-                        text: maybeJsonText(details, input.verbose === true, ToolsResponse.compactAsyncRunStatus(details)),
+                        text: spawnMetadataText(details, input.verbose === true, ToolsResponse.compactAsyncRunStatus(details)),
                     },
                 ],
                 details,

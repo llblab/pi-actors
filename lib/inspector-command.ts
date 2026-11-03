@@ -5,7 +5,7 @@
  */
 
 import * as AsyncRuns from "./async-runs.ts";
-import * as InspectorActions from "./inspector-actions.ts";
+import * as Inspector from "./inspector.ts";
 import * as InspectorOverlay from "./inspector-overlay.ts";
 import * as Paths from "./paths.ts";
 import type * as Pi from "./pi.ts";
@@ -23,7 +23,7 @@ export function registerActorInspectorCommand(
           new InspectorOverlay.ActorInspectorOverlay({
             done,
             killRun: (run, runInstanceId) =>
-              InspectorActions.killOwnedRunFromInspector(
+              Inspector.killOwnedRunFromInspector(
                 getRunOwnerId(ctx),
                 run,
                 Paths.EXTENSION_RUNTIME_PATHS.runStateRoot,

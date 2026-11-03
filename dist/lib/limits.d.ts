@@ -30,6 +30,7 @@ export declare const RUN_RETENTION_MAX_BYTES: number;
 export declare const RUN_DELIVERY_BATCH_MAX_MEMBERS = 256;
 export declare const RUN_DELIVERY_MODEL_MAX_MEMBERS = 64;
 export declare const RUN_DELIVERY_MODEL_MAX_BYTES: number;
+export declare const RUN_COMPLETION_MODEL_MAX_BYTES: number;
 export declare const RUN_DELIVERY_RECEIPT_LIMIT = 128;
 export declare const RUN_DELIVERY_SESSION_MAX_ENTRIES = 256;
 export declare const RUN_DELIVERY_SESSION_MAX_BYTES: number;

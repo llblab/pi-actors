@@ -15,6 +15,7 @@ import * as RecipesDiscovery from "./recipes-discovery.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as ToolsLocal from "./tools-local.ts";
+import * as ToolsResponse from "./tools-response.ts";
 
 export interface RuntimeContext {
   hasUI: boolean;
@@ -195,20 +196,38 @@ export function createAutoToolsRuntime(
       (warning) => !shadowed.includes(warning) && !skipped.includes(warning),
     );
     const lines = ["pi-actors recipe registry warning"];
+    const groups: Array<[string, number, number]> = [];
     if (shadowed.length > 0) {
       lines.push("User recipes shadow lower-priority user sources:");
+      const start = lines.length;
       lines.push(...shadowed.map((warning) => `• ${warning}`));
+      groups[groups.length] = ["shadowed_sources", start, lines.length];
     }
     if (skipped.length > 0) {
       lines.push("Recipes skipped from tool exposure:");
+      const start = lines.length;
       lines.push(...skipped.map((warning) => `• ${warning}`));
+      groups[groups.length] = ["skipped_tool_exposure", start, lines.length];
     }
     if (other.length > 0) {
       lines.push("Other registry diagnostics:");
+      const start = lines.length;
       lines.push(...other.map((warning) => `• ${warning}`));
+      groups[groups.length] = ["other_diagnostics", start, lines.length];
     }
     lines.push("Next: inspect target=recipes view=doctor");
-    return `${lines.join("\n")}\n`;
+    // Preserve the original layout join/coercion and its faults before projecting owned warning slots.
+    void `${lines.join("\n")}\n`;
+    let text = ToolsResponse.formatMarkdownField("report", "pi-actors recipe registry warning");
+    for (const [key, start, end] of groups) {
+      text += `\n- ${key}:`;
+      for (let index = start; index < end; index++) {
+        const value = lines[index].slice(2);
+        text += "\n" + (value.isWellFormed() ? ToolsResponse.formatMarkdownField("warning", value, 1)
+          : "  - warning:\n    - result: unavailable\n    - reason: malformed_selected_text");
+      }
+    }
+    return text + "\n" + ToolsResponse.formatMarkdownField("instruction", "Next: inspect target=recipes view=doctor") + "\n";
   }
   function loadTools(
     ctx: RuntimeContext,
@@ -353,7 +372,7 @@ export function createRecipeToolReloadWatcher(
     setWatchStatus("failed");
     try {
       ctx.ui.notify(
-        "Recipe live reload watcher failed; restart the session or use register_tool again to refresh recipe tools.",
+        "- report: Recipe live reload watcher failed\n- instruction: restart the session or use register_tool again to refresh recipe tools.",
         "warning",
       );
     } catch (error) {
@@ -372,7 +391,7 @@ export function createRecipeToolReloadWatcher(
       try {
         runtime.loadTools(ctx, deps.getResolutionContext?.());
         if (notifyAfterReload) {
-          ctx.ui.notify("Recipe tools refreshed from ~/.pi/agent/recipes", "info");
+          ctx.ui.notify("- report: Recipe tools refreshed from ~/.pi/agent/recipes", "info");
         }
         notifyAfterReload = false;
       } catch (error) {

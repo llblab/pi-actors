@@ -96,4 +96,7 @@ export interface RegisteredToolExecutionResult {
 }
 export type RegisteredToolExec = (command: string, args: string[], options?: ToolExecOptions) => Promise<ToolExecResult>;
 export declare function applyOutputAcceptancePolicy(result: ToolExecResult, output: string | undefined): Promise<ToolExecResult>;
-export declare function executeRegisteredTool(cfg: RegisteredTool, params: Record<string, unknown>, exec: RegisteredToolExec, cwd: string, signal?: AbortSignal): Promise<RegisteredToolExecutionResult>;
+export declare function executeRegisteredTool(cfg: RegisteredTool, params: Record<string, unknown>, exec: RegisteredToolExec, cwd: string, signal?: AbortSignal, kernel?: {
+    readonly onPrimaryCommandSelected?: (result: Readonly<ToolExecResult>) => void | Promise<void>;
+    readonly onFinalResponseSelected?: (text: string, upstreamTruncated: boolean) => void | Promise<void>;
+}): Promise<RegisteredToolExecutionResult>;

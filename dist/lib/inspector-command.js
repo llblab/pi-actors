@@ -4,7 +4,7 @@
  * Owns host-facing Inspector launch wiring without owning Inspector state or actions.
  */
 import * as AsyncRuns from "./async-runs.js";
-import * as InspectorActions from "./inspector-actions.js";
+import * as Inspector from "./inspector.js";
 import * as InspectorOverlay from "./inspector-overlay.js";
 import * as Paths from "./paths.js";
 export function registerActorInspectorCommand(pi, getRunOwnerId) {
@@ -14,7 +14,7 @@ export function registerActorInspectorCommand(pi, getRunOwnerId) {
             ctx.ui.setWidget("zz-pi-actors-comms", undefined);
             await ctx.ui.custom((tui, theme, _keybindings, done) => new InspectorOverlay.ActorInspectorOverlay({
                 done,
-                killRun: (run, runInstanceId) => InspectorActions.killOwnedRunFromInspector(getRunOwnerId(ctx), run, Paths.EXTENSION_RUNTIME_PATHS.runStateRoot, runInstanceId, {
+                killRun: (run, runInstanceId) => Inspector.killOwnedRunFromInspector(getRunOwnerId(ctx), run, Paths.EXTENSION_RUNTIME_PATHS.runStateRoot, runInstanceId, {
                     getRunStatus: AsyncRuns.getRunStatus,
                     killRun: AsyncRuns.killRun,
                 }),

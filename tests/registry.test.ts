@@ -1,3 +1,5 @@
+import "./test-environment.mjs";
+
 /**
  * Registry regression tests
  * Covers register/update/delete behavior independently from pi-facing schema assembly
@@ -5,16 +7,23 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createRequire, syncBuiltinESMExports } from "node:module";
+import { Text, visibleWidth, stripTerminalSequences } from "@earendil-works/pi-tui";
+import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
 import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
-import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
+import { createActiveSkillRecipeContext, RUNTIME_OWNED_RECIPE_INPUT_NAMES } from "../lib/recipes-references.ts";
 import { executeRegisterTool } from "../lib/registry.ts";
+import { createRegisterToolDefinition } from "../lib/tools-register.ts";
+import { createAutoToolsRuntime } from "../lib/runtime.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +57,1568 @@ async function createHarness() {
   };
 }
 
+type RegistryNoticeKind = "activated" | "promoted" | "deleted";
+const registryNoticeReport = { activated: "Tool activated", promoted: "Promoted draft recipe", deleted: "Deleted tool" };
+const registryNoticeExpected = (kind: RegistryNoticeKind, name: string) => "- report: " + registryNoticeReport[kind] + "\n- tool: " + name;
+
+async function prepareRegistryNotice(kind: RegistryNoticeKind) {
+  const h = await createHarness();
+  const draft = join(h.root, "drafts", "notice.json");
+  if (kind === "promoted") { await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, JSON.stringify({ description: "Draft", template: "echo" })); }
+  if (kind === "deleted") await executeRegisterTool({ name: "notice", description: "Prior", template: "echo" }, {}, h.deps);
+  h.notifications.length = 0; h.runtimeRegistered.length = 0;
+  const params = kind === "promoted" ? { name: "notice", draft } : kind === "deleted" ? { name: "notice", template: null } : { name: "notice", description: "Notice", template: "echo" };
+  return { h, params };
+}
+
+for (const kind of ["activated", "promoted", "deleted"] as const) test(`AX registry ${kind} notice preserves real UI gate and post-effect callback failures`, async () => {
+  for (const visible of [false, true]) {
+    const { h, params } = await prepareRegistryNotice(kind);
+    try {
+      const messages: Array<[string, string | undefined]> = [];
+      const runtime = createAutoToolsRuntime({ configPath: h.deps.configPath, reservedToolNames: h.deps.reservedToolNames, registerTool(): never { throw Error("No live host registration"); }, exec: async (): Promise<never> => { throw Error("No command execution"); } });
+      const ctx = { hasUI: visible, get ui() { assert.equal(visible, true); return { notify(message: string, type?: "info" | "warning" | "error") { messages.push([message, type]); assert.equal(existsSync(join(h.root, "notice.json")), kind !== "deleted"); assert.equal(h.tools.has("notice"), kind !== "deleted"); } }; } };
+      const result = await executeRegisterTool(params, ctx, { ...h.deps, notify: runtime.notify });
+      assert.deepEqual(messages, visible ? [[registryNoticeExpected(kind, "notice"), "info"]] : []);
+      assert.equal(result.details.tool, "notice"); assert.equal(existsSync(join(h.root, "notice.json")), kind !== "deleted");
+      assert.equal(h.tools.has("notice"), kind !== "deleted");
+    } finally { await h.cleanup(); }
+  }
+  const opaque = Object.freeze({ toString(): never { throw Error("Do not coerce notification failure"); } });
+  for (const cause of [undefined, "PRIVATE_PRIMITIVE", opaque]) {
+    const { h, params } = await prepareRegistryNotice(kind); let calls = 0, rejected = false;
+    try {
+      try { await executeRegisterTool(params, {}, { ...h.deps, notify(_ctx, message, type) {
+        calls++; assert.equal(message, registryNoticeExpected(kind, "notice")); assert.equal(type, "info");
+        assert.equal(existsSync(join(h.root, "notice.json")), kind !== "deleted"); assert.equal(h.tools.has("notice"), kind !== "deleted"); throw cause;
+      } }); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true); assert.equal(calls, 1); assert.equal(existsSync(join(h.root, "notice.json")), kind !== "deleted"); assert.equal(h.tools.has("notice"), kind !== "deleted");
+    } finally { await h.cleanup(); }
+  }
+  const { h, params } = await prepareRegistryNotice(kind);
+  try {
+    const messages: string[] = [];
+    const runtime = createAutoToolsRuntime({ configPath: h.deps.configPath, reservedToolNames: h.deps.reservedToolNames, registerTool(): never { throw Error("No live host registration"); }, exec: async (): Promise<never> => { throw Error("No command execution"); } });
+    const ctx = { hasUI: true, ui: { notify: (message: string) => messages.push(message) } };
+    const definition = createRegisterToolDefinition({ ...h.deps, notify: runtime.notify });
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")), manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href); let calls = 0;
+    const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, ctx); } };
+    const call = { type: "toolCall", id: "host-registry-notice", name: "register_tool", arguments: params };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(calls, 1); assert.equal(outcome.isError, false); assert.deepEqual(messages, [registryNoticeExpected(kind, "notice")]); assert.equal(outcome.result.details.tool, "notice");
+  } finally { await h.cleanup(); }
+});
+
+test("AX registry notices preserve selected-name coercion and native literal wrapping without a model cap", async () => {
+  const stop = Object.freeze({ stop: "after notice observation" });
+  for (const kind of ["activated", "promoted", "deleted"] as const) for (const value of ["name\r\n# Heading\n- next: data\n  tool: data", "界👩‍💻é".repeat(2000), "bad\ud800"]) {
+    const { h, params } = await prepareRegistryNotice(kind); let selected = false, conversions = 0, message: string | undefined, rejected = false;
+    class LegacyName {
+      trim() { return this; } toLowerCase() { return this; } replace() { return this; } slice() { return this; }
+      [Symbol.toPrimitive]() { if (selected) { conversions++; return value; } return "notice"; }
+    }
+    const name = new LegacyName() as unknown as string;
+    const tools = kind === "deleted" ? new Map([[name, h.tools.get("notice")!]]) : h.tools;
+    try {
+      try { await executeRegisterTool({ ...params, name }, {}, { ...h.deps, getTools: () => tools, get notify() {
+        selected = true; return (_ctx: unknown, text: string, type: "info" | "warning" | "error") => { message = text; assert.equal(type, "info"); throw stop; };
+      } }); } catch (error) { rejected = true; assert.equal(error, stop); }
+      assert.equal(rejected, true); assert.equal(conversions, 1, "The old name interpolation occurs once after notify lookup"); assert.ok(message); assert.ok(message.isWellFormed());
+      assert.ok(message.startsWith("- report: " + registryNoticeReport[kind] + "\n"));
+      if (value.isWellFormed()) {
+        if (/[\r\n]/u.test(value)) assert.ok(message.endsWith("- tool:\n  name\r\n  # Heading\n  - next: data\n    tool: data"));
+        else { assert.equal(message, registryNoticeExpected(kind, value)); assert.ok(Buffer.byteLength(message) > 16384, "Ordinary notify retains full value; model cap is not borrowed"); }
+        for (const width of [24, 52, 90, 140]) {
+          const lines = new Text(message, 1, 0).render(width);
+          assert.ok(lines.every(line => visibleWidth(line) <= width));
+          assert.ok(lines.some(line => stripTerminalSequences(line).includes("- report:")));
+          assert.ok(lines.some(line => stripTerminalSequences(line).includes("- tool:")));
+        }
+      } else assert.equal(message, "- report: " + registryNoticeReport[kind] + "\n- tool: [unavailable]\n- tool_omission:\n  - reason: malformed_selected_text\n  - shown: 0\n  - omitted: 1\n  - total: 1");
+    } finally { await h.cleanup(); }
+  }
+});
+
+const transactionMessage = (stage: string, generation: string, summary: string, error: string) => "\n- result: Tool registration transaction failed.\n- stage: " + stage + "\n- resolution_generation: " + generation + "\n- active_skills_summary: " + summary + "\n- error: " + error;
+
+async function captureTransactionText(h: Awaited<ReturnType<typeof createHarness>>, generation: string, summary: string[], message: string, failAt?: string, cause?: unknown) {
+  const events: string[] = [], NativeError = Error, lower = new NativeError("PRIVATE_ORIGINAL", { cause: "PRIVATE_CAUSE" }); let skills = 0, rejected = false, error: unknown;
+  const selected = { [Symbol.toPrimitive]() { events.push("error_coerce"); if (failAt === "error_coerce") throw cause; return message; } };
+  Object.defineProperty(lower, "message", { get() { events.push("message"); if (failAt === "message") throw cause; return selected; } });
+  const context = { cwd: h.root, sessionId: "PRIVATE_SESSION", get generation() { events.push("generation"); if (failAt === "generation") throw cause; return { [Symbol.toPrimitive]() { events.push("generation_coerce"); if (failAt === "generation_coerce") throw cause; return generation; } } as unknown as string; }, get activeSkills() {
+    if (++skills <= 2) { events.push("skills:" + skills); return { namespaces: {} }; }
+    events.push("summary"); if (failAt === "summary") throw cause; return { namespaces: Object.fromEntries(summary.map(name => [name, []])) };
+  } };
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Error")!;
+  Object.defineProperty(globalThis, "Error", { configurable: true, get() { events.push("Error_lookup"); return NativeError; } });
+  try { await executeRegisterTool({ name: "transaction_text", description: "Description", template: "echo" }, {}, { ...h.deps, getRecipeResolutionContext: () => context,
+    registerRuntimeTool(cfg) { events.push("activate"); assert.equal(h.tools.get("transaction_text"), cfg); assert.equal(existsSync(join(h.root, "transaction_text.json")), true); throw lower; },
+    setActiveTools(names) { events.push("setActive"); h.deps.setActiveTools(names); }, notify(): never { throw new NativeError("No notice"); },
+  }); } catch (caught) { rejected = true; error = caught; }
+  finally { Object.defineProperty(globalThis, "Error", descriptor); }
+  assert.equal(rejected, true); assert.equal(existsSync(join(h.root, "transaction_text.json")), false); assert.equal(h.tools.has("transaction_text"), false);
+  assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, "Error"), descriptor); return { error, events };
+}
+
+test("AX transaction failure text preserves real stage effects, restoration and cleanup faults", async () => {
+  const h = await createHarness(), primary = new Error("PRIMARY_ACTIVATION"), token = Object.freeze({ toString(): never { throw Error("Do not coerce cleanup fault"); } });
+  const context = createRecipeResolutionContext("transaction-test", h.root, createActiveSkillRecipeContext([]));
+  try {
+    for (const existing of [false, true]) {
+      h.tools.clear(); await rm(join(h.root, "transaction_case.json"), { force: true });
+      if (existing) await executeRegisterTool({ name: "transaction_case", description: "Old", template: "echo old" }, {}, h.deps);
+      h.runtimeRegistered.length = 0; h.notifications.length = 0;
+      const path = join(h.root, "transaction_case.json"), before = existing ? await readFile(path, "utf8") : undefined, events: string[] = [];
+      await assert.rejects(executeRegisterTool({ name: "transaction_case", update: true, description: "New", template: "echo new" }, {}, { ...h.deps, getRecipeResolutionContext: () => context,
+        registerRuntimeTool(cfg) { events.push("register:" + cfg.description); assert.equal(h.tools.get("transaction_case"), cfg); assert.equal(JSON.parse(readFileSync(path, "utf8")).description, cfg.description); if (cfg.description === "New") throw primary; },
+        setActiveTools(names) { events.push("setActive"); h.deps.setActiveTools(names); },
+      }), (error: unknown) => { assert.ok(error instanceof Error); assert.equal(error.message, transactionMessage("runtime_activation", context.generation, "<none>", primary.message)); return true; });
+      assert.deepEqual(events, ["register:New", ...(existing ? ["register:Old"] : []), "setActive"]);
+      assert.equal(existsSync(path), existing); if (existing) assert.equal(await readFile(path, "utf8"), before);
+      assert.equal(h.tools.get("transaction_case")?.description, existing ? "Old" : undefined);
+    }
+    h.tools.clear(); h.notifications.length = 0;
+    let skills = 0;
+    const invalidPersisted = { ...context, get activeSkills() { if (++skills === 2) throw new Error("PERSISTED_ADMISSION"); return createActiveSkillRecipeContext([]); } };
+    await assert.rejects(executeRegisterTool({ name: "admission_tx", description: "Description", template: "echo" }, {}, { ...h.deps, getRecipeResolutionContext: () => invalidPersisted }), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.equal(error.message, transactionMessage("persisted_admission", context.generation, "<none>", "Persisted tool recipe admission failed: PERSISTED_ADMISSION")); return true;
+    }); assert.equal(existsSync(join(h.root, "admission_tx.json")), false);
+    await mkdir(h.root, { recursive: true }); const blocker = join(h.root, "not-directory"); await writeFile(blocker, "BLOCKER"); let roots = 0;
+    await assert.rejects(executeRegisterTool({ name: "persist_tx", description: "Description", template: "echo" }, {}, { ...h.deps, getRecipeResolutionContext: () => context, get recipeRoot() { return ++roots === 4 ? blocker : h.root; } }), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.match(error.message, /- stage: persist\n/u); assert.match(error.message, /ENOTDIR|EEXIST/u); return true;
+    }); assert.equal(roots, 4); assert.equal(await readFile(blocker, "utf8"), "BLOCKER");
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const position of ["delete", "reactivate", "setActive"]) {
+      h.tools.clear(); await rm(join(h.root, "cleanup_tx.json"), { force: true });
+      if (position === "reactivate") await executeRegisterTool({ name: "cleanup_tx", description: "Old", template: "echo old" }, {}, h.deps);
+      const tools = new Map(h.tools); const originalDelete = tools.delete;
+      tools.delete = function(name) { if (position === "delete") throw cause; return originalDelete.call(this, name); };
+      let calls = 0, rejected = false;
+      try { await executeRegisterTool({ name: "cleanup_tx", update: true, description: "New", template: "echo new" }, {}, { ...h.deps, getTools: () => tools,
+        registerRuntimeTool() { if (++calls === 1) throw primary; if (position === "reactivate") throw cause; },
+        setActiveTools(names) { if (position === "setActive") throw cause; h.deps.setActiveTools(names); },
+      }); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true); assert.equal(calls, position === "reactivate" ? 2 : 1);
+      assert.equal(existsSync(join(h.root, "cleanup_tx.json")), position === "reactivate");
+      assert.equal(tools.get("cleanup_tx")?.description, position === "delete" ? "New" : position === "reactivate" ? "Old" : undefined);
+    }
+    h.tools.clear(); h.notifications.length = 0; h.runtimeRegistered.length = 0;
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")), manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href);
+    const definition = createRegisterToolDefinition({ ...h.deps, getRecipeResolutionContext: () => context, registerRuntimeTool(): never { throw new Error("SDK_ACTIVATION"); } }); let calls = 0;
+    const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+    const call = { type: "toolCall", id: "host-transaction", name: "register_tool", arguments: { name: "host_transaction", description: "Description", template: "echo" } };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, transactionMessage("runtime_activation", context.generation, "<none>", "SDK_ACTIVATION")); assert.deepEqual(outcome.result.details, {});
+    assert.equal(existsSync(join(h.root, "host_transaction.json")), false); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX transaction post-cleanup template keeps coercion order, raw faults and whole-field bounds", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce secondary fault"); } });
+  const order = ["skills:1", "skills:2", "activate", "setActive", "Error_lookup", "generation", "generation_coerce", "summary", "Error_lookup", "message", "error_coerce"];
+  try {
+    const result = await captureTransactionText(h, "RESOLUTION", ["zeta", "alpha, beta"], "  message\n"); assert.ok(result.error instanceof Error);
+    assert.equal(result.error.message, "\n- result: Tool registration transaction failed.\n- stage: runtime_activation\n- resolution_generation: RESOLUTION\n- active_skills_summary: alpha, beta, zeta\n- error:\n    message\n  "); assert.deepEqual(result.events, order);
+    assert.deepEqual(Object.keys(result.error), []); assert.equal(Object.hasOwn(result.error, "cause"), false);
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["generation", "generation_coerce", "summary", "message", "error_coerce"]) {
+      const fault = await captureTransactionText(h, "RESOLUTION", [], "message", stage, cause); assert.equal(fault.error, cause); assert.deepEqual(fault.events, order.slice(0, order.indexOf(stage) + 1));
+    }
+    const read = async (generation: string, summary: string, error: string) => { const result = await captureTransactionText(h, generation, summary === "<none>" ? [] : [summary], error); assert.ok(result.error instanceof Error); assert.ok(result.error.message.isWellFormed()); assert.ok(Buffer.byteLength(result.error.message) <= 16384); return result.error.message; };
+    for (const key of ["resolution_generation", "active_skills_summary", "error"]) {
+      const values = ["RESOLUTION", "<none>", "message"], slot = ["resolution_generation", "active_skills_summary", "error"].indexOf(key);
+      const minimal = [...values]; minimal[slot] = "x"; const width = 16384 - Buffer.byteLength(transactionMessage("runtime_activation", minimal[0], minimal[1], minimal[2])) + 1;
+      const exact = [...values]; exact[slot] = "x".repeat(width); assert.equal(await read(exact[0], exact[1], exact[2]), transactionMessage("runtime_activation", exact[0], exact[1], exact[2]));
+      const overflow = [...values]; overflow[slot] = "x".repeat(width + 1); assert.match(await read(overflow[0], overflow[1], overflow[2]), new RegExp("- " + key + ": \\[omitted\\]\\n- " + key + "_omission:"));
+      const malformed = [...values]; malformed[slot] = "bad\ud800"; assert.match(await read(malformed[0], malformed[1], malformed[2]), new RegExp("- " + key + ": \\[unavailable\\]\\n- " + key + "_omission:\\n  - reason: malformed_selected_text"));
+      const unit = "界👩‍💻é", unicode = [...values]; unicode[slot] = unit.repeat(Math.floor(width / Buffer.byteLength(unit))) + "x".repeat(width % Buffer.byteLength(unit)); assert.equal(Buffer.byteLength(await read(unicode[0], unicode[1], unicode[2])), 16384);
+    }
+    for (const value of [undefined, "primitive", Symbol("selected")]) await assert.rejects(executeRegisterTool({ name: "primitive_tx", description: "Description", template: "echo" }, {}, { ...h.deps, registerRuntimeTool(): never { throw value; } }), (error: unknown) => { assert.ok(error instanceof Error); assert.ok(error.message.endsWith("- error: " + String(value))); return true; });
+    let rejected = false;
+    try { await executeRegisterTool({ name: "unprintable_tx", description: "Description", template: "echo" }, {}, { ...h.deps, registerRuntimeTool(): never { throw { toString(): never { throw token; } }; } }); }
+    catch (error) { rejected = true; assert.equal(error, token); }
+    assert.equal(rejected, true); assert.equal(existsSync(join(h.root, "unprintable_tx.json")), false); assert.equal(h.tools.has("unprintable_tx"), false);
+  } finally { await h.cleanup(); }
+});
+
+async function captureCandidateRefusal(h: Awaited<ReturnType<typeof createHarness>>, branch: "source" | "recipe" | "falsy_from" | "draft", source = "alpha/task", diagnostic = "ADMISSION_MARKER", names: string[] = [], doctor = source, failAt?: string, cause?: unknown) {
+  const events: string[] = []; let activeReads = 0, fromReads = 0, sourceReads = 0, rejected = false, error: unknown;
+  const NativeError = Error, lower = new NativeError(diagnostic);
+  const bounded = diagnostic.length <= 4096 ? diagnostic : diagnostic.slice(0, 4095) + "…";
+  const sourceValue = { [Symbol.toPrimitive]() { const stage = ++sourceReads === 1 ? "source" : sourceReads === 2 ? "doctor_test" : "doctor_identity"; events.push(stage); if (failAt === stage) throw cause; return stage === "source" ? source : doctor; } };
+  const context = { cwd: h.root, generation: "PRIVATE_GENERATION", sessionId: "PRIVATE_SESSION", get activeSkills() {
+    if (++activeReads === 1) { events.push("admission"); throw lower; }
+    events.push("summary"); if (failAt === "summary") throw cause; return { namespaces: Object.fromEntries(names.map(name => [name, []])) };
+  } };
+  const draft = join(h.root, "drafts", "candidate-observation.json");
+  if (branch === "draft") { await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, JSON.stringify({ description: "Description", template: "echo" })); }
+  const input = branch === "draft" ? { name: "candidate_error", draft } : branch === "recipe" ? { name: "candidate_error", description: "Description", template: "echo" }
+    : { name: "candidate_error", description: "Description", get from() { fromReads++; return fromReads === 4 ? { trim: () => branch === "falsy_from" ? "" : sourceValue } : "alpha/task"; } };
+  const joinDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, "join")!;
+  const errorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Error")!;
+  const nativeJoin = Array.prototype.join;
+  const selected = (value: unknown) => Array.isArray(value) && value.length === 1 && value[0] === bounded;
+  // Serialize hooks around one awaited real admission; never replace its returned result.
+  Object.defineProperty(Array.prototype, "join", { configurable: true, get() {
+    if (selected(this)) { events.push("join_get"); if (failAt === "join_get") throw cause; }
+    return function(this: unknown[], ...args: unknown[]) {
+      if (selected(this) && args[0] === "; ") {
+        events.push("join"); if (failAt === "join") throw cause;
+        const value = Reflect.apply(nativeJoin, this, args);
+        return { [Symbol.toPrimitive]() { events.push("diagnostics"); if (failAt === "diagnostics") throw cause; return value; } };
+      }
+      return Reflect.apply(nativeJoin, this, args);
+    };
+  } });
+  Object.defineProperty(globalThis, "Error", { configurable: true, get() { events.push("Error_lookup"); return NativeError; } });
+  try { await executeRegisterTool(input, {}, { ...h.deps, getRecipeResolutionContext: () => context,
+    getActiveTools(): never { throw new NativeError("Refusal precedes activation"); }, registerRuntimeTool(): never { throw new NativeError("No dispatch"); }, notify(): never { throw new NativeError("No notice"); },
+  }); } catch (caught) { rejected = true; error = caught; }
+  finally { Object.defineProperty(Array.prototype, "join", joinDescriptor); Object.defineProperty(globalThis, "Error", errorDescriptor); }
+  assert.equal(rejected, true); return { error, events, bounded, activeReads, fromReads };
+}
+
+async function captureRawDraftFailure(h: Awaited<ReturnType<typeof createHarness>>, reason: string | undefined, failAt?: string, cause?: unknown) {
+  const draft = join(h.root, "drafts", "raw-observation.json"); await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, "null");
+  const NativeError = Error, lower = new NativeError("PRIVATE_LOWER"), events: string[] = [];
+  let reads = 0, stats = 0, rejected = false, error: unknown;
+  const selected = { [Symbol.toPrimitive]() { events.push("reason"); if (failAt === "reason") throw cause; return reason; } };
+  Object.defineProperty(lower, "message", { get() { events.push("message"); if (failAt === "message") throw cause; return reason === undefined ? undefined : selected; } });
+  const readDescriptor = Object.getOwnPropertyDescriptor(fs, "readFileSync")!, statDescriptor = Object.getOwnPropertyDescriptor(fs, "statSync")!;
+  const errorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Error")!;
+  Object.defineProperty(fs, "readFileSync", { ...readDescriptor, value: function(...args: unknown[]) {
+    if (args[0] === draft) { events.push("read:" + ++reads); if (reads === 2) throw lower; }
+    return Reflect.apply(readDescriptor.value, fs, args);
+  } });
+  Object.defineProperty(fs, "statSync", { ...statDescriptor, value: function(...args: unknown[]) {
+    if (args[0] === draft) { events.push("stat:" + ++stats); if (stats === 2 && failAt === "stat") throw cause; }
+    return Reflect.apply(statDescriptor.value, fs, args);
+  } });
+  syncBuiltinESMExports();
+  Object.defineProperty(globalThis, "Error", { configurable: true, get() { events.push("Error_lookup"); return NativeError; } });
+  try { await executeRegisterTool({ name: "raw_draft_error", draft }, {}, { ...h.deps,
+    getRecipeResolutionContext(): never { throw new NativeError("Raw refusal precedes context"); }, registerRuntimeTool(): never { throw new NativeError("No dispatch"); }, notify(): never { throw new NativeError("No notice"); },
+  }); } catch (caught) { rejected = true; error = caught; }
+  finally { Object.defineProperty(globalThis, "Error", errorDescriptor); Object.defineProperty(fs, "readFileSync", readDescriptor); Object.defineProperty(fs, "statSync", statDescriptor); syncBuiltinESMExports(); }
+  assert.equal(fs.readFileSync, readDescriptor.value); assert.equal(readFileSync, readDescriptor.value); assert.equal(fs.statSync, statDescriptor.value);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, "Error"), errorDescriptor);
+  assert.equal(rejected, true); assert.equal(await readFile(draft, "utf8"), "null"); return { error, events };
+}
+
+const draftInvalidHeader = "\n- field: draft\n- result: Draft recipe is invalid.";
+
+test("AX draft raw refusal preserves two reads, reason presence and raw faults", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce secondary fault"); } });
+  const order = ["stat:1", "read:1", "stat:2", "read:2", "Error_lookup", "message", "Error_lookup", "reason"];
+  try {
+    for (const reason of [undefined, "", "RAW_REASON"]) {
+      const result = await captureRawDraftFailure(h, reason);
+      assert.ok(result.error instanceof Error); assert.equal(result.error.message, draftInvalidHeader + (reason === undefined ? "" : "\n- reason: " + reason));
+      assert.deepEqual(result.events, reason === undefined ? order.slice(0, -1) : order);
+      assert.deepEqual(Object.keys(result.error), []); assert.equal(Object.hasOwn(result.error, "cause"), false);
+    }
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["stat", "message", "reason"]) {
+      const result = await captureRawDraftFailure(h, "RAW_REASON", stage, cause); assert.equal(result.error, cause);
+      assert.deepEqual(result.events, stage === "stat" ? order.slice(0, 3) : order.slice(0, order.indexOf(stage) + 1));
+    }
+    const prefix = draftInvalidHeader + "\n- reason: ", size = 16384 - Buffer.byteLength(prefix);
+    for (const payload of ["x".repeat(size), "界".repeat(Math.floor(size / 3)) + "x".repeat(size % 3)]) {
+      const result = await captureRawDraftFailure(h, payload); assert.ok(result.error instanceof Error); assert.equal(result.error.message, prefix + payload); assert.equal(Buffer.byteLength(result.error.message), 16384);
+    }
+    const overflow = await captureRawDraftFailure(h, "x".repeat(size + 1)); assert.ok(overflow.error instanceof Error); assert.match(overflow.error.message, /reason: \[omitted\]\n- reason_omission:/u);
+    const malformed = await captureRawDraftFailure(h, "bad\ud800"); assert.ok(malformed.error instanceof Error); assert.match(malformed.error.message, /reason: \[unavailable\]\n- reason_omission:\n  - reason: malformed_selected_text/u);
+    const opaque = await captureRawDraftFailure(h, "# Heading\r\n- next: data\n  tool: data"); assert.ok(opaque.error instanceof Error); assert.equal(opaque.error.message, draftInvalidHeader + "\n- reason:\n  # Heading\r\n  - next: data\n    tool: data");
+    const draft = join(h.root, "drafts", "sdk-invalid.json"); await writeFile(draft, "null");
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")), manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href);
+    const definition = createRegisterToolDefinition(h.deps); let calls = 0;
+    const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+    const call = { type: "toolCall", id: "host-raw-draft", name: "register_tool", arguments: { name: "host_raw", draft } };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftInvalidHeader + "\n- reason: JSON recipe must be an object"); assert.deepEqual(outcome.result.details, {});
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX draft candidate refusal preserves real admission join after Error lookup and legacy cap", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce secondary fault"); } });
+  const order = ["admission", "Error_lookup", "Error_lookup", "join_get", "join", "diagnostics"];
+  try {
+    const result = await captureCandidateRefusal(h, "draft"); assert.ok(result.error instanceof Error); assert.equal(result.error.message, draftInvalidHeader + "\n- diagnostics_summary: ADMISSION_MARKER"); assert.deepEqual(result.events, order);
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["join_get", "join", "diagnostics"]) {
+      const fault = await captureCandidateRefusal(h, "draft", "unused", "ADMISSION_MARKER", [], "unused", stage, cause); assert.equal(fault.error, cause); assert.deepEqual(fault.events, order.slice(0, order.indexOf(stage) + 1));
+    }
+    const original = "界".repeat(5000), bounded = original.slice(0, 4095) + "…";
+    const capped = await captureCandidateRefusal(h, "draft", "unused", original); assert.ok(capped.error instanceof Error); assert.equal(capped.error.message, draftInvalidHeader + "\n- diagnostics_summary: " + bounded); assert.equal(capped.bounded, bounded);
+    const malformed = await captureCandidateRefusal(h, "draft", "unused", "x".repeat(4094) + "😀tail"); assert.ok(malformed.error instanceof Error); assert.match(malformed.error.message, /diagnostics_summary: \[unavailable\]\n- diagnostics_summary_omission:/u);
+    const draft = join(h.root, "drafts", "sdk-candidate.json"); await writeFile(draft, JSON.stringify({ description: "Description", template: "echo" }));
+    const marker = "SDK_DRAFT_ADMISSION", context = { cwd: h.root, generation: "PRIVATE_GENERATION", sessionId: "PRIVATE_SESSION", get activeSkills(): never { throw new Error(marker); } };
+    const definition = createRegisterToolDefinition({ ...h.deps, getRecipeResolutionContext: () => context });
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")), manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href); let calls = 0;
+    const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+    const call = { type: "toolCall", id: "host-draft-admission", name: "register_tool", arguments: { name: "host_candidate", draft } };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftInvalidHeader + "\n- diagnostics_summary: " + marker); assert.deepEqual(outcome.result.details, {});
+    assert.equal(existsSync(join(h.root, "candidate_error.json")), false); assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+const candidateMessage = (diagnostics: string, source?: string, summary = "<none>", instruction = "inspect target=recipes view=doctor identity=alpha/task") =>
+  "\n- field: recipe" + (source === undefined ? "" : "\n- source:\n  ```text\n  " + source + "\n  ```") +
+  "\n- result: " + (source === undefined ? "Tool recipe validation failed." : "Recipe source validation failed.") +
+  "\n- diagnostics_summary: " + diagnostics + (source === undefined ? "" : "\n- active_skills_summary: " + summary + "\n- instruction: " + instruction);
+
+for (const branch of ["source", "recipe"] as const) test(`AX candidate admission ${branch} refusal preserves real admission and branch evidence`, async () => {
+  const h = await createHarness();
+  try {
+    const result = await captureCandidateRefusal(h, branch, "alpha/task", "ADMISSION_MARKER", ["zeta", "alpha, beta"]);
+    assert.ok(result.error instanceof Error); assert.equal(result.error.message, candidateMessage("ADMISSION_MARKER", branch === "source" ? "alpha/task" : undefined, "alpha, beta, zeta"));
+    assert.equal(Object.getPrototypeOf(result.error), Error.prototype); assert.deepEqual(Object.keys(result.error), []); assert.equal(Object.hasOwn(result.error, "cause"), false);
+    assert.equal(result.activeReads, branch === "source" ? 2 : 1); assert.equal(existsSync(join(h.root, "candidate_error.json")), false);
+    const marker = "SDK_ADMISSION_MARKER"; let active = 0;
+    const context = { cwd: h.root, generation: "PRIVATE_GENERATION", sessionId: "PRIVATE_SESSION", get activeSkills() { if (++active === 1) throw new Error(marker); return createActiveSkillRecipeContext([]); } };
+    const definition = createRegisterToolDefinition({ ...h.deps, getRecipeResolutionContext: () => context });
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json"), entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href);
+    let calls = 0; const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+    const call = { type: "toolCall", id: "host-candidate", name: "register_tool", arguments: branch === "source" ? { name: "host_candidate", from: "alpha/task" } : { name: "host_candidate", description: "Description", template: "echo" } };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, candidateMessage(marker, branch === "source" ? "alpha/task" : undefined)); assert.deepEqual(outcome.result.details, {});
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX candidate refusal preserves pre-Error join, branch and secondary fault observations", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce secondary fault"); } });
+  const order = ["admission", "Error_lookup", "source", "join_get", "join", "diagnostics", "summary", "doctor_test", "doctor_identity", "Error_lookup"];
+  try {
+    const source = await captureCandidateRefusal(h, "source", "shown", "ADMISSION_MARKER", [], "other/task");
+    assert.deepEqual(source.events, order); assert.ok(source.error instanceof Error); assert.equal(source.error.message, candidateMessage("ADMISSION_MARKER", "shown", "<none>", "inspect target=recipes view=doctor identity=other/task"));
+    for (const branch of ["recipe", "falsy_from"] as const) {
+      const result = await captureCandidateRefusal(h, branch); assert.deepEqual(result.events, ["admission", "Error_lookup", "join_get", "join", "diagnostics", "Error_lookup"]);
+      assert.ok(result.error instanceof Error); assert.equal(result.error.message, candidateMessage("ADMISSION_MARKER")); assert.equal(result.activeReads, 1);
+    }
+    const emptyDisplay = await captureCandidateRefusal(h, "source", "", "ADMISSION_MARKER", [], "invalid");
+    assert.ok(emptyDisplay.error instanceof Error); assert.equal(emptyDisplay.error.message, candidateMessage("ADMISSION_MARKER", "", "<none>", "inspect target=recipes view=doctor"));
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["source", "join_get", "join", "diagnostics", "summary", "doctor_test", "doctor_identity"]) {
+      const result = await captureCandidateRefusal(h, "source", "shown", "ADMISSION_MARKER", [], "other/task", stage, cause);
+      assert.equal(result.error, cause); assert.deepEqual(result.events, order.slice(0, order.indexOf(stage) + 1));
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX candidate refusal preserves legacy diagnostic cap and whole-field response bounds", async () => {
+  const h = await createHarness();
+  const read = async (source: string, diagnostics: string, summary = "<none>", doctor = "invalid", branch: "source" | "recipe" = "source") => {
+    const result = await captureCandidateRefusal(h, branch, source, diagnostics, summary === "<none>" ? [] : [summary], doctor);
+    assert.ok(result.error instanceof Error); assert.ok(result.error.message.isWellFormed()); assert.ok(Buffer.byteLength(result.error.message) <= 16384); return { text: result.error.message, bounded: result.bounded };
+  };
+  try {
+    const original = "界".repeat(5000), capped = original.slice(0, 4095) + "…";
+    assert.deepEqual(await read("alpha/task", original, "<none>", "invalid", "recipe"), { text: candidateMessage(capped), bounded: capped });
+    const malformed = "x".repeat(4094) + "😀tail";
+    const unavailable = await read("alpha/task", malformed, "<none>", "invalid", "recipe");
+    assert.equal(unavailable.bounded.isWellFormed(), false); assert.match(unavailable.text, /diagnostics_summary: \[unavailable\]\n- diagnostics_summary_omission:\n  - reason: malformed_selected_text/u);
+    const hint = "inspect target=recipes view=doctor";
+    for (const key of ["source", "active_skills_summary"]) {
+      const base = candidateMessage("ADMISSION_MARKER", key === "source" ? "x" : "short", key === "active_skills_summary" ? "x" : "<none>", hint);
+      const width = 16384 - Buffer.byteLength(base) + 1;
+      const source = key === "source" ? "x".repeat(width) : "short", summary = key === "active_skills_summary" ? "x".repeat(width) : "<none>";
+      assert.equal((await read(source, "ADMISSION_MARKER", summary)).text, candidateMessage("ADMISSION_MARKER", source, summary, hint));
+      assert.match((await read(key === "source" ? source + "x" : source, "ADMISSION_MARKER", key === "active_skills_summary" ? summary + "x" : summary)).text, new RegExp("- " + key + ": \\[omitted\\]\\n- " + key + "_omission:"));
+      const unit = "界👩‍💻é", unicode = unit.repeat(Math.floor(width / Buffer.byteLength(unit))) + "x".repeat(width % Buffer.byteLength(unit));
+      assert.equal(Buffer.byteLength((await read(key === "source" ? unicode : source, "ADMISSION_MARKER", key === "active_skills_summary" ? unicode : summary)).text), 16384);
+      assert.match((await read(key === "source" ? "bad\ud800" : "short", "ADMISSION_MARKER", key === "active_skills_summary" ? "bad\ud800" : "<none>")).text, new RegExp("- " + key + ": \\[unavailable\\]"));
+    }
+    const doctorPrefix = "inspect target=recipes view=doctor identity=";
+    const base = candidateMessage("ADMISSION_MARKER", "short", "<none>", doctorPrefix + "a/b");
+    const width = 16384 - Buffer.byteLength(base) + 1, doctor = "a/" + "b".repeat(width);
+    assert.equal(Buffer.byteLength((await read("short", "ADMISSION_MARKER", "<none>", doctor)).text), 16384);
+    assert.match((await read("short", "ADMISSION_MARKER", "<none>", doctor + "b")).text, /instruction: \[omitted\]\n- instruction_omission:/u);
+    const opaque = "# Heading\r\n- next: data\n  tool: data", body = await read("bad`````source", opaque, "alpha, beta\r\nlabel: data");
+    assert.ok(body.text.includes("``````text\n  bad`````source\n  ``````"));
+    assert.ok(body.text.includes("- diagnostics_summary:\n  # Heading\r\n  - next: data\n    tool: data"));
+  } finally { await h.cleanup(); }
+});
+
+async function captureSourceNormalization(h: Awaited<ReturnType<typeof createHarness>>, source: string, reason: string, names: string[] = [], doctor = source, failAt?: string, cause?: unknown) {
+  const events: string[] = []; let reads = 0, conversions = 0, rejected = false, error: unknown;
+  const selectedSource = {
+    startsWith() { events.push("startsWith"); return false; },
+    [Symbol.toPrimitive]() { const stage = ++conversions === 1 ? "source" : conversions === 2 ? "doctor_test" : "doctor_identity"; events.push(stage); if (failAt === stage) throw cause; return stage === "source" ? source : doctor; },
+  };
+  const selectedReason = { [Symbol.toPrimitive]() { events.push("reason"); if (failAt === "reason") throw cause; return reason; } };
+  const original = new Error("PRIVATE_ORIGINAL", { cause: "PRIVATE_CAUSE" });
+  Object.defineProperty(original, "message", { get() { events.push("message"); if (failAt === "message") throw cause; return { trim() { events.push("trim"); if (failAt === "trim") throw cause; return selectedReason; } }; } });
+  const context = { cwd: h.root, generation: "PRIVATE_GENERATION", sessionId: "PRIVATE_SESSION", get activeSkills() {
+    events.push("skills"); if (failAt === "skills") throw cause; return { namespaces: Object.fromEntries(names.map(name => [name, []])) };
+  } };
+  const input = { name: "source_failure", get from() { reads++; return reads === 4 ? { trim: () => selectedSource } : "alpha/task"; }, get description(): never { events.push("spread"); throw original; } };
+  try { await executeRegisterTool(input, {}, { ...h.deps, getRecipeResolutionContext: () => context,
+    getTools(): never { throw Error("No lookup after source refusal"); }, registerRuntimeTool(): never { throw Error("No dispatch"); }, notify(): never { throw Error("No notice"); },
+  }); } catch (caught) { rejected = true; error = caught; }
+  assert.equal(rejected, true); assert.equal(reads, 6); return { error, events };
+}
+
+const sourceFailureMessage = (source: string, reason: string, summary: string, instruction: string) =>
+  "\n- field: from\n- source:\n  ```text\n  " + source + "\n  ```\n- result: Recipe source is invalid.\n- reason: " + reason + "\n- active_skills_summary: " + summary + "\n- instruction: " + instruction;
+
+test("AX public source normalization preserves owned reasons, legacy summary and SDK errors", async () => {
+  const h = await createHarness();
+  try {
+    const names = ["alpha, beta", ...Array.from({ length: 22 }, (_, i) => "skill" + String(i).padStart(2, "0"))];
+    const context = createRecipeResolutionContext("source-test", h.root, createActiveSkillRecipeContext(names.map(name => ({ name, baseDir: join(h.root, "unused") }))));
+    const summary = [...names].sort().slice(0, 20).join(", ");
+    const cases = [
+      ["std:old", "std: Recipe references were removed; use <skill>/<recipe> or an explicit .json/.md file path.", "inspect target=recipes view=doctor"],
+      ["skill:alpha/task", "skill: Recipe references were removed; use alpha/task without a prefix.", "inspect target=recipes view=doctor identity=alpha/task"],
+      ["invalid", "Tool from must use <skill>/<recipe> or an explicit .json/.md file path.", "inspect target=recipes view=doctor"],
+    ];
+    const deps = { ...h.deps, getRecipeResolutionContext: () => context };
+    for (const [source, reason, hint] of cases) await assert.rejects(executeRegisterTool({ name: "bad_source", from: source }, {}, deps), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.equal(error.message, sourceFailureMessage(source, reason, summary, hint)); assert.equal(Object.getPrototypeOf(error), Error.prototype);
+      assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false); assert.doesNotMatch(error.message, /- next:|PRIVATE_|not applied|no effects/u); return true;
+    });
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(entry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(deps);
+    for (const [source, reason, hint] of cases.slice(0, 2)) {
+      let calls = 0; const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+      const call = { type: "toolCall", id: "host-source-normalization", name: "register_tool", arguments: { name: "host_source", from: source } };
+      const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+      assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, sourceFailureMessage(source, reason, summary, hint)); assert.deepEqual(outcome.result.details, {});
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX source normalization keeps catch extent and original template and summary fault order", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce secondary fault"); } });
+  const order = ["spread", "message", "trim", "startsWith", "source", "reason", "skills", "doctor_test", "doctor_identity"];
+  try {
+    const captured = await captureSourceNormalization(h, "displayed", "why", ["zeta", "alpha, beta"], "other/task");
+    assert.ok(captured.error instanceof Error); assert.equal(captured.error.message, sourceFailureMessage("displayed", "why", "alpha, beta, zeta", "inspect target=recipes view=doctor identity=other/task"));
+    assert.deepEqual(captured.events, order, "Display source and diagnostic hint may disagree; preserve old observations rather than repairing identity");
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["message", "trim", "source", "reason", "skills", "doctor_test", "doctor_identity"]) {
+      const result = await captureSourceNormalization(h, "displayed", "why", [], "alpha/task", stage, cause);
+      assert.equal(result.error, cause); assert.deepEqual(result.events, order.slice(0, order.indexOf(stage) + 1));
+    }
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const point of [3, 5]) {
+      let reads = 0, rejected = false;
+      try { await executeRegisterTool({ name: "outside_catch", get from() { if (++reads === point) throw cause; return "alpha/task"; } }, {}, h.deps); }
+      catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true); assert.equal(reads, point);
+    }
+    for (const thrown of [undefined, "primitive", Symbol("selected")]) {
+      await assert.rejects(executeRegisterTool({ name: "spread_failure", from: "alpha/task", get description(): never { throw thrown; } }, {}, h.deps), (error: unknown) => {
+        assert.ok(error instanceof Error); assert.equal(error.message, sourceFailureMessage("alpha/task", String(thrown), "<none>", "inspect target=recipes view=doctor identity=alpha/task")); return true;
+      });
+    }
+    let rejected = false;
+    try { await executeRegisterTool({ name: "string_fault", from: "alpha/task", get description(): never { throw { toString(): never { throw token; } }; } }, {}, h.deps); }
+    catch (error) { rejected = true; assert.equal(error, token); } assert.equal(rejected, true);
+    let fromReads = 0;
+    await assert.rejects(executeRegisterTool({ name: "missing_display", get from() { return ++fromReads === 3 ? undefined : "alpha/task"; }, get description(): never { throw "why"; } }, {}, h.deps), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.equal(error.message, sourceFailureMessage("undefined", "why", "<none>", "inspect target=recipes view=doctor")); return true;
+    }); assert.equal(fromReads, 5);
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX source normalization fits whole selected fields with truthful omissions and opaque Markdown", async () => {
+  const h = await createHarness();
+  try {
+    const normalHint = "inspect target=recipes view=doctor";
+    const get = async (source: string, reason: string, summary: string, doctor = "invalid") => {
+      const result = await captureSourceNormalization(h, source, reason, summary === "<none>" ? [] : [summary], doctor);
+      assert.ok(result.error instanceof Error); const text = result.error.message;
+      assert.ok(text.isWellFormed()); assert.ok(Buffer.byteLength(text) <= 16384); return text;
+    };
+    for (const key of ["source", "reason", "active_skills_summary"]) {
+      const args = ["short", "why", "<none>"]; const slot = ["source", "reason", "active_skills_summary"].indexOf(key);
+      const empty = [...args]; empty[slot] = "x";
+      const base = sourceFailureMessage(empty[0], empty[1], empty[2], normalHint);
+      const size = 16384 - Buffer.byteLength(base) + 1;
+      const exact = [...args]; exact[slot] = "x".repeat(size);
+      assert.equal(await get(exact[0], exact[1], exact[2]), sourceFailureMessage(exact[0], exact[1], exact[2], normalHint));
+      const overflow = [...args]; overflow[slot] = "x".repeat(size + 1);
+      assert.match(await get(overflow[0], overflow[1], overflow[2]), new RegExp("- " + key + ": \\[omitted\\]\\n- " + key + "_omission:"));
+      const malformed = [...args]; malformed[slot] = "bad\ud800";
+      assert.match(await get(malformed[0], malformed[1], malformed[2]), new RegExp("- " + key + ": \\[unavailable\\]\\n- " + key + "_omission:\\n  - reason: malformed_selected_text"));
+      const unit = "界👩‍💻é", unicode = [...args]; unicode[slot] = unit.repeat(Math.floor(size / Buffer.byteLength(unit))) + "x".repeat(size % Buffer.byteLength(unit));
+      assert.equal(Buffer.byteLength(await get(unicode[0], unicode[1], unicode[2])), 16384);
+    }
+    const doctorPrefix = "inspect target=recipes view=doctor identity=";
+    const base = sourceFailureMessage("short", "why", "<none>", doctorPrefix + "a/b");
+    const width = 16384 - Buffer.byteLength(base) + 1;
+    const exactDoctor = "a/" + "b".repeat(width);
+    assert.equal(Buffer.byteLength(await get("short", "why", "<none>", exactDoctor)), 16384);
+    assert.match(await get("short", "why", "<none>", exactDoctor + "b"), /- instruction: \[omitted\]\n- instruction_omission:/u);
+    const opaque = "# Heading\r\n\r\n- next: forged\n  tool: not metadata\n`body`";
+    const selected = await get("bad`````source", opaque, "a, b\r\nlabel: value");
+    assert.ok(selected.includes("``````text\n  bad`````source\n  ``````"));
+    assert.ok(selected.includes("- reason:\n  # Heading\r\n  \r\n  - next: forged\n    tool: not metadata\n  `body`"));
+    assert.ok(selected.includes("- active_skills_summary:\n  a, b\r\n  label: value"));
+    assert.ok(selected.endsWith("- instruction: " + normalHint));
+  } finally { await h.cleanup(); }
+});
+
+const draftPathSuffix = (kind: "root" | "missing") => kind === "root"
+  ? "\n- result: Draft must be under the allowed root.\n- instruction: Use inspect target=recipes view=summary to list drafts."
+  : "\n- result: Draft not found.";
+
+for (const kind of ["root", "missing"] as const) test(`AX draft path ${kind} refusal preserves selected literal and whole-reference bounds`, async () => {
+  const h = await createHarness(), key = kind === "root" ? "allowed_root" : "path";
+  const suffix = draftPathSuffix(kind), prefix = "\n- field: draft\n- " + key + ":\n  ```text\n  ";
+  const tail = "\n  ```" + suffix;
+  const ref = (payload: string) => kind === "root" ? join(h.root, payload, "drafts") : join(h.root, "drafts", payload);
+  const capture = async (reference: string, caller?: string) => {
+    let roots = 0, rejected = false, result: unknown;
+    try { await executeRegisterTool({ name: "draft_path", draft: kind === "root" ? caller ?? join(h.root, "FORBIDDEN_CALLER") : reference }, {}, { ...h.deps,
+      get recipeRoot() { roots++; return roots === 1 ? h.root : kind === "root" ? dirname(reference) : h.root; },
+      getTools(): never { throw Error("Path guards precede tool lookup"); },
+      getRecipeResolutionContext(): never { throw Error("No new context read"); },
+      notify(): never { throw Error("No notice"); },
+      registerRuntimeTool(): never { throw Error("No dispatch"); },
+    }); } catch (error) { rejected = true; result = error; }
+    assert.equal(rejected, true); assert.equal(roots, 2);
+    assert.ok(result instanceof Error); assert.equal(Object.getPrototypeOf(result), Error.prototype); assert.deepEqual(Object.keys(result), []); assert.equal(Object.hasOwn(result, "cause"), false);
+    assert.ok(result.message.isWellFormed()); assert.ok(Buffer.byteLength(result.message) <= 16384);
+    assert.doesNotMatch(result.message, /FORBIDDEN_CALLER|- next:|not applied|no effects|callable_now|exists: true/u); return result.message;
+  };
+  try {
+    const plain = ref("short"); assert.equal(await capture(plain), prefix + plain + tail);
+    if (kind === "root") {
+      assert.equal(await capture(plain, plain), prefix + plain + tail, "Equality still refuses");
+      assert.equal(await capture(plain, join(plain, "..prefix")), prefix + plain + tail, "Original dot-prefix refusal is not repaired into a new containment rule");
+    }
+    const quoted = ref("literal`````界\r\nnext: data");
+    const formatted = await capture(quoted);
+    assert.ok(formatted.includes("- " + key + ":\n  ``````text\n  " + quoted.replaceAll(/\r\n|\r|\n/gu, newline => newline + "  ") + "\n  ``````"));
+    const fixed = Buffer.byteLength(ref("x")) - 1;
+    const allowance = 16384 - Buffer.byteLength(prefix + tail) - fixed;
+    const exact = ref("x".repeat(allowance));
+    assert.equal(await capture(exact), prefix + exact + tail); assert.equal(Buffer.byteLength(prefix + exact + tail), 16384);
+    const omitted = "\n- field: draft\n- " + key + ": [omitted]\n- " + key + "_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix;
+    assert.equal(await capture(ref("x".repeat(allowance + 1))), omitted);
+    const unit = "界👩‍💻é", payload = unit.repeat(Math.floor(allowance / Buffer.byteLength(unit))) + "x".repeat(allowance % Buffer.byteLength(unit));
+    assert.equal(Buffer.byteLength(await capture(ref(payload))), 16384); assert.equal(await capture(ref(payload + "界")), omitted);
+    assert.equal(await capture(ref("bad\ud800")), "\n- field: draft\n- " + key + ": [unavailable]\n- " + key + "_omission:\n  - reason: malformed_selected_text\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix);
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX draft path refusals preserve root and draft observations, raw faults and actual SDK errors", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce fault"); } });
+  const missing = join(h.root, "drafts", "missing.json"), outside = join(h.root, "FORBIDDEN_CALLER.json");
+  try {
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const mode of ["outer_root", "guard_root", "draft_trim", "draft_string"]) {
+      let roots = 0, drafts = 0, rejected = false;
+      const input = { name: "path_fault", get draft() { drafts++;
+        if (mode === "draft_trim" && drafts === 2) return { trim(): never { throw cause; } };
+        if (mode === "draft_string" && drafts === 5) return { toString(): never { throw cause; } };
+        return missing;
+      } };
+      try { await executeRegisterTool(input, {}, { ...h.deps, get recipeRoot() {
+        roots++; if (mode === "outer_root" || mode === "guard_root" && roots === 2) throw cause; return h.root;
+      } }); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true);
+      if (mode === "outer_root") assert.deepEqual([roots, drafts], [1, 0]);
+      if (mode === "guard_root") assert.deepEqual([roots, drafts], [2, 5]);
+      if (mode === "draft_trim") assert.deepEqual([roots, drafts], [1, 2]);
+      if (mode === "draft_string") assert.deepEqual([roots, drafts], [1, 5]);
+    }
+    await assert.rejects(executeRegisterTool({ name: "bad_root", draft: missing }, {}, { ...h.deps, recipeRoot: {} as string }), (error: unknown) => {
+      assert.ok(error instanceof TypeError); assert.doesNotMatch(error.message, /- field: draft/u); return true;
+    });
+    const existing = join(h.root, "drafts", "existing.json"), bytes = "PRIVATE_BODY_NOT_READ";
+    await mkdir(dirname(existing), { recursive: true }); await writeFile(existing, bytes);
+    let rejected = false;
+    try { await executeRegisterTool({ name: "existing_path", draft: existing }, {}, { ...h.deps, getTools(): never { throw token; } }); }
+    catch (error) { rejected = true; assert.equal(error, token); }
+    assert.equal(rejected, true); assert.equal(await readFile(existing, "utf8"), bytes);
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(entry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps);
+    for (const [draft, kind, key, reference] of [[outside, "root", "allowed_root", resolve(h.root, "drafts")], [missing, "missing", "path", resolve(missing)]] as const) {
+      let calls = 0;
+      const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+      const call = { type: "toolCall", id: "host-draft-path", name: "register_tool", arguments: { name: "host_path", draft } };
+      const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+      assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, "\n- field: draft\n- " + key + ":\n  ```text\n  " + reference + "\n  ```" + draftPathSuffix(kind)); assert.deepEqual(outcome.result.details, {});
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+const runtimeDefaultText = (key: string) => "\n- field: defaults\n- key: " + key + "\n- result: Tool defaults cannot set runtime-owned input.\n- instruction: remove that default and retry register_tool; the runtime supplies it.";
+
+test("AX runtime-owned default refusal preserves finite first-key selection and copy order without values", async () => {
+  const h = await createHarness(), draft = join(h.root, "drafts", "runtime-key.json");
+  const bytes = JSON.stringify({ description: "PRIVATE_DRAFT", template: "echo untouched" });
+  const names = ["owner_id", "recipe_dir", "run_instance_id", "runtime_state_root", "session_id", "skill_dir", "state_dir", "trace_file"];
+  assert.deepEqual(RUNTIME_OWNED_RECIPE_INPUT_NAMES, names); assert.equal(Object.isFrozen(RUNTIME_OWNED_RECIPE_INPUT_NAMES), true);
+  try {
+    await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, bytes);
+    const symbol = Symbol("private copied symbol");
+    const groups: Array<[string, Array<string | symbol>]> = [...names.map(key => [key, [key]] as [string, string[]]),
+      ["owner_id", ["17", "PRIVATE_SAFE", ...names, symbol]],
+      ["trace_file", [...names].reverse()],
+      ["runtime_state_root", ["OWNER_ID", " owner_id", "owner_id\ud800", "PRIVATE_SAFE", "runtime_state_root", "owner_id"]],
+    ];
+    for (const route of ["ordinary", "draft"]) for (const [selected, keys] of groups) {
+      const copy: string[] = [], stages: string[] = []; let drafts = 0;
+      const body = Object.fromEntries(keys.map(key => [key, Object.freeze({ toString(): never { throw Error("Do not stringify default values"); } })]));
+      const ordered = Reflect.ownKeys(body);
+      const defaults = new Proxy(body, {
+        ownKeys(target) { copy.push("keys"); return Reflect.ownKeys(target); },
+        getOwnPropertyDescriptor(target, key) { copy.push("descriptor:" + String(key)); return Reflect.getOwnPropertyDescriptor(target, key); },
+        get(target, key, receiver) { copy.push("value:" + String(key)); return Reflect.get(target, key, receiver); },
+      });
+      const input = { name: "runtime_key", from: "private-owner/reference", defaults,
+        // Direct changing-getter promotion probe, not a two-source SDK DTO.
+        get draft() { return route === "draft" && ++drafts > 1 ? draft : undefined; },
+      };
+      await assert.rejects(executeRegisterTool(input, {}, { ...h.deps,
+        getRecipeResolutionContext() { stages.push("resolution"); return undefined; },
+        getTools() { stages.push("getTools"); return h.tools; },
+        getToolNameBlocker() { stages.push("blocker"); return undefined; },
+        registerRuntimeTool(): never { throw Error("No dispatch"); },
+        getActiveTools(): never { throw Error("No activation read"); },
+        notify(): never { throw Error("No notice"); },
+      }), (error: unknown) => {
+        assert.ok(error instanceof Error); assert.equal(error.message, runtimeDefaultText(selected)); assert.equal(Object.getPrototypeOf(error), Error.prototype);
+        assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false); assert.ok(error.message.isWellFormed()); assert.ok(Buffer.byteLength(error.message) < 1024);
+        assert.doesNotMatch(error.message, /PRIVATE_|private-owner|- next:|no effects|not applied|callable_now|supported_keys/u); return true;
+      });
+      assert.deepEqual(copy, ["keys", ...ordered.flatMap(key => ["descriptor:" + String(key), "value:" + String(key)])]);
+      assert.deepEqual(stages, [...(route === "ordinary" ? ["resolution"] : []), "getTools", "blocker"]);
+      if (route === "draft") assert.equal(drafts, 5);
+      assert.equal(await readFile(draft, "utf8"), bytes); assert.equal(existsSync(join(h.root, "runtime_key.json")), false);
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX runtime-owned default guard keeps late-copy faults, delegation condition and real SDK key order", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce fault"); } });
+  try {
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) {
+      const reads: string[] = []; let rejected = false;
+      const defaults = { get owner_id() { reads.push("owner"); return "PRIVATE_VALUE"; }, get tail(): never { reads.push("tail"); throw cause; } };
+      try { await executeRegisterTool({ name: "copy_fault", from: "private-owner/reference", defaults }, {}, h.deps); }
+      catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true); assert.deepEqual(reads, ["owner", "tail"], "Do not refuse before the original full copy finishes");
+      let templates = 0; rejected = false;
+      try { await executeRegisterTool({ name: "command_default", description: "Description", defaults: { owner_id: "PRIVATE_VALUE" }, get template() { if (++templates === 2) throw cause; return "echo first"; } }, {}, h.deps); }
+      catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true); assert.equal(templates, 2, "The delegated-source guard is not a global command-template default ban");
+    }
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(entry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps);
+    for (const keys of [["state_dir", "owner_id"], ["owner_id", "state_dir"]]) {
+      const defaults = Object.fromEntries(keys.map(key => [key, "PRIVATE_VALUE"])); const original = JSON.stringify(defaults); let calls = 0;
+      const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+      const call = { type: "toolCall", id: "host-runtime-key", name: "register_tool", arguments: { name: "host_key", from: "private-owner/reference", defaults } };
+      const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+      assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, runtimeDefaultText(keys[0])); assert.deepEqual(outcome.result.details, {}); assert.equal(JSON.stringify(defaults), original);
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+const authoredGuardText = {
+  defaults: "\n- field: defaults\n- result: Tool defaults must be an object.",
+  description: "\n- field: description\n- result: Tool description is required for command-template registration.",
+  null: "\n- field: template\n- result: Tool template cannot be null here.",
+  required: "\n- field: template\n- result: Tool template is required.",
+};
+
+for (const kind of ["defaults", "description", "null", "required"] as const) test(`AX authored guard ${kind} preserves authoring stages without body echo`, async () => {
+  const h = await createHarness(), draft = join(h.root, "drafts", "authored.json");
+  const bytes = JSON.stringify({ description: "PRIVATE_DRAFT", ...(kind === "required" ? {} : { template: "echo retained" }) });
+  try {
+    await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, bytes);
+    for (const route of [...(kind === "defaults" ? ["from"] : []), "command", "draft"]) {
+      const events: string[] = []; let templates = 0, drafts = 0;
+      const input: Record<string, unknown> = {
+        name: "authored",
+        description: { trim() { events.push("description.trim"); return kind === "description" ? "" : "PRIVATE_DESCRIPTION"; }, toString(): never { throw Error("No description coercion for copy"); } },
+        defaults: kind === "defaults" ? false : undefined,
+      };
+      if (route === "from") input.from = "private-owner/reference";
+      else if (route === "command") Object.defineProperty(input, "template", { enumerable: true, get() { templates++; return templates === 1 ? "echo first" : kind === "null" ? null : undefined; } });
+      else if (kind === "null") {
+        // Direct changing-getter probe; not a cloneable two-source SDK request.
+        Object.defineProperty(input, "draft", { enumerable: true, get() { drafts++; return drafts === 1 ? undefined : draft; } });
+        Object.defineProperty(input, "template", { enumerable: true, get() { templates++; return null; } });
+      } else input.draft = draft;
+      await assert.rejects(executeRegisterTool(input, {}, { ...h.deps,
+        getRecipeResolutionContext() { events.push("resolution"); return undefined; },
+        getTools() { events.push("getTools"); return h.tools; },
+        getToolNameBlocker() { events.push("blocker"); return undefined; },
+        getActiveTools(): never { throw Error("No activation read"); },
+        registerRuntimeTool(): never { throw Error("No dispatch"); },
+        notify(): never { throw Error("No notice"); },
+      }), (error: unknown) => {
+        assert.ok(error instanceof Error); assert.equal(error.message, authoredGuardText[kind]); assert.equal(Object.getPrototypeOf(error), Error.prototype);
+        assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false); assert.ok(Buffer.byteLength(error.message) < 1024);
+        assert.doesNotMatch(error.message, /PRIVATE_|private-owner|- next:|- instruction:|not applied|no effects|callable_now/u); return true;
+      });
+      assert.deepEqual(events, [...(route === "draft" ? [] : ["resolution"]), "getTools", "blocker", "description.trim"]);
+      assert.equal(templates, route === "command" ? ["null", "required"].includes(kind) ? 2 : 1 : route === "draft" && kind === "null" ? 1 : 0);
+      if (route === "draft" && kind === "null") assert.equal(drafts, 5);
+      assert.equal(await readFile(draft, "utf8"), bytes); assert.equal(existsSync(join(h.root, "authored.json")), false);
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX authored constants preserve Schema and observation faults plus SDK phase ownership", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce unowned fault"); } });
+  try {
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const mode of ["args", "description_trim", "defaults_keys", "defaults_descriptor", "defaults_value", "retained_template"]) {
+      h.tools.clear(); let templates = 0;
+      if (mode === "retained_template") h.tools.set("fault_author", { name: "fault_author", description: "Existing", args: [], defaults: {}, get template(): never { throw cause; } });
+      const defaults = new Proxy({ secret: 1 }, {
+        ownKeys(target) { if (mode === "defaults_keys") throw cause; return Reflect.ownKeys(target); },
+        getOwnPropertyDescriptor(target, key) { if (mode === "defaults_descriptor") throw cause; return Reflect.getOwnPropertyDescriptor(target, key); },
+        get(target, key, receiver) { if (mode === "defaults_value") throw cause; return Reflect.get(target, key, receiver); },
+      });
+      let rejected = false;
+      try { await executeRegisterTool({ name: "fault_author", update: true,
+        get args() { if (mode === "args") throw cause; return undefined; },
+        description: { trim() { if (mode === "description_trim") throw cause; return "Description"; } },
+        defaults, get template() { return mode === "retained_template" && ++templates > 1 ? undefined : "echo"; },
+      }, {}, h.deps); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true);
+    }
+    h.tools.clear();
+    await assert.rejects(executeRegisterTool({ name: "schema_args", args: "same,same", template: "echo", get description(): never { throw Error("Schema error precedes description"); } }, {}, h.deps), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.equal(error.message, "\nDuplicate argument name(s): same"); return true;
+    });
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(entry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps);
+    for (const [params, isError, expectedCalls, pattern] of [
+      [{ name: "host_author", template: "echo", description: "" }, true, 1, /- field: description\n- result: Tool description is required/u],
+      [{ name: "host_author", template: "echo", description: "Description", defaults: false }, true, 0, /Validation failed for tool "register_tool":/u],
+      [{ name: "host_author", template: null }, false, 1, /- result: not found/u],
+    ] as const) {
+      let calls = 0;
+      const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+      const call = { type: "toolCall", id: "host-authored", name: "register_tool", arguments: params };
+      const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+      assert.equal(calls, expectedCalls); assert.equal(outcome.isError, isError); assert.match(outcome.result.content[0].text, pattern);
+      assert.deepEqual(outcome.result.details, isError ? {} : { tool: "host_author" });
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []); assert.deepEqual(h.activeTools(), ["read", "smoke"]);
+  } finally { await h.cleanup(); }
+});
+
+const templateShapeText = {
+  nested: "\n- field: template\n- result: Nested Recipe-shaped templates are not a register_tool source mode.\n- instruction: retry with from=<skill>/<recipe> and defaults={...}.",
+  empty: "\n- field: template\n- result: Tool template sequence is empty.",
+  type: "\n- field: template\n- result: unsupported template type\n- supported_types:\n  - string\n  - object\n  - sequence",
+};
+
+for (const kind of ["nested", "empty", "type"] as const) test(`AX template shape ${kind} refusal preserves both helper call paths without source echo`, async () => {
+  const h = await createHarness();
+  const draft = join(h.root, "drafts", "shape.json"), draftBytes = JSON.stringify({ description: "PRIVATE_DRAFT", template: "echo retained" });
+  try {
+    await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, draftBytes);
+    for (const phase of ["front", "authored", "draft_authored"]) {
+      let templates = 0, drafts = 0; const events: string[] = [];
+      const input = {
+        name: "shape", description: "PRIVATE_DESCRIPTION",
+        get template() { templates++; return phase === "authored" && templates === 1 ? "echo first" : kind === "nested" ? { template: "PRIVATE_NAMESPACE/ref" } : kind === "empty" ? [] : false; },
+        // Direct changing-getter probe, not a cloneable two-source SDK request.
+        get draft() { drafts++; return phase === "draft_authored" && drafts > 1 ? draft : undefined; },
+      };
+      await assert.rejects(executeRegisterTool(input, {}, { ...h.deps,
+        getRecipeResolutionContext() { events.push("resolution"); return undefined; },
+        getTools() { events.push("getTools"); return h.tools; },
+        getToolNameBlocker() { events.push("blocker"); return undefined; },
+        getActiveTools(): never { throw Error("No activation read"); },
+        registerRuntimeTool(): never { throw Error("No dispatch"); },
+        notify(): never { throw Error("No notice"); },
+      }), (error: unknown) => {
+        assert.ok(error instanceof Error); assert.equal(error.message, templateShapeText[kind]); assert.equal(Object.getPrototypeOf(error), Error.prototype);
+        assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false);
+        assert.ok(Buffer.byteLength(error.message) < 1024); assert.doesNotMatch(error.message, /PRIVATE_|- next:|no effects|not applied|callable_now/u); return true;
+      });
+      assert.deepEqual(events, phase === "front" ? ["resolution"] : phase === "authored" ? ["resolution", "getTools", "blocker"] : ["getTools", "blocker"]);
+      assert.equal(templates, phase === "authored" ? 2 : 1);
+      assert.equal(drafts, phase === "draft_authored" ? 5 : 2);
+      assert.equal(existsSync(join(h.root, "shape.json")), false); assert.equal(await readFile(draft, "utf8"), draftBytes);
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []); assert.deepEqual(h.activeTools(), ["read", "smoke"]);
+  } finally { await h.cleanup(); }
+});
+
+test("AX template shape guards preserve accessor and expansion faults, special values and actual SDK ownership", async () => {
+  const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce unowned fault"); } });
+  try {
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const mode of ["template_get", "reference_trim", "own_keys", "descriptor", "array_expand", "object_expand"]) {
+      let gets = 0; const events: string[] = [];
+      const value = mode === "template_get" ? { get template(): never { throw cause; } }
+        : mode === "reference_trim" ? { get template() { return ++gets === 1 ? "PRIVATE_NAMESPACE/ref" : { trim(): never { throw cause; } }; } }
+        : mode === "own_keys" || mode === "descriptor" ? new Proxy({ template: "PRIVATE_NAMESPACE/ref" }, {
+          get(target, key, receiver) { events.push("get:" + String(key)); return Reflect.get(target, key, receiver); },
+          ownKeys(target) { events.push("ownKeys"); if (mode === "own_keys") throw cause; return Reflect.ownKeys(target); },
+          getOwnPropertyDescriptor(): never { events.push("descriptor"); throw cause; },
+        })
+        : mode === "array_expand" ? new Proxy([], { get(target, key, receiver) { if (key === "flatMap") throw cause; return Reflect.get(target, key, receiver); } })
+        : { get defaults(): never { throw cause; } };
+      let rejected = false;
+      try { await executeRegisterTool({ name: "fault_shape", template: value }, {}, h.deps); }
+      catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true);
+      if (mode === "reference_trim") assert.equal(gets, 2);
+      if (mode === "own_keys" || mode === "descriptor") assert.deepEqual(events, ["get:template", "get:template", "ownKeys", ...(mode === "descriptor" ? ["descriptor"] : [])]);
+    }
+    await assert.rejects(executeRegisterTool({ name: "dependency", template: { template: "echo", repeat: 0 } }, {}, h.deps), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.equal(error.message, "Command template repeat must be a positive integer."); return true;
+    });
+    const blocked = Object.freeze({ effect: "old blocker reached" });
+    for (const value of ["echo", { template: "echo" }, ["echo"], undefined]) {
+      let rejected = false;
+      try { await executeRegisterTool({ name: "valid_shape", template: value }, {}, { ...h.deps, getToolNameBlocker(): never { throw blocked; } }); }
+      catch (error) { rejected = true; assert.equal(error, blocked); }
+      assert.equal(rejected, true);
+    }
+    for (const value of [null, ""]) {
+      const result = await executeRegisterTool({ name: "absent_shape", template: value }, {}, { ...h.deps, getToolNameBlocker(): never { throw Error("Deletion precedes blocker"); } });
+      assert.match(result.content[0].text, /result: not found/u);
+    }
+    for (const [value, expected] of [[null, "- field: template\n- result: Tool template cannot be null here."], [undefined, "- field: template\n- result: Tool template is required."]] as const) {
+      let reads = 0;
+      await assert.rejects(executeRegisterTool({ name: "late_shape", description: "Description", get template() { return ++reads === 1 ? "echo" : value; } }, {}, h.deps), (error: unknown) => {
+        assert.ok(error instanceof Error); assert.equal(error.message, "\n" + expected); return true;
+      }); assert.equal(reads, 2);
+    }
+    const unsupported = Object.assign(function privateBody() {}, { toString(): never { throw Error("No unsupported-value coercion"); } });
+    for (const value of [false, 7, Symbol("private unsupported"), unsupported]) await assert.rejects(executeRegisterTool({ name: "unsupported_shape", template: value }, {}, h.deps), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.equal(error.message, templateShapeText.type); return true;
+    });
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(entry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition({ ...h.deps, getToolNameBlocker: () => "HOST_BLOCKER" });
+    for (const [value, expected] of [[{ template: "PRIVATE_NAMESPACE/ref" }, templateShapeText.nested], [[], templateShapeText.empty], [7, "\nHOST_BLOCKER"]] as const) {
+      let calls = 0, received: unknown;
+      const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; received = (args[1] as { template: unknown }).template; return definition.execute(...args, {}); } };
+      const call = { type: "toolCall", id: "host-shape", name: "register_tool", arguments: { name: "host_shape", template: value } };
+      const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+      assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, expected); assert.deepEqual(outcome.result.details, {});
+      if (typeof value === "number") { assert.equal(received, "7"); assert.equal(value, 7); }
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+async function checkDuplicateRegistrationGuard(kind: "ordinary" | "draft") {
+  const h = await createHarness();
+  const target = join(h.root, "smoke.json"), draft = join(h.root, "drafts", "candidate.json");
+  const cfg: RegisteredTool = Object.freeze({ name: "smoke", description: "Existing", template: "echo prior", args: [], defaults: {}, async: false });
+  const before = "PRIVATE_INVALID_TARGET", draftBytes = "PRIVATE_DRAFT_MUST_NOT_BE_READ";
+  const suffix = "\n- result: Tool already registered.\n- instruction: Use update=true to overwrite.";
+  const expected = "\n- field: name\n- value: smoke" + suffix;
+  try {
+    await mkdir(kind === "draft" ? dirname(draft) : h.root, { recursive: true });
+    if (kind === "draft") await writeFile(draft, draftBytes);
+    for (const present of ["map", "file", "both"]) {
+      await rm(target, { force: true }); h.tools.clear();
+      if (present !== "file") h.tools.set("smoke", cfg);
+      if (present !== "map") await writeFile(target, before);
+      const events: string[] = [];
+      const tools = new Map(h.tools);
+      tools.get = name => { events.push("map.get"); return h.tools.get(name); };
+      const input = { name: "SMOKE", ...(kind === "draft" ? { draft } : { description: "PRIVATE_DESCRIPTION", template: "echo private" }), get update() { events.push("update"); return false; } };
+      await assert.rejects(executeRegisterTool(input, {}, { ...h.deps,
+        getRecipeResolutionContext() { events.push("resolution"); return undefined; },
+        getTools() { events.push("getTools"); return tools; },
+        getToolNameBlocker() { events.push("blocker"); return undefined; },
+        getActiveTools(): never { throw Error("No activation read"); },
+        setActiveTools(): never { throw Error("No mutation"); },
+        notify(): never { throw Error("No notification"); },
+        registerRuntimeTool(): never { throw Error("No dispatch"); },
+      }), (error: unknown) => {
+        assert.ok(error instanceof Error); assert.equal(Object.getPrototypeOf(error), Error.prototype); assert.equal(error.message, expected);
+        assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false);
+        assert.doesNotMatch(error.message, /PRIVATE_|- next:|not applied|no effects|callable_now|rollback/u); return true;
+      });
+      assert.deepEqual(events, [...(kind === "ordinary" ? ["resolution"] : []), "getTools", "map.get", "blocker", "update"]);
+      assert.equal(h.tools.get("smoke"), present === "file" ? undefined : cfg);
+      assert.equal(existsSync(target), present !== "map");
+      if (present !== "map") assert.equal(await readFile(target, "utf8"), before);
+      if (kind === "draft") assert.equal(await readFile(draft, "utf8"), draftBytes);
+    }
+    const token = Object.freeze({ toString(): never { throw Error("Do not coerce fault"); } });
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const port of ["getTools", "map.get", "blocker", "update", ...(kind === "ordinary" ? ["resolution"] : [])]) {
+      const tools = new Map(h.tools);
+      tools.get = () => { if (port === "map.get") throw cause; return cfg; };
+      const input = { name: "smoke", ...(kind === "draft" ? { draft } : { template: "echo keep" }), get update() { if (port === "update") throw cause; return false; } };
+      let rejected = false;
+      try { await executeRegisterTool(input, {}, { ...h.deps,
+        getRecipeResolutionContext() { if (port === "resolution") throw cause; return undefined; },
+        getTools() { if (port === "getTools") throw cause; return tools; },
+        getToolNameBlocker() { if (port === "blocker") throw cause; return undefined; },
+      }); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true);
+    }
+    await assert.rejects(executeRegisterTool({ name: "smoke", ...(kind === "draft" ? { draft } : {}), get update(): never { throw Error("Blocker must precede update"); } }, {}, { ...h.deps, getToolNameBlocker: () => "DEPENDENCY_BLOCKER" }), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.equal(error.message, "\nDEPENDENCY_BLOCKER"); return true;
+    });
+    const capture = async (value: string | symbol, fail = false, cause: unknown = undefined) => {
+      let atMessage = false, conversions = 0, rejected = false, result: unknown;
+      class LegacyName {
+        trim() { return this; } toLowerCase() { return this; } replace() { return this; } slice() { return this; }
+        [Symbol.toPrimitive]() { conversions++; if (atMessage && fail) throw cause; return atMessage ? value : "smoke"; }
+      }
+      const tools = new Map<string, RegisteredTool>(); tools.get = () => cfg;
+      try { await executeRegisterTool({ name: new LegacyName() as unknown as string, ...(kind === "draft" ? { draft } : {}), get update() { atMessage = true; return false; } }, {}, { ...h.deps, getTools: () => tools }); }
+      catch (error) { rejected = true; result = error; }
+      assert.equal(rejected, true); assert.equal(conversions, 5, "Two normalizations, lock/target paths and original display conversion"); return result;
+    };
+    const message = async (value: string) => { const error = await capture(value); assert.ok(error instanceof Error); assert.ok(error.message.isWellFormed()); assert.ok(Buffer.byteLength(error.message) <= 16384); return error.message; };
+    const prefix = "\n- field: name\n- value: ", count = 16384 - Buffer.byteLength(prefix + suffix);
+    assert.equal(await message("x".repeat(count)), prefix + "x".repeat(count) + suffix);
+    assert.equal(await message("x".repeat(count + 1)), "\n- field: name\n- value: [omitted]\n- value_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix);
+    const unit = "界👩‍💻é", unicode = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "x".repeat(count % Buffer.byteLength(unit));
+    assert.equal(Buffer.byteLength(await message(unicode)), 16384); assert.match(await message(unicode + "界"), /value: \[omitted\]/u);
+    assert.match(await message("bad\ud800"), /value: \[unavailable\]\n- value_omission:\n  - reason: malformed_selected_text/u);
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) assert.equal(await capture("unused", true, cause), cause);
+    assert.ok(await capture(Symbol("native template refusal")) instanceof TypeError);
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(entry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps); let calls = 0;
+    const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
+    const call = { type: "toolCall", id: "host-duplicate", name: "register_tool", arguments: { name: "SMOKE", ...(kind === "draft" ? { draft } : {}) } };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, expected); assert.deepEqual(outcome.result.details, {});
+    assert.equal(await readFile(target, "utf8"), before); if (kind === "draft") assert.equal(await readFile(draft, "utf8"), draftBytes);
+    assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+}
+
+test("AX ordinary duplicate refusal preserves ownership predicates, effects, faults and selected name", async () => {
+  await checkDuplicateRegistrationGuard("ordinary");
+});
+
+test("AX draft duplicate refusal preserves ownership predicates, effects, faults and selected name", async () => {
+  await checkDuplicateRegistrationGuard("draft");
+});
+
+test("AX ordinary registration name and missing-source guards preserve stage observations and existing result paths", async () => {
+  const h = await createHarness();
+  try {
+    for (const mode of ["invalid", "reserved", "source"]) {
+      const events: string[] = [], reads: string[] = [];
+      class Reserved extends Set<string> { override has(name: string) { events.push("reserved:" + name); return super.has(name); } }
+      class Tools extends Map<string, RegisteredTool> { override get(name: string) { events.push("map.get:" + name); return super.get(name); } }
+      const tools = new Tools();
+      const params = new Proxy({ name: mode === "invalid" ? "@@@" : mode === "reserved" ? "BASH" : "fresh" }, {
+        get(target, key, receiver) { reads.push(String(key)); if (["description", "defaults"].includes(String(key))) throw Error("Do not read undisplayed caller body"); return Reflect.get(target, key, receiver); },
+      });
+      const expected = mode === "invalid" ? "\n- field: name\n- result: Invalid tool name."
+        : mode === "reserved" ? "\n- field: name\n- value: bash\n- result: Reserved tool name."
+        : "\n- result: New registration requires exactly one source mode.\n- source_modes:\n  - from\n  - template\n  - draft\n- instruction: retry register_tool with one source field.";
+      await assert.rejects(executeRegisterTool(params, {}, {
+        ...h.deps,
+        reservedToolNames: new Reserved(["bash"]),
+        getRecipeResolutionContext() { events.push("resolution"); return undefined; },
+        getTools() { events.push("getTools"); return tools; },
+        getToolNameBlocker(name: string) { events.push("blocker:" + name); return undefined; },
+        getActiveTools(): never { throw Error("Guard precedes activation"); },
+        notify(): never { throw Error("No notification"); },
+        registerRuntimeTool(): never { throw Error("No dispatch"); },
+      }), (error: unknown) => {
+        assert.ok(error instanceof Error); assert.equal(Object.getPrototypeOf(error), Error.prototype); assert.equal(error.message, expected);
+        assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false); assert.ok(Buffer.byteLength(error.message) <= 16384);
+        assert.doesNotMatch(error.message, /- next:|not applied|no effects|callable_now|generation/u); return true;
+      });
+      assert.deepEqual(events, mode === "invalid" ? [] : mode === "reserved" ? ["reserved:bash"] : ["reserved:fresh", "resolution", "getTools", "map.get:fresh", "blocker:fresh"]);
+      assert.equal(reads.filter(x => x === "name").length, 4);
+      assert.equal(reads.filter(x => x === "draft").length, mode === "source" ? 2 : 1);
+      assert.equal(reads.filter(x => x === "from").length, mode === "source" ? 3 : 0);
+      assert.equal(reads.filter(x => x === "template").length, mode === "source" ? 1 : 0);
+      assert.equal(existsSync(join(h.root, "fresh.json")), false);
+    }
+    const listed = await executeRegisterTool({ name: "" }, {}, h.deps);
+    assert.match(listed.content[0].text, /registered_tools: none/u); assert.deepEqual(listed.details, { tool: "register_tool" });
+    await executeRegisterTool({ name: "existing", description: "Old", template: "echo retained" }, {}, h.deps);
+    const updated = await executeRegisterTool({ name: "existing", description: "New", update: true }, {}, h.deps);
+    assert.equal(updated.details.persisted, true); assert.equal(h.tools.get("existing")?.description, "New");
+    assert.equal(JSON.parse(await readFile(join(h.root, "existing.json"), "utf8")).template, "echo retained", "An update still needs no new source");
+  } finally { await h.cleanup(); }
+});
+
+test("AX ordinary registration guard projection preserves unowned faults, scalar bounds and SDK coercion", async () => {
+  const h = await createHarness(); const token = Object.freeze({ toString(): never { throw Error("Do not coerce unowned failure"); } });
+  try {
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const mode of ["name_get", "normalize", "reserved", "resolution", "template", "getTools", "map_get", "blocker"]) {
+      class Reserved extends Set<string> { override has(name: string) { if (mode === "reserved") throw cause; return super.has(name); } }
+      class Tools extends Map<string, RegisteredTool> { override get(name: string) { if (mode === "map_get") throw cause; return super.get(name); } }
+      const params = mode === "name_get" ? { get name(): never { throw cause; } }
+        : mode === "normalize" ? { name: { trim(): never { throw cause; } } }
+        : mode === "template" ? { name: "fault_name", get template(): never { throw cause; } } : { name: "fault_name" };
+      let rejected = false;
+      try { await executeRegisterTool(params, {}, { ...h.deps,
+        reservedToolNames: new Reserved(),
+        getRecipeResolutionContext() { if (mode === "resolution") throw cause; return undefined; },
+        getTools() { if (mode === "getTools") throw cause; return new Tools(); },
+        getToolNameBlocker() { if (mode === "blocker") throw cause; return undefined; },
+      }); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true);
+    }
+    await assert.rejects(executeRegisterTool({ name: "blocked" }, {}, { ...h.deps, getToolNameBlocker: () => "DEPENDENCY_BLOCKER" }), (error: unknown) => {
+      assert.ok(error instanceof Error); assert.equal(error.message, "\nDEPENDENCY_BLOCKER"); return true;
+    });
+    const capture = async (value: string) => {
+      let atMessage = false, coercions = 0;
+      class LegacyName {
+        trim() { return this; } toLowerCase() { return this; } replace() { return this; } slice() { return this; }
+        [Symbol.toPrimitive]() { coercions++; return atMessage ? value : "smoke"; }
+      }
+      class Reserved extends Set<string> { override has() { atMessage = true; return true; } }
+      let message: string | undefined;
+      try { await executeRegisterTool({ name: new LegacyName() as unknown as string }, {}, { ...h.deps, reservedToolNames: new Reserved() }); }
+      catch (error) { assert.ok(error instanceof Error); message = error.message; }
+      assert.equal(coercions, 4, "Original two normalizations, lock path and final display conversion remain");
+      assert.ok(message); assert.ok(message.isWellFormed()); assert.ok(Buffer.byteLength(message) <= 16384); return message;
+    };
+    const prefix = "\n- field: name\n", suffix = "\n- result: Reserved tool name.";
+    const count = 16384 - Buffer.byteLength(prefix + "- value: " + suffix);
+    assert.equal(await capture("x".repeat(count)), prefix + "- value: " + "x".repeat(count) + suffix);
+    assert.equal(await capture("x".repeat(count + 1)), prefix + "- value: [omitted]\n- value_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix);
+    const unit = "界👩‍💻é", unicode = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "x".repeat(count % Buffer.byteLength(unit));
+    assert.equal(Buffer.byteLength(await capture(unicode)), 16384);
+    assert.match(await capture(unicode + "界"), /value: \[omitted\]/u);
+    assert.match(await capture("bad\ud800"), /value: \[unavailable\]\n- value_omission:\n  - reason: malformed_selected_text/u);
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps);
+    for (const [params, isError, callsExpected, pattern] of [
+      [{ name: "@@@" }, true, 1, /- field: name\n- result: Invalid tool name./u],
+      [{ name: "BASH" }, true, 1, /- value: bash\n- result: Reserved tool name./u],
+      [{ name: "host_fresh" }, true, 1, /- result: New registration requires exactly one source mode./u],
+      [{ name: "" }, false, 1, /registered_tools: none/u],
+      [{ name: 7 }, true, 1, /- result: New registration requires exactly one source mode./u],
+      [{ name: {} }, true, 0, /Validation failed for tool "register_tool":/u],
+    ] as const) {
+      let calls = 0, receivedName: unknown;
+      const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; receivedName = (args[1] as { name?: unknown }).name; return definition.execute(...args, {}); } };
+      const call = { type: "toolCall", id: "host-name-source", name: "register_tool", arguments: params };
+      const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+      assert.equal(outcome.isError, isError); assert.equal(calls, callsExpected); assert.match(outcome.result.content[0].text, pattern);
+      assert.deepEqual(outcome.result.details, isError ? {} : { tool: "register_tool" });
+      if (typeof params.name === "number") { assert.equal(receivedName, "7"); assert.equal(params.name, 7); }
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX registry source-mode guard constants preserve descriptor and getter order without source echo", async () => {
+  const h = await createHarness();
+  const expected = {
+    values: "\n- field: values\n- result: register_tool values was removed.\n- replacement_fields:\n  - defaults\n  - from\n- instruction: retry register_tool with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition.",
+    from: "\n- field: from\n- result: Tool from must be a non-empty Recipe reference.\n- reference_forms:\n  - <skill>/<recipe>\n  - explicit .json path\n  - explicit .md path\n- instruction: retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path.",
+    mixed: "\n- result: Use exactly one register_tool source mode.\n- source_modes:\n  - from\n  - template\n  - draft\n- instruction: remove the extra source fields and retry register_tool.",
+    inherited: "\n- field: from\n- result: register_tool from inherits args and async behavior.\n- inherited_fields:\n  - args\n  - async\n- instruction: retry register_tool with from and optional defaults only; omit args and async.",
+  };
+  try {
+    for (const named of [false, true]) for (const mode of ["values", "from", "from_empty", "mixed", "args", "async", "both"] as const) {
+      const events: string[] = [];
+      const raw: Record<string, unknown> = {};
+      if (named) raw.name = "guard_only";
+      if (mode === "values") Object.defineProperty(raw, "values", { get(): never { throw Error("Presence guard must not read values"); } });
+      else Object.defineProperty(raw, "from", { get() { return mode === "from" ? { toString(): never { throw Error("Do not coerce supplied reference"); } } : mode === "from_empty" ? "" : "PRIVATE_SOURCE"; } });
+      if (mode === "mixed") Object.defineProperty(raw, "template", { get(): never { throw Error("Only template presence is observed"); } });
+      if (mode === "args" || mode === "both") Object.defineProperty(raw, "args", { get(): never { throw Error("Only args presence is observed"); } });
+      if (mode === "async" || mode === "both") Object.defineProperty(raw, "async", { get(): never { throw Error("Only async presence is observed"); } });
+      const params = new Proxy(raw, { get(target, key, receiver) { events.push("get:" + String(key)); return Reflect.get(target, key, receiver); },
+        getOwnPropertyDescriptor(target, key) { events.push("has:" + String(key)); return Reflect.getOwnPropertyDescriptor(target, key); } });
+      const key = mode === "values" ? "values" : mode.startsWith("from") ? "from" : mode === "mixed" ? "mixed" : "inherited";
+      await assert.rejects(executeRegisterTool(params, {}, {
+        ...h.deps,
+        getTools(): never { throw Error("Guard precedes list/registry lookup"); },
+        getRecipeResolutionContext(): never { throw Error("Guard precedes resolution"); },
+        notify(): never { throw Error("No notifier on local guard"); },
+        registerRuntimeTool(): never { throw Error("No registration dispatch"); },
+      }), (error: unknown) => {
+        assert.ok(error instanceof Error); assert.equal(Object.getPrototypeOf(error), Error.prototype); assert.equal(error.message, expected[key]);
+        assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false);
+        assert.ok(Buffer.byteLength(error.message) < 1024); assert.doesNotMatch(error.message, /PRIVATE_SOURCE|- next:|not applied|no effects|callable_now|generation/u); return true;
+      });
+      const order = ["get:name", ...(named ? ["get:name"] : []), "has:values", ...(mode === "values" ? [] : ["has:from", "get:from", ...(mode === "from" ? [] : ["get:from", ...(mode === "from_empty" ? [] : ["get:draft", "has:template", ...(mode === "mixed" ? [] : ["has:args", ...(mode === "async" ? ["has:async"] : [])])])])])];
+      assert.deepEqual(events, order);
+    }
+    assert.deepEqual(h.notifications, []); assert.deepEqual(h.runtimeRegistered, []); assert.equal(h.tools.size, 0);
+    assert.equal(existsSync(join(h.root, "guard_only.json")), false);
+  } finally { await h.cleanup(); }
+});
+
+test("AX registry source-mode refusals keep unowned observation faults and host schema ownership", async () => {
+  const h = await createHarness();
+  const token = Object.freeze({ toString(): never { throw Error("Do not format original failure"); } });
+  try {
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) {
+      const descriptor = (key: string, values: Record<string, unknown>) => new Proxy(values, { getOwnPropertyDescriptor(target, property) { if (property === key) throw cause; return Reflect.getOwnPropertyDescriptor(target, property); } });
+      let fromReads = 0;
+      const requests = [descriptor("values", {}), descriptor("from", {}), { get from(): never { throw cause; } },
+        { get from(): unknown { return ++fromReads === 1 ? "string gate" : { trim(): never { throw cause; } }; } },
+        { get draft(): never { throw cause; } }, descriptor("template", {}),
+        descriptor("args", { from: "PRIVATE_SOURCE" }), descriptor("async", { from: "PRIVATE_SOURCE" })];
+      for (const params of requests) {
+        let rejected = false;
+        try { await executeRegisterTool(params, {}, h.deps); }
+        catch (error) { rejected = true; assert.equal(error, cause); }
+        assert.equal(rejected, true);
+      }
+    }
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps);
+    for (const [params, isError, reachesFacade, pattern] of [
+      [{ values: { caller: "data" } }, true, false, /Validation failed for tool "register_tool":/u],
+      [{ from: {} }, true, false, /Validation failed for tool "register_tool":/u],
+      [{ from: 7 }, false, true, /- registered_tools: none/u],
+      [{ from: "" }, true, true, /- field: from\n- result: Tool from must be a non-empty Recipe reference./u],
+      [{ from: "PRIVATE_SOURCE", template: "echo" }, true, true, /- result: Use exactly one register_tool source mode./u],
+      [{ from: "PRIVATE_SOURCE", args: "x" }, true, true, /- inherited_fields:\n  - args\n  - async/u],
+      [{ from: "PRIVATE_SOURCE", async: true }, true, true, /- inherited_fields:\n  - args\n  - async/u],
+    ] as const) {
+      let calls = 0, receivedFrom: unknown;
+      const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; receivedFrom = (args[1] as { from?: unknown }).from; return definition.execute(...args, {}); } };
+      const call = { type: "toolCall", id: "host-mode-guard", name: "register_tool", arguments: params };
+      const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+      assert.equal(outcome.isError, isError, JSON.stringify({ params, calls, result: outcome.result })); assert.match(outcome.result.content[0].text, pattern);
+      assert.equal(calls, reachesFacade ? 1 : 0); assert.deepEqual(outcome.result.details, isError ? {} : { tool: "register_tool" });
+      if ("from" in params && typeof params.from === "number") { assert.equal(receivedFrom, "7"); assert.equal(params.from, 7, "Host clones/coerces before execute; caller input stays numeric"); }
+      if (reachesFacade) assert.doesNotMatch(outcome.result.content[0].text, /PRIVATE_SOURCE|- next:/u);
+    }
+    assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
+  } finally { await h.cleanup(); }
+});
+
+test("AX draft promotion receipt preserves selected flag text and original activation and effect order", async () => {
+  for (const mode of ["void", "false", "true", "toggle", "zero", "opaque"]) for (const update of [false, true]) {
+    const h = await createHarness(), events: string[] = []; let reads = 0;
+    const draft = join(h.root, "drafts", "source.json");
+    const source = JSON.stringify({ description: "PRIVATE_DESCRIPTION", args: ["file", "lang=PRIVATE_DEFAULT"], template: "echo {file} {lang}" });
+    const opaqueText = "## Legacy claim\r\nnext: body only\r\n\r\n  · literal";
+    const opaque = { [Symbol.toPrimitive](hint: string) { events.push("coerce:" + hint); return opaqueText; } };
+    const selected: unknown = mode === "zero" ? 0 : mode === "opaque" ? opaque : mode === "true" || mode === "toggle";
+    try {
+      await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, source);
+      if (update) await executeRegisterTool({ name: "promoted", description: "Old", template: "echo old" }, {}, h.deps);
+      const result = await executeRegisterTool({ name: "promoted", draft, update }, {}, {
+        ...h.deps,
+        notify(ctx: unknown, message: string) { events.push("notify"); h.deps.notify(ctx, message); },
+        registerRuntimeTool(cfg: RegisteredTool) {
+          events.push("register"); h.deps.registerRuntimeTool(cfg);
+          const args = cfg.args, recipe = cfg.recipe;
+          Object.defineProperty(cfg, "args", { get() { events.push("args"); return args; } });
+          Object.defineProperty(cfg, "recipe", { get() { events.push("recipe"); return recipe; } });
+          if (mode === "void") return undefined;
+          return {
+            get active_tool() { events.push("active"); return mode !== "false"; },
+            get activation(): "current_session" | "unverified" { events.push("activation"); return mode === "false" ? "unverified" : "current_session"; },
+            get host_registered() { events.push("host"); return mode !== "false"; },
+            get callable_now() { events.push("callable:" + ++reads); return (mode === "toggle" && reads > 1 ? false : selected) as boolean; },
+          };
+        },
+      });
+      const expectedEvents = ["register", "args", "recipe", "recipe", ...(mode === "void" ? [] : ["callable:1"]), "notify",
+        ...(mode === "opaque" ? ["coerce:string"] : []), ...(mode === "void" ? [] : ["active", "activation", "callable:2",
+          ...(["false", "zero", "toggle"].includes(mode) ? ["host", ...(mode === "false" ? [] : ["active"])] : [])]),
+        "args", ...(mode === "void" ? [] : ["host"])];
+      assert.deepEqual(events, expectedEvents, "No activation reread or flag coercion before notify");
+      assert.equal(result.details.promoted, true); assert.equal(result.details.persisted, true); assert.equal(result.details.registry_active, true);
+      assert.equal(result.details.callable_now, mode === "void" ? false : selected);
+      assert.equal(result.details.activation_boundary, mode === "void" ? "session_activation_unverified" : mode === "false" ? "host_registration" : ["zero", "toggle"].includes(mode) ? "callability_verification" : "current_session");
+      assert.deepEqual(result.details.required_args, ["file"]); assert.deepEqual(result.details.optional_args, ["lang"]);
+      const invocation = ["true", "toggle", "opaque"].includes(mode);
+      assert.deepEqual(result.details.next_actions, invocation ? ["call tool promoted", "inspect target=tool:promoted view=status"] : ["inspect target=tool:promoted view=status"]);
+      const flag = mode === "opaque" ? "- callable_now:\n  " + opaqueText.replaceAll(/\r\n|\r|\n/gu, newline => newline + "  ") : "- callable_now: " + (mode === "zero" ? "0" : mode === "true" || mode === "toggle" ? "true" : "false");
+      assert.equal(result.content[0].text, "\n- tool: promoted\n- result: " + (update ? "updated" : "registered") + "\n- source: draft\n" + flag +
+        (invocation ? "\n- instruction: call tool promoted" : "\n- next:\n  - tool: inspect\n  - target: tool:promoted\n  - view: status"));
+      assert.doesNotMatch(result.content[0].text, /PRIVATE_|activation_boundary:|required_args:|optional_args:|defaults:|persisted:|host_registered:|warnings:/u);
+      assert.equal(await readFile(draft, "utf8"), source);
+      assert.equal(JSON.parse(await readFile(join(h.root, "promoted.json"), "utf8")).template, "echo {file} {lang}");
+    } finally { await h.cleanup(); }
+  }
+  for (const cause of [undefined, "PRIVATE_PRIMITIVE", Object.freeze({ toString(): never { throw Error("Never format original failure"); } })]) for (const mode of ["register", "summary", "notify", "coerce", "details"]) {
+    const h = await createHarness(); const draft = join(h.root, "drafts", "fault.json"); let effects = 0, notified = 0;
+    try {
+      await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, JSON.stringify({ description: "Retained", template: "echo" }));
+      let rejected = false;
+      try { await executeRegisterTool({ name: "fault_promotion", draft }, {}, {
+        ...h.deps,
+        notify() { notified++; if (mode === "notify") throw cause; },
+        registerRuntimeTool(cfg: RegisteredTool) {
+          effects++; if (mode === "register") throw cause;
+          if (mode === "summary") Object.defineProperty(cfg, "args", { get(): never { throw cause; } });
+          return { get active_tool() { if (mode === "details") throw cause; return true; }, activation: "current_session", host_registered: true,
+            callable_now: (mode === "coerce" ? { [Symbol.toPrimitive](): never { throw cause; } } : true) as boolean };
+        },
+      }); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true); assert.equal(effects, 1); assert.equal(notified, ["register", "summary"].includes(mode) ? 0 : 1);
+      assert.equal(JSON.parse(await readFile(join(h.root, "fault_promotion.json"), "utf8")).description, "Retained");
+      assert.equal(h.tools.has("fault_promotion"), true, "Promotion retains its old post-effect boundary, not ordinary registration rollback");
+    } finally { await h.cleanup(); }
+  }
+});
+
+test("AX draft promotion receipt bounds the exact selected display without adding compact facts", async () => {
+  const h = await createHarness(); const draft = join(h.root, "drafts", "bounded.json");
+  let value = "x", coercions = 0;
+  const display = { [Symbol.toPrimitive](hint: string) { assert.equal(hint, "string"); coercions++; return value; } };
+  try {
+    await mkdir(dirname(draft), { recursive: true }); await writeFile(draft, JSON.stringify({ description: "Bound", template: "echo" }));
+    const run = () => executeRegisterTool({ name: "bounded", draft, update: true }, {}, { ...h.deps,
+      registerRuntimeTool: () => ({ active_tool: true, activation: "current_session", host_registered: true, callable_now: display as unknown as boolean }) });
+    await run();
+    const base = await run();
+    value = "false";
+    const falseDisplay = await run(); assert.match(falseDisplay.content[0].text, /- callable_now: false\n- instruction: call tool bounded/u);
+    const count = 16384 - Buffer.byteLength(base.content[0].text) + 1;
+    value = "x".repeat(count);
+    const full = await run(); assert.equal(Buffer.byteLength(full.content[0].text), 16384); assert.ok(full.content[0].text.includes("- callable_now: " + value));
+    value += "x";
+    const omitted = await run(); assert.ok(Buffer.byteLength(omitted.content[0].text) <= 16384);
+    assert.match(omitted.content[0].text, /- callable_now: \[omitted\]\n- callable_now_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1/u);
+    assert.doesNotMatch(omitted.content[0].text, /x{40}/u); assert.equal(omitted.details.callable_now, display);
+    const unit = "界👩‍💻é";
+    value = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "x".repeat(count % Buffer.byteLength(unit));
+    assert.equal(Buffer.byteLength((await run()).content[0].text), 16384);
+    value += "界";
+    assert.match((await run()).content[0].text, /callable_now: \[omitted\]/u);
+    value = "bad\ud800";
+    const malformed = await run(); assert.ok(malformed.content[0].text.isWellFormed());
+    assert.match(malformed.content[0].text, /callable_now: \[unavailable\]/u); assert.match(malformed.content[0].text, /reason: malformed_selected_text/u);
+    assert.equal(value.charCodeAt(3), 0xd800); assert.equal(coercions, 8, "Exactly one old flag conversion per promotion");
+    await assert.rejects(executeRegisterTool({ name: "symbol_promotion", draft }, {}, { ...h.deps,
+      registerRuntimeTool: () => ({ active_tool: true, activation: "current_session", host_registered: true, callable_now: Symbol("legacy") as unknown as boolean }) }), TypeError);
+    assert.equal(h.tools.has("symbol_promotion"), true, "Template Symbol coercion stays a post-effect failure, unlike String(Symbol)");
+    assert.equal(JSON.parse(await readFile(join(h.root, "symbol_promotion.json"), "utf8")).description, "Bound");
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps);
+    const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...args, {}) };
+    const call = { type: "toolCall", id: "host-promotion", name: "register_tool", arguments: { name: "host_promoted", draft } };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(outcome.isError, false); assert.equal(outcome.result.details.promoted, true); assert.equal(outcome.result.details.callable_now, false);
+    assert.equal(outcome.result.content[0].text, "\n- tool: host_promoted\n- result: registered\n- source: draft\n- callable_now: false\n- next:\n  - tool: inspect\n  - target: tool:host_promoted\n  - view: status");
+  } finally { await h.cleanup(); }
+});
+
+test("AX registry list preserves selected names, order and coercion with whole-group coverage", async () => {
+  const h = await createHarness();
+  const capture = async (values: unknown[]) => {
+    const events: string[] = [];
+    class NameMap extends Map<string, RegisteredTool> { override keys() { events.push("keys"); return super.keys(); } }
+    const map = new NameMap();
+    const cfg = Object.defineProperty({}, "private_body", { get(): never { throw Error("Do not inspect tool bodies"); } }) as RegisteredTool;
+    for (const value of values) map.set(value as string, cfg);
+    const result = await executeRegisterTool({}, { get sessionManager(): never { throw Error("No session lookup for current registry names"); } }, {
+      ...h.deps,
+      getTools() { events.push("getTools"); return map; },
+      getActiveTools(): never { throw Error("No activation inference"); },
+      notify(): never { throw Error("No list notification"); },
+      get recipeRoot(): never { throw Error("No filesystem path lookup"); },
+    });
+    assert.deepEqual(events, ["getTools", "keys"]);
+    assert.deepEqual(result.details, { tool: "register_tool" });
+    assert.deepEqual([...map.keys()], values, "Sorting/projecting does not reorder or mutate the registry");
+    assert.ok(Buffer.byteLength(result.content[0].text) <= 16384); assert.ok(result.content[0].text.isWellFormed());
+    return result.content[0].text;
+  };
+  const coverage = (shown: number, omitted: number, total: number, reason?: string) => "\n- registered_tools_coverage:" + (reason ? "\n  - reason: " + reason : "") + `\n  - shown: ${shown}\n  - omitted: ${omitted}\n  - total: ${total}`;
+  try {
+    assert.equal(await capture([]), "\n- registered_tools: none" + coverage(0, 0, 0));
+    for (const values of [["solo"], ["zeta", "alpha"], ["界👩‍💻é", "## Name\r\nnext: body\r\n\r\n  - opaque · literal"]]) {
+      const expected = [...values].sort().map(value => "  - " + value.replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ")).join("\n");
+      assert.equal(await capture(values), "\n- registered_tools:\n" + expected + coverage(values.length, 0, values.length));
+    }
+    const base = await capture(["a"]);
+    const count = 16384 - Buffer.byteLength(base) + 1;
+    const exact = "a".repeat(count);
+    assert.equal(Buffer.byteLength(await capture([exact])), 16384);
+    assert.equal(await capture([exact + "a"]), "\n- registered_tools: [omitted]" + coverage(0, 1, 1, "response_too_large"));
+    assert.equal(await capture([exact, "z"]), "\n- registered_tools: [omitted]" + coverage(0, 2, 2, "response_too_large"));
+    const unit = "界👩‍💻é";
+    const unicode = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "x".repeat(count % Buffer.byteLength(unit));
+    assert.equal(Buffer.byteLength(await capture([unicode])), 16384);
+    assert.equal(await capture([unicode + "界"]), "\n- registered_tools: [omitted]" + coverage(0, 1, 1, "response_too_large"));
+    const malformed = "bad\ud800";
+    assert.equal(await capture([malformed]), "\n- registered_tools: [unavailable]" + coverage(0, 1, 1, "malformed_selected_text"));
+    let coercions = 0;
+    const key = { [Symbol.toPrimitive](hint: string) { assert.equal(hint, "string"); coercions++; return "## Captured\n- next: content"; } };
+    assert.equal(await capture([key]), "\n- registered_tools:\n  - ## Captured\n    - next: content" + coverage(1, 0, 1));
+    assert.equal(coercions, 1, "Use the captured compiler-prefixed row, never coerce the original key again");
+    for (const cause of [undefined, "PRIVATE_PRIMITIVE", Object.freeze({ toString(): never { throw Error("Do not format failure"); } })]) {
+      let rejected = false;
+      try { await capture([{ [Symbol.toPrimitive](): never { throw cause; } }]); }
+      catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true);
+    }
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps);
+    const hostTool = { ...definition, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...values, {}) };
+    const call = { type: "toolCall", id: "host-list", name: "register_tool", arguments: {} };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(outcome.isError, false); assert.equal(outcome.result.content[0].text, "\n- registered_tools: none" + coverage(0, 0, 0));
+    assert.deepEqual(outcome.result.details, { tool: "register_tool" });
+  } finally { await h.cleanup(); }
+});
+
+test("AX registry deletion preserves lookup and partial effects while keeping reload instruction opaque", async () => {
+  for (const found of [false, true]) for (const file of [false, true]) {
+    const h = await createHarness(), events: string[] = [];
+    const recipePath = join(h.root, "smoke.json");
+    class DeleteMap extends Map<string, RegisteredTool> {
+      override has(name: string) { events.push("has"); return super.has(name); }
+      override delete(name: string) { events.push("delete"); assert.equal(existsSync(recipePath), false, "File removal stays before map deletion"); return super.delete(name); }
+    }
+    const tools = new DeleteMap();
+    if (found) tools.set("smoke", { name: "smoke", args: [], defaults: {}, description: "PRIVATE_BODY", template: "PRIVATE_TEMPLATE" });
+    try {
+      if (file) { await mkdir(h.root, { recursive: true }); await writeFile(recipePath, "ORIGINAL_RECIPE_BYTES"); }
+      const result = await executeRegisterTool({ name: "SMOKE", template: null }, {}, {
+        ...h.deps,
+        getTools() { events.push("getTools"); return tools; },
+        getActiveTools() { events.push("getActive"); return h.activeTools(); },
+        setActiveTools(names: string[]) { events.push("setActive"); h.deps.setActiveTools(names); },
+        notify(ctx: unknown, message: string) { events.push("notify"); h.deps.notify(ctx, message); },
+      });
+      assert.deepEqual(result.details, { tool: "smoke" });
+      assert.equal(result.content[0].text, "\n- tool: smoke\n- result: " + (found ? "deleted\n- instruction: Reload to remove it from the complete registry." : "not found"));
+      assert.deepEqual(events, found ? ["getTools", "has", "delete", "getActive", "setActive", "notify"] : ["getTools", "has"]);
+      assert.deepEqual(h.activeTools(), found ? ["read"] : ["read", "smoke"]);
+      assert.deepEqual(h.notifications, found ? ["- report: Deleted tool\n- tool: smoke"] : []);
+      if (!found && file) assert.equal(await readFile(recipePath, "utf8"), "ORIGINAL_RECIPE_BYTES", "A current-map miss does not authorize orphan-file deletion");
+      else assert.equal(existsSync(recipePath), false);
+      assert.doesNotMatch(result.content[0].text, /PRIVATE_|- next:|callable_now|active_tool|not applied|no effects|closure|automatically/u);
+      assert.ok(Buffer.byteLength(result.content[0].text) <= 16384);
+    } finally { await h.cleanup(); }
+  }
+  const boundHarness = await createHarness();
+  try {
+    const display = async (value: string) => {
+      let atReceipt = false, coercions = 0;
+      class LegacyName {
+        trim() { return this; } toLowerCase() { return this; } replace() { return this; } slice() { return this; }
+        [Symbol.toPrimitive]() { coercions++; return atReceipt ? value : "smoke"; }
+      }
+      class MissingMap extends Map<string, RegisteredTool> { override has() { atReceipt = true; return false; } }
+      const name = new LegacyName();
+      const result = await executeRegisterTool({ name: name as unknown as string, template: null }, {}, { ...boundHarness.deps, getTools: () => new MissingMap() });
+      assert.equal(coercions, 4, "Keep the original normalizer/path/name template observations, including one receipt conversion");
+      assert.equal(result.details.tool, name); assert.ok(result.content[0].text.isWellFormed()); assert.ok(Buffer.byteLength(result.content[0].text) <= 16384);
+      return result.content[0].text;
+    };
+    const exact = "x".repeat(16384 - Buffer.byteLength("\n- tool: \n- result: not found"));
+    assert.equal(await display(exact), "\n- tool: " + exact + "\n- result: not found");
+    assert.equal(await display(exact + "x"), "\n- tool: [omitted]\n- tool_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1\n- result: not found");
+    assert.match(await display("bad\ud800"), /tool: \[unavailable\]\n- tool_omission:\n  - reason: malformed_selected_text/u);
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(boundHarness.deps);
+    const hostTool = { ...definition, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...values, {}) };
+    for (const found of [false, true]) {
+      if (found) boundHarness.tools.set("smoke", { name: "smoke", args: [], defaults: {}, description: "Fixture", template: "echo" });
+      const call = { type: "toolCall", id: "host-delete", name: "register_tool", arguments: { name: "smoke", template: null } };
+      const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+      assert.equal(outcome.isError, false, "Absent tool remains a returned result, not a new Error");
+      assert.equal(outcome.result.content[0].text, "\n- tool: smoke\n- result: " + (found ? "deleted\n- instruction: Reload to remove it from the complete registry." : "not found"));
+      assert.deepEqual(outcome.result.details, { tool: "smoke" });
+    }
+  } finally { await boundHarness.cleanup(); }
+  for (const cause of [undefined, "PRIVATE_PRIMITIVE", Object.freeze({ toString(): never { throw Error("Do not coerce failure"); } })]) for (const fault of ["getTools", "has", "delete", "getActive", "setActive", "notify"]) {
+    const h = await createHarness(); const events: string[] = [];
+    const path = join(h.root, "smoke.json");
+    class FaultMap extends Map<string, RegisteredTool> {
+      override has(name: string) { events.push("has"); if (fault === "has") throw cause; return super.has(name); }
+      override delete(name: string) { events.push("delete"); const result = super.delete(name); if (fault === "delete") throw cause; return result; }
+    }
+    const tools = new FaultMap([["smoke", { name: "smoke", args: [], defaults: {}, description: "Fixture", template: "echo" }]]);
+    try {
+      await mkdir(h.root, { recursive: true }); await writeFile(path, "RETAIN_OR_REMOVE_ONCE");
+      let rejected = false;
+      try { await executeRegisterTool({ name: "smoke", template: null }, {}, {
+        ...h.deps,
+        getTools() { events.push("getTools"); if (fault === "getTools") throw cause; return tools; },
+        getActiveTools() { events.push("getActive"); if (fault === "getActive") throw cause; return h.activeTools(); },
+        setActiveTools(names: string[]) { events.push("setActive"); h.deps.setActiveTools(names); if (fault === "setActive") throw cause; },
+        notify(ctx: unknown, message: string) { events.push("notify"); h.deps.notify(ctx, message); if (fault === "notify") throw cause; },
+      }); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true);
+      const order = ["getTools", "has", "delete", "getActive", "setActive", "notify"];
+      const index = order.indexOf(fault); assert.deepEqual(events, order.slice(0, index + 1));
+      assert.equal(existsSync(path), index < 2); assert.equal(Map.prototype.has.call(tools, "smoke"), index < 2);
+      assert.deepEqual(h.activeTools(), index < 4 ? ["read", "smoke"] : ["read"]);
+      assert.deepEqual(h.notifications, index < 5 ? [] : ["- report: Deleted tool\n- tool: smoke"]);
+    } finally { await h.cleanup(); }
+  }
+});
+
+test("AX registration receipt preserves activation observations, opaque warnings and existing machine facts", async () => {
+  for (const mode of ["unverified", "callable", "toggle"]) for (const update of [false, true]) {
+    const h = await createHarness();
+    const events: string[] = [];
+    let callableReads = 0;
+    try {
+      if (update) await executeRegisterTool({ name: "receipt", description: "Old", template: "echo old" }, {}, h.deps);
+      const deps = {
+        ...h.deps,
+        notify(ctx: unknown, message: string) { events.push("notify"); h.deps.notify(ctx, message); },
+        registerRuntimeTool(cfg: RegisteredTool) {
+          events.push("register"); h.deps.registerRuntimeTool(cfg);
+          const args = cfg.args, recipe = cfg.recipe;
+          Object.defineProperty(cfg, "args", { get() { events.push("args"); return args; } });
+          Object.defineProperty(cfg, "recipe", { get() { events.push("recipe"); return recipe; } });
+          if (mode === "unverified") return undefined;
+          return {
+            get active_tool() { events.push("active"); return true; },
+            get activation(): "current_session" { events.push("activation"); return "current_session"; },
+            get host_registered() { events.push("host"); return true; },
+            get callable_now() { callableReads++; events.push("callable:" + callableReads); return mode === "callable" || callableReads % 2 === 1; },
+          };
+        },
+      };
+      const label = "## Authored\r\nnext: still a label\r\n\r\n  - literal · warning";
+      const result = await executeRegisterTool({ name: "receipt", description: "PRIVATE_DESCRIPTION", args: "file,lang=ru", update,
+        template: { label, template: "bash -c 'echo fixed' {file} {lang}" } }, {}, deps);
+      const expectedEvents = ["register", ...(mode === "unverified" ? [] : ["host", "active", "callable:1"]), "notify",
+        "recipe", "recipe", "recipe", ...(mode === "unverified" ? [] : ["callable:2"]), "args", "recipe", "recipe",
+        ...(mode === "toggle" ? ["callable:3"] : []),
+        ...(mode === "unverified" ? [] : ["active", "activation", mode === "toggle" ? "callable:4" : "callable:3", ...(mode === "toggle" ? ["host", "active"] : [])]),
+        "args", ...(mode === "unverified" ? [] : ["host"]), "recipe"];
+      assert.deepEqual(events, expectedEvents, "No new activation/boundary or cfg observations to build copy");
+      const callable = mode === "callable";
+      assert.equal(result.details.callable_now, callable);
+      assert.equal(result.details.activation_boundary, mode === "unverified" ? "session_activation_unverified" : mode === "toggle" ? "callability_verification" : "current_session");
+      assert.deepEqual(result.details.required_args, ["file"]); assert.deepEqual(result.details.optional_args, ["lang"]);
+      assert.deepEqual(result.details.next_actions, callable ? ["call tool receipt", "inspect target=tool:receipt view=status"] : ["inspect target=tool:receipt view=status"]);
+      assert.equal(result.details.persisted, true); assert.equal(result.details.registry_active, true); assert.equal(result.details.source, "template");
+      const warnings = result.details.templateWarnings!;
+      assert.equal(warnings.length, 1); assert.ok(warnings[0].startsWith(label + ": invokes bash;"));
+      const expected = "\n- tool: receipt\n- result: " + (callable ? update ? "updated" : "registered" : "persisted") + "\n- source: template\n- callable_now: " + callable +
+        (callable ? "" : "\n- activation_boundary: " + (mode === "toggle" ? "current_session" : "session_activation_unverified")) +
+        "\n- required_args:\n  - file\n- optional_args:\n  - lang\n- warnings:\n  - " + warnings[0].replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ") +
+        (callable ? "\n- instruction: call tool receipt" : "\n- next:\n  - tool: inspect\n  - target: tool:receipt\n  - view: status");
+      assert.equal(result.content[0].text, expected);
+      assert.doesNotMatch(result.content[0].text, /PRIVATE_DESCRIPTION|defaults:|host_registered:|registry_active:|validated:|not sandboxed by.*- next:/u);
+      const stored = JSON.parse(await readFile(join(h.root, "receipt.json"), "utf8"));
+      assert.equal(stored.template.label, label); assert.deepEqual(stored.defaults, { lang: "ru" });
+    } finally { await h.cleanup(); }
+  }
+  const token = Object.freeze({ toString() { throw Error("Do not coerce original failure"); } });
+  for (const cause of [token, undefined, "PRIVATE_PRIMITIVE"]) for (const mode of ["notify", "warning", "args_join", "late_activation"]) {
+    const h = await createHarness(); let effects = 0, gets = 0;
+    try {
+      class JoinFault extends Array<string> { override join(): never { throw cause; } }
+      let rejected = false;
+      try { await executeRegisterTool({ name: "fault", description: "Retained", template: "echo {file}" }, {}, {
+        ...h.deps,
+        notify() { if (mode === "notify") throw cause; },
+        registerRuntimeTool(cfg: RegisteredTool) {
+          effects++;
+          if (mode === "warning") Object.defineProperty(cfg, "recipe", { get(): never { throw cause; } });
+          if (mode === "args_join") cfg.args = new JoinFault("file");
+          if (mode === "late_activation") return { active_tool: true, activation: "current_session", host_registered: true, get callable_now() { if (++gets > 1) throw cause; return true; } };
+        },
+      }); } catch (error) { rejected = true; assert.equal(error, cause); }
+      assert.equal(rejected, true); assert.equal(effects, 1);
+      assert.equal(JSON.parse(await readFile(join(h.root, "fault.json"), "utf8")).description, "Retained");
+      assert.equal(h.tools.has("fault"), true, "Copy/notification failures after persistence do not trigger a new rollback or retry");
+    } finally { await h.cleanup(); }
+  }
+});
+
+test("AX registration receipt budgets whole argument groups, prioritizes warnings and preserves literal source", async () => {
+  const h = await createHarness();
+  try {
+    const first = await executeRegisterTool({ name: "tight", description: "Bound", args: "a", template: "echo {a}" }, {}, h.deps);
+    const size = 16384 - Buffer.byteLength(first.content[0].text) + 1;
+    const arg = "a".repeat(size);
+    const full = await executeRegisterTool({ name: "tight", description: "Bound", args: arg, template: `echo {${arg}}`, update: true }, {}, h.deps);
+    assert.equal(Buffer.byteLength(full.content[0].text), 16384); assert.ok(full.content[0].text.includes("  - " + arg));
+    const large = arg + "a";
+    const omitted = await executeRegisterTool({ name: "tight", description: "Bound", args: large, template: `echo {${large}}`, update: true }, {}, h.deps);
+    assert.match(omitted.content[0].text, /- required_args: \[omitted\]\n- required_args_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1/u);
+    assert.doesNotMatch(omitted.content[0].text, /a{40}/u); assert.deepEqual(omitted.details.required_args, [large]);
+    assert.ok(Buffer.byteLength(omitted.content[0].text) <= 16384);
+    const label = "界👩‍💻é".repeat(70) + "\r\nnext: opaque";
+    const warning = await executeRegisterTool({ name: "tight", description: "Bound", args: arg, template: { label, template: `bash -c 'echo fixed' {${arg}}` }, update: true }, {}, h.deps);
+    assert.match(warning.content[0].text, /required_args: \[omitted\]/u);
+    assert.ok(warning.content[0].text.includes("  - " + warning.details.templateWarnings![0].replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ")));
+    assert.ok(Buffer.byteLength(warning.content[0].text) <= 16384);
+    const optionalBase = await executeRegisterTool({ name: "optional", description: "Bound", args: "a=PRIVATE_DEFAULT", template: "echo {a}" }, {}, h.deps);
+    const optionalSize = 16384 - Buffer.byteLength(optionalBase.content[0].text) + 1;
+    const optionalArg = "o".repeat(optionalSize);
+    const optionalFull = await executeRegisterTool({ name: "optional", description: "Bound", args: optionalArg + "=PRIVATE_DEFAULT", template: `echo {${optionalArg}}`, update: true }, {}, h.deps);
+    assert.equal(Buffer.byteLength(optionalFull.content[0].text), 16384); assert.doesNotMatch(optionalFull.content[0].text, /PRIVATE_DEFAULT/u);
+    const optionalLarge = optionalArg + "o";
+    const optionalOmitted = await executeRegisterTool({ name: "optional", description: "Bound", args: optionalLarge + "=PRIVATE_DEFAULT", template: `echo {${optionalLarge}}`, update: true }, {}, h.deps);
+    assert.match(optionalOmitted.content[0].text, /optional_args: \[omitted\]/u); assert.deepEqual(optionalOmitted.details.optional_args, [optionalLarge]);
+    assert.equal(optionalOmitted.details.defaults![optionalLarge], "PRIVATE_DEFAULT"); assert.doesNotMatch(optionalOmitted.content[0].text, /PRIVATE_DEFAULT|o{40}/u);
+    const largeWarning = await executeRegisterTool({ name: "large_warning", description: "Bound", template: { label: "界".repeat(6000), template: "bash -c 'echo fixed'" } }, {}, h.deps);
+    assert.match(largeWarning.content[0].text, /- warnings: \[omitted\]\n- warnings_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1/u);
+    assert.ok(largeWarning.details.templateWarnings![0].startsWith("界".repeat(6000))); assert.ok(Buffer.byteLength(largeWarning.content[0].text) < 1024);
+    const malformed = await executeRegisterTool({ name: "malformed", description: "Bound", template: "echo" }, {}, {
+      ...h.deps, registerRuntimeTool(cfg: RegisteredTool) { cfg.args = ["bad\ud800"]; },
+    });
+    assert.match(malformed.content[0].text, /required_args: \[unavailable\]/u); assert.match(malformed.content[0].text, /reason: malformed_selected_text/u);
+    assert.ok(malformed.content[0].text.isWellFormed()); assert.deepEqual(malformed.details.required_args, ["bad\ud800"]);
+    const source = join(h.root, "source ``` literal.json");
+    await writeFile(source, JSON.stringify({ description: "Literal", args: ["name"], template: "echo {name}" }));
+    const sourced = await executeRegisterTool({ name: "from_literal", from: source }, {}, h.deps);
+    assert.equal(sourced.details.source, source);
+    assert.ok(sourced.content[0].text.includes("- source:\n  ````text\n  " + source + "\n  ````"));
+    assert.equal(await readFile(source, "utf8"), JSON.stringify({ description: "Literal", args: ["name"], template: "echo {name}" }));
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
+    const definition = createRegisterToolDefinition(h.deps);
+    const hostTool = { ...definition, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...values, {}) };
+    const call = { type: "toolCall", id: "host-registration", name: "register_tool", arguments: { name: "host_receipt", description: "Host", template: "echo" } };
+    const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
+    assert.equal(outcome.isError, false); assert.equal(outcome.result.details.persisted, true); assert.equal(outcome.result.details.callable_now, false);
+    assert.match(outcome.result.content[0].text, /^\n- tool: host_receipt\n- result: persisted\n- source: template\n- callable_now: false/u);
+    assert.deepEqual(outcome.result.details.required_args, []); assert.deepEqual(outcome.result.details.next_actions, ["inspect target=tool:host_receipt view=status"]);
+  } finally { await h.cleanup(); }
+});
+
 test("Registry mutations register template-backed tools", async () => {
   const harness = await createHarness();
   try {
@@ -74,7 +1645,7 @@ test("Registry mutations register template-backed tools", async () => {
     assert.deepEqual(harness.runtimeRegistered, ["transcribe"]);
     assert.match(
       result.content[0].text,
-      /Persisted tool "transcribe" from template; callable_now=false; activation_boundary=session_activation_unverified/,
+      /- tool: transcribe\n- result: persisted\n- source: template\n- callable_now: false\n- activation_boundary: session_activation_unverified/,
     );
     assert.deepEqual(result.details.required_args, ["file"]);
     assert.deepEqual(result.details.optional_args, ["lang"]);
@@ -279,7 +1850,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /Recipe source "music-player\/playback" validation failed:.*volume.*integer.*Next: inspect target=recipes view=doctor identity=music-player\/playback/is,
+      /music-player\/playback.*validation failed.*volume.*integer.*instruction: inspect target=recipes view=doctor identity=music-player\/playback/is,
     );
     await assert.rejects(
       executeRegisterTool(
@@ -291,7 +1862,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /Recipe source "music-player\/playback" validation failed:.*Unknown delegated Recipe default argument: unknown.*Next: inspect target=recipes view=doctor identity=music-player\/playback/is,
+      /music-player\/playback.*validation failed.*Unknown delegated Recipe default argument: unknown.*instruction: inspect target=recipes view=doctor identity=music-player\/playback/is,
     );
     await assert.rejects(
       executeRegisterTool(
@@ -303,7 +1874,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /runtime-owned.*state_dir.*Next: remove that default and retry register_tool/is,
+      /key: state_dir.*runtime-owned.*instruction: remove that default and retry register_tool/is,
     );
     await assert.rejects(readFile(join(harness.root, "bad_volume.json"), "utf8"));
     await assert.rejects(readFile(join(harness.root, "bad_default.json"), "utf8"));
@@ -319,35 +1890,35 @@ test("Registry mutations reject ambiguous or copied Recipe source modes", async 
     for (const [params, pattern] of [
       [
         { description: "Mixed", from: "music-player/playback", name: "mixed", template: "echo" },
-        /exactly one register_tool source mode.*Next: remove the extra source fields and retry register_tool/s,
+        /exactly one register_tool source mode.*- instruction: remove the extra source fields and retry register_tool/s,
       ],
       [
         { args: "source:path", from: "music-player/playback", name: "copied_args" },
-        /from inherits args and async behavior.*Next: retry register_tool with from and optional defaults only/s,
+        /from inherits args and async behavior.*- instruction: retry register_tool with from and optional defaults only/s,
       ],
       [
         { name: "missing_source" },
-        /requires exactly one source mode.*Next: retry register_tool with one source field/s,
+        /requires exactly one source mode.*- instruction: retry register_tool with one source field/s,
       ],
       [
         { from: "", name: "empty_from" },
-        /non-empty Recipe reference.*Next: retry register_tool with from=<skill>\/<recipe>/s,
+        /non-empty Recipe reference.*- instruction: retry register_tool with from=<skill>\/<recipe>/s,
       ],
       [
         { from: "skill:music-player/playback", name: "prefixed_from" },
-        /skill: Recipe references were removed.*Next: inspect target=recipes view=doctor identity=music-player\/playback/s,
+        /skill: Recipe references were removed.*instruction: inspect target=recipes view=doctor identity=music-player\/playback/s,
       ],
       [
         { from: "std:player", name: "std_from" },
-        /std: Recipe references were removed.*Next: inspect target=recipes view=doctor/s,
+        /std: Recipe references were removed.*instruction: inspect target=recipes view=doctor/s,
       ],
       [
         { description: "Nested", name: "nested", template: { template: "music-player/playback" } },
-        /Nested Recipe-shaped templates.*Next: retry with from=<skill>\/<recipe> and defaults=/is,
+        /Nested Recipe-shaped templates.*- instruction: retry with from=<skill>\/<recipe> and defaults=/is,
       ],
       [
         { description: "Legacy values", name: "legacy_values", template: "echo", values: { x: 1 } },
-        /values was removed.*Next: retry register_tool with defaults/is,
+        /values was removed.*- instruction: retry register_tool with defaults/is,
       ],
     ] as const) {
       await assert.rejects(executeRegisterTool(params, {}, harness.deps), pattern);
@@ -666,7 +2237,7 @@ test("Registry mutations delete tools and deactivate them", async () => {
     );
     assert.equal(harness.tools.has("smoke"), false);
     assert.deepEqual(harness.activeTools(), ["read"]);
-    assert.match(result.content[0].text, /Deleted tool "smoke"/);
+    assert.match(result.content[0].text, /- tool: smoke\n- result: deleted/);
   } finally {
     await harness.cleanup();
   }

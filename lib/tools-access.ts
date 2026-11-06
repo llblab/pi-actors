@@ -5,6 +5,7 @@
  */
 
 import * as AsyncRuns from "./async-runs.ts";
+import * as RunIndex from "./runs-index.ts";
 
 export interface SessionContext {
   sessionManager?: { getSessionId?: () => string };
@@ -12,6 +13,18 @@ export interface SessionContext {
 
 export function getContextSessionId(ctx: unknown): string | undefined {
   return (ctx as SessionContext | undefined)?.sessionManager?.getSessionId?.();
+}
+
+/** Optional post-launch navigation never fails or rolls back work already admitted by the launch owner. */
+export function readRunFileNavigationForContext(status: object, ctx: unknown): Readonly<RunIndex.RunDirectoryNavigation> {
+  try {
+    const sessionId = getContextSessionId(ctx);
+    const directory = Object.getOwnPropertyDescriptor(status, "state_dir");
+    const navigation = RunIndex.readRunDirectoryNavigation(typeof directory?.value === "string" ? directory.value : "", status, sessionId);
+    return getContextSessionId(ctx) === sessionId ? navigation : Object.freeze({ state: "unavailable", reason: "session_changed" });
+  } catch {
+    return Object.freeze({ state: "unavailable", reason: "navigation_unavailable" });
+  }
 }
 
 export function requireContextSessionId(ctx: unknown, actor: string): string {

@@ -27,6 +27,7 @@ export interface RunTraceReadEvent {
 export interface RunTraceJournalRead {
     diagnostics: StateReadDiagnostic[];
     events: RunTraceReadEvent[];
+    omittedEvents: number;
     fileBytes: number;
     omittedPrefixBytes: number;
     readBytes: number;

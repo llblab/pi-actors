@@ -5,6 +5,9 @@
  */
 import * as Limits from "./limits.js";
 import { readJsonlFileResilient, } from "./state-readers.js";
+// Non-JSON provenance data. The enumerable Symbol survives turn copies; it grants no source/lifecycle authority.
+export const SESSION_TURN_IDENTITY = Symbol("session-turn-identity");
+export const SESSION_EVIDENCE_CHRONOLOGY = Symbol("session-evidence-chronology");
 const SENSITIVE_KEY = /(?:^|[_-])(?:api[-_]?key|authorization|cookie|credential|password|private[-_]?key|secret|secret[-_]?access[-_]?key|token)$|^(?:access|refresh|auth|api)Token$|^(?:clientSecret|privateKey|secretAccessKey)$/i;
 function boundedJsonStringBytes(value) {
     let bytes = Buffer.byteLength(value, "utf8") + 2;
@@ -206,7 +209,8 @@ function contentText(message, type, maxChars) {
         .join("\n");
     return boundedText(text, maxChars);
 }
-function activeBranch(entries, path, diagnostics) {
+/** Physical last-leaf ancestry, not current model context or a claim about a live SessionManager leaf. */
+export function selectLastRecordedSessionBranch(entries, path, diagnostics) {
     const treeEntries = entries.filter((entry) => entry.type !== "session" && typeof entry.id === "string");
     const leaf = treeEntries.at(-1);
     if (!leaf || typeof leaf.id !== "string")
@@ -247,6 +251,31 @@ function toolCalls(message, maxTextChars, maxToolCalls) {
         name: String(block.name),
     }));
 }
+function sessionChronology(turns, sourceAvailable) {
+    const basis = "recorded_branch_metadata";
+    const unavailable = (reason) => Object.freeze({
+        state: "unavailable", basis, reason, entries: Object.freeze([]),
+    });
+    if (!sourceAvailable)
+        return unavailable("source_unavailable");
+    const entries = [];
+    let bytes = Buffer.byteLength(JSON.stringify({ state: "available", basis, entries: [] }));
+    for (const turn of turns) {
+        const identity = turn[SESSION_TURN_IDENTITY];
+        if (identity?.basis !== "entry")
+            return unavailable("identity_unavailable");
+        const timestamp = turn.timestamp;
+        if (typeof timestamp !== "string" || timestamp.length !== 24 || !Number.isFinite(Date.parse(timestamp)) ||
+            new Date(timestamp).toISOString() !== timestamp || redactSessionEvidenceValue(timestamp) !== timestamp)
+            return unavailable("timestamp_unavailable");
+        const entry = Object.freeze({ ordinal: turn.index, timestamp, identity });
+        bytes += Buffer.byteLength(JSON.stringify(entry)) + Number(entries.length > 0);
+        if (bytes > Limits.SESSION_EVIDENCE_MAX_BYTES)
+            return unavailable("metadata_too_large");
+        entries.push(entry);
+    }
+    return Object.freeze({ state: "available", basis, entries: Object.freeze(entries) });
+}
 export function readSessionEvidence(path, options = {}) {
     const maxBytes = Math.max(1, options.maxBytes ?? Limits.SESSION_EVIDENCE_MAX_BYTES);
     const maxTextChars = Math.max(1, options.maxTextChars ?? Limits.SESSION_EVIDENCE_TEXT_CHARS);
@@ -255,7 +284,27 @@ export function readSessionEvidence(path, options = {}) {
     const read = readJsonlFileResilient(path, { maxBytes });
     const diagnostics = [...read.diagnostics];
     const header = read.records.find((entry) => entry.type === "session");
-    const branch = activeBranch(read.records, path, diagnostics);
+    const branch = selectLastRecordedSessionBranch(read.records, path, diagnostics);
+    const ordinals = new Map(branch.map(entry => [entry, 0]));
+    const idCounts = new Map(branch.map(entry => [String(entry.id), 0]));
+    let sessionHeaders = 0;
+    for (const [index, entry] of read.records.entries()) {
+        if (entry.type === "session")
+            sessionHeaders++;
+        if (ordinals.has(entry))
+            ordinals.set(entry, index + 1);
+        if (entry.type !== "session" && typeof entry.id === "string" && idCounts.has(entry.id)) {
+            idCounts.set(entry.id, idCounts.get(entry.id) + 1);
+        }
+    }
+    const sessionId = sessionHeaders === 1 && typeof header?.id === "string" && header.id &&
+        redactSessionEvidenceValue(header.id, maxTextChars) === header.id ? header.id : undefined;
+    const identity = (entry, role) => {
+        const entryId = typeof entry.id === "string" ? entry.id : "";
+        const basis = sessionId && entryId && idCounts.get(entryId) === 1 && diagnostics.length === 0 &&
+            redactSessionEvidenceValue(entryId, maxTextChars) === entryId ? "entry" : "record";
+        return Object.freeze({ basis, role, ...(basis === "entry" ? { sessionId, entryId } : { ordinal: ordinals.get(entry) }) });
+    };
     const turns = [];
     let pendingUser;
     let currentTurn;
@@ -267,6 +316,7 @@ export function readSessionEvidence(path, options = {}) {
         if (role === "user") {
             pendingUser = {
                 id: String(entry.id),
+                identity: identity(entry, "user"),
                 text: contentText(message, "text", maxTextChars),
             };
             currentTurn = undefined;
@@ -274,6 +324,7 @@ export function readSessionEvidence(path, options = {}) {
         }
         if (role === "assistant") {
             currentTurn = {
+                [SESSION_TURN_IDENTITY]: identity(entry, "assistant"),
                 ...(typeof entry.id === "string" ? { assistantEntryId: entry.id } : {}),
                 ...(contentText(message, "text", maxTextChars)
                     ? { assistantText: contentText(message, "text", maxTextChars) }
@@ -328,6 +379,7 @@ export function readSessionEvidence(path, options = {}) {
             toolCalls: [],
             unmatchedToolResults: 0,
             userEntryId: pendingUser.id,
+            [SESSION_TURN_IDENTITY]: pendingUser.identity,
             ...(pendingUser.text ? { userText: pendingUser.text } : {}),
         });
     }
@@ -336,7 +388,7 @@ export function readSessionEvidence(path, options = {}) {
         ...turn,
         index: firstVisibleIndex + index + 1,
     }));
-    return {
+    const evidence = {
         ...(branch.at(-1)?.id ? { activeLeafId: String(branch.at(-1)?.id) } : {}),
         diagnostics,
         path,
@@ -345,4 +397,8 @@ export function readSessionEvidence(path, options = {}) {
         truncated: read.truncated === true || turns.length > visibleTurns.length,
         turns: visibleTurns,
     };
+    Object.defineProperty(evidence, SESSION_EVIDENCE_CHRONOLOGY, {
+        value: sessionChronology(turns, sessionId !== undefined && read.truncated !== true && diagnostics.length === 0),
+    });
+    return evidence;
 }

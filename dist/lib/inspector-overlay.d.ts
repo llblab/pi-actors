@@ -3,7 +3,7 @@
  * Zones: owned actor selection, Recipe/Trace/Control tabs, safe Run Kill confirmation
  * Owns manual kernel navigation; evidence parsing and lifecycle mutation stay in ports.
  */
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import { type Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI } from "@earendil-works/pi-tui";
 import * as ActorInspector from "./inspector.ts";
 import * as TraceProjection from "./trace-projection.ts";
@@ -37,12 +37,20 @@ export declare class ActorInspectorOverlay {
     private documentScroll;
     private detailScroll;
     private feedback?;
+    private feedbackFromAction;
+    private feedbackScroll;
+    private feedbackPageRows;
+    private inspectorFrame?;
     private focus;
     private killConfirmation?;
     private killDialogChoice;
+    private killDialogScroll;
+    private killDialogPageRows;
     private rowIndex;
     private runCache?;
     private selectedTraceId?;
+    private controlCache?;
+    private controlSelection?;
     private runIndex;
     private selectorIndex;
     private selectorMode?;
@@ -55,6 +63,7 @@ export declare class ActorInspectorOverlay {
     invalidate(): void;
     handleInput(data: string): void;
     render(width: number): string[];
+    private renderInspector;
     private get tab();
     private runs;
     private contentViewportRows;
@@ -71,25 +80,34 @@ export declare class ActorInspectorOverlay {
     private renderRunControl;
     private renderTabs;
     private renderContent;
+    private modalUnderlay;
+    private compositePopup;
+    private popupLayout;
+    private renderFeedbackPopup;
+    private closureWarning;
     private renderSelector;
     private runSelectorOptions;
     private renderMenuBox;
+    private traceTableLine;
     private renderTraceList;
     private renderTraceDetail;
+    private agentDetailSegments;
+    private metadataText;
+    private agentDetailProjection;
     private controlDocument;
+    private controlObservation;
+    private selectedControl;
+    private openControlList;
+    private handleControlInput;
+    private renderControlContent;
     private allTraceItems;
     private traceSources;
     private traceSource;
     private traceItems;
     private readRunMeta;
     private documentProjection;
-    private inlineDocumentValue;
-    private labeledDocumentLines;
-    private labeledScalarLines;
-    private document;
     private wrapDocument;
-    private styleDocumentLine;
-    private visiblePrefix;
+    private keyHints;
     private renderKeyHints;
     private statusColor;
     private footerBorder;

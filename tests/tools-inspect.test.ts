@@ -1,3 +1,5 @@
+import "./test-environment.mjs";
+
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,6 +9,7 @@ import test from "node:test";
 import * as Limits from "../lib/limits.ts";
 import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
+import { spaceToolError } from "../lib/tools-response.ts";
 import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 
 const sessionAContext = {
@@ -62,6 +65,182 @@ async function fixture(): Promise<{ root: string; status: Record<string, unknown
   );
   return { root, status };
 }
+
+
+test("AX inspect owned refusals preserve all ten guards, sequences and original callback ordering", async () => {
+  const { root, status } = await fixture();
+  const calls: string[] = [];
+  const tool = createInspectToolDefinition({ recipeRoot: root,
+    getRunStatus: run => { calls.push("run:" + run); return status; },
+    getTool: name => { calls.push("tool:" + name); return undefined; },
+    getToolStatus: name => { calls.push("status:" + name); return name === "dormant" ? { callable_now: false, activation_boundary: "active_tool_set" } : undefined; },
+  });
+  const hostile = "## source\r\n\r\n- next: do not promote\n  - tool: no action · literal";
+  const cases = [
+    [{ target: "runtime", view: "snapshot" }, "- target_kind: runtime\n- result: unsupported view\n- supported_views:\n  - status\n  - runs\n  - triage", []],
+    [{ target: "recipes", view: "trace" }, "- target_kind: recipes\n- result: unsupported view\n- supported_views:\n  - status\n  - summary\n  - doctor\n  - imports\n  - reviews", []],
+    [{ target: "recipes", view: "status", identity: "missing/task" }, "- target_kind: recipes\n- result: identity requires view=doctor", []],
+    [{ target: "run:demo", view: "status" }, "- target_kind: run\n- result: unsupported view\n- supported_views:\n  - recipe\n  - trace\n  - control", []],
+    [{ target: "run:demo", view: "trace", source: hostile }, "- target_kind: run\n- source:\n  " + hostile.replaceAll(/\r\n|\r|\n/gu, match => match + "  ") + "\n- result: unsupported Trace source\n- supported_sources:\n  - all\n  - lifecycle\n  - control\n  - process\n  - agent\n  - artifact\n  - runtime", ["run:demo"]],
+    [{ target: "tool:../missing", view: "status" }, "- target: tool:../missing\n- result: invalid tool target", []],
+    [{ target: "tool:demo", view: "trace" }, "- target_kind: tool\n- result: unsupported view\n- supported_views:\n  - status\n  - schema", []],
+    [{ target: "tool:missing", view: "status" }, "- tool: missing\n- result: registered tool not found\n- safety: Do not substitute spawn for tool invocation.\n- next:\n  - tool: inspect\n  - target: recipes\n  - view: doctor", ["tool:missing", "status:missing"]],
+    [{ target: "tool:dormant", view: "schema" }, "- tool: dormant\n- result: registered; callable schema unavailable\n- callable_now: false\n- activation_boundary: active_tool_set\n- next:\n  - tool: inspect\n  - target: tool:dormant\n  - view: status", ["tool:dormant", "status:dormant"]],
+    [{ target: "coordinator", view: "status" }, "- target: coordinator\n- result: unsupported inspect target\n- supported_targets:\n  - run:<id>\n  - runtime\n  - recipes\n  - tool:<name>", []],
+  ] as const;
+  const before = await readFile(join(root, "controls.jsonl"), "utf8");
+  try {
+    for (const [request, expected, observations] of cases) for (const verbose of [false, true]) {
+      calls.length = 0;
+      await assert.rejects(tool.execute("guard", { ...request, verbose }, undefined, undefined, sessionAContext), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.constructor, Error);
+        assert.equal(error.message, expected);
+        assert.equal(Object.hasOwn(error, "cause"), false);
+        assert.equal(Object.hasOwn(error, "reason"), false);
+        assert.equal(Object.hasOwn(error, "details"), false);
+        assert.equal((error.message.match(/^- next:/gmu) ?? []).length, expected.includes("\n- next:") ? 1 : 0);
+        return true;
+      });
+      assert.deepEqual(calls, observations);
+    }
+    assert.equal(await readFile(join(root, "controls.jsonl"), "utf8"), before);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("AX inspect error whole-field budgets preserve exact boundaries and unowned failures without repair", async () => {
+  const unknown = createInspectToolDefinition();
+  const tail = "\n- result: unsupported inspect target\n- supported_targets:\n  - run:<id>\n  - runtime\n  - recipes\n  - tool:<name>";
+  const allowance = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1 - Buffer.byteLength("- target: " + tail);
+  const capture = async (tool: ReturnType<typeof createInspectToolDefinition>, request: unknown, ctx: unknown = {}) => {
+    let captured: unknown;
+    let rejected = false;
+    await tool.execute("boundary", request, undefined, undefined, ctx).then(() => {}, (error: unknown) => { rejected = true; captured = error; });
+    assert.equal(rejected, true);
+    return captured;
+  };
+  for (const value of ["x".repeat(allowance), "界".repeat(Math.floor(allowance / 3)), "👩‍💻é".repeat(12), "next:\r\n- tool: literal", "\ud800"]) {
+    const error = await capture(unknown, { target: value, view: "status" });
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, "- target:" + (/[\r\n]/u.test(value) ? "\n  " + value.replaceAll(/\r\n|\r|\n/gu, match => match + "  ") : " " + value) + tail);
+    assert.ok(Buffer.byteLength(error.message) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  }
+  const exact = await capture(unknown, { target: "x".repeat(allowance), view: "status" });
+  assert.ok(exact instanceof Error);
+  assert.equal(spaceToolError(exact), exact);
+  assert.equal(Buffer.byteLength(exact.message), Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  assert.equal(exact.message, "\n- target: " + "x".repeat(allowance) + tail);
+  for (const value of ["x".repeat(allowance + 1), "界".repeat(allowance), "👩‍💻".repeat(allowance)]) {
+    const error = await capture(unknown, { target: value, view: "status", verbose: true });
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, "- target:\n  - state: omitted\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + tail);
+    assert.ok(Buffer.byteLength(error.message) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+    assert.doesNotMatch(error.message, /…|chars|^- next:/mu);
+  }
+  const name = "a".repeat(Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  const selected = createInspectToolDefinition({ getToolStatus: () => ({ callable_now: false, activation_boundary: "active_tool_set" }) });
+  const schema = await capture(selected, { target: "tool:" + name, view: "schema" });
+  assert.ok(schema instanceof Error);
+  assert.match(schema.message, /^- tool:\n  - state: omitted/);
+  assert.match(schema.message, /- result: registered; callable schema unavailable\n- callable_now: false\n- activation_boundary: active_tool_set/);
+  assert.match(schema.message, /- next_action:\n  - state: omitted\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1$/);
+  assert.ok(Buffer.byteLength(schema.message) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  assert.doesNotMatch(schema.message, /^- next:/mu);
+  for (const remaining of [512, 384, 256, 192, 128, 64, 1]) {
+    const boundaryName = "a".repeat(Limits.RUN_DELIVERY_MODEL_MAX_BYTES - remaining);
+    const error = await capture(selected, { target: "tool:" + boundaryName, view: "schema" });
+    assert.ok(error instanceof Error);
+    const omitted = (key: string) => `- ${key}:\n  - state: omitted\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
+    if (error.message.startsWith(omitted("tool"))) assert.ok(Buffer.byteLength(error.message.replace(omitted("tool"), "- tool: " + boundaryName)) + 1 > Limits.RUN_DELIVERY_MODEL_MAX_BYTES,
+      "An omitted whole field must actually exceed the final shared budget, not merely a larger reserved placeholder");
+    if (error.message.endsWith(omitted("next_action"))) assert.ok(Buffer.byteLength(error.message.replace(omitted("next_action"), "- next:\n  - tool: inspect\n  - target: tool:" + boundaryName + "\n  - view: status")) + 1 > Limits.RUN_DELIVERY_MODEL_MAX_BYTES,
+      "An omitted action must actually exceed the final shared budget");
+  }
+  const missing = await capture(unknown, { target: "tool:" + name, view: "status" });
+  assert.ok(missing instanceof Error);
+  assert.match(missing.message, /^- tool:\n  - state: omitted/);
+  assert.match(missing.message, /- safety: Do not substitute spawn for tool invocation\./);
+  assert.ok(missing.message.endsWith("- next:\n  - tool: inspect\n  - target: recipes\n  - view: doctor"));
+  assert.ok(Buffer.byteLength(missing.message) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  const defaults = await capture(createInspectToolDefinition({ getToolStatus: () => ({}) }), { target: "tool:demo", view: "schema" });
+  assert.ok(defaults instanceof Error);
+  assert.match(defaults.message, /- callable_now: false\n- activation_boundary: host_registration/);
+  let trapReads = 0;
+  const trapped = Object.defineProperty(new Error("not observed"), "message", { get() { trapReads += 1; throw Symbol("message trap"); } });
+  const raw = [undefined, "primitive", Symbol("opaque"), trapped, Object.freeze({ message: "not an Error", private: true }),
+    new AggregateError([new Error("inner")], "external", { cause: new Error("original") })];
+  for (const failure of raw) {
+    const ports = [
+      { request: { target: "run:demo", view: "trace" }, deps: { getRunStatus: () => { throw failure; } } },
+      { request: { target: "tool:demo", view: "status" }, deps: { getTool: () => { throw failure; } } },
+      { request: { target: "tool:demo", view: "status" }, deps: { getToolStatus: () => { throw failure; } } },
+      { request: { target: "recipes", view: "status" }, deps: { registryStatus: () => { throw failure; } } },
+    ];
+    for (const port of ports) assert.equal(await capture(createInspectToolDefinition(port.deps), port.request, sessionAContext), failure);
+    let messageReads = 0, boundaryReads = 0;
+    const malformed = createInspectToolDefinition({ getToolStatus: () => ({
+      get callable_now() { messageReads += 1; return { toString() { throw failure; } }; },
+      get activation_boundary() { boundaryReads += 1; return "not observed"; },
+    }) });
+    assert.equal(await capture(malformed, { target: "tool:demo", view: "schema" }), failure);
+    assert.equal(messageReads, 1); assert.equal(boundaryReads, 0);
+  }
+  assert.equal(trapReads, 0);
+  const { root, status } = await fixture();
+  try {
+    const foreign = createInspectToolDefinition({ getRunStatus: () => ({ ...status, ownerId: "session-b" }) });
+    const refused = await capture(foreign, { target: "run:demo", view: "trace", source: "do-not-echo-source" }, sessionAContext);
+    assert.ok(refused instanceof Error);
+    assert.equal((refused as Error & { reason?: string }).reason, "session_mismatch");
+    assert.equal((refused as Error & { hint?: string }).hint, "inspect target=runtime view=runs");
+    assert.doesNotMatch(refused.message, /do-not-echo-source/);
+    let callableReads = 0, boundaryReads = 0;
+    const opaque = "## Boundary\r\n\r\nnext: not trusted\n- tool: content";
+    const once = createInspectToolDefinition({ getToolStatus: () => ({
+      get callable_now() { callableReads += 1; return false; },
+      get activation_boundary() { boundaryReads += 1; return opaque; },
+    }) });
+    const error = await capture(once, { target: "tool:demo", view: "schema" });
+    assert.ok(error instanceof Error);
+    assert.ok(error.message.includes("- activation_boundary:\n  " + opaque.replaceAll(/\r\n|\r|\n/gu, match => match + "  ")));
+    assert.equal(callableReads, 1); assert.equal(boundaryReads, 1);
+    const fallback = createInspectToolDefinition({ listRuns: () => [status], getRunStatus: () => { throw undefined; } });
+    const result = await fallback.execute("fallback", { target: "runtime", view: "runs" }, undefined, undefined, sessionAContext);
+    assert.equal(result.details.runs.length, 1);
+    assert.deepEqual(result.details.runs[0], status);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("AX compact inspection preserves Run views, tool facts and opaque advice while verbose schema stays exact", async () => {
+  const { root, status } = await fixture();
+  try {
+    const tool = createInspectToolDefinition({ getRunStatus: () => status });
+    for (const view of ["recipe", "trace", "control"]) {
+      const compact = await tool.execute("compact", { target: "run:demo", view }, undefined, undefined, sessionAContext);
+      const verbose = await tool.execute("verbose", { target: "run:demo", view, verbose: true }, undefined, undefined, sessionAContext);
+      assert.equal(compact.content[0].text, "\n- run: demo\n- view: " + view);
+      assert.deepEqual(compact.details, verbose.details); assert.equal(verbose.content[0].text, "\n" + JSON.stringify(verbose.details, null, 2));
+      assert.doesNotMatch(JSON.stringify(compact), /TOOL_.*_SECRET|\/private\/recipes|run: run:/);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+  const advice = "## Advice\r\n\r\n- tool: source text · kept\n  - Nested";
+  const facts = Object.freeze({ callable_now: true, activation_boundary: "current_session", source: "sample/task", required_args: Object.freeze(["file", "input path"]), optional_args: Object.freeze(["mode"]),
+    launch_kind: "tool", spawn_calls: 2, tool_calls: 3, next_actions: Object.freeze([advice, "register_tool name=demo update=true"]) });
+  const before = JSON.stringify(facts);
+  const tool = createInspectToolDefinition({ getTool: () => ({ description: "Demo", parameters: { type: "object", properties: {} } }), getToolStatus: () => facts });
+  const result = await tool.execute("tool", { target: "tool:demo", view: "status" }, undefined, undefined, {});
+  assert.equal(result.content[0].text, "\n- tool: demo\n- source: sample/task\n- callable_now: true\n- activation_boundary: current_session\n- required_args:\n  - file\n  - input path\n- optional_args:\n  - mode\n- launch_kind: tool\n- spawn_calls: 2\n- tool_calls: 3\n- instruction:\n  " + advice.replaceAll(/\r\n|\r|\n/gu, match => match + "  "));
+  assert.equal(JSON.stringify(facts), before); assert.equal(result.details.next_actions, facts.next_actions);
+  assert.doesNotMatch(result.content[0].text, /^- next:|\bnext=/mu);
+  const verbose = await tool.execute("verbose", { target: "tool:demo", view: "status", verbose: true }, undefined, undefined, {});
+  assert.equal(verbose.content[0].text, "\n" + JSON.stringify(verbose.details, null, 2)); assert.deepEqual(verbose.details, result.details);
+  const schema = await tool.execute("schema", { target: "tool:demo", view: "schema" }, undefined, undefined, {});
+  assert.equal(schema.content[0].text, "\n" + JSON.stringify(schema.details, null, 2));
+  const empty = createInspectToolDefinition({ getToolStatus: () => ({ callable_now: false, required_args: [], next_actions: ["inspect target=recipes view=doctor"] }) });
+  const sparse = await empty.execute("sparse", { target: "tool:dormant", view: "status" }, undefined, undefined, {});
+  assert.ok(sparse.content[0].text.includes("- required_args: none\n- optional_args: unknown"));
+  assert.ok(sparse.content[0].text.endsWith("- next:\n  - tool: inspect\n  - target: recipes\n  - view: doctor"));
+});
 
 test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () => {
   const { root, status } = await fixture();
@@ -182,7 +361,7 @@ test("Inspect rejects removed Run views on the canonical target", async () => {
     const tool = createInspectToolDefinition({ getRunStatus: () => status });
     await assert.rejects(
       tool.execute("status", { target: "run:demo", view: "status" }, undefined, undefined, sessionAContext),
-      /supports view=recipe, view=trace, or view=control/,
+      /- target_kind: run\n- result: unsupported view\n- supported_views:\n  - recipe\n  - trace\n  - control/,
     );
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -269,10 +448,10 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
       undefined,
       { recipeResolutionContext },
     );
-    assert.match(compactCatalog.content[0].text, /skill_catalog_partial=true/);
+    assert.match(compactCatalog.content[0].text, /- skill_catalog_partial: true/);
     assert.match(
       compactCatalog.content[0].text,
-      /next=inspect_target=recipes_view=imports_verbose=true/,
+      /- next:\n  - tool: inspect\n  - target: recipes\n  - view: imports\n  - verbose: true/,
     );
 
     const focused = await tool.execute(
@@ -297,9 +476,12 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
     });
     assert.match(
       focused.content[0].text,
-      /identity=sample\/task skill_active=true resolvable=true catalog_partial=true component_status=available/,
+      /- identity: sample\/task\n- skill_active: true\n- resolvable: true\n- catalog_partial: true\n- component_status: available/,
     );
     assert.doesNotMatch(focused.content[0].text, new RegExp(root));
+    assert.ok(focused.content[0].text.includes("- source_location:\n  ```text\n  <active-skill:sample>/task.json\n  ```\n"));
+    assert.ok(focused.content[0].text.endsWith("- instruction: spawn recipe=sample/task"));
+    assert.doesNotMatch(focused.content[0].text, /^- next:|register_tool/mu);
 
     const inactive = await tool.execute(
       "inactive-component",
@@ -359,7 +541,7 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
         undefined,
         { recipeResolutionContext },
       ),
-      /identity is supported only with view=doctor/,
+      /- target_kind: recipes\n- result: identity requires view=doctor/,
     );
 
     await rm(join(sampleSkill, "recipes", "bad.json"));
@@ -392,6 +574,33 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
   }
 });
 
+test("AX runtime records preserve existing facts, full inventory and independent verbose navigation", async () => {
+  const { root, status } = await fixture();
+  try {
+    const rows = Object.freeze([...Array.from({ length: 240 }, (_, index) => Object.freeze({ ...status, run: "owned-" + index, state_dir: join(root, "owned-" + index) })),
+      Object.freeze({ ...status, run: "foreign", ownerId: "session-b", state_dir: join(root, "foreign") })]);
+    const byDir = new Map(rows.map(row => [row.state_dir, row])); let reads = 0;
+    const before = JSON.stringify(rows), tool = createInspectToolDefinition({ listRuns: () => [...rows], getRunStatus: dir => { reads++; return byDir.get(dir)!; }, runStateRoot: root });
+    const runtime = await tool.execute("status", { target: "runtime", view: "status" }, undefined, undefined, {});
+    assert.equal(runtime.content[0].text, "\n- runtime: status\n- version: " + runtime.details.version + "\n- state_schema: " + runtime.details.state_schema + "\n- automatic_review: " + runtime.details.automatic_review);
+    assert.equal(reads, 0); assert.doesNotMatch(runtime.content[0].text, /elapsed|snapshot|^- next:/mu);
+    const compact = await tool.execute("runs", { target: "runtime", view: "runs", lines: "1" }, undefined, undefined, sessionAContext);
+    assert.equal(compact.content[0].text, "\n- runtime: runs\n- runs: 240"); assert.equal(compact.details.runs.length, 240);
+    assert.equal(reads, 241); assert.equal(Object.hasOwn(compact.details, "navigation"), false);
+    const verbose = await tool.execute("verbose", { target: "runtime", view: "runs", lines: "1", verbose: true }, undefined, undefined, sessionAContext);
+    assert.equal(reads, 482); assert.deepEqual(verbose.details.runs, compact.details.runs); assert.ok(Object.hasOwn(verbose.details, "navigation"));
+    assert.equal(verbose.content[0].text, "\n" + JSON.stringify(verbose.details, null, 2));
+    assert.doesNotMatch(JSON.stringify(compact), /foreign/); assert.equal(JSON.stringify(rows), before);
+    const failed = { ...status, status: "failed" }, triage = createInspectToolDefinition({ listRuns: () => [failed], getRunStatus: () => failed });
+    const result = await triage.execute("triage", { target: "runtime", view: "triage" }, undefined, undefined, sessionAContext);
+    assert.equal(result.content[0].text, "\n- runtime: triage\n- failed: 1\n- pending_controls: 0\n- stale_controls: 0\n- backpressured: 0\n- incomplete_trace: 0\n- attention: 0");
+    assert.equal(result.details.failed_runs.length, 1); assert.doesNotMatch(result.content[0].text, /^- next:|^- instruction:|elapsed|snapshot/mu);
+    const structured = await triage.execute("triage-json", { target: "runtime", view: "triage", verbose: true }, undefined, undefined, sessionAContext);
+    assert.deepEqual(structured.details, result.details); assert.equal(structured.content[0].text, "\n" + JSON.stringify(structured.details, null, 2));
+    await assert.rejects(tool.execute("missing", { target: "runtime", view: "runs" }, undefined, undefined, {}), error => (error as any).reason === "session_unavailable");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("Runtime status reports immutable source package identity", async () => {
   const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   const tool = createInspectToolDefinition();
@@ -407,7 +616,7 @@ test("Runtime status reports immutable source package identity", async () => {
     );
     assert.equal(result.details.version, pkg.version);
     assert.equal(result.details.state_schema, "run-kernel-v1");
-    assert.match(result.content[0].text, new RegExp(`version=${pkg.version} state_schema=run-kernel-v1`));
+    assert.match(result.content[0].text, new RegExp(`- version: ${pkg.version}\\n- state_schema: run-kernel-v1`));
   } finally {
     if (previous === undefined) delete process.env.npm_package_version;
     else process.env.npm_package_version = previous;
@@ -559,6 +768,9 @@ test("Runtime triage distinguishes fresh saturation from stale work", async () =
       journal_bytes: Buffer.byteLength(await readFile(join(root, "controls.jsonl"))),
     }]);
     assert.deepEqual(result.details.next_actions, ["inspect target=run:demo view=control"]);
+    const compact = await tool.execute("compact-triage", { target: "runtime", view: "triage" }, undefined, undefined, sessionAContext);
+    assert.equal(compact.content[0].text, "\n- runtime: triage\n- failed: 0\n- pending_controls: 66\n- stale_controls: 2\n- backpressured: 1\n- incomplete_trace: 0\n- attention: 0");
+    assert.equal(compact.details.pending_controls.length, 40); assert.equal(compact.details.pending_control_count, 66);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -704,11 +916,11 @@ test("Inspect treats tools as capability definitions, not runtime actors", async
   assert.deepEqual(result.details.optional_args, ["mode"]);
   assert.match(
     result.content[0].text,
-    /tool=demo source=sample\/task callable_now=true activation_boundary=current_session required=file optional=mode launch_kind=tool spawn_calls=2 tool_calls=3/,
+    /- tool: demo\n- source: sample\/task\n- callable_now: true\n- activation_boundary: current_session\n- required_args:\n  - file\n- optional_args:\n  - mode\n- launch_kind: tool\n- spawn_calls: 2\n- tool_calls: 3/,
   );
   await assert.rejects(
     tool.execute("runtime", { target: "tool:pi-actors", view: "triage" }, undefined, undefined, {}),
-    /supports view=status or view=schema/,
+    /- target_kind: tool\n- result: unsupported view\n- supported_views:\n  - status\n  - schema/,
   );
 });
 
@@ -744,7 +956,7 @@ test("Inspect diagnoses registered but inactive and unknown tools without spawn 
   assert.equal(status.details.activation_boundary, "active_tool_set");
   assert.match(
     status.content[0].text,
-    /tool=dormant source=sample\/task callable_now=false activation_boundary=active_tool_set.*next=register_tool name=dormant update=true/,
+    /- tool: dormant\n- source: sample\/task\n- callable_now: false\n- activation_boundary: active_tool_set[\s\S]*- instruction: register_tool name=dormant update=true/,
   );
   assert.doesNotMatch(status.content[0].text, /next=spawn|spawn recipe=/);
   await assert.rejects(
@@ -755,7 +967,7 @@ test("Inspect diagnoses registered but inactive and unknown tools without spawn 
       undefined,
       {},
     ),
-    /registered but its callable schema is unavailable; callable_now=false, activation_boundary=active_tool_set.*Next: inspect target=tool:dormant view=status/s,
+    /- tool: dormant\n- result: registered; callable schema unavailable\n- callable_now: false\n- activation_boundary: active_tool_set\n- next:\n  - tool: inspect\n  - target: tool:dormant\n  - view: status/,
   );
   await assert.rejects(
     tool.execute(
@@ -765,8 +977,84 @@ test("Inspect diagnoses registered but inactive and unknown tools without spawn 
       undefined,
       {},
     ),
-    /Registered tool not found: missing.*Next: inspect target=recipes view=doctor; do not substitute spawn/s,
+    /- tool: missing\n- result: registered tool not found\n- safety: Do not substitute spawn for tool invocation\.\n- next:\n  - tool: inspect\n  - target: recipes\n  - view: doctor/,
   );
+});
+
+test("Runtime verbose navigation uses the actual session, survives a new manager and preserves legacy failures", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-navigation-"));
+  try {
+    const { claimRunStateDirectory } = await import("../lib/runs-ownership.ts");
+    const { registerRunStateDirectory } = await import("../lib/runs-index.ts");
+    const statuses: Record<string, any>[] = [];
+    for (const ownerId of ["session-a", "session-b"]) {
+      const run = `owned-${ownerId}`;
+      const state_dir = claimRunStateDirectory(join(root, run), run);
+      const status = { run, state_dir, ownerId, run_instance_id: `generation-${run}`, status: "done", pid: 0 };
+      await writeFile(join(state_dir, "run.json"), JSON.stringify(status));
+      registerRunStateDirectory(root, state_dir, status); statuses.push(status);
+    }
+    const tool = createInspectToolDefinition({ runStateRoot: root, listRuns: () => statuses,
+      getRunStatus: path => statuses.find(row => row.state_dir === path)! });
+    for (const ctx of [{ sessionManager: { getSessionId: () => "session-a" } }, { sessionManager: { getSessionId: () => "session-a" } }]) {
+      const reply = await tool.execute("map", { target: "runtime", view: "runs", verbose: true, owner_session: "session-b" }, undefined, undefined, ctx);
+      assert.equal(reply.details.navigation.state, "available");
+      assert.deepEqual(reply.details.navigation.items.map((item: any) => item.run), ["owned-session-a"]);
+      assert.doesNotMatch(reply.content[0].text, /owned-session-b/);
+    }
+    const compact = await tool.execute("compact", { target: "runtime", view: "runs" }, undefined, undefined,
+      { sessionManager: { getSessionId: () => "session-a" } });
+    assert.equal(Object.hasOwn(compact.details, "navigation"), false);
+    await writeFile(join(root, "index.json"), "{broken");
+    const unavailable = await tool.execute("missing", { target: "runtime", view: "runs", verbose: true }, undefined, undefined,
+      { sessionManager: { getSessionId: () => "session-a" } });
+    assert.equal(unavailable.details.runs.length, 1);
+    assert.deepEqual(unavailable.details.navigation, { state: "unavailable", reason: "catalog_unavailable" });
+    assert.equal(await readFile(join(root, "index.json"), "utf8"), "{broken");
+    let selected = "session-a";
+    const switching = createInspectToolDefinition({ runStateRoot: root, listRuns: () => { selected = "session-b"; return statuses; },
+      getRunStatus: path => statuses.find(row => row.state_dir === path)! });
+    await assert.rejects(switching.execute("switch", { target: "runtime", view: "runs", verbose: true }, undefined, undefined,
+      { sessionManager: { getSessionId: () => selected } }), (error: any) => error.reason === "session_mismatch");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Runtime verbose navigation uses failed investigation for projection only and reuses exact observed rows", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runtime-priority-"));
+  try {
+    const { claimRunStateDirectory } = await import("../lib/runs-ownership.ts");
+    const { registerRunStateDirectory } = await import("../lib/runs-index.ts");
+    const rows: Record<string, any>[] = [];
+    for (const [run, status, parent] of [["older", "done", undefined], ["failed-child", "failed", "older"], ["latest", "done", undefined]]) {
+      const state_dir = claimRunStateDirectory(join(root, run!), run!);
+      const row = { run, state_dir, run_instance_id: `generation-${run}`, ownerId: "session-a", status,
+        ...(parent ? { delivery_parent: { run: parent, run_instance_id: `generation-${parent}`, state_dir: join(root, parent) } } : {}) };
+      await writeFile(join(state_dir, "run.json"), JSON.stringify(row)); registerRunStateDirectory(root, state_dir, { ...row, status: "running" }); rows.push(row);
+    }
+    const before = await readFile(join(root, "index.json"));
+    let failedOnly = false, mismatched = false, unavailable = false; const observations: string[] = [];
+    const tool = createInspectToolDefinition({ runStateRoot: root, listRuns: () => failedOnly ? rows.filter(row => row.status === "failed") : rows,
+      getRunStatus: directory => { observations.push(directory); if (unavailable) throw Error("Current status unavailable"); const row = rows.find(row => row.state_dir === directory)!;
+        return mismatched ? { ...row, run_instance_id: "stale-generation" } : row; } });
+    const ctx = { sessionManager: { getSessionId: () => "session-a" } };
+    const normal = await tool.execute("normal", { target: "runtime", view: "runs", verbose: true, root_order: "failed_subtrees_first" }, undefined, undefined, ctx);
+    assert.equal(observations.length, 3); assert.deepEqual(normal.details.navigation.items.map((row: any) => row.run), ["latest", "older", "failed-child"]);
+    assert.equal(normal.details.navigation.priority.root_order, "latest_registration");
+    failedOnly = true; observations.length = 0;
+    const focused = await tool.execute("failed", { target: "runtime", view: "runs", verbose: true, status: "failed" }, undefined, undefined, ctx);
+    assert.deepEqual(observations, [rows[1].state_dir]); assert.deepEqual(focused.details.runs.map((row: any) => row.run), ["failed-child"]);
+    assert.deepEqual(focused.details.navigation.items.map((row: any) => row.run), ["older", "failed-child", "latest"]);
+    assert.deepEqual(focused.details.navigation.priority, { root_order: "failed_subtrees_first", basis: "observed_failed_rows" });
+    mismatched = true; observations.length = 0;
+    const stale = await tool.execute("stale", { target: "runtime", view: "runs", verbose: true, status: "failed" }, undefined, undefined, ctx);
+    assert.equal(observations.length, 1); assert.deepEqual(stale.details.navigation.items.map((row: any) => row.run), ["latest", "older", "failed-child"]);
+    mismatched = false; unavailable = true; observations.length = 0;
+    const missing = await tool.execute("unavailable", { target: "runtime", view: "runs", verbose: true, status: "failed" }, undefined, undefined, ctx);
+    assert.equal(observations.length, 1); assert.equal(missing.details.runs[0].status, "failed"); // Preserve legacy injected inventory fallback, not its ranking authority.
+    assert.deepEqual(missing.details.navigation.items.map((row: any) => row.run), ["latest", "older", "failed-child"]);
+    const compact = await tool.execute("compact", { target: "runtime", view: "runs", status: "failed" }, undefined, undefined, ctx);
+    assert.equal(Object.hasOwn(compact.details, "navigation"), false); assert.deepEqual(await readFile(join(root, "index.json")), before);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("Inspect schema documents kernel targets, focused Recipe identity, and Trace source", () => {

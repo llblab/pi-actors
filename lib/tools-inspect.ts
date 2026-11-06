@@ -18,6 +18,7 @@ import * as RecipesDiscovery from "./recipes-discovery.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import * as ReviewDiagnostics from "./review-diagnostics.ts";
 import * as RunsControls from "./runs-controls.ts";
+import { readRunSessionNavigation, type RunNavigationPriority } from "./runs-index.ts";
 import * as RunControlDelivery from "./runs-control-delivery.ts";
 import * as RunsTrace from "./runs-trace.ts";
 import * as Runtime from "./runtime.ts";
@@ -37,6 +38,7 @@ export interface InspectToolDeps<TContext = unknown> {
   getToolStatus?: (name: string) => Record<string, unknown> | undefined;
   listRuns?: () => Array<Record<string, any>>;
   recipeRoot?: string;
+  runStateRoot?: string;
   registryStatus?: () => Runtime.RecipeRegistryStatus;
 }
 
@@ -53,23 +55,36 @@ function runtimeRuns(
   ctx: unknown,
   deps: InspectToolDeps,
   status: string | undefined,
+  includeNavigation = false,
 ): Record<string, unknown> {
   const session = ToolsAccess.requireContextSessionId(ctx, "runtime Run inventory");
   const listed = deps.listRuns
     ? deps.listRuns()
     : AsyncRuns.listRuns(undefined, status);
+  const observedFailures: RunNavigationPriority["failed"][number][] = [];
   const runs = listed
     .map((run) => {
       try {
-        return deps.getRunStatus
+        const observed = deps.getRunStatus
           ? deps.getRunStatus(String(run.state_dir ?? run.run))
           : AsyncRuns.getRunStatus(String(run.state_dir ?? run.run));
+        if (includeNavigation && observed.status === "failed" && typeof observed.run === "string" && typeof observed.run_instance_id === "string" &&
+            typeof observed.state_dir === "string" && observed.ownerId === session) {
+          observedFailures.push({ run: observed.run, run_instance_id: observed.run_instance_id, state_dir: observed.state_dir, ownerId: session });
+        }
+        return observed;
       } catch {
         return run;
       }
     })
     .filter((run) => run.ownerId === session);
-  return { owner_session: session, runs };
+  const navigation = includeNavigation ? readRunSessionNavigation(deps.runStateRoot ?? Paths.getRunStateRoot(), session, {
+    root_order: status === "failed" ? "failed_subtrees_first" : "latest_registration",
+    failed: observedFailures,
+  }) : undefined;
+  const current = ToolsAccess.requireContextSessionId(ctx, "runtime Run inventory");
+  if (current !== session) throw ToolsAccess.sessionMismatchError({ currentSession: current, expectedSession: session, target: "runtime" });
+  return { owner_session: session, runs, ...(navigation ? { navigation } : {}) };
 }
 
 function runtimeTriage(
@@ -171,13 +186,44 @@ function runtimeTriage(
 }
 
 function compactRuntime(view: string, details: Record<string, unknown>): string {
-  if (view === "runs") {
-    return `\nruntime runs=${(details.runs as unknown[] | undefined)?.length ?? 0}`;
-  }
-  if (view === "triage") {
-    return `\nruntime failed=${(details.failed_runs as unknown[] | undefined)?.length ?? 0} pending_controls=${Number(details.pending_control_count ?? 0)} stale_controls=${Number(details.stale_control_count ?? 0)} backpressured=${Number(details.backpressured_run_count ?? 0)} incomplete_trace=${Number(details.trace_diagnostic_count ?? 0)} attention=${(details.attention_events as unknown[] | undefined)?.length ?? 0}`;
-  }
-  return `\nruntime version=${String(details.version)} state_schema=${String(details.state_schema)} automatic_review=${String(details.automatic_review)}`;
+  const fields = view === "runs" ? { runs: (details.runs as unknown[] | undefined)?.length ?? 0 }
+    : view === "triage" ? {
+      failed: (details.failed_runs as unknown[] | undefined)?.length ?? 0,
+      pending_controls: Number(details.pending_control_count ?? 0), stale_controls: Number(details.stale_control_count ?? 0),
+      backpressured: Number(details.backpressured_run_count ?? 0), incomplete_trace: Number(details.trace_diagnostic_count ?? 0),
+      attention: (details.attention_events as unknown[] | undefined)?.length ?? 0,
+    } : { version: String(details.version), state_schema: String(details.state_schema), automatic_review: String(details.automatic_review) };
+  return "\n" + [ToolsResponse.formatMarkdownField("runtime", view),
+    ...Object.entries(fields).map(([key, value]) => ToolsResponse.formatMarkdownField(key, String(value)))].join("\n");
+}
+
+// Projects local refusals only; does not intercept other throws or change existing catches.
+function formatInspectFailure(
+  fields: readonly (readonly [key: string, value: string | readonly string[], omittable?: true])[],
+  next?: readonly [target: string, view: string],
+): string {
+  // The unchanged public adapter adds exactly one leading LF to these Error messages.
+  const budget = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1;
+  const omitted = (key: string) => `- ${key}:\n  - state: omitted\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
+  const field = ([key, value]: (typeof fields)[number]) => typeof value === "string"
+    ? ToolsResponse.formatMarkdownField(key, value)
+    : `- ${key}:\n${value.map(item => `  - ${item}`).join("\n")}`;
+  // Unmarked fields are bounded compiler literals/lists. Short values seed full so admission only grows.
+  const formatted = fields.map(field);
+  const projected = fields.map((item, index) => {
+    const full = formatted[index]!, fallback = omitted(item[0]);
+    return item[2] && Buffer.byteLength(full, "utf8") > Buffer.byteLength(fallback, "utf8") ? fallback : full;
+  });
+  let action = next ? ToolsResponse.formatInspectNextAction(next[0], next[1]) : "";
+  const text = () => [...projected, ...(action ? [action] : [])].join("\n");
+  if (next && Buffer.byteLength(text(), "utf8") > budget) action = omitted("next_action");
+  fields.forEach((item, index) => {
+    if (!item[2]) return;
+    const fallback = projected[index]!;
+    projected[index] = formatted[index]!;
+    if (Buffer.byteLength(text(), "utf8") > budget) projected[index] = fallback;
+  });
+  return text();
 }
 
 function inspectRuntime(
@@ -192,10 +238,13 @@ function inspectRuntime(
       ctx,
       deps,
       typeof input.status === "string" ? input.status : undefined,
+      input.verbose === true,
     );
   }
   if (view === "triage") return runtimeTriage(ctx, deps);
-  throw new Error("inspect runtime supports view=status, view=runs, or view=triage.");
+  throw new Error(formatInspectFailure([
+    ["target_kind", "runtime"], ["result", "unsupported view"], ["supported_views", ["status", "runs", "triage"]],
+  ]));
 }
 
 function portableSkillRecipePath(
@@ -350,9 +399,10 @@ function inspectRecipes(
     view !== "imports" &&
     view !== "reviews"
   ) {
-    throw new Error(
-      "inspect recipes supports view=status, view=summary, view=doctor, view=imports, or view=reviews.",
-    );
+    throw new Error(formatInspectFailure([
+      ["target_kind", "recipes"], ["result", "unsupported view"],
+      ["supported_views", ["status", "summary", "doctor", "imports", "reviews"]],
+    ]));
   }
   const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
   if (view === "reviews") {
@@ -379,7 +429,7 @@ function inspectRecipes(
   const identity =
     typeof input.identity === "string" ? input.identity.trim() : "";
   if (identity && view !== "doctor") {
-    throw new Error("inspect recipes identity is supported only with view=doctor.");
+    throw new Error(formatInspectFailure([["target_kind", "recipes"], ["result", "identity requires view=doctor"]]));
   }
   if (view === "doctor" && identity) {
     return inspectRecipeIdentity(
@@ -463,7 +513,9 @@ function inspectRun(
   deps: InspectToolDeps,
 ): Record<string, unknown> {
   if (view !== "recipe" && view !== "trace" && view !== "control") {
-    throw new Error("inspect run:<id> supports view=recipe, view=trace, or view=control.");
+    throw new Error(formatInspectFailure([
+      ["target_kind", "run"], ["result", "unsupported view"], ["supported_views", ["recipe", "trace", "control"]],
+    ]));
   }
   const status = deps.getRunStatus
     ? ToolsAccess.assertRunStatusAccessibleToContext(
@@ -487,7 +539,10 @@ function inspectRun(
       source !== "artifact" &&
       source !== "runtime"
     ) {
-      throw new Error(`unsupported Trace source: ${source}`);
+      throw new Error(formatInspectFailure([
+        ["target_kind", "run"], ["source", source, true], ["result", "unsupported Trace source"],
+        ["supported_sources", ["all", "lifecycle", "control", "process", "agent", "artifact", "runtime"]],
+      ]));
     }
     return {
       run, source,
@@ -545,22 +600,26 @@ function inspectTool(
   deps: InspectToolDeps,
 ): Record<string, unknown> {
   if (!name || !/^[A-Za-z0-9_.-]+$/.test(name)) {
-    throw new Error(`invalid tool target: tool:${name}`);
+    throw new Error(formatInspectFailure([["target", `tool:${name}`, true], ["result", "invalid tool target"]]));
   }
   if (view !== "status" && view !== "schema") {
-    throw new Error("inspect tool:<name> supports view=status or view=schema.");
+    throw new Error(formatInspectFailure([
+      ["target_kind", "tool"], ["result", "unsupported view"], ["supported_views", ["status", "schema"]],
+    ]));
   }
   const tool = deps.getTool?.(name);
   const status = deps.getToolStatus?.(name);
   if (!tool && !status) {
-    throw new Error(
-      `Registered tool not found: ${name}. Next: inspect target=recipes view=doctor; do not substitute spawn for tool invocation.`,
-    );
+    throw new Error(formatInspectFailure([
+      ["tool", name, true], ["result", "registered tool not found"], ["safety", "Do not substitute spawn for tool invocation."],
+    ], ["recipes", "doctor"]));
   }
   if (view === "schema" && !tool) {
-    throw new Error(
-      `Tool "${name}" is registered but its callable schema is unavailable; callable_now=${String(status?.callable_now ?? false)}, activation_boundary=${String(status?.activation_boundary ?? "host_registration")}. Next: inspect target=tool:${name} view=status.`,
-    );
+    throw new Error(formatInspectFailure([
+      ["tool", name, true], ["result", "registered; callable schema unavailable"],
+      ["callable_now", String(status?.callable_now ?? false), true],
+      ["activation_boundary", String(status?.activation_boundary ?? "host_registration"), true],
+    ], [`tool:${name}`, "status"]));
   }
   return {
     name,
@@ -578,38 +637,37 @@ function inspectTool(
 function compactResult(target: string, view: string, details: Record<string, unknown>): string {
   if (target === "runtime") return compactRuntime(view, details);
   if (target === "recipes" && typeof details.identity === "string") {
-    const lines = [
-      `recipes doctor identity=${details.identity} skill_active=${String(details.skill_active)} resolvable=${String(details.resolvable)} catalog_partial=${String(details.catalog_partial)} component_status=${String(details.component_status)}`,
-      ...(details.source_location
-        ? [`source=${String(details.source_location)}`]
-        : []),
-      `resolution_generation=${String(details.resolution_generation)}`,
-      ...(details.rejected_reason
-        ? [`rejected_reason=${String(details.rejected_reason)}`]
-        : []),
-      ...((details.next_actions as unknown[] | undefined) ?? []).map(
-        (action) => `next=${String(action)}`,
-      ),
-    ];
-    return `\n${lines.join("\n")}`;
+    const fields = [ToolsResponse.formatMarkdownField("recipes", "doctor"),
+      ...["identity", "skill_active", "resolvable", "catalog_partial", "component_status"]
+        .map(key => ToolsResponse.formatMarkdownField(key, String(details[key]))),
+      ...(details.source_location ? [ToolsResponse.formatMarkdownField("source_location", ToolsResponse.formatLiteralBlock(String(details.source_location)))] : []),
+      ToolsResponse.formatMarkdownField("resolution_generation", String(details.resolution_generation)),
+      ...(details.rejected_reason ? [ToolsResponse.formatMarkdownField("rejected_reason", String(details.rejected_reason))] : [])];
+    const actions = details.next_actions as unknown[] | undefined;
+    if (actions?.length) fields.push(ToolsResponse.formatInspectionHint(String(actions[0])));
+    return "\n" + fields.join("\n");
   }
   if (target === "recipes") return ToolsResponse.compactRecipeRegistry(details);
   if (target.startsWith("tool:") && view === "status") {
-    const required = Array.isArray(details.required_args)
-      ? details.required_args.map(String).join(",") || "none"
-      : "unknown";
-    const optional = Array.isArray(details.optional_args)
-      ? details.optional_args.map(String).join(",") || "none"
-      : "unknown";
+    const argumentsField = (key: string, value: unknown): string => Array.isArray(value) && value.length
+      ? "- " + key + ":\n" + value.map(item => "  - " + String(item).replace(/\r\n|\r|\n/gu, match => match + "    ")).join("\n")
+      : ToolsResponse.formatMarkdownField(key, Array.isArray(value) ? "none" : "unknown");
     const next = Array.isArray(details.next_actions) && details.next_actions.length > 0
       ? String(details.next_actions[0])
       : details.callable_now === true
         ? `call tool ${target.slice(5)}`
         : `register_tool name=${target.slice(5)} update=true`;
-    return `\ntool=${target.slice(5)} source=${String(details.source ?? "unknown")} callable_now=${String(details.callable_now ?? false)} activation_boundary=${String(details.activation_boundary ?? "unknown")} required=${required} optional=${optional} launch_kind=${String(details.launch_kind ?? "none")} spawn_calls=${Number(details.spawn_calls ?? 0)} tool_calls=${Number(details.tool_calls ?? 0)} next=${next}`;
+    return "\n" + [ToolsResponse.formatMarkdownField("tool", target.slice(5)),
+      ToolsResponse.formatMarkdownField("source", String(details.source ?? "unknown")),
+      ToolsResponse.formatMarkdownField("callable_now", String(details.callable_now ?? false)),
+      ToolsResponse.formatMarkdownField("activation_boundary", String(details.activation_boundary ?? "unknown")),
+      argumentsField("required_args", details.required_args), argumentsField("optional_args", details.optional_args),
+      ToolsResponse.formatMarkdownField("launch_kind", String(details.launch_kind ?? "none")),
+      ToolsResponse.formatMarkdownField("spawn_calls", String(Number(details.spawn_calls ?? 0))),
+      ToolsResponse.formatMarkdownField("tool_calls", String(Number(details.tool_calls ?? 0))), ToolsResponse.formatInspectionHint(next)].join("\n");
   }
-  if (target.startsWith("tool:")) return `\ntool=${target.slice(5)} view=${view}`;
-  return `\nrun=${target.slice(4)} view=${view}`;
+  if (target.startsWith("tool:")) return "\n" + ToolsResponse.formatMarkdownField("tool", target.slice(5)) + "\n" + ToolsResponse.formatMarkdownField("view", view);
+  return "\n" + ToolsResponse.formatMarkdownField("run", target.slice(4)) + "\n" + ToolsResponse.formatMarkdownField("view", view);
 }
 
 export function createInspectToolDefinition<TContext = unknown>(
@@ -629,7 +687,7 @@ export function createInspectToolDefinition<TContext = unknown>(
         source: Schema.stringSchema(
           "Optional Trace source: all, lifecycle, control, process, agent, artifact, or runtime.",
         ),
-        status: Schema.stringSchema("Optional runtime Run status filter."),
+        status: Schema.stringSchema("Optional runtime Run status filter. With verbose runs, failed prioritizes observed failed subtrees without filtering the navigation map."),
         target: Schema.stringSchema("Target: run:<id>, runtime, recipes, or tool:<name>."),
         verbose: Schema.booleanSchema("Return full JSON instead of compact text."),
         view: Schema.stringSchema(
@@ -659,9 +717,10 @@ export function createInspectToolDefinition<TContext = unknown>(
         else if (target.startsWith("tool:")) {
           details = inspectTool(target.slice(5), view, deps);
         } else {
-          throw new Error(
-            `unsupported inspect target: ${target}; use run:<id>, runtime, recipes, or tool:<name>`,
-          );
+          throw new Error(formatInspectFailure([
+            ["target", target, true], ["result", "unsupported inspect target"],
+            ["supported_targets", ["run:<id>", "runtime", "recipes", "tool:<name>"]],
+          ]));
         }
       }
       return {

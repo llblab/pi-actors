@@ -4,13 +4,15 @@
  */
 
 import assert from "node:assert/strict";
-import { homedir } from "node:os";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { execCommandTemplate } from "../lib/command-templates.ts";
 import { executeRegisteredTool } from "../lib/execution.ts";
+import * as Limits from "../lib/limits.ts";
 import type { RegisteredTool } from "../lib/config.ts";
 import {
   createActiveSkillRecipeContext,
@@ -1313,4 +1315,84 @@ test("Registered tool execution stops retries when recover fails", async () => {
     /Exit code 3[\s\S]*stderr:\nreset failed/,
   );
   assert.deepEqual(calls, ["/work/write", "/work/validate", "/work/reset"]);
+});
+
+test("Registered command formatting preserves a genuine UTF-8 replacement-character tail and complete capture", async t => {
+  const root = mkdtempSync(join(tmpdir(), "pi-actors-output-unicode-")); const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = join(root, "agent"); let childPid: number | undefined; let childClosed = false;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+    if (childPid && !childClosed) throw Error("Captured fixture command exit remains unproven; retaining state");
+    rmSync(root, { recursive: true, force: true });
+  });
+  const tail = "\uFFFD\uFFFD" + "x".repeat(Limits.TOOL_OUTPUT_MAX_BYTES - 6); const content = "prefix-" + tail;
+  const script = join(root, "emit.cjs"); writeFileSync(script, `process.stdout.write(${JSON.stringify(content)});`);
+  const result = await executeRegisteredTool({ ...tool, name: "unicode-tail", template: "{node} {script}", args: ["node", "script"], defaults: {} },
+    { node: process.execPath, script }, (command, args, options) => execCommandTemplate(command, args, { ...options, captureDir: join(root, "captures"),
+      onAttemptManaged: context => { childPid = context.process.pid; context.process.once("close", () => { childClosed = true; }); },
+    }), root);
+  assert.ok(childPid); assert.equal(childClosed, true); assert.equal(result.details.code, 0);
+  assert.equal(result.details.truncated, true);
+  assert.equal(result.details.stdoutBytes, Buffer.byteLength(content)); assert.equal(result.details.stdoutCapturedBytes, Buffer.byteLength(content));
+  assert.ok(result.content[0].text.startsWith(`\n${tail}\n\n[Output truncated: `));
+  const saved = result.details.fullOutputPath; assert.ok(typeof saved === "string"); assert.ok(saved.startsWith(root + sep));
+  assert.equal(readFileSync(saved, "utf8"), content);
+});
+
+test("Final response selection is kernel-only pre-format successful output, never launch metadata or replay", async () => {
+  const cfg: RegisteredTool = { name: "response", description: "fixture", template: { template: "launch-private-command" }, args: [], defaults: {} };
+  for (const truncated of [false, true]) {
+    let calls = 0, selected = 0;
+    const answer = "REAL RESULT 🌍\r\n" + "X".repeat(60 * 1024);
+    await executeRegisteredTool(cfg, { onFinalResponseSelected: "actor data is not a callback" }, async () => {
+      calls++; return { code: 0, killed: false, stdout: answer, stderr: "", stdoutTruncated: truncated };
+    }, tmpdir(), undefined, { onFinalResponseSelected(text, upstream) {
+      selected++; assert.equal(text, answer); assert.equal(upstream, truncated);
+    } });
+    assert.equal(calls, 1); assert.equal(selected, 1);
+  }
+  for (const template of [["LAUNCH_PREPARE", "LAUNCH_FINAL"], { parallel: true, template: ["LAUNCH_A", "LAUNCH_B"] },
+    { template: "LAUNCH_RETRY", retry: 2 }] as RegisteredTool["template"][]) {
+    let calls = 0, selected = 0;
+    const retriedLeaf = !Array.isArray(template) && template && typeof template === "object" && "retry" in template;
+    await executeRegisteredTool({ ...cfg, template }, {}, async () => {
+      calls++; return { code: 0, killed: false, stdout: "FINAL ACTOR RESPONSE", stderr: "" };
+    }, tmpdir(), undefined, { onFinalResponseSelected(text) {
+      selected++; assert.ok(text.includes("FINAL ACTOR RESPONSE")); assert.doesNotMatch(text, /LAUNCH_/);
+    } });
+    assert.equal(calls, retriedLeaf ? 1 : 2); assert.equal(selected, 1);
+  }
+  let branch = 0;
+  await executeRegisteredTool({ ...cfg, template: { parallel: true, min_successful: 1, template: ["bad", "good"] } }, {}, async () =>
+    ++branch === 1 ? { code: 7, killed: false, stdout: "", stderr: "X".repeat(2000) }
+      : { code: 0, killed: false, stdout: "GOOD ANSWER", stderr: "" }, tmpdir(), undefined,
+    { onFinalResponseSelected(text, upstream) { assert.ok(text.includes("GOOD ANSWER")); assert.equal(upstream, true); } });
+  let calls = 0; const failure = Error("response publication refusal");
+  await assert.rejects(executeRegisteredTool(cfg, {}, async () => {
+    calls++; return { code: 0, killed: false, stdout: "answer", stderr: "" };
+  }, tmpdir(), undefined, { onFinalResponseSelected() { throw failure; } }), error => error === failure);
+  assert.equal(calls, 1);
+  await assert.rejects(executeRegisteredTool(cfg, {}, async () => ({ code: 7, killed: false, stdout: "partial", stderr: "failed" }),
+    tmpdir(), undefined, { onFinalResponseSelected() { assert.fail("Failure text is not a successful response"); } }));
+});
+
+test("Primary command selection is an explicit kernel-only pre-format port, not a composition or actor-value permission", async t => {
+  const root = mkdtempSync(join(tmpdir(), "pi-actors-primary-selection-")); const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = root;
+  t.after(() => { if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous; rmSync(root, {recursive:true, force:true}); });
+  const cfg: RegisteredTool = { name: "selection", description: "fixture", template: "fixture", args: [], defaults: {} };
+  const raw = { code: 0, killed: false, stdout: "X".repeat(60 * 1024), stderr: "" }; let selected = 0;
+  const { existsSync } = await import("node:fs");
+  const result = await executeRegisteredTool(cfg, { visible: true }, async () => raw, root, undefined, {
+    onPrimaryCommandSelected(value) { selected++; assert.equal(value, raw); assert.equal(existsSync(join(root, "tmp", "pi-actors", "outputs")), false); },
+  });
+  assert.equal(selected, 1); assert.equal(result.details.truncated, true);
+  for (const template of [["fixture"], { template: "fixture" }] as RegisteredTool["template"][]) {
+    await executeRegisteredTool({ ...cfg, template }, {}, async () => ({ ...raw, stdout: "short" }), root, undefined, {
+      onPrimaryCommandSelected: () => assert.fail("Unadmitted composition called the primary publication port"),
+    });
+  }
+  await assert.rejects(executeRegisteredTool(cfg, {}, async () => ({ ...raw, stdout: "short", code: 3 }), root, undefined, {
+    onPrimaryCommandSelected: () => assert.fail("Failure stderr is outside primary stdout selection"),
+  }));
 });

@@ -6,6 +6,7 @@
 
 import {
   closeSync,
+  constants,
   fstatSync,
   openSync,
   readFileSync,
@@ -41,12 +42,14 @@ function diagnosticMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function readTextFileCapped(path: string, maxBytes: number | undefined): string {
-  if (maxBytes === undefined) return readFileSync(path, "utf8");
+function readTextFileCapped(path: string, maxBytes: number | undefined, strictUtf8 = false): string {
+  if (maxBytes === undefined) return strictUtf8 ? new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path)) : readFileSync(path, "utf8");
   const limit = Math.max(0, Math.floor(maxBytes));
-  const fd = openSync(path, "r");
+  const fd = openSync(path, strictUtf8 ? constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0) : "r");
   try {
-    const size = fstatSync(fd).size;
+    const opened = fstatSync(fd);
+    if (strictUtf8 && !opened.isFile()) throw new Error("bounded strict read requires a regular file");
+    const size = opened.size;
     if (size > limit) {
       throw Object.assign(
         new Error(`file exceeds bounded read limit (${size} > ${limit} bytes)`),
@@ -60,17 +63,23 @@ function readTextFileCapped(path: string, maxBytes: number | undefined): string 
       if (bytesRead === 0) break;
       offset += bytesRead;
     }
-    return content.subarray(0, offset).toString("utf8");
+    if (strictUtf8 && offset !== size) throw new Error("file ended before its bounded strict read completed");
+    const observed = content.subarray(0, offset);
+    return strictUtf8 ? new TextDecoder("utf-8", { fatal: true }).decode(observed) : observed.toString("utf8");
   } finally {
     closeSync(fd);
   }
 }
 
-export function readJsonFileResilient<T>(path: string, fallback: T): JsonReadResult<T> {
+export function readJsonFileResilient<T>(
+  path: string,
+  fallback: T,
+  options: { maxBytes?: number; strictUtf8?: boolean } = {},
+): JsonReadResult<T> {
   try {
     return {
       diagnostics: [],
-      value: JSON.parse(readFileSync(path, "utf8")) as T,
+      value: JSON.parse(readTextFileCapped(path, options.maxBytes, options.strictUtf8)) as T,
     };
   } catch (error) {
     if (isEnoent(error)) return { diagnostics: [], value: fallback };

@@ -4,8 +4,9 @@
  * Owns portable command-template parsing, expansion, risk checks, retries, timeouts, and direct execution.
  */
 
-import { spawn, spawnSync } from "node:child_process";
-import { accessSync, appendFileSync, constants, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
+import { accessSync, appendFileSync, constants, lstatSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, extname, isAbsolute, join, resolve as resolvePath } from "node:path";
 
@@ -56,6 +57,12 @@ export interface CommandTemplateInvocation {
 }
 
 export interface CommandTemplateExecOptions {
+  /** Kernel-only synchronous admission around each native spawn, including retries. */
+  admitSpawn?: (start: () => ChildProcess) => ChildProcess;
+  /** Kernel-only fresh handle after capture/exit management, inside synchronous spawn admission. Not birth proof. */
+  onAttemptManaged?: (context: CommandTemplateManagedAttempt) => void;
+  /** Kernel observation of settled attempts only; no receipt exists for a denied spawn. */
+  onAttemptComplete?: (receipt: CommandTemplateAttemptReceipt) => void;
   cwd?: string;
   timeout?: number;
   signal?: AbortSignal;
@@ -77,6 +84,68 @@ export interface CommandTemplateExecResult {
   stderrFile?: string;
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
+  stdoutCaptureIncomplete?: true;
+  stderrCaptureIncomplete?: true;
+  stdoutFileBytes?: number;
+  stderrFileBytes?: number;
+}
+
+export interface CommandTemplateManagedAttempt {
+  readonly attempt: number;
+  readonly process: ChildProcess;
+}
+
+export interface CommandTemplateSpawnAdmission { readonly attempt: number; }
+
+let pendingSpawnAdmission: CommandTemplateSpawnAdmission | undefined;
+const freshManagedAttempts = new WeakMap<CommandTemplateManagedAttempt, { process: ChildProcess; pid: number | undefined; admission: CommandTemplateSpawnAdmission }>();
+
+/** Available only before this synchronous admission invokes its factory; never retroactively adopt a born process. */
+export function readPendingCommandSpawnAdmission(): CommandTemplateSpawnAdmission | undefined {
+  return pendingSpawnAdmission;
+}
+
+/** Kernel-only launch observation capability; copies and references retained past the callback are not authority. */
+export function requireFreshManagedCommandAttempt(context: CommandTemplateManagedAttempt, admission?: CommandTemplateSpawnAdmission): CommandTemplateManagedAttempt {
+  const actual = freshManagedAttempts.get(context);
+  if (!actual || (admission !== undefined && actual.admission !== admission) || context.process !== actual.process || actual.process.pid !== actual.pid) {
+    throw new Error("Native process observation requires a fresh managed attempt from this runtime.");
+  }
+  return context;
+}
+
+export interface CommandTemplateAttemptReceipt {
+  readonly attempt: number;
+  /** Kernel-only digest of observed stdout bytes after complete capture persistence; not exposure/native authority. */
+  readonly stdoutSha256?: string;
+  readonly result: Readonly<CommandTemplateExecResult>;
+  readonly nativeExitCode?: number | null;
+  readonly nativeSignal?: NodeJS.Signals | null;
+}
+
+export interface CommandTemplateNativeClose {
+  readonly pid: number;
+  readonly nativeExitCode: number | null;
+  readonly nativeSignal: NodeJS.Signals | null;
+}
+
+const nativeCloseReceipts = new WeakMap<CommandTemplateAttemptReceipt, {
+  admission: CommandTemplateSpawnAdmission;
+  process: ChildProcess;
+  close: CommandTemplateNativeClose;
+}>();
+
+/** Exact retained process close during its synchronous receipt callback, never a serialized terminal claim. */
+export function requireNativeCommandAttemptClose(
+  receipt: CommandTemplateAttemptReceipt,
+  admission: CommandTemplateSpawnAdmission,
+  child: ChildProcess,
+): CommandTemplateNativeClose {
+  const actual = nativeCloseReceipts.get(receipt);
+  if (!actual || actual.admission !== admission || actual.process !== child || child.pid !== actual.close.pid) {
+    throw new Error("Native settlement requires its exact runtime-local process-close receipt.");
+  }
+  return actual.close;
 }
 
 export type CommandTemplateRiskLabel =
@@ -901,7 +970,7 @@ export async function execCommandTemplate(
           ),
         }
       : options;
-    const result = await execCommandTemplateOnce(command, args, attemptOptions);
+    const result = await execCommandTemplateOnce(command, args, attemptOptions, attempt);
     if (result.code === 0) return result;
     lastResult = result;
   }
@@ -914,6 +983,9 @@ interface BoundedCommandCapture {
     bytes: number;
     content: string;
     file?: string;
+    fileBytes?: number;
+    incomplete?: boolean;
+    sha256?: string;
     truncated: boolean;
   };
 }
@@ -930,39 +1002,54 @@ function createBoundedCommandCapture(
   limit: number,
   getCaptureDir: () => string,
   persistCompleteStream: boolean,
+  onFailure: (error: unknown) => void,
 ): BoundedCommandCapture {
   let bytes = 0;
+  const digest = stream === "stdout" && persistCompleteStream ? createHash("sha256") : undefined;
   let content: Buffer = Buffer.alloc(0);
   let file = persistCompleteStream
     ? join(getCaptureDir(), `${stream}.log`)
     : undefined;
   if (file) writeFileSync(file, Buffer.alloc(0));
   let truncated = false;
+  let incomplete = false;
   return {
     append(value) {
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
       bytes += chunk.length;
+      digest?.update(chunk);
       if (bytes > limit) truncated = true;
-      if (!file && bytes <= limit) {
-        content = Buffer.concat([content, chunk]);
-        return;
-      }
-      if (!file) {
-        file = join(getCaptureDir(), `${stream}.log`);
-        writeFileSync(file, content);
-      }
-      appendFileSync(file, chunk);
+      const previous = content;
       content = trimCaptureTail(Buffer.concat([content, chunk]), limit);
+      if (!file && bytes <= limit) return;
+      if (incomplete) return;
+      try {
+        if (!file) {
+          file = join(getCaptureDir(), `${stream}.log`);
+          writeFileSync(file, previous);
+        }
+        appendFileSync(file, chunk);
+      } catch (error) {
+        incomplete = true;
+        onFailure(error);
+      }
     },
     result() {
-      if (!file && persistCompleteStream) {
-        file = join(getCaptureDir(), `${stream}.log`);
-        writeFileSync(file, content);
+      let retainedFile = file;
+      let fileBytes: number | undefined;
+      if (incomplete && file) {
+        try {
+          const stat = lstatSync(file);
+          if (stat.isFile()) fileBytes = stat.size;
+          else retainedFile = undefined;
+        } catch { retainedFile = undefined; }
       }
       return {
         bytes,
         content: content.toString("utf8"),
-        ...(file ? { file } : {}),
+        ...(retainedFile ? { file: retainedFile } : {}),
+        ...(digest && !incomplete && retainedFile ? { sha256: digest.digest("hex") } : {}),
+        ...(incomplete ? { incomplete: true, ...(fileBytes === undefined ? {} : { fileBytes }) } : {}),
         truncated,
       };
     },
@@ -972,134 +1059,196 @@ function createBoundedCommandCapture(
 function execCommandTemplateOnce(
   command: string,
   args: string[],
-  options: CommandTemplateExecOptions = {},
+  options: CommandTemplateExecOptions,
+  attempt: number,
 ): Promise<CommandTemplateExecResult> {
-  return new Promise((resolve) => {
-    const proc = spawn(command, args, {
-      cwd: options.cwd,
-      shell: false,
-      stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-    });
-    const captureLimit = Math.max(
-      1,
-      options.captureLimitBytes ?? DEFAULT_COMMAND_CAPTURE_LIMIT_BYTES,
-    );
-    let captureDir: string | undefined;
-    const getCaptureDir = (): string => {
-      if (captureDir) return captureDir;
-      captureDir = options.captureDir
-        ? resolvePath(options.captureDir)
-        : mkdtempSync(join(tmpdir(), "pi-actors-command-"));
-      mkdirSync(captureDir, { recursive: true });
-      return captureDir;
-    };
-    const persistCompleteStreams = options.captureDir !== undefined;
-    const stdoutCapture = createBoundedCommandCapture(
-      "stdout",
-      captureLimit,
-      getCaptureDir,
-      persistCompleteStreams,
-    );
-    const stderrCapture = createBoundedCommandCapture(
-      "stderr",
-      captureLimit,
-      getCaptureDir,
-      persistCompleteStreams,
-    );
-    let killed = false;
-    let settled = false;
-    let timeoutId: NodeJS.Timeout | undefined;
-    let killTimeoutId: NodeJS.Timeout | undefined;
-    const signalProcessTree = (signal: NodeJS.Signals): void => {
-      if (proc.pid === undefined) return;
-      if (process.platform === "win32") {
-        spawnSync("taskkill", [
-          "/PID",
-          String(proc.pid),
-          "/T",
-          ...(signal === "SIGKILL" ? ["/F"] : []),
-        ]);
-        return;
-      }
-      const snapshot = spawnSync("ps", ["-eo", "pid=,ppid="], { encoding: "utf8" });
-      const children = new Map<number, number[]>();
-      for (const line of snapshot.stdout?.split(/\r?\n/u) ?? []) {
-        const [pidText, parentText] = line.trim().split(/\s+/u);
-        const pid = Number(pidText);
-        const parent = Number(parentText);
-        if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(parent)) continue;
-        const siblings = children.get(parent) ?? [];
-        siblings.push(pid);
-        children.set(parent, siblings);
-      }
-      const descendants: number[] = [];
-      const collect = (parent: number): void => {
-        for (const child of children.get(parent) ?? []) {
-          collect(child);
-          descendants.push(child);
+  return new Promise((resolve, reject) => {
+    let failure: { error: unknown } | undefined;
+    let managed: ChildProcess | undefined;
+    let invoked = false;
+    let admissionOpen = true;
+    const spawnAdmission = Object.freeze({ attempt });
+    const rememberFailure = (error: unknown): void => { failure ??= { error }; };
+    const start = (): ChildProcess => {
+      if (!admissionOpen) throw new Error("Native spawn admission window is closed.");
+      if (invoked) throw new Error("Native spawn factory may be invoked only once per attempt.");
+      invoked = true;
+      pendingSpawnAdmission = undefined;
+      const captureLimit = Math.max(
+        1,
+        options.captureLimitBytes ?? DEFAULT_COMMAND_CAPTURE_LIMIT_BYTES,
+      );
+      let captureDir: string | undefined;
+      const getCaptureDir = (): string => {
+        if (captureDir) return captureDir;
+        captureDir = options.captureDir
+          ? resolvePath(options.captureDir)
+          : mkdtempSync(join(tmpdir(), "pi-actors-command-"));
+        mkdirSync(captureDir, { recursive: true });
+        return captureDir;
+      };
+      const persistCompleteStreams = options.captureDir !== undefined;
+      const stdoutCapture = createBoundedCommandCapture(
+        "stdout",
+        captureLimit,
+        getCaptureDir,
+        persistCompleteStreams,
+        rememberFailure,
+      );
+      const stderrCapture = createBoundedCommandCapture(
+        "stderr",
+        captureLimit,
+        getCaptureDir,
+        persistCompleteStreams,
+        rememberFailure,
+      );
+      let killed = false;
+      let settled = false;
+      let timeoutId: NodeJS.Timeout | undefined;
+      let killTimeoutId: NodeJS.Timeout | undefined;
+      const signalProcessTree = (signal: NodeJS.Signals): void => {
+        if (proc.pid === undefined) return;
+        if (process.platform === "win32") {
+          spawnSync("taskkill", [
+            "/PID",
+            String(proc.pid),
+            "/T",
+            ...(signal === "SIGKILL" ? ["/F"] : []),
+          ]);
+          return;
+        }
+        const snapshot = spawnSync("ps", ["-eo", "pid=,ppid="], { encoding: "utf8" });
+        const children = new Map<number, number[]>();
+        for (const line of snapshot.stdout?.split(/\r?\n/u) ?? []) {
+          const [pidText, parentText] = line.trim().split(/\s+/u);
+          const pid = Number(pidText);
+          const parent = Number(parentText);
+          if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(parent)) continue;
+          const siblings = children.get(parent) ?? [];
+          siblings.push(pid);
+          children.set(parent, siblings);
+        }
+        const descendants: number[] = [];
+        const collect = (parent: number): void => {
+          for (const child of children.get(parent) ?? []) {
+            collect(child);
+            descendants.push(child);
+          }
+        };
+        collect(proc.pid);
+        for (const pid of [...descendants, proc.pid]) {
+          try {
+            process.kill(pid, signal);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+          }
         }
       };
-      collect(proc.pid);
-      for (const pid of [...descendants, proc.pid]) {
+      const killProcess = (): void => {
+        if (killed) return;
+        killed = true;
+        signalProcessTree("SIGTERM");
+        killTimeoutId = setTimeout(() => {
+          if (!settled) signalProcessTree("SIGKILL");
+        }, options.killGrace ?? 5000);
+      };
+      const settle = (code: number, nativeExitCode?: number | null, nativeSignal?: NodeJS.Signals | null): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        if (killTimeoutId) clearTimeout(killTimeoutId);
+        if (options.signal)
+          options.signal.removeEventListener("abort", killProcess);
+        const stdout = stdoutCapture.result();
+        const stderr = stderrCapture.result();
+        const result = {
+          stdout: stdout.content,
+          stderr: stderr.content,
+          code,
+          killed,
+          stdoutBytes: stdout.bytes,
+          stderrBytes: stderr.bytes,
+          ...(stdout.file ? { stdoutFile: stdout.file } : {}),
+          ...(stderr.file ? { stderrFile: stderr.file } : {}),
+          ...(stdout.truncated ? { stdoutTruncated: true } : {}),
+          ...(stderr.truncated ? { stderrTruncated: true } : {}),
+          ...(stdout.incomplete ? { stdoutCaptureIncomplete: true as const, ...(stdout.fileBytes === undefined ? {} : { stdoutFileBytes: stdout.fileBytes }) } : {}),
+          ...(stderr.incomplete ? { stderrCaptureIncomplete: true as const, ...(stderr.fileBytes === undefined ? {} : { stderrFileBytes: stderr.fileBytes }) } : {}),
+        };
         try {
-          process.kill(pid, signal);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-        }
-      }
-    };
-    const killProcess = (): void => {
-      if (killed) return;
-      killed = true;
-      signalProcessTree("SIGTERM");
-      killTimeoutId = setTimeout(() => {
-        if (!settled) signalProcessTree("SIGKILL");
-      }, options.killGrace ?? 5000);
-    };
-    const settle = (code: number): void => {
-      if (settled) return;
-      settled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-      if (killTimeoutId) clearTimeout(killTimeoutId);
-      if (options.signal)
-        options.signal.removeEventListener("abort", killProcess);
-      const stdout = stdoutCapture.result();
-      const stderr = stderrCapture.result();
-      resolve({
-        stdout: stdout.content,
-        stderr: stderr.content,
-        code,
-        killed,
-        stdoutBytes: stdout.bytes,
-        stderrBytes: stderr.bytes,
-        ...(stdout.file ? { stdoutFile: stdout.file } : {}),
-        ...(stderr.file ? { stderrFile: stderr.file } : {}),
-        ...(stdout.truncated ? { stdoutTruncated: true } : {}),
-        ...(stderr.truncated ? { stderrTruncated: true } : {}),
+          if (options.onAttemptComplete) {
+            const receipt = Object.freeze({
+              attempt, result: Object.freeze({ ...result }),
+              ...(stdout.sha256 ? { stdoutSha256: stdout.sha256 } : {}),
+              ...(nativeExitCode !== undefined ? { nativeExitCode } : {}),
+              ...(nativeSignal !== undefined ? { nativeSignal } : {}),
+            });
+            const exitObserved = (Number.isSafeInteger(nativeExitCode) && nativeSignal === null) ||
+              (nativeExitCode === null && typeof nativeSignal === "string" && /^SIG[A-Z0-9]+$/.exec(nativeSignal)?.[0] === nativeSignal);
+            if (exitObserved && Number.isSafeInteger(proc.pid) && Number(proc.pid) > 0 &&
+              proc.exitCode === nativeExitCode && proc.signalCode === nativeSignal) {
+              nativeCloseReceipts.set(receipt, {
+                admission: spawnAdmission, process: proc,
+                close: Object.freeze({ pid: proc.pid!, nativeExitCode: nativeExitCode!, nativeSignal: nativeSignal! }),
+              });
+            }
+            try { options.onAttemptComplete(receipt); }
+            finally { nativeCloseReceipts.delete(receipt); }
+          }
+        } catch (error) { rememberFailure(error); }
+        if (failure) reject(failure.error);
+        else resolve(result);
+      };
+      const proc = spawn(command, args, {
+        cwd: options.cwd,
+        shell: false,
+        stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       });
+      proc.stdout?.on("data", (data: Buffer) => {
+        stdoutCapture.append(data);
+      });
+      proc.stderr?.on("data", (data: Buffer) => {
+        stderrCapture.append(data);
+      });
+      proc.stdin?.on("error", () => {});
+      proc.on("error", (error) => {
+        const liveHandle = Number.isSafeInteger(proc.pid) && Number(proc.pid) > 0;
+        if (liveHandle) rememberFailure(error);
+        stderrCapture.append(error instanceof Error ? error.message : String(error));
+        if (!liveHandle) settle(1);
+      });
+      proc.on("close", (code, signal) => {
+        settle(code ?? 1, code, signal);
+      });
+      managed = proc;
+      try {
+        if (options.signal) {
+          if (options.signal.aborted) killProcess();
+          else
+            options.signal.addEventListener("abort", killProcess, { once: true });
+        }
+        if (options.timeout !== undefined && options.timeout > 0)
+          timeoutId = setTimeout(killProcess, options.timeout);
+        if (options.stdin !== undefined) proc.stdin?.end(options.stdin);
+        if (options.onAttemptManaged) {
+          const context = Object.freeze({ attempt, process: proc });
+          freshManagedAttempts.set(context, { process: proc, pid: proc.pid, admission: spawnAdmission });
+          try { options.onAttemptManaged(context); }
+          finally { freshManagedAttempts.delete(context); }
+        }
+      } catch (error) { rememberFailure(error); }
+      return proc;
     };
-    if (options.signal) {
-      if (options.signal.aborted) killProcess();
-      else
-        options.signal.addEventListener("abort", killProcess, { once: true });
-    }
-    if (options.timeout !== undefined && options.timeout > 0)
-      timeoutId = setTimeout(killProcess, options.timeout);
-    proc.stdout?.on("data", (data: Buffer) => {
-      stdoutCapture.append(data);
-    });
-    proc.stderr?.on("data", (data: Buffer) => {
-      stderrCapture.append(data);
-    });
-    proc.stdin?.on("error", () => {});
-    if (options.stdin !== undefined) proc.stdin?.end(options.stdin);
-    proc.on("error", (error) => {
-      stderrCapture.append(error instanceof Error ? error.message : String(error));
-      settle(1);
-    });
-    proc.on("close", (code) => {
-      settle(code ?? (killed ? 1 : 0));
-    });
+    const parentAdmission = pendingSpawnAdmission;
+    try {
+      pendingSpawnAdmission = spawnAdmission;
+      const proc = options.admitSpawn ? options.admitSpawn(start) : start();
+      if (!managed) throw new Error("Native spawn admission must invoke its managed factory.");
+      if (proc !== managed) throw new Error("Native spawn admission must return its managed process.");
+    } catch (error) {
+      if (managed) rememberFailure(error);
+      else reject(error);
+    } finally { admissionOpen = false; pendingSpawnAdmission = parentAdmission; }
   });
 }
 

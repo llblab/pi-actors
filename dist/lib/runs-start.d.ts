@@ -7,6 +7,8 @@ import { type FileMutationLockOptions } from "./file-state.ts";
 type RunJsonReader = (path: string) => Record<string, unknown> | undefined;
 export declare function readActiveOwnedRunState(stateDir: string, readJson: RunJsonReader, _runnerPath: string): Record<string, unknown> | undefined;
 export declare function assertNoActiveRunState(stateDir: string, readJson: RunJsonReader, runnerPath: string): void;
+/** Prepare-only metadata must neither replace an earlier Run nor erase unrelated retained evidence. */
+export declare function assertFreshRunPreparationState(stateDir: string): void;
 export declare function acquireStateStartLock(stateDir: string, options?: FileMutationLockOptions): () => void;
 export declare function prepareStateDirForStart(stateDir: string, readJson: RunJsonReader, _runnerPath: string): void;
 export {};

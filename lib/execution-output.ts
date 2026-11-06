@@ -50,10 +50,10 @@ export function byteLength(value: string): number {
 export function trimToTailBytes(value: string, maxBytes: number): string {
   const buffer = Buffer.from(value, "utf8");
   if (buffer.length <= maxBytes) return value;
-  return buffer
-    .subarray(buffer.length - maxBytes)
-    .toString("utf8")
-    .replace(/^\uFFFD+/, "");
+  let start = Math.ceil(buffer.length - maxBytes);
+  // Skip only the cut code point's continuation bytes, not genuine U+FFFD text.
+  while (start < buffer.length && (buffer[start] & 0xc0) === 0x80) start++;
+  return buffer.subarray(start).toString("utf8");
 }
 
 export function truncateTailContent(content: string): {

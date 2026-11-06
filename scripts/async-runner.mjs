@@ -36,6 +36,7 @@ const {
   appendRecipeContextToPiArgs,
   attachPiSessionDir,
   materializePiPrintPromptArg,
+  piPrintResponseMode,
 } = await importRuntimeModule("recipes-context");
 const { buildReviewPreflightDiagnostic, formatReviewPreflightDiagnostic } =
   await importRuntimeModule("preflight-diagnostics");
@@ -44,6 +45,8 @@ const { applyOutputAcceptancePolicy, executeRegisteredTool } =
   await importRuntimeModule("execution");
 const { writeJsonAtomic } = await importRuntimeModule("file-state");
 const { appendRunTraceEvent } = await importRuntimeModule("runs-trace");
+const { admitRunResultProducer, publishRunResult, withRunProducerEvidence, withRunWorkAdmission } = await importRuntimeModule("runs-results");
+const { createRunPrimaryTextPublisher, prepareRunArtifactInventoryPublication, createRunResultDiagnosticsPublisher } = await importRuntimeModule("runs-context-exports");
 
 function quoteCommandDetailPart(value) {
   if (value === "") return "''";
@@ -74,14 +77,19 @@ function summarizeCommandDetail(commandDetail) {
 
 export async function runAsyncRunner(stateDir = process.argv[2]) {
   if (!stateDir) throw new Error("missing state dir");
-  const runPath = join(stateDir, "run.json");
+  const { meta, producer } = admitRunResultProducer(stateDir);
+  const primaryText = createRunPrimaryTextPublisher(stateDir, producer);
+  const resultDiagnostics = createRunResultDiagnosticsPublisher(stateDir, producer);
+  const artifactInventory = prepareRunArtifactInventoryPublication(stateDir, producer);
+  if (artifactInventory.readFailure() !== undefined) console.error("Run artifact inventory publication unavailable; workload policy is unchanged.");
+  let primarySelectionFailed = false; let terminalPublicationStarted = false;
+  let unsupportedResponseFormat = false;
   const progressPath = join(stateDir, "progress.json");
   const resultPath = join(stateDir, "result.json");
   const tracePath = join(stateDir, "trace.jsonl");
   const stdoutPath = join(stateDir, "stdout.log");
   const stderrPath = join(stateDir, "stderr.log");
   const executionPath = join(stateDir, "execution.json");
-  const meta = JSON.parse(readFileSync(runPath, "utf8"));
   function event(kind, data = {}) {
     appendRunTraceEvent(stateDir, { kind, data });
   }
@@ -114,8 +122,10 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     writeJsonAtomic(executionPath, {
       version: 1,
       run: meta.run,
+      run_instance_id: producer.runInstanceId,
       status,
       ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
+      active_subagents: activeSubagents,
       commands: [...evidenceRecords].sort((left, right) =>
         left.id.localeCompare(right.id)
       ),
@@ -173,12 +183,31 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
           : "not_required",
     };
   }
+  function commandAttemptEvidence({ attempt, result, nativeExitCode, nativeSignal }) {
+    return {
+      attempt,
+      code: result.code,
+      ...(nativeExitCode !== undefined ? { native_exit_code: nativeExitCode } : {}),
+      ...(nativeSignal ? { native_signal: nativeSignal } : {}),
+      killed: result.killed,
+      stdout: {
+        ...(result.stdoutFile ? { path: relative(stateDir, result.stdoutFile).replaceAll("\\", "/") } : {}),
+        bytes: result.stdoutCaptureIncomplete ? result.stdoutFileBytes ?? null : result.stdoutBytes ?? Buffer.byteLength(result.stdout),
+        ...(result.stdoutCaptureIncomplete ? { complete: false, bytes_observed: result.stdoutBytes, error: "capture_write_failed" } : {}),
+      },
+      stderr: {
+        ...(result.stderrFile ? { path: relative(stateDir, result.stderrFile).replaceAll("\\", "/") } : {}),
+        bytes: result.stderrCaptureIncomplete ? result.stderrFileBytes ?? null : result.stderrBytes ?? Buffer.byteLength(result.stderr),
+        ...(result.stderrCaptureIncomplete ? { complete: false, bytes_observed: result.stderrBytes, error: "capture_write_failed" } : {}),
+      },
+    };
+  }
   function commandEvidenceRecord({
-    captureDir,
     commandDetail,
     commandId,
     materialized,
     options,
+    attempts,
     result,
     rawExitCode,
     sessionDir,
@@ -187,28 +216,6 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     startedAt,
   }) {
     const recipeContext = options?.actorRecipeContext;
-    const attempts = [];
-    const maxAttempts = Math.max(1, options?.retry || 1);
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const attemptDir = join(
-        captureDir,
-        `attempt-${String(attempt).padStart(3, "0")}`,
-      );
-      const stdoutFile = join(attemptDir, "stdout.log");
-      const stderrFile = join(attemptDir, "stderr.log");
-      if (!existsSync(stdoutFile) && !existsSync(stderrFile)) continue;
-      attempts.push({
-        attempt,
-        stdout: {
-          path: relative(stateDir, stdoutFile).replaceAll("\\", "/"),
-          bytes: existsSync(stdoutFile) ? statSync(stdoutFile).size : 0,
-        },
-        stderr: {
-          path: relative(stateDir, stderrFile).replaceAll("\\", "/"),
-          bytes: existsSync(stderrFile) ? statSync(stderrFile).size : 0,
-        },
-      });
-    }
     const expectedReviewMarker =
       options?.evidenceContext?.acceptOutput === "review_evidence";
     const expectedPreflightMarker = stage === "preflight";
@@ -250,6 +257,8 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
         : {}),
       attempts,
       exit_code: rawExitCode ?? result.code,
+      ...(attempts.at(-1)?.native_exit_code !== undefined
+        ? { native_exit_code: attempts.at(-1).native_exit_code } : {}),
       effective_exit_code: result.code,
       killed: result.killed,
       stdout_bytes: result.stdoutBytes ?? Buffer.byteLength(result.stdout),
@@ -284,8 +293,9 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       complete_allowed: missing.length === 0,
     };
   }
-  function progressRunning() {
-    progress("running", {
+  function progressRunning(status = "running") {
+    if (status === "done" || status === "failed") return;
+    progress(status, {
       activeSubagents,
       completed: completedSubagents,
       failures: subagentFailures,
@@ -306,159 +316,207 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
     }
   }
   async function observedExec(command, args, options) {
-    captureCounter += 1;
-    const commandId = `command-${String(captureCounter).padStart(3, "0")}`;
-    const contextArgs = appendRecipeContextToPiArgs(
-      command,
-      args,
-      meta.recipe_context_records,
-      options?.actorRecipeContext,
-    );
-    const session = attachPiSessionDir(
-      command,
-      contextArgs,
-      join(stateDir, "sessions", commandId),
-    );
-    const materialized = materializePiPrintPromptArg(
-      command,
-      session.args,
-      promptFilePath,
-    );
-    const execArgs = materialized.args;
-    const commandDetail = formatCommandDetail(command, execArgs);
-    const stage =
-      options?.actorRecipeContext?.alias ||
-      options?.actorRecipeContext?.name ||
-      "command";
-    const occurrence = (stageOccurrences.get(stage) || 0) + 1;
-    stageOccurrences.set(stage, occurrence);
-    if (
-      materialized.promptFile &&
-      ["verifier", "merger", "judge", "normalizer"].includes(stage)
-    ) {
-      const references = evidenceRecords
-        .filter((record) =>
-          ["reviewer", "verifier", "merger", "judge"].includes(record.stage)
-        )
-        .map((record) => `ACTOR_EVIDENCE_REF: execution.json#${record.id}`);
-      if (references.length > 0) {
-        appendFileSync(
-          materialized.promptFile,
-          `\n\nRetained actor evidence references available for citation:\n${references.join("\n")}\n`,
-        );
-        materialized.promptBytes = statSync(materialized.promptFile).size;
+    const {
+      captureDir, commandDetail, commandId, evidenceIndex, execArgs, materialized, occurrence, session, stage, startedEvidence,
+    } = withRunWorkAdmission(stateDir, producer, () => {
+      captureCounter += 1;
+      const commandId = `command-${String(captureCounter).padStart(3, "0")}`;
+      const contextArgs = appendRecipeContextToPiArgs(
+        command,
+        args,
+        meta.recipe_context_records,
+        options?.actorRecipeContext,
+      );
+      const session = attachPiSessionDir(
+        command,
+        contextArgs,
+        join(stateDir, "sessions", commandId),
+      );
+      const materialized = materializePiPrintPromptArg(
+        command,
+        session.args,
+        promptFilePath,
+      );
+      const execArgs = materialized.args;
+      const commandDetail = formatCommandDetail(command, execArgs);
+      const stage =
+        options?.actorRecipeContext?.alias ||
+        options?.actorRecipeContext?.name ||
+        "command";
+      const occurrence = (stageOccurrences.get(stage) || 0) + 1;
+      stageOccurrences.set(stage, occurrence);
+      if (
+        materialized.promptFile &&
+        ["verifier", "merger", "judge", "normalizer"].includes(stage)
+      ) {
+        const references = evidenceRecords
+          .filter((record) =>
+            ["reviewer", "verifier", "merger", "judge"].includes(record.stage)
+          )
+          .map((record) => `ACTOR_EVIDENCE_REF: execution.json#${record.id}`);
+        if (references.length > 0) {
+          appendFileSync(
+            materialized.promptFile,
+            `\n\nRetained actor evidence references available for citation:\n${references.join("\n")}\n`,
+          );
+          materialized.promptBytes = statSync(materialized.promptFile).size;
+        }
       }
-    }
-    activeSubagents += 1;
-    const evidenceIndex = evidenceRecords.length;
-    const startedEvidence = commandEvidenceStartRecord({
-      commandDetail,
-      commandId,
-      materialized,
-      options,
-      sessionDir: session.sessionDir,
-      stage,
-      occurrence,
-    });
-    evidenceRecords.push(startedEvidence);
-    writeExecutionManifest("running");
-    event("command.start", {
-      activeSubagents,
-      command_id: commandId,
-      command: commandDetail,
-      ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
-      ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
-      ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir).replaceAll("\\", "/") } : {}),
-    });
-    progressRunning();
-    const captureDir = join(stateDir, "captures", commandId);
-    const rawResult = await execCommandTemplate(command, execArgs, {
-      ...options,
-      captureDir,
-    });
-    let result = await applyOutputAcceptancePolicy(
-      rawResult,
-      options?.evidenceContext?.acceptOutput,
-    );
-    result = {
-      ...result,
-      evidenceRef: `execution.json#${commandId}`,
-    };
-    const preflightDiagnostic = result.code !== 0
-      ? buildReviewPreflightDiagnostic({
-          args: execArgs,
-          code: result.code,
-          killed: result.killed,
-          ...(materialized.promptFile ? { promptFile: materialized.promptFile } : {}),
-          promptText: readPromptText(materialized.promptFile),
-          stderr: result.stderr,
-          stdout: result.stdout,
-        })
-      : undefined;
-    if (preflightDiagnostic) {
-      result = {
-        ...result,
-        stderr: [
-          result.stderr,
-          formatReviewPreflightDiagnostic(preflightDiagnostic),
-        ].filter(Boolean).join("\n"),
-      };
-    }
-    evidenceRecords[evidenceIndex] = commandEvidenceRecord({
-      captureDir,
-      commandDetail,
-      commandId,
-      materialized,
-      options,
-      result,
-      rawExitCode: rawResult.code,
-      sessionDir: session.sessionDir,
-      stage,
-      occurrence,
-      startedAt: startedEvidence.started_at,
-    });
-    writeExecutionManifest("running");
-    activeSubagents = Math.max(0, activeSubagents - 1);
-    completedSubagents += 1;
-    if (result.code !== 0) {
-      subagentFailures.push({
-        code: result.code,
-        command: commandDetail,
-        killed: result.killed,
-        ...captureDetails(result),
-        ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
-        ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
+      activeSubagents += 1;
+      const evidenceIndex = evidenceRecords.length;
+      const startedEvidence = commandEvidenceStartRecord({
+        commandDetail,
+        commandId,
+        materialized,
+        options,
+        sessionDir: session.sessionDir,
+        stage,
+        occurrence,
       });
-    }
-    observation(
-      "command.done",
-      `Command ${summarizeCommandDetail(commandDetail)} completed with code ${result.code}`,
-      {
+      evidenceRecords.push(startedEvidence);
+      writeExecutionManifest("running");
+      event("command.start", {
         activeSubagents,
-        ...(meta.artifacts ? { artifacts: meta.artifacts } : {}),
-        run_files: [stdoutPath, stderrPath, resultPath, tracePath, executionPath],
         command_id: commandId,
-        code: result.code,
         command: commandDetail,
-        killed: result.killed,
-        ...captureDetails(result),
         ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
         ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
         ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir).replaceAll("\\", "/") } : {}),
+      });
+      progressRunning();
+      const captureDir = join(stateDir, "captures", commandId);
+      return { captureDir, commandDetail, commandId, evidenceIndex, execArgs, materialized, occurrence, session, stage, startedEvidence };
+    });
+    const attempts = []; const primaryAttempts = [];
+    let completed = false;
+    let completedObservation;
+    try {
+      const rawResult = await execCommandTemplate(command, execArgs, {
+        ...options,
+        captureDir,
+        admitSpawn: (start) => withRunWorkAdmission(stateDir, producer, start),
+        onAttemptComplete: (receipt) => {
+          primaryAttempts.push(receipt);
+          attempts.push(commandAttemptEvidence(receipt));
+          withRunProducerEvidence(stateDir, producer, ({ status }) => {
+            evidenceRecords[evidenceIndex] = { ...startedEvidence, attempts: [...attempts] };
+            writeExecutionManifest(status);
+            progressRunning(status);
+          });
+        },
+      });
+      let result = await applyOutputAcceptancePolicy(
+        rawResult,
+        options?.evidenceContext?.acceptOutput,
+      );
+      result = {
+        ...result,
+        evidenceRef: `execution.json#${commandId}`,
+      };
+      const preflightDiagnostic = result.code !== 0
+        ? buildReviewPreflightDiagnostic({
+            args: execArgs,
+            code: result.code,
+            killed: result.killed,
+            ...(materialized.promptFile ? { promptFile: materialized.promptFile } : {}),
+            promptText: readPromptText(materialized.promptFile),
+            stderr: result.stderr,
+            stdout: result.stdout,
+          })
+        : undefined;
+      if (preflightDiagnostic) {
+        result = {
+          ...result,
+          stderr: [
+            result.stderr,
+            formatReviewPreflightDiagnostic(preflightDiagnostic),
+          ].filter(Boolean).join("\n"),
+        };
+      }
+      evidenceRecords[evidenceIndex] = commandEvidenceRecord({
+        commandDetail,
+        commandId,
+        materialized,
+        options,
+        attempts,
+        result,
+        rawExitCode: rawResult.code,
+        sessionDir: session.sessionDir,
+        stage,
+        occurrence,
+        startedAt: startedEvidence.started_at,
+      });
+      completedSubagents += 1;
+      if (result.code !== 0) {
+        subagentFailures.push({
+          code: result.code,
+          command: commandDetail,
+          killed: result.killed,
+          ...captureDetails(result),
+          ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
+          ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
+        });
+      }
+      completedObservation = () => observation(
+        "command.done",
+        `Command ${summarizeCommandDetail(commandDetail)} completed with code ${result.code}`,
+        {
+          activeSubagents,
+          ...(meta.artifacts ? artifactInventory.snapshot() : {}),
+          run_files: [stdoutPath, stderrPath, resultPath, tracePath, executionPath],
+          command_id: commandId,
+          code: result.code,
+          command: commandDetail,
+          killed: result.killed,
+          ...captureDetails(result),
+          ...(materialized.promptFile ? { prompt_file: materialized.promptFile } : {}),
+          ...(materialized.promptBytes ? { prompt_bytes: materialized.promptBytes } : {}),
+          ...(session.sessionDir ? { session_dir: relative(stateDir, session.sessionDir).replaceAll("\\", "/") } : {}),
+          ...(commandSessionFiles(session.sessionDir).length > 0
+            ? { session_files: commandSessionFiles(session.sessionDir) }
+            : {}),
+          ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
+        },
+        "log",
+        result.code === 0 ? "info" : "error",
+      );
+      const responseMode = piPrintResponseMode(command, execArgs);
+      if (responseMode === "unsupported") unsupportedResponseFormat = true;
+      primaryText.observe(result, { commandId, attempts: primaryAttempts, session: Boolean(session.sessionDir) || responseMode !== undefined });
+      completed = true;
+      return result;
+    } catch (error) {
+      evidenceRecords[evidenceIndex] = {
+        ...startedEvidence,
+        status: "interrupted",
+        completed_at: new Date().toISOString(),
+        attempts,
         ...(commandSessionFiles(session.sessionDir).length > 0
-          ? { session_files: commandSessionFiles(session.sessionDir) }
-          : {}),
-        ...(preflightDiagnostic ? { preflight: preflightDiagnostic } : {}),
-      },
-      "log",
-      result.code === 0 ? "info" : "error",
-    );
-    progressRunning();
-    return result;
+          ? { session_files: commandSessionFiles(session.sessionDir) } : {}),
+        semantic_acceptance: "unavailable",
+        interruption: { message: error instanceof Error ? error.message : String(error) },
+      };
+      throw error;
+    } finally {
+      activeSubagents = Math.max(0, activeSubagents - 1);
+      try {
+        withRunProducerEvidence(stateDir, producer, ({ status }) => {
+          writeExecutionManifest(status);
+          if (completed) completedObservation();
+          progressRunning(status);
+        });
+      } catch (error) {
+        if (completed) throw error;
+        // Keep the primary execution rejection; never write evidence into a replacement generation.
+        console.error("Run interrupted-command evidence could not be persisted.");
+      }
+    }
   }
   try {
-    event("run.runner.start", { pid: process.pid });
-    progressRunning();
+    withRunWorkAdmission(stateDir, producer, () => {
+      event("run.runner.start", { pid: process.pid });
+      progressRunning();
+    });
     const result = await executeRegisteredTool(
       {
         name: "run_actor",
@@ -470,6 +528,13 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       meta.values || {},
       observedExec,
       meta.cwd,
+      undefined,
+      { onPrimaryCommandSelected: selected => {
+        try { primaryText.select(selected); } catch (error) { primarySelectionFailed = true; throw error; }
+      }, onFinalResponseSelected: (text, upstreamTruncated) => {
+        if (unsupportedResponseFormat) return;
+        try { primaryText.selectResponse(text, upstreamTruncated); } catch (error) { primarySelectionFailed = true; throw error; }
+      } },
     );
     const text = result.content?.[0]?.text || "";
     appendFileSync(stdoutPath, text);
@@ -487,35 +552,32 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       };
       throw error;
     }
-    writeExecutionManifest("done");
-    progress("done", {
-      completed: 1,
-      failures: result.details.nonCriticalFailures || [],
-    });
-    writeJsonAtomic(resultPath, {
+    terminalPublicationStarted = true;
+    publishRunResult(stateDir, producer, {
       code: result.details.code,
       command: result.details.command,
       killed: result.details.killed,
       ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
       truncated: result.details.truncated,
-      completedAt: new Date().toISOString(),
+    }, {
+      primaryText: primaryText.snapshot,
+      artifactInventory: artifactInventory.snapshot,
+      resultDiagnostics: resultDiagnostics.publish,
+      trace: { kind: "run.done", data: { code: result.details.code } },
+      prepare: ({ stopping }) => {
+        writeExecutionManifest(stopping ? "stopping" : "done");
+        progress(stopping ? "stopping" : "done", {
+          completed: 1,
+          failures: result.details.nonCriticalFailures || [],
+        });
+      },
     });
-    event("run.done", { code: result.details.code });
   } catch (error) {
+    // Authority refusal and failed terminal publication must not become an invented workload code or implicit retry.
+    if (primarySelectionFailed || terminalPublicationStarted) throw error;
     const message = error instanceof Error ? error.message : String(error);
     const details = error && typeof error === "object" ? error.details : undefined;
-    appendFileSync(stderrPath, `${message}\n`);
-    writeExecutionManifest("failed");
-    progress("failed", {
-      completed: 0,
-      failures: Array.isArray(details?.branches) && details.branches.length > 0
-        ? details.branches
-        : subagentFailures.length > 0
-          ? subagentFailures
-          : [{ message }],
-      ...(details?.failureReason ? { failureReason: details.failureReason } : {}),
-    });
-    writeJsonAtomic(resultPath, {
+    publishRunResult(stateDir, producer, {
       code: typeof details?.code === "number" ? details.code : 1,
       error: message,
       killed: Boolean(details?.killed),
@@ -523,11 +585,27 @@ export async function runAsyncRunner(stateDir = process.argv[2]) {
       ...(details?.failureReason ? { failure_reason: details.failureReason } : {}),
       ...(meta.model_policy ? { model_policy: meta.model_policy } : {}),
       ...(details?.softQuorum ? { soft_quorum: details.softQuorum } : {}),
-      completedAt: new Date().toISOString(),
-    });
-    event("run.failed", {
-      error: message,
-      ...(details?.failureReason ? { failure_reason: details.failureReason } : {}),
+    }, {
+      primaryText: () => ({ output: null, output_unavailable: "primary_not_selected_for_failure" }),
+      artifactInventory: artifactInventory.snapshot,
+      resultDiagnostics: resultDiagnostics.publish,
+      trace: {
+        kind: "run.failed",
+        data: { error: message, ...(details?.failureReason ? { failure_reason: details.failureReason } : {}) },
+      },
+      prepare: ({ stopping }) => {
+        appendFileSync(stderrPath, `${message}\n`);
+        writeExecutionManifest(stopping ? "stopping" : "failed");
+        progress(stopping ? "stopping" : "failed", {
+          completed: 0,
+          failures: Array.isArray(details?.branches) && details.branches.length > 0
+            ? details.branches
+            : subagentFailures.length > 0
+              ? subagentFailures
+              : [{ message }],
+          ...(details?.failureReason ? { failureReason: details.failureReason } : {}),
+        });
+      },
     });
     throw error;
   }

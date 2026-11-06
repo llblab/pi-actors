@@ -4,9 +4,33 @@
  * Owns portable command-template parsing, expansion, risk checks, retries, timeouts, and direct execution.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { accessSync, appendFileSync, constants, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { accessSync, appendFileSync, constants, lstatSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, extname, isAbsolute, join, resolve as resolvePath } from "node:path";
+let pendingSpawnAdmission;
+const freshManagedAttempts = new WeakMap();
+/** Available only before this synchronous admission invokes its factory; never retroactively adopt a born process. */
+export function readPendingCommandSpawnAdmission() {
+    return pendingSpawnAdmission;
+}
+/** Kernel-only launch observation capability; copies and references retained past the callback are not authority. */
+export function requireFreshManagedCommandAttempt(context, admission) {
+    const actual = freshManagedAttempts.get(context);
+    if (!actual || (admission !== undefined && actual.admission !== admission) || context.process !== actual.process || actual.process.pid !== actual.pid) {
+        throw new Error("Native process observation requires a fresh managed attempt from this runtime.");
+    }
+    return context;
+}
+const nativeCloseReceipts = new WeakMap();
+/** Exact retained process close during its synchronous receipt callback, never a serialized terminal claim. */
+export function requireNativeCommandAttemptClose(receipt, admission, child) {
+    const actual = nativeCloseReceipts.get(receipt);
+    if (!actual || actual.admission !== admission || actual.process !== child || child.pid !== actual.close.pid) {
+        throw new Error("Native settlement requires its exact runtime-local process-close receipt.");
+    }
+    return actual.close;
+}
 const DEFAULT_COMMAND_CAPTURE_LIMIT_BYTES = 1024 * 1024;
 const COMMAND_TEMPLATE_RISK_LABEL_ORDER = [
     "risk.shell",
@@ -634,7 +658,7 @@ export async function execCommandTemplate(command, args, options = {}) {
                 captureDir: join(options.captureDir, `attempt-${String(attempt).padStart(3, "0")}`),
             }
             : options;
-        const result = await execCommandTemplateOnce(command, args, attemptOptions);
+        const result = await execCommandTemplateOnce(command, args, attemptOptions, attempt);
         if (result.code === 0)
             return result;
         lastResult = result;
@@ -649,8 +673,9 @@ function trimCaptureTail(value, limit) {
         start += 1;
     return value.subarray(start);
 }
-function createBoundedCommandCapture(stream, limit, getCaptureDir, persistCompleteStream) {
+function createBoundedCommandCapture(stream, limit, getCaptureDir, persistCompleteStream, onFailure) {
     let bytes = 0;
+    const digest = stream === "stdout" && persistCompleteStream ? createHash("sha256") : undefined;
     let content = Buffer.alloc(0);
     let file = persistCompleteStream
         ? join(getCaptureDir(), `${stream}.log`)
@@ -658,163 +683,272 @@ function createBoundedCommandCapture(stream, limit, getCaptureDir, persistComple
     if (file)
         writeFileSync(file, Buffer.alloc(0));
     let truncated = false;
+    let incomplete = false;
     return {
         append(value) {
             const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
             bytes += chunk.length;
+            digest?.update(chunk);
             if (bytes > limit)
                 truncated = true;
-            if (!file && bytes <= limit) {
-                content = Buffer.concat([content, chunk]);
-                return;
-            }
-            if (!file) {
-                file = join(getCaptureDir(), `${stream}.log`);
-                writeFileSync(file, content);
-            }
-            appendFileSync(file, chunk);
+            const previous = content;
             content = trimCaptureTail(Buffer.concat([content, chunk]), limit);
+            if (!file && bytes <= limit)
+                return;
+            if (incomplete)
+                return;
+            try {
+                if (!file) {
+                    file = join(getCaptureDir(), `${stream}.log`);
+                    writeFileSync(file, previous);
+                }
+                appendFileSync(file, chunk);
+            }
+            catch (error) {
+                incomplete = true;
+                onFailure(error);
+            }
         },
         result() {
-            if (!file && persistCompleteStream) {
-                file = join(getCaptureDir(), `${stream}.log`);
-                writeFileSync(file, content);
+            let retainedFile = file;
+            let fileBytes;
+            if (incomplete && file) {
+                try {
+                    const stat = lstatSync(file);
+                    if (stat.isFile())
+                        fileBytes = stat.size;
+                    else
+                        retainedFile = undefined;
+                }
+                catch {
+                    retainedFile = undefined;
+                }
             }
             return {
                 bytes,
                 content: content.toString("utf8"),
-                ...(file ? { file } : {}),
+                ...(retainedFile ? { file: retainedFile } : {}),
+                ...(digest && !incomplete && retainedFile ? { sha256: digest.digest("hex") } : {}),
+                ...(incomplete ? { incomplete: true, ...(fileBytes === undefined ? {} : { fileBytes }) } : {}),
                 truncated,
             };
         },
     };
 }
-function execCommandTemplateOnce(command, args, options = {}) {
-    return new Promise((resolve) => {
-        const proc = spawn(command, args, {
-            cwd: options.cwd,
-            shell: false,
-            stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-        });
-        const captureLimit = Math.max(1, options.captureLimitBytes ?? DEFAULT_COMMAND_CAPTURE_LIMIT_BYTES);
-        let captureDir;
-        const getCaptureDir = () => {
-            if (captureDir)
+function execCommandTemplateOnce(command, args, options, attempt) {
+    return new Promise((resolve, reject) => {
+        let failure;
+        let managed;
+        let invoked = false;
+        let admissionOpen = true;
+        const spawnAdmission = Object.freeze({ attempt });
+        const rememberFailure = (error) => { failure ??= { error }; };
+        const start = () => {
+            if (!admissionOpen)
+                throw new Error("Native spawn admission window is closed.");
+            if (invoked)
+                throw new Error("Native spawn factory may be invoked only once per attempt.");
+            invoked = true;
+            pendingSpawnAdmission = undefined;
+            const captureLimit = Math.max(1, options.captureLimitBytes ?? DEFAULT_COMMAND_CAPTURE_LIMIT_BYTES);
+            let captureDir;
+            const getCaptureDir = () => {
+                if (captureDir)
+                    return captureDir;
+                captureDir = options.captureDir
+                    ? resolvePath(options.captureDir)
+                    : mkdtempSync(join(tmpdir(), "pi-actors-command-"));
+                mkdirSync(captureDir, { recursive: true });
                 return captureDir;
-            captureDir = options.captureDir
-                ? resolvePath(options.captureDir)
-                : mkdtempSync(join(tmpdir(), "pi-actors-command-"));
-            mkdirSync(captureDir, { recursive: true });
-            return captureDir;
-        };
-        const persistCompleteStreams = options.captureDir !== undefined;
-        const stdoutCapture = createBoundedCommandCapture("stdout", captureLimit, getCaptureDir, persistCompleteStreams);
-        const stderrCapture = createBoundedCommandCapture("stderr", captureLimit, getCaptureDir, persistCompleteStreams);
-        let killed = false;
-        let settled = false;
-        let timeoutId;
-        let killTimeoutId;
-        const signalProcessTree = (signal) => {
-            if (proc.pid === undefined)
-                return;
-            if (process.platform === "win32") {
-                spawnSync("taskkill", [
-                    "/PID",
-                    String(proc.pid),
-                    "/T",
-                    ...(signal === "SIGKILL" ? ["/F"] : []),
-                ]);
-                return;
-            }
-            const snapshot = spawnSync("ps", ["-eo", "pid=,ppid="], { encoding: "utf8" });
-            const children = new Map();
-            for (const line of snapshot.stdout?.split(/\r?\n/u) ?? []) {
-                const [pidText, parentText] = line.trim().split(/\s+/u);
-                const pid = Number(pidText);
-                const parent = Number(parentText);
-                if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(parent))
-                    continue;
-                const siblings = children.get(parent) ?? [];
-                siblings.push(pid);
-                children.set(parent, siblings);
-            }
-            const descendants = [];
-            const collect = (parent) => {
-                for (const child of children.get(parent) ?? []) {
-                    collect(child);
-                    descendants.push(child);
+            };
+            const persistCompleteStreams = options.captureDir !== undefined;
+            const stdoutCapture = createBoundedCommandCapture("stdout", captureLimit, getCaptureDir, persistCompleteStreams, rememberFailure);
+            const stderrCapture = createBoundedCommandCapture("stderr", captureLimit, getCaptureDir, persistCompleteStreams, rememberFailure);
+            let killed = false;
+            let settled = false;
+            let timeoutId;
+            let killTimeoutId;
+            const signalProcessTree = (signal) => {
+                if (proc.pid === undefined)
+                    return;
+                if (process.platform === "win32") {
+                    spawnSync("taskkill", [
+                        "/PID",
+                        String(proc.pid),
+                        "/T",
+                        ...(signal === "SIGKILL" ? ["/F"] : []),
+                    ]);
+                    return;
+                }
+                const snapshot = spawnSync("ps", ["-eo", "pid=,ppid="], { encoding: "utf8" });
+                const children = new Map();
+                for (const line of snapshot.stdout?.split(/\r?\n/u) ?? []) {
+                    const [pidText, parentText] = line.trim().split(/\s+/u);
+                    const pid = Number(pidText);
+                    const parent = Number(parentText);
+                    if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(parent))
+                        continue;
+                    const siblings = children.get(parent) ?? [];
+                    siblings.push(pid);
+                    children.set(parent, siblings);
+                }
+                const descendants = [];
+                const collect = (parent) => {
+                    for (const child of children.get(parent) ?? []) {
+                        collect(child);
+                        descendants.push(child);
+                    }
+                };
+                collect(proc.pid);
+                for (const pid of [...descendants, proc.pid]) {
+                    try {
+                        process.kill(pid, signal);
+                    }
+                    catch (error) {
+                        if (error.code !== "ESRCH")
+                            throw error;
+                    }
                 }
             };
-            collect(proc.pid);
-            for (const pid of [...descendants, proc.pid]) {
+            const killProcess = () => {
+                if (killed)
+                    return;
+                killed = true;
+                signalProcessTree("SIGTERM");
+                killTimeoutId = setTimeout(() => {
+                    if (!settled)
+                        signalProcessTree("SIGKILL");
+                }, options.killGrace ?? 5000);
+            };
+            const settle = (code, nativeExitCode, nativeSignal) => {
+                if (settled)
+                    return;
+                settled = true;
+                if (timeoutId)
+                    clearTimeout(timeoutId);
+                if (killTimeoutId)
+                    clearTimeout(killTimeoutId);
+                if (options.signal)
+                    options.signal.removeEventListener("abort", killProcess);
+                const stdout = stdoutCapture.result();
+                const stderr = stderrCapture.result();
+                const result = {
+                    stdout: stdout.content,
+                    stderr: stderr.content,
+                    code,
+                    killed,
+                    stdoutBytes: stdout.bytes,
+                    stderrBytes: stderr.bytes,
+                    ...(stdout.file ? { stdoutFile: stdout.file } : {}),
+                    ...(stderr.file ? { stderrFile: stderr.file } : {}),
+                    ...(stdout.truncated ? { stdoutTruncated: true } : {}),
+                    ...(stderr.truncated ? { stderrTruncated: true } : {}),
+                    ...(stdout.incomplete ? { stdoutCaptureIncomplete: true, ...(stdout.fileBytes === undefined ? {} : { stdoutFileBytes: stdout.fileBytes }) } : {}),
+                    ...(stderr.incomplete ? { stderrCaptureIncomplete: true, ...(stderr.fileBytes === undefined ? {} : { stderrFileBytes: stderr.fileBytes }) } : {}),
+                };
                 try {
-                    process.kill(pid, signal);
+                    if (options.onAttemptComplete) {
+                        const receipt = Object.freeze({
+                            attempt, result: Object.freeze({ ...result }),
+                            ...(stdout.sha256 ? { stdoutSha256: stdout.sha256 } : {}),
+                            ...(nativeExitCode !== undefined ? { nativeExitCode } : {}),
+                            ...(nativeSignal !== undefined ? { nativeSignal } : {}),
+                        });
+                        const exitObserved = (Number.isSafeInteger(nativeExitCode) && nativeSignal === null) ||
+                            (nativeExitCode === null && typeof nativeSignal === "string" && /^SIG[A-Z0-9]+$/.exec(nativeSignal)?.[0] === nativeSignal);
+                        if (exitObserved && Number.isSafeInteger(proc.pid) && Number(proc.pid) > 0 &&
+                            proc.exitCode === nativeExitCode && proc.signalCode === nativeSignal) {
+                            nativeCloseReceipts.set(receipt, {
+                                admission: spawnAdmission, process: proc,
+                                close: Object.freeze({ pid: proc.pid, nativeExitCode: nativeExitCode, nativeSignal: nativeSignal }),
+                            });
+                        }
+                        try {
+                            options.onAttemptComplete(receipt);
+                        }
+                        finally {
+                            nativeCloseReceipts.delete(receipt);
+                        }
+                    }
                 }
                 catch (error) {
-                    if (error.code !== "ESRCH")
-                        throw error;
+                    rememberFailure(error);
+                }
+                if (failure)
+                    reject(failure.error);
+                else
+                    resolve(result);
+            };
+            const proc = spawn(command, args, {
+                cwd: options.cwd,
+                shell: false,
+                stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+            });
+            proc.stdout?.on("data", (data) => {
+                stdoutCapture.append(data);
+            });
+            proc.stderr?.on("data", (data) => {
+                stderrCapture.append(data);
+            });
+            proc.stdin?.on("error", () => { });
+            proc.on("error", (error) => {
+                const liveHandle = Number.isSafeInteger(proc.pid) && Number(proc.pid) > 0;
+                if (liveHandle)
+                    rememberFailure(error);
+                stderrCapture.append(error instanceof Error ? error.message : String(error));
+                if (!liveHandle)
+                    settle(1);
+            });
+            proc.on("close", (code, signal) => {
+                settle(code ?? 1, code, signal);
+            });
+            managed = proc;
+            try {
+                if (options.signal) {
+                    if (options.signal.aborted)
+                        killProcess();
+                    else
+                        options.signal.addEventListener("abort", killProcess, { once: true });
+                }
+                if (options.timeout !== undefined && options.timeout > 0)
+                    timeoutId = setTimeout(killProcess, options.timeout);
+                if (options.stdin !== undefined)
+                    proc.stdin?.end(options.stdin);
+                if (options.onAttemptManaged) {
+                    const context = Object.freeze({ attempt, process: proc });
+                    freshManagedAttempts.set(context, { process: proc, pid: proc.pid, admission: spawnAdmission });
+                    try {
+                        options.onAttemptManaged(context);
+                    }
+                    finally {
+                        freshManagedAttempts.delete(context);
+                    }
                 }
             }
+            catch (error) {
+                rememberFailure(error);
+            }
+            return proc;
         };
-        const killProcess = () => {
-            if (killed)
-                return;
-            killed = true;
-            signalProcessTree("SIGTERM");
-            killTimeoutId = setTimeout(() => {
-                if (!settled)
-                    signalProcessTree("SIGKILL");
-            }, options.killGrace ?? 5000);
-        };
-        const settle = (code) => {
-            if (settled)
-                return;
-            settled = true;
-            if (timeoutId)
-                clearTimeout(timeoutId);
-            if (killTimeoutId)
-                clearTimeout(killTimeoutId);
-            if (options.signal)
-                options.signal.removeEventListener("abort", killProcess);
-            const stdout = stdoutCapture.result();
-            const stderr = stderrCapture.result();
-            resolve({
-                stdout: stdout.content,
-                stderr: stderr.content,
-                code,
-                killed,
-                stdoutBytes: stdout.bytes,
-                stderrBytes: stderr.bytes,
-                ...(stdout.file ? { stdoutFile: stdout.file } : {}),
-                ...(stderr.file ? { stderrFile: stderr.file } : {}),
-                ...(stdout.truncated ? { stdoutTruncated: true } : {}),
-                ...(stderr.truncated ? { stderrTruncated: true } : {}),
-            });
-        };
-        if (options.signal) {
-            if (options.signal.aborted)
-                killProcess();
-            else
-                options.signal.addEventListener("abort", killProcess, { once: true });
+        const parentAdmission = pendingSpawnAdmission;
+        try {
+            pendingSpawnAdmission = spawnAdmission;
+            const proc = options.admitSpawn ? options.admitSpawn(start) : start();
+            if (!managed)
+                throw new Error("Native spawn admission must invoke its managed factory.");
+            if (proc !== managed)
+                throw new Error("Native spawn admission must return its managed process.");
         }
-        if (options.timeout !== undefined && options.timeout > 0)
-            timeoutId = setTimeout(killProcess, options.timeout);
-        proc.stdout?.on("data", (data) => {
-            stdoutCapture.append(data);
-        });
-        proc.stderr?.on("data", (data) => {
-            stderrCapture.append(data);
-        });
-        proc.stdin?.on("error", () => { });
-        if (options.stdin !== undefined)
-            proc.stdin?.end(options.stdin);
-        proc.on("error", (error) => {
-            stderrCapture.append(error instanceof Error ? error.message : String(error));
-            settle(1);
-        });
-        proc.on("close", (code) => {
-            settle(code ?? (killed ? 1 : 0));
-        });
+        catch (error) {
+            if (managed)
+                rememberFailure(error);
+            else
+                reject(error);
+        }
+        finally {
+            admissionOpen = false;
+            pendingSpawnAdmission = parentAdmission;
+        }
     });
 }
 export function buildCommandTemplateInvocation(config, values, cwd, options = {}) {

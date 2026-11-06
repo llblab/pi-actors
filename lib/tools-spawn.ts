@@ -9,22 +9,25 @@ import { join } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
 import { withFileMutationLock } from "./file-state.ts";
+import * as Limits from "./limits.ts";
 import * as ModelContext from "./model-context.ts";
 import * as Paths from "./paths.ts";
 import type * as RecipeResolution from "./recipes-context.ts";
-import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsResponse from "./tools-response.ts";
+import { readRunFileNavigationForContext } from "./tools-access.ts";
 
 export interface SpawnToolContext extends ModelContext.CurrentModelContext {
   recipeResolutionContext?: RecipeResolution.RecipeResolutionContext;
   cwd: string;
+  /** Kernel-injected only; never sourced from tool input/actor values. */
+  onSupervisionClockCaptured?: AsyncRuns.AsyncRunStartOptions["onSupervisionClockCaptured"];
   sessionManager?: { getSessionId?: () => string };
 }
 
 const asRecord = ToolsResponse.asRecord;
-const maybeJsonText = ToolsResponse.maybeJsonText;
+const spawnMetadataText = ToolsResponse.spawnMetadataText;
 
 function getRunOwnerId(ctx: SpawnToolContext): string | undefined {
   return ctx.sessionManager?.getSessionId?.();
@@ -79,14 +82,33 @@ function writeSpawnDraftRecipe(
   return path;
 }
 
+/** Compiler-owned pre-launch diagnostics only; selected caller values are not admitted Run ids. */
+function spawnGuardText(kind: "state_dir" | "namespace" | "id", value?: string): string {
+  const field = ToolsResponse.formatMarkdownField;
+  const facts = kind === "state_dir"
+    ? [field("result", "unsupported field"), field("reason", "Run state is runtime-owned; run:<id> remains addressable and retention-safe.")]
+    : [field("result", kind === "namespace" ? "unsupported Run target" : "invalid Run target"), field("accepted_format", "run:<id>"),
+      ...(kind === "id" ? [field("id_rule", "nonempty ASCII letters, digits, underscore, dot or hyphen")] : [])];
+  const render = (selected?: string) => ToolsResponse.withLeadingLineBreak(
+    [field("field", kind === "state_dir" ? "state_dir" : "as"), ...(selected === undefined ? [] : [selected]), ...facts].join("\n"));
+  if (value === undefined) return render();
+  const wellFormed = value.isWellFormed();
+  if (wellFormed) {
+    const complete = render(field("value", value));
+    if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES) return complete;
+  }
+  const reason = wellFormed ? "response_too_large" : "malformed_selected_text";
+  return render(`- value: [${reason === "response_too_large" ? "omitted" : "unavailable"}]\n- value_omission:\n  - reason: ${reason}\n  - shown: 0\n  - omitted: 1\n  - total: 1`);
+}
+
 function runIdFromTarget(target: string | undefined): string | undefined {
   if (!target) return undefined;
   if (!target.startsWith("run:")) {
-    throw new Error(`spawn.as accepts only run:<id>; received: ${target}`);
+    throw new Error(spawnGuardText("namespace", `${target}`));
   }
   const run = target.slice(4);
   if (!run || !/^[A-Za-z0-9_.-]+$/.test(run)) {
-    throw new Error(`invalid spawn Run target: ${target}`);
+    throw new Error(spawnGuardText("id", `${target}`));
   }
   return run;
 }
@@ -127,7 +149,7 @@ export function createSpawnToolDefinition<
           "Optional originating transport route preserved for detached terminal follow-up, e.g. Telegram chat_id and thread_id.",
         ),
         verbose: Schema.booleanSchema(
-          "Return full JSON instead of compact text.",
+          "Return full YAML instead of compact text.",
         ),
       },
       [],
@@ -141,9 +163,7 @@ export function createSpawnToolDefinition<
     ) {
       const input = asRecord(params);
       if (input.state_dir !== undefined) {
-        throw new Error(
-          "spawn.state_dir is not supported; run state is runtime-owned so run:<id> remains addressable and retention-safe.",
-        );
+        throw new Error(spawnGuardText("state_dir"));
       }
       const runId = runIdFromTarget(
         typeof input.as === "string" ? input.as : undefined,
@@ -185,12 +205,13 @@ export function createSpawnToolDefinition<
             : {}),
         },
         ctx.cwd,
-        { skillContext: ctx.recipeResolutionContext?.activeSkills },
+        { skillContext: ctx.recipeResolutionContext?.activeSkills, onSupervisionClockCaptured: ctx.onSupervisionClockCaptured },
       );
       const draftRecipe = writeSpawnDraftRecipe(input, meta);
       const nextActions = ToolsResponse.runNextActions(meta.run);
       const details = {
         ...meta,
+        file_navigation: readRunFileNavigationForContext(meta, ctx),
         ...(draftRecipe ? { draft_recipe: draftRecipe } : {}),
         next_actions: nextActions,
       };
@@ -198,7 +219,7 @@ export function createSpawnToolDefinition<
         content: [
           {
             type: "text" as const,
-            text: maybeJsonText(
+            text: spawnMetadataText(
               details,
               input.verbose === true,
               ToolsResponse.compactAsyncRunStatus(details),

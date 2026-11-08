@@ -783,8 +783,14 @@ test("Actual SDK lifecycle keeps numbered history immutable across tree fork clo
       settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
       resourceLoaderOptions: { noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
         extensionFactories: [pi => {
-          scope.kernel = createActorExtensionRuntime(pi, undefined, () => { scope.admissions++; return true; });
-          pi.on("session_start", async (event, ctx) => { scope.ctx = ctx; scope.event = event; await scope.kernel.onSessionStart(ctx, event); });
+          scope.kernel = createActorExtensionRuntime({ ...pi,
+            sendMessage: () => assert.fail("Controlled busy lifecycle must not dispatch idle completions"),
+          }, undefined, () => { scope.admissions++; return true; });
+          pi.on("session_start", async (event, ctx) => {
+            // The whole controlled lifetime is busy, including watcher/settlement callbacks between manual boundaries.
+            scope.ctx = { ...ctx, isIdle: () => false }; scope.event = event;
+            await scope.kernel.onSessionStart(scope.ctx, event);
+          });
           pi.on("session_shutdown", (event, ctx) => scope.kernel.onSessionShutdown(event.reason, ctx));
         }] } });
     const created = await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent, noTools: "all" });
@@ -804,12 +810,14 @@ test("Actual SDK lifecycle keeps numbered history immutable across tree fork clo
     seedStreamJournal(ownerId);
     await writeTerminalRun(ownerId, "sdk-binding-first", "generation-sdk-first");
     // Controlled busy-boundary probe uses a real SDK manager/lifecycle, not a generated model turn.
-    const busy = { ...alpha.ctx, isIdle: () => false };
+    const busy = alpha.ctx;
     const draft = alpha.kernel.onTurnEnd(completedBoundary(), busy).entries.at(-1);
     sdk.session.sessionManager.appendCustomMessageEntry(draft.customType, draft.content, draft.display, draft.details);
     alpha.kernel.onContext([draft], alpha.ctx);
     const file = sdk.session.sessionManager.getSessionFile()!;
     await writeTerminalRun(ownerId, "sdk-binding-second", "generation-sdk-second");
+    // Exercise background delivery before the manual boundary without depending on watcher timing.
+    assert.doesNotThrow(() => alpha.kernel.onAgentSettled(alpha.ctx));
     const second = alpha.kernel.onTurnEnd(completedBoundary(), busy).entries.at(-1);
     assert.ok(second.content.startsWith("---\nindex: 1\n"));
     const path = getRunDeliveryJournalPath(extensionTempDir, ownerId), beforeTree = fs.readFileSync(path);

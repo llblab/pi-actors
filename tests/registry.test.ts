@@ -17,6 +17,19 @@ import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { parseDocument, isMap, isSeq } from "yaml";
+
+function registryYaml(text: string): any {
+  assert.ok(text.startsWith("\n"));
+  assert.doesNotMatch(text, /^(?:---|```)/mu);
+  const document = parseDocument(text, { version: "1.2", schema: "core" });
+  assert.deepEqual(document.errors, []);
+  assert.ok(isMap(document.contents));
+  for (const key of ["registered_tools", "required_args", "optional_args", "warnings"]) {
+    if (Array.isArray(document.toJS()[key])) assert.ok(isSeq(document.get(key, true)));
+  }
+  return document.toJS();
+}
 
 import type { RegisteredTool } from "../lib/config.ts";
 import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
@@ -815,7 +828,7 @@ test("AX authored constants preserve Schema and observation faults plus SDK phas
     for (const [params, isError, expectedCalls, pattern] of [
       [{ name: "host_author", template: "echo", description: "" }, true, 1, /- field: description\n- result: Tool description is required/u],
       [{ name: "host_author", template: "echo", description: "Description", defaults: false }, true, 0, /Validation failed for tool "register_tool":/u],
-      [{ name: "host_author", template: null }, false, 1, /- result: not found/u],
+      [{ name: "host_author", template: null }, false, 1, /result: "not found"/u],
     ] as const) {
       let calls = 0;
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
@@ -901,7 +914,7 @@ test("AX template shape guards preserve accessor and expansion faults, special v
     }
     for (const value of [null, ""]) {
       const result = await executeRegisterTool({ name: "absent_shape", template: value }, {}, { ...h.deps, getToolNameBlocker(): never { throw Error("Deletion precedes blocker"); } });
-      assert.match(result.content[0].text, /result: not found/u);
+      assert.match(result.content[0].text, /result: "not found"/u);
     }
     for (const [value, expected] of [[null, "- field: template\n- result: Tool template cannot be null here."], [undefined, "- field: template\n- result: Tool template is required."]] as const) {
       let reads = 0;
@@ -1061,7 +1074,7 @@ test("AX ordinary registration name and missing-source guards preserve stage obs
       assert.equal(existsSync(join(h.root, "fresh.json")), false);
     }
     const listed = await executeRegisterTool({ name: "" }, {}, h.deps);
-    assert.match(listed.content[0].text, /registered_tools: none/u); assert.deepEqual(listed.details, { tool: "register_tool" });
+    assert.deepEqual(registryYaml(listed.content[0].text).registered_tools, []); assert.deepEqual(listed.details, { tool: "register_tool" });
     await executeRegisterTool({ name: "existing", description: "Old", template: "echo retained" }, {}, h.deps);
     const updated = await executeRegisterTool({ name: "existing", description: "New", update: true }, {}, h.deps);
     assert.equal(updated.details.persisted, true); assert.equal(h.tools.get("existing")?.description, "New");
@@ -1120,7 +1133,7 @@ test("AX ordinary registration guard projection preserves unowned faults, scalar
       [{ name: "@@@" }, true, 1, /- field: name\n- result: Invalid tool name./u],
       [{ name: "BASH" }, true, 1, /- value: bash\n- result: Reserved tool name./u],
       [{ name: "host_fresh" }, true, 1, /- result: New registration requires exactly one source mode./u],
-      [{ name: "" }, false, 1, /registered_tools: none/u],
+      [{ name: "" }, false, 1, /registered_tools:\n  \[\]/u],
       [{ name: 7 }, true, 1, /- result: New registration requires exactly one source mode./u],
       [{ name: {} }, true, 0, /Validation failed for tool "register_tool":/u],
     ] as const) {
@@ -1202,7 +1215,7 @@ test("AX registry source-mode refusals keep unowned observation faults and host 
     for (const [params, isError, reachesFacade, pattern] of [
       [{ values: { caller: "data" } }, true, false, /Validation failed for tool "register_tool":/u],
       [{ from: {} }, true, false, /Validation failed for tool "register_tool":/u],
-      [{ from: 7 }, false, true, /- registered_tools: none/u],
+      [{ from: 7 }, false, true, /registered_tools:\n  \[\]/u],
       [{ from: "" }, true, true, /- field: from\n- result: Tool from must be a non-empty Recipe reference./u],
       [{ from: "PRIVATE_SOURCE", template: "echo" }, true, true, /- result: Use exactly one register_tool source mode./u],
       [{ from: "PRIVATE_SOURCE", args: "x" }, true, true, /- inherited_fields:\n  - args\n  - async/u],
@@ -1260,9 +1273,9 @@ test("AX draft promotion receipt preserves selected flag text and original activ
       assert.deepEqual(result.details.required_args, ["file"]); assert.deepEqual(result.details.optional_args, ["lang"]);
       const invocation = ["true", "toggle", "opaque"].includes(mode);
       assert.deepEqual(result.details.next_actions, invocation ? ["call tool promoted", "inspect target=tool:promoted view=status"] : ["inspect target=tool:promoted view=status"]);
-      const flag = mode === "opaque" ? "- callable_now:\n  " + opaqueText.replaceAll(/\r\n|\r|\n/gu, newline => newline + "  ") : "- callable_now: " + (mode === "zero" ? "0" : mode === "true" || mode === "toggle" ? "true" : "false");
-      assert.equal(result.content[0].text, "\n- tool: promoted\n- result: " + (update ? "updated" : "registered") + "\n- source: draft\n" + flag +
-        (invocation ? "\n- instruction: call tool promoted" : "\n- next:\n  - tool: inspect\n  - target: tool:promoted\n  - view: status"));
+      const flag = mode === "opaque" ? opaqueText : mode === "zero" ? "0" : mode === "true" || mode === "toggle" ? "true" : "false";
+      assert.deepEqual(registryYaml(result.content[0].text), { tool: "promoted", result: update ? "updated" : "registered", source: "draft", callable_now: flag,
+        ...(invocation ? { instruction: "call tool promoted" } : { next: { tool: "inspect", target: "tool:promoted", view: "status" } }) });
       assert.doesNotMatch(result.content[0].text, /PRIVATE_|activation_boundary:|required_args:|optional_args:|defaults:|persisted:|host_registered:|warnings:/u);
       assert.equal(await readFile(draft, "utf8"), source);
       assert.equal(JSON.parse(await readFile(join(h.root, "promoted.json"), "utf8")).template, "echo {file} {lang}");
@@ -1301,23 +1314,34 @@ test("AX draft promotion receipt bounds the exact selected display without addin
     await run();
     const base = await run();
     value = "false";
-    const falseDisplay = await run(); assert.match(falseDisplay.content[0].text, /- callable_now: false\n- instruction: call tool bounded/u);
+    const falseDisplay = await run(); assert.equal(registryYaml(falseDisplay.content[0].text).callable_now, "false"); assert.equal(registryYaml(falseDisplay.content[0].text).instruction, "call tool bounded");
     const count = 16384 - Buffer.byteLength(base.content[0].text) + 1;
     value = "x".repeat(count);
-    const full = await run(); assert.equal(Buffer.byteLength(full.content[0].text), 16384); assert.ok(full.content[0].text.includes("- callable_now: " + value));
+    const full = await run(); assert.equal(Buffer.byteLength(full.content[0].text), 16384); assert.equal(registryYaml(full.content[0].text).callable_now, value);
     value += "x";
     const omitted = await run(); assert.ok(Buffer.byteLength(omitted.content[0].text) <= 16384);
-    assert.match(omitted.content[0].text, /- callable_now: \[omitted\]\n- callable_now_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1/u);
+    assert.equal(registryYaml(omitted.content[0].text).callable_now, "[omitted]");
+    assert.deepEqual(registryYaml(omitted.content[0].text).callable_now_omission, { reason: "response_too_large", shown: 0, omitted: 1, total: 1 });
     assert.doesNotMatch(omitted.content[0].text, /x{40}/u); assert.equal(omitted.details.callable_now, display);
     const unit = "界👩‍💻é";
     value = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "x".repeat(count % Buffer.byteLength(unit));
     assert.equal(Buffer.byteLength((await run()).content[0].text), 16384);
     value += "界";
-    assert.match((await run()).content[0].text, /callable_now: \[omitted\]/u);
+    assert.equal(registryYaml((await run()).content[0].text).callable_now, "[omitted]");
     value = "bad\ud800";
     const malformed = await run(); assert.ok(malformed.content[0].text.isWellFormed());
-    assert.match(malformed.content[0].text, /callable_now: \[unavailable\]/u); assert.match(malformed.content[0].text, /reason: malformed_selected_text/u);
+    assert.equal(registryYaml(malformed.content[0].text).callable_now, "[unavailable]"); assert.equal(registryYaml(malformed.content[0].text).callable_now_omission.reason, "malformed_selected_text");
     assert.equal(value.charCodeAt(3), 0xd800); assert.equal(coercions, 8, "Exactly one old flag conversion per promotion");
+    // Separate probes do not alter the original scenario's coercion-count assertion.
+    for (const selected of ["true", "0", "null", "[]", "\uFEFFopaque\r\nnext: body\r\n\"\\界"]) {
+      value = selected; assert.equal(registryYaml((await run()).content[0].text).callable_now, selected);
+    }
+    value = "\"";
+    const escapedBase = await run();
+    const escapedRoom = 16384 - Buffer.byteLength(escapedBase.content[0].text);
+    value = "\"".repeat(1 + Math.floor(escapedRoom / 2)) + "x".repeat(escapedRoom % 2);
+    const escaped = await run(); assert.equal(Buffer.byteLength(escaped.content[0].text), 16384); assert.equal(registryYaml(escaped.content[0].text).callable_now, value);
+    value += "x"; assert.equal(registryYaml((await run()).content[0].text).callable_now_omission.reason, "response_too_large");
     await assert.rejects(executeRegisterTool({ name: "symbol_promotion", draft }, {}, { ...h.deps,
       registerRuntimeTool: () => ({ active_tool: true, activation: "current_session", host_registered: true, callable_now: Symbol("legacy") as unknown as boolean }) }), TypeError);
     assert.equal(h.tools.has("symbol_promotion"), true, "Template Symbol coercion stays a post-effect failure, unlike String(Symbol)");
@@ -1331,7 +1355,7 @@ test("AX draft promotion receipt bounds the exact selected display without addin
     const call = { type: "toolCall", id: "host-promotion", name: "register_tool", arguments: { name: "host_promoted", draft } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(outcome.isError, false); assert.equal(outcome.result.details.promoted, true); assert.equal(outcome.result.details.callable_now, false);
-    assert.equal(outcome.result.content[0].text, "\n- tool: host_promoted\n- result: registered\n- source: draft\n- callable_now: false\n- next:\n  - tool: inspect\n  - target: tool:host_promoted\n  - view: status");
+    assert.deepEqual(registryYaml(outcome.result.content[0].text), { tool: "host_promoted", result: "registered", source: "draft", callable_now: "false", next: { tool: "inspect", target: "tool:host_promoted", view: "status" } });
   } finally { await h.cleanup(); }
 });
 
@@ -1356,28 +1380,33 @@ test("AX registry list preserves selected names, order and coercion with whole-g
     assert.ok(Buffer.byteLength(result.content[0].text) <= 16384); assert.ok(result.content[0].text.isWellFormed());
     return result.content[0].text;
   };
-  const coverage = (shown: number, omitted: number, total: number, reason?: string) => "\n- registered_tools_coverage:" + (reason ? "\n  - reason: " + reason : "") + `\n  - shown: ${shown}\n  - omitted: ${omitted}\n  - total: ${total}`;
+  const coverage = (shown: number, omitted: number, total: number, reason?: string) => ({ ...(reason ? { reason } : {}), shown, omitted, total });
+  const expectedList = (names: string[], total = names.length, reason?: string) => ({ registered_tools: reason ? (reason === "malformed_selected_text" ? "[unavailable]" : "[omitted]") : names, registered_tools_coverage: coverage(names.length, total - names.length, total, reason) });
   try {
-    assert.equal(await capture([]), "\n- registered_tools: none" + coverage(0, 0, 0));
-    for (const values of [["solo"], ["zeta", "alpha"], ["界👩‍💻é", "## Name\r\nnext: body\r\n\r\n  - opaque · literal"]]) {
-      const expected = [...values].sort().map(value => "  - " + value.replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ")).join("\n");
-      assert.equal(await capture(values), "\n- registered_tools:\n" + expected + coverage(values.length, 0, values.length));
+    assert.deepEqual(registryYaml(await capture([])), expectedList([]));
+    for (const values of [["solo"], ["zeta", "alpha"], ["界👩‍💻é", "## Name\r\nnext: body\r\n\r\n  - opaque · literal"], ["null", "true", "12", "[]", "\uFEFFname", "a\"b\\c"]]) {
+      assert.deepEqual(registryYaml(await capture(values)), expectedList([...values].sort()));
     }
     const base = await capture(["a"]);
     const count = 16384 - Buffer.byteLength(base) + 1;
     const exact = "a".repeat(count);
     assert.equal(Buffer.byteLength(await capture([exact])), 16384);
-    assert.equal(await capture([exact + "a"]), "\n- registered_tools: [omitted]" + coverage(0, 1, 1, "response_too_large"));
-    assert.equal(await capture([exact, "z"]), "\n- registered_tools: [omitted]" + coverage(0, 2, 2, "response_too_large"));
+    assert.deepEqual(registryYaml(await capture([exact + "a"])), expectedList([], 1, "response_too_large"));
+    assert.deepEqual(registryYaml(await capture([exact, "z"])), expectedList([], 2, "response_too_large"));
+    const escaped = "\"".repeat(Math.floor(count / 2)) + "a".repeat(count % 2);
+    assert.equal(Buffer.byteLength(await capture([escaped])), 16384);
+    assert.deepEqual(registryYaml(await capture([escaped])), expectedList([escaped]));
+    assert.deepEqual(registryYaml(await capture([escaped + "a"])), expectedList([], 1, "response_too_large"));
     const unit = "界👩‍💻é";
     const unicode = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "x".repeat(count % Buffer.byteLength(unit));
     assert.equal(Buffer.byteLength(await capture([unicode])), 16384);
-    assert.equal(await capture([unicode + "界"]), "\n- registered_tools: [omitted]" + coverage(0, 1, 1, "response_too_large"));
+    assert.deepEqual(registryYaml(await capture([unicode])), expectedList([unicode]));
+    assert.deepEqual(registryYaml(await capture([unicode + "界"])), expectedList([], 1, "response_too_large"));
     const malformed = "bad\ud800";
-    assert.equal(await capture([malformed]), "\n- registered_tools: [unavailable]" + coverage(0, 1, 1, "malformed_selected_text"));
+    assert.deepEqual(registryYaml(await capture([malformed])), expectedList([], 1, "malformed_selected_text"));
     let coercions = 0;
     const key = { [Symbol.toPrimitive](hint: string) { assert.equal(hint, "string"); coercions++; return "## Captured\n- next: content"; } };
-    assert.equal(await capture([key]), "\n- registered_tools:\n  - ## Captured\n    - next: content" + coverage(1, 0, 1));
+    assert.deepEqual(registryYaml(await capture([key])), expectedList(["## Captured\n- next: content"]));
     assert.equal(coercions, 1, "Use the captured compiler-prefixed row, never coerce the original key again");
     for (const cause of [undefined, "PRIVATE_PRIMITIVE", Object.freeze({ toString(): never { throw Error("Do not format failure"); } })]) {
       let rejected = false;
@@ -1393,7 +1422,7 @@ test("AX registry list preserves selected names, order and coercion with whole-g
     const hostTool = { ...definition, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...values, {}) };
     const call = { type: "toolCall", id: "host-list", name: "register_tool", arguments: {} };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
-    assert.equal(outcome.isError, false); assert.equal(outcome.result.content[0].text, "\n- registered_tools: none" + coverage(0, 0, 0));
+    assert.equal(outcome.isError, false); assert.deepEqual(registryYaml(outcome.result.content[0].text), expectedList([]));
     assert.deepEqual(outcome.result.details, { tool: "register_tool" });
   } finally { await h.cleanup(); }
 });
@@ -1418,7 +1447,7 @@ test("AX registry deletion preserves lookup and partial effects while keeping re
         notify(ctx: unknown, message: string) { events.push("notify"); h.deps.notify(ctx, message); },
       });
       assert.deepEqual(result.details, { tool: "smoke" });
-      assert.equal(result.content[0].text, "\n- tool: smoke\n- result: " + (found ? "deleted\n- instruction: Reload to remove it from the complete registry." : "not found"));
+      assert.deepEqual(registryYaml(result.content[0].text), { tool: "smoke", result: found ? "deleted" : "not found", ...(found ? { instruction: "Reload to remove it from the complete registry." } : {}) });
       assert.deepEqual(events, found ? ["getTools", "has", "delete", "getActive", "setActive", "notify"] : ["getTools", "has"]);
       assert.deepEqual(h.activeTools(), found ? ["read"] : ["read", "smoke"]);
       assert.deepEqual(h.notifications, found ? ["- report: Deleted tool\n- tool: smoke"] : []);
@@ -1443,10 +1472,17 @@ test("AX registry deletion preserves lookup and partial effects while keeping re
       assert.equal(result.details.tool, name); assert.ok(result.content[0].text.isWellFormed()); assert.ok(Buffer.byteLength(result.content[0].text) <= 16384);
       return result.content[0].text;
     };
-    const exact = "x".repeat(16384 - Buffer.byteLength("\n- tool: \n- result: not found"));
-    assert.equal(await display(exact), "\n- tool: " + exact + "\n- result: not found");
-    assert.equal(await display(exact + "x"), "\n- tool: [omitted]\n- tool_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1\n- result: not found");
-    assert.match(await display("bad\ud800"), /tool: \[unavailable\]\n- tool_omission:\n  - reason: malformed_selected_text/u);
+    for (const value of ["null", "true", "[]", "\uFEFFopaque\r\nnext: body\r\n\"\\界"]) assert.deepEqual(registryYaml(await display(value)), { tool: value, result: "not found" });
+    const exact = "x".repeat(16384 - Buffer.byteLength(await display("")));
+    assert.equal(Buffer.byteLength(await display(exact)), 16384);
+    assert.deepEqual(registryYaml(await display(exact)), { tool: exact, result: "not found" });
+    for (const [value, reason, tool] of [[exact + "x", "response_too_large", "[omitted]"], ["bad\ud800", "malformed_selected_text", "[unavailable]"]]) {
+      assert.deepEqual(registryYaml(await display(value)), { tool, tool_omission: { reason, shown: 0, omitted: 1, total: 1 }, result: "not found" });
+    }
+    const escaped = "\"".repeat(Math.floor(exact.length / 2)) + "x".repeat(exact.length % 2);
+    assert.equal(Buffer.byteLength(await display(escaped)), 16384);
+    assert.deepEqual(registryYaml(await display(escaped)), { tool: escaped, result: "not found" });
+    assert.equal(registryYaml(await display(escaped + "x")).tool_omission.reason, "response_too_large");
     const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
     const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
     const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
@@ -1458,7 +1494,7 @@ test("AX registry deletion preserves lookup and partial effects while keeping re
       const call = { type: "toolCall", id: "host-delete", name: "register_tool", arguments: { name: "smoke", template: null } };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(outcome.isError, false, "Absent tool remains a returned result, not a new Error");
-      assert.equal(outcome.result.content[0].text, "\n- tool: smoke\n- result: " + (found ? "deleted\n- instruction: Reload to remove it from the complete registry." : "not found"));
+      assert.deepEqual(registryYaml(outcome.result.content[0].text), { tool: "smoke", result: found ? "deleted" : "not found", ...(found ? { instruction: "Reload to remove it from the complete registry." } : {}) });
       assert.deepEqual(outcome.result.details, { tool: "smoke" });
     }
   } finally { await boundHarness.cleanup(); }
@@ -1531,11 +1567,12 @@ test("AX registration receipt preserves activation observations, opaque warnings
       assert.equal(result.details.persisted, true); assert.equal(result.details.registry_active, true); assert.equal(result.details.source, "template");
       const warnings = result.details.templateWarnings!;
       assert.equal(warnings.length, 1); assert.ok(warnings[0].startsWith(label + ": invokes bash;"));
-      const expected = "\n- tool: receipt\n- result: " + (callable ? update ? "updated" : "registered" : "persisted") + "\n- source: template\n- callable_now: " + callable +
-        (callable ? "" : "\n- activation_boundary: " + (mode === "toggle" ? "current_session" : "session_activation_unverified")) +
-        "\n- required_args:\n  - file\n- optional_args:\n  - lang\n- warnings:\n  - " + warnings[0].replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ") +
-        (callable ? "\n- instruction: call tool receipt" : "\n- next:\n  - tool: inspect\n  - target: tool:receipt\n  - view: status");
-      assert.equal(result.content[0].text, expected);
+      assert.deepEqual(registryYaml(result.content[0].text), {
+        tool: "receipt", result: callable ? update ? "updated" : "registered" : "persisted", source: "template", callable_now: callable,
+        ...(callable ? {} : { activation_boundary: mode === "toggle" ? "current_session" : "session_activation_unverified" }),
+        required_args: ["file"], optional_args: ["lang"], warnings: [warnings[0]],
+        ...(callable ? { instruction: "call tool receipt" } : { next: { tool: "inspect", target: "tool:receipt", view: "status" } }),
+      });
       assert.doesNotMatch(result.content[0].text, /PRIVATE_DESCRIPTION|defaults:|host_registered:|registry_active:|validated:|not sandboxed by.*- next:/u);
       const stored = JSON.parse(await readFile(join(h.root, "receipt.json"), "utf8"));
       assert.equal(stored.template.label, label); assert.deepEqual(stored.defaults, { lang: "ru" });
@@ -1571,16 +1608,17 @@ test("AX registration receipt budgets whole argument groups, prioritizes warning
     const size = 16384 - Buffer.byteLength(first.content[0].text) + 1;
     const arg = "a".repeat(size);
     const full = await executeRegisterTool({ name: "tight", description: "Bound", args: arg, template: `echo {${arg}}`, update: true }, {}, h.deps);
-    assert.equal(Buffer.byteLength(full.content[0].text), 16384); assert.ok(full.content[0].text.includes("  - " + arg));
+    assert.equal(Buffer.byteLength(full.content[0].text), 16384); assert.deepEqual(registryYaml(full.content[0].text).required_args, [arg]);
     const large = arg + "a";
     const omitted = await executeRegisterTool({ name: "tight", description: "Bound", args: large, template: `echo {${large}}`, update: true }, {}, h.deps);
-    assert.match(omitted.content[0].text, /- required_args: \[omitted\]\n- required_args_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1/u);
+    assert.equal(registryYaml(omitted.content[0].text).required_args, "[omitted]");
+    assert.deepEqual(registryYaml(omitted.content[0].text).required_args_omission, { reason: "response_too_large", shown: 0, omitted: 1, total: 1 });
     assert.doesNotMatch(omitted.content[0].text, /a{40}/u); assert.deepEqual(omitted.details.required_args, [large]);
     assert.ok(Buffer.byteLength(omitted.content[0].text) <= 16384);
     const label = "界👩‍💻é".repeat(70) + "\r\nnext: opaque";
     const warning = await executeRegisterTool({ name: "tight", description: "Bound", args: arg, template: { label, template: `bash -c 'echo fixed' {${arg}}` }, update: true }, {}, h.deps);
-    assert.match(warning.content[0].text, /required_args: \[omitted\]/u);
-    assert.ok(warning.content[0].text.includes("  - " + warning.details.templateWarnings![0].replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ")));
+    assert.equal(registryYaml(warning.content[0].text).required_args, "[omitted]");
+    assert.deepEqual(registryYaml(warning.content[0].text).warnings, [warning.details.templateWarnings![0]]);
     assert.ok(Buffer.byteLength(warning.content[0].text) <= 16384);
     const optionalBase = await executeRegisterTool({ name: "optional", description: "Bound", args: "a=PRIVATE_DEFAULT", template: "echo {a}" }, {}, h.deps);
     const optionalSize = 16384 - Buffer.byteLength(optionalBase.content[0].text) + 1;
@@ -1589,21 +1627,44 @@ test("AX registration receipt budgets whole argument groups, prioritizes warning
     assert.equal(Buffer.byteLength(optionalFull.content[0].text), 16384); assert.doesNotMatch(optionalFull.content[0].text, /PRIVATE_DEFAULT/u);
     const optionalLarge = optionalArg + "o";
     const optionalOmitted = await executeRegisterTool({ name: "optional", description: "Bound", args: optionalLarge + "=PRIVATE_DEFAULT", template: `echo {${optionalLarge}}`, update: true }, {}, h.deps);
-    assert.match(optionalOmitted.content[0].text, /optional_args: \[omitted\]/u); assert.deepEqual(optionalOmitted.details.optional_args, [optionalLarge]);
+    assert.equal(registryYaml(optionalOmitted.content[0].text).optional_args, "[omitted]"); assert.deepEqual(optionalOmitted.details.optional_args, [optionalLarge]);
     assert.equal(optionalOmitted.details.defaults![optionalLarge], "PRIVATE_DEFAULT"); assert.doesNotMatch(optionalOmitted.content[0].text, /PRIVATE_DEFAULT|o{40}/u);
     const largeWarning = await executeRegisterTool({ name: "large_warning", description: "Bound", template: { label: "界".repeat(6000), template: "bash -c 'echo fixed'" } }, {}, h.deps);
-    assert.match(largeWarning.content[0].text, /- warnings: \[omitted\]\n- warnings_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1/u);
+    assert.equal(registryYaml(largeWarning.content[0].text).warnings, "[omitted]");
+    assert.deepEqual(registryYaml(largeWarning.content[0].text).warnings_omission, { reason: "response_too_large", shown: 0, omitted: 1, total: 1 });
     assert.ok(largeWarning.details.templateWarnings![0].startsWith("界".repeat(6000))); assert.ok(Buffer.byteLength(largeWarning.content[0].text) < 1024);
     const malformed = await executeRegisterTool({ name: "malformed", description: "Bound", template: "echo" }, {}, {
       ...h.deps, registerRuntimeTool(cfg: RegisteredTool) { cfg.args = ["bad\ud800"]; },
     });
-    assert.match(malformed.content[0].text, /required_args: \[unavailable\]/u); assert.match(malformed.content[0].text, /reason: malformed_selected_text/u);
+    assert.equal(registryYaml(malformed.content[0].text).required_args, "[unavailable]"); assert.equal(registryYaml(malformed.content[0].text).required_args_omission.reason, "malformed_selected_text");
     assert.ok(malformed.content[0].text.isWellFormed()); assert.deepEqual(malformed.details.required_args, ["bad\ud800"]);
+    const selectedArgs = async (args: unknown[]) => executeRegisterTool({ name: "selected_args", description: "Bound", template: "echo", update: true }, {}, {
+      ...h.deps, registerRuntimeTool(cfg: RegisteredTool) { cfg.args = args as string[]; },
+    });
+    for (const args of [[], ["false"], ["true", "null", "[]", "0", "\uFEFFopaque\r\nnext: body\r\n\"\\界"]]) {
+      const selected = await selectedArgs(args);
+      assert.deepEqual(registryYaml(selected.content[0].text).required_args, args);
+      assert.deepEqual(registryYaml(selected.content[0].text).optional_args, []);
+      assert.equal(Object.hasOwn(registryYaml(selected.content[0].text), "warnings"), false);
+    }
+    const nontext = await selectedArgs([0]);
+    assert.deepEqual(registryYaml(nontext.content[0].text).required_args_omission, { reason: "malformed_selected_text", shown: 0, omitted: 1, total: 1 });
+    const escapedBase = await selectedArgs(["\""]);
+    const escapedRoom = 16384 - Buffer.byteLength(escapedBase.content[0].text);
+    const escapedArg = "\"".repeat(1 + Math.floor(escapedRoom / 2)) + "x".repeat(escapedRoom % 2);
+    const escapedFull = await selectedArgs([escapedArg]);
+    assert.equal(Buffer.byteLength(escapedFull.content[0].text), 16384); assert.deepEqual(registryYaml(escapedFull.content[0].text).required_args, [escapedArg]);
+    assert.equal(registryYaml((await selectedArgs([escapedArg + "x"])).content[0].text).required_args_omission.reason, "response_too_large");
+    const unicodeArg = "界".repeat(Math.floor((escapedRoom + 2) / 3)) + "x".repeat((escapedRoom + 2) % 3);
+    const unicodeFull = await selectedArgs([unicodeArg]);
+    assert.equal(Buffer.byteLength(unicodeFull.content[0].text), 16384); assert.deepEqual(registryYaml(unicodeFull.content[0].text).required_args, [unicodeArg]);
+    assert.equal(registryYaml((await selectedArgs([unicodeArg + "x"])).content[0].text).required_args_omission.reason, "response_too_large");
+    assert.deepEqual(registryYaml((await selectedArgs([escapedArg, "z"])).content[0].text).required_args_omission, { reason: "response_too_large", shown: 0, omitted: 2, total: 2 });
     const source = join(h.root, "source ``` literal.json");
     await writeFile(source, JSON.stringify({ description: "Literal", args: ["name"], template: "echo {name}" }));
     const sourced = await executeRegisterTool({ name: "from_literal", from: source }, {}, h.deps);
     assert.equal(sourced.details.source, source);
-    assert.ok(sourced.content[0].text.includes("- source:\n  ````text\n  " + source + "\n  ````"));
+    assert.equal(registryYaml(sourced.content[0].text).source, source);
     assert.equal(await readFile(source, "utf8"), JSON.stringify({ description: "Literal", args: ["name"], template: "echo {name}" }));
     const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
     const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
@@ -1614,7 +1675,8 @@ test("AX registration receipt budgets whole argument groups, prioritizes warning
     const call = { type: "toolCall", id: "host-registration", name: "register_tool", arguments: { name: "host_receipt", description: "Host", template: "echo" } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(outcome.isError, false); assert.equal(outcome.result.details.persisted, true); assert.equal(outcome.result.details.callable_now, false);
-    assert.match(outcome.result.content[0].text, /^\n- tool: host_receipt\n- result: persisted\n- source: template\n- callable_now: false/u);
+    assert.deepEqual(registryYaml(outcome.result.content[0].text), { tool: "host_receipt", result: "persisted", source: "template", callable_now: false,
+      activation_boundary: "session_activation_unverified", required_args: [], optional_args: [], next: { tool: "inspect", target: "tool:host_receipt", view: "status" } });
     assert.deepEqual(outcome.result.details.required_args, []); assert.deepEqual(outcome.result.details.next_actions, ["inspect target=tool:host_receipt view=status"]);
   } finally { await h.cleanup(); }
 });
@@ -1643,10 +1705,9 @@ test("Registry mutations register template-backed tools", async () => {
       template: "~/bin/transcribe {file} {lang}",
     });
     assert.deepEqual(harness.runtimeRegistered, ["transcribe"]);
-    assert.match(
-      result.content[0].text,
-      /- tool: transcribe\n- result: persisted\n- source: template\n- callable_now: false\n- activation_boundary: session_activation_unverified/,
-    );
+    const receipt = registryYaml(result.content[0].text);
+    assert.equal(receipt.tool, "transcribe"); assert.equal(receipt.result, "persisted"); assert.equal(receipt.source, "template");
+    assert.equal(receipt.callable_now, false); assert.equal(receipt.activation_boundary, "session_activation_unverified");
     assert.deepEqual(result.details.required_args, ["file"]);
     assert.deepEqual(result.details.optional_args, ["lang"]);
     assert.equal(result.details.source, "template");
@@ -2237,7 +2298,7 @@ test("Registry mutations delete tools and deactivate them", async () => {
     );
     assert.equal(harness.tools.has("smoke"), false);
     assert.deepEqual(harness.activeTools(), ["read"]);
-    assert.match(result.content[0].text, /- tool: smoke\n- result: deleted/);
+    assert.match(result.content[0].text, /tool: "smoke"\nresult: "deleted"/);
   } finally {
     await harness.cleanup();
   }

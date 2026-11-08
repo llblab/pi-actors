@@ -19,6 +19,8 @@ export interface MarkedRecipeContextRecord extends TemplateRecipeContextRecord {
     you_are_here_path?: string;
 }
 export declare function findPiPrintPromptIndex(args: string[]): number | undefined;
+/** Pi text-print stdout (direct or resolved SDK CLI via Node) is the reply; JSON/RPC/interactive output is not. */
+export declare function piPrintResponseMode(command: string, args: string[]): "text" | "unsupported" | undefined;
 export declare function markRecipeContextRecords(records: TemplateRecipeContextRecord[], context?: CommandTemplateActorRecipeContext): MarkedRecipeContextRecord[];
 export declare function formatRecipeContextJsonl(records: TemplateRecipeContextRecord[], context?: CommandTemplateActorRecipeContext): string;
 export declare function buildRecipeContextPromptBlock(records: TemplateRecipeContextRecord[], context?: CommandTemplateActorRecipeContext): string;

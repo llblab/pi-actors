@@ -1,6 +1,6 @@
 {
   "name": "@llblab/pi-actors",
-  "version": "0.55.0",
+  "version": "0.56.0",
   "private": false,
   "description": "Local Actor Kernel for Pi",
   "keywords": [
@@ -27,11 +27,13 @@
   "scripts": {
     "check": "node --experimental-strip-types -e \"await import('./index.ts'); console.log('pi-actors: extension import ok')\"",
     "conformance": "node scripts/conformance.mjs",
-    "test": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
-    "test:preservation": "node --experimental-strip-types --test --test-concurrency=1 tests/async-runs.test.ts tests/observability.test.ts tests/session-evidence.test.ts tests/inspector-security.test.ts tests/inspector-overlay.test.ts tests/review-control.test.ts",
+    "test": "node --import ./tests/test-environment.mjs --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
+    "test:shard": "node .github/scripts/test-shards.mjs",
+    "test:preservation": "node --import ./tests/test-environment.mjs --experimental-strip-types --test --test-concurrency=1 tests/async-runs.test.ts tests/runs-retention.test.ts tests/observability.test.ts tests/session-evidence.test.ts tests/inspector.test.ts tests/inspector-overlay.test.ts tests/review-control.test.ts",
     "pack:dry": "npm pack --dry-run",
     "recipes:qa": "node skills/actors/scripts/validate-recipe.mjs skills --skills --qa --summary",
-    "validate": "npx tsc --noEmit && npm run recipes:qa && npm run build:check && npm run check && npm test && npm run conformance && npm run pack:dry",
+    "validate:preflight": "npx tsc --noEmit && npm run recipes:qa && npm run build:check && npm run check",
+    "validate": "npm run validate:preflight && npm test && npm run pack:dry",
     "audit:dependencies": "npm audit --audit-level=high --omit=peer",
     "build": "node scripts/build-dist.mjs",
     "build:check": "node scripts/build-dist.mjs --check",
@@ -49,8 +51,7 @@
     "BACKLOG.md",
     "CHANGELOG.md",
     "docs",
-    "fixtures",
-    "banner.jpg"
+    "fixtures"
   ],
   "pi": {
     "extensions": [
@@ -68,5 +69,8 @@
   "devDependencies": {
     "@types/node": "latest",
     "typescript": "latest"
+  },
+  "dependencies": {
+    "yaml": "2.9.0"
   }
 }

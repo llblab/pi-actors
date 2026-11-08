@@ -1084,6 +1084,8 @@ export async function executeRegisteredTool(
   exec: RegisteredToolExec,
   cwd: string,
   signal?: AbortSignal,
+  kernel?: { readonly onPrimaryCommandSelected?: (result: Readonly<ToolExecResult>) => void | Promise<void>;
+    readonly onFinalResponseSelected?: (text: string, upstreamTruncated: boolean) => void | Promise<void> },
 ): Promise<RegisteredToolExecutionResult> {
   const executed = await executeTemplateSteps(
     cfg,
@@ -1126,6 +1128,12 @@ export async function executeRegisteredTool(
       },
     });
   }
+  // Only the plain successful leaf is admitted initially; compositions/acceptance policies are separate contracts.
+  if (typeof cfg.template === "string" && executed.commands.length === 1 && !executed.failures.length) {
+    await kernel?.onPrimaryCommandSelected?.(result);
+  }
+  await kernel?.onFinalResponseSelected?.(result.stdout, result.stdoutTruncated === true || executed.branches.some(branch =>
+    branch.status !== "done" && (branch.stderrTruncated === true || branch.stderrBytes > Buffer.byteLength(branch.stderr ?? ""))));
   const formatted = formatOutput(cfg.name, "stdout", result.stdout);
   const templateWarnings = CommandTemplates.getCommandTemplateWarnings(
     createTemplateConfig(cfg),

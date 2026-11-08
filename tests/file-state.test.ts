@@ -4,6 +4,8 @@
  */
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
@@ -15,7 +17,9 @@ import test from "node:test";
 import {
   acquireFileMutationLock,
   mutationLockPath,
+  withFileMutationLock,
   writeJsonAtomic,
+  writeTextAtomic,
 } from "../lib/file-state.ts";
 
 const worker = fileURLToPath(new URL("./fixtures/file-lock-worker.ts", import.meta.url));
@@ -102,6 +106,131 @@ async function assertDeterministicContention(
     "second:released",
   ]);
 }
+
+test("Locked file mutation preserves callback and release failures without replay or rollback", (t) => {
+  // Data-only real file-lock interleavings; no worker/native workload or host-exit proof is introduced.
+  for (const kind of ["return", "error", "aggregate", "undefined", "primitive", "hostile"] as const)
+    for (const releaseKind of ["none", "error", "undefined"] as const) {
+      const root = fs.mkdtempSync(join(tmpdir(), "pi-actors-file-callback-")); const target = join(root, "state.json"); const lock = mutationLockPath(target);
+      const nested = new Error("original private cause"); let coerced = 0, thenRead = 0, calls = 0, releases = 0;
+      const primary: unknown = kind === "undefined" ? undefined : kind === "primitive" ? 0
+        : kind === "hostile" ? { [Symbol.toPrimitive]() { coerced++; throw new Error("must not coerce"); } }
+        : kind === "aggregate" ? new AggregateError([nested, undefined], "original aggregate", { cause: nested })
+        : Object.assign(new Error("callback rejection", { cause: nested }), { details: { partial: true } });
+      const releaseFailure = releaseKind === "undefined" ? undefined : new Error("controlled file-lock release fault");
+      const returned = Object.freeze({ get then() { thenRead++; throw new Error("Synchronous wrapper must not inspect returned thenable"); } });
+      const mkdir = fs.mkdirSync;
+      const hook = t.mock.method(fs, "mkdirSync", ((...args: Parameters<typeof fs.mkdirSync>) => {
+        if (String(args[0]).startsWith(lock + ".reclaim.") && String(args[0]).endsWith(".pending")) {
+          releases++; if (releaseKind !== "none") throw releaseFailure;
+        }
+        return Reflect.apply(mkdir, fs, args);
+      }) as typeof fs.mkdirSync);
+      syncBuiltinESMExports(); let rejected = false; let caught: unknown; let result: unknown;
+      try {
+        result = withFileMutationLock(target, () => {
+          calls++;
+          const owner = JSON.parse(fs.readFileSync(join(lock, "owner.json"), "utf8"));
+          writeJsonAtomic(join(root, "fixture-frame.json"), { kind: "controlled_file_lock_only", target, lock, owner, host_exit: "not_asserted" });
+          assert.equal(owner.pid, process.pid); assert.ok(typeof owner.token === "string" && owner.token.length > 0);
+          assert.equal(releases, 0);
+          const contention = new Error("callback is still under the same lock");
+          assert.throws(() => acquireFileMutationLock(target, { onContention() { throw contention; } }), error => error === contention);
+          writeJsonAtomic(target, { kind, calls });
+          if (kind !== "return") throw primary;
+          return returned;
+        });
+      } catch (error) { rejected = true; caught = error; }
+      finally { hook.mock.restore(); syncBuiltinESMExports(); }
+      if (releaseKind !== "none") t.diagnostic(`Controlled file-lock fault retained: ${root}; host_exit=not_asserted; no native scope claim`);
+      try {
+        assert.equal(calls, 1); assert.equal(releases, 1); assert.equal(coerced, 0); assert.equal(thenRead, 0);
+        assert.deepEqual(JSON.parse(fs.readFileSync(target, "utf8")), { kind, calls: 1 }, "Already written bytes are never rolled back or rewritten for diagnostics");
+        if (kind === "return" && releaseKind === "none") { assert.equal(rejected, false); assert.equal(result, returned); }
+        else {
+          assert.equal(rejected, true);
+          if (kind === "return") assert.equal(caught, releaseFailure, "A release-only failure, including undefined, stays exact");
+          else if (releaseKind === "none") assert.equal(caught, primary, "A single callback rejection stays exact");
+          else {
+            assert.ok(caught instanceof AggregateError); assert.deepEqual(caught.errors, [primary, releaseFailure]); assert.equal(caught.cause, primary);
+            assert.equal(Object.hasOwn(caught, "cause"), true); assert.equal(Object.getOwnPropertyDescriptor(caught, "cause")?.enumerable, false);
+            assert.equal(Object.getOwnPropertyDescriptor(caught, "errors")?.enumerable, false); assert.deepEqual(Object.keys(caught), []);
+            if (primary instanceof AggregateError) { assert.deepEqual(primary.errors, [nested, undefined]); assert.equal(primary.cause, nested); }
+          }
+        }
+        assert.equal(fs.existsSync(lock), releaseKind !== "none", "Faulted release is not cleanup proof");
+      } finally {
+        if (releaseKind === "none") fs.rmSync(root, { recursive: true, force: true });
+        // Faulted owner/lock/frame is retained; neither a settled callback nor this host can certify native/host exit.
+      }
+    }
+});
+
+test("Atomic replacement preserves exact failures, inspection causes, partial bytes and bounded retries", (t) => {
+  // Real writes/replacements plus controlled syscall errors, not new native workloads or transaction proof.
+  for (const writer of ["text", "json"] as const) for (const phase of ["before", "after"] as const)
+    for (const kind of ["undefined", "null", "zero", "string", "error", "aggregate", "hostile_text", "code_throws", "code_throws_undefined", "object_code"] as const) {
+      const root = fs.mkdtempSync(join(tmpdir(), "pi-actors-atomic-cause-")), target = join(root, "state β.json");
+      const previous = "original😀\r\n", payload = { text: "new😀\r\n" }, next = writer === "text" ? payload.text : JSON.stringify(payload, null, 2) + "\n";
+      fs.writeFileSync(target, previous);
+      let renames = 0, callbacks = 0, codeReads = 0, coerced = 0, rejected = false; let caught: unknown;
+      const child = new Error("original private cause"), observationFailure = kind === "code_throws_undefined" ? undefined : new Error("retry classification accessor fault");
+      const hostileText = { [Symbol.toPrimitive]() { coerced++; throw new Error("must not coerce"); } };
+      const primary: unknown = kind === "undefined" ? undefined : kind === "null" ? null : kind === "zero" ? 0 : kind === "string" ? "EPERM"
+        : kind === "aggregate" ? new AggregateError([child, undefined], "original aggregate", { cause: child })
+        : kind === "hostile_text" ? hostileText
+        : kind.startsWith("code_throws") || kind === "object_code" ? { get code() { codeReads++; if (kind === "object_code") return hostileText; throw observationFailure; } }
+        : Object.assign(new Error("rename rejection", { cause: child }), { details: { partial: true } });
+      const rename = fs.renameSync;
+      const hook = t.mock.method(fs, "renameSync", ((...args: Parameters<typeof fs.renameSync>) => {
+        if (args[1] !== target) return Reflect.apply(rename, fs, args);
+        renames++;
+        fs.writeFileSync(join(root, "fixture-frame.json"), JSON.stringify({ kind, writer, phase, target, temp: args[0], owner_pid: process.pid, host_exit: "not_asserted" }));
+        if (phase === "after") Reflect.apply(rename, fs, args);
+        throw primary;
+      }) as typeof fs.renameSync);
+      syncBuiltinESMExports();
+      try {
+        if (writer === "text") writeTextAtomic(target, next, { onBeforeReplace() { callbacks++; } });
+        else writeJsonAtomic(target, payload);
+      } catch (error) { rejected = true; caught = error; }
+      finally { hook.mock.restore(); syncBuiltinESMExports(); }
+      t.diagnostic(`Controlled atomic replacement fault retained: ${root}; host_exit=not_asserted; no native scope claim`);
+      assert.equal(rejected, true); assert.equal(renames, 1); assert.equal(callbacks, writer === "text" ? 1 : 0); assert.equal(coerced, 0);
+      assert.equal(fs.readFileSync(target, "utf8"), phase === "after" ? next : previous, "Committed bytes remain and a pre-rename failure does not invent a replacement");
+      if (kind === "code_throws" || kind === "code_throws_undefined") {
+        assert.equal(codeReads, 1); assert.ok(caught instanceof AggregateError); assert.equal(caught.errors.length, 2);
+        assert.equal(caught.errors[0], primary); assert.equal(caught.errors[1], observationFailure); assert.equal(caught.cause, primary);
+        assert.equal(Object.getOwnPropertyDescriptor(caught, "cause")?.enumerable, false); assert.equal(Object.getOwnPropertyDescriptor(caught, "errors")?.enumerable, false);
+        assert.deepEqual(Object.keys(caught), []);
+      } else {
+        assert.equal(caught, primary); assert.equal(codeReads, kind === "object_code" ? 1 : 0);
+        if (primary instanceof AggregateError) { assert.deepEqual(primary.errors, [child, undefined]); assert.equal(primary.cause, child); }
+      }
+    }
+  for (const code of ["EPERM", "EBUSY"] as const) for (const exhausted of [false, true]) {
+    const root = fs.mkdtempSync(join(tmpdir(), "pi-actors-atomic-retry-")), target = join(root, "state.json");
+    fs.writeFileSync(target, "before"); let renames = 0, callbacks = 0, rejected = false; let caught: unknown;
+    const delays: unknown[] = [], faults = Array.from({ length: 20 }, (_, i) => Object.assign(new Error(`controlled ${code} ${i}`), { code }));
+    const rename = fs.renameSync, wait = Atomics.wait;
+    const hook = t.mock.method(fs, "renameSync", ((...args: Parameters<typeof fs.renameSync>) => {
+      if (args[1] !== target) return Reflect.apply(rename, fs, args);
+      renames++; if (exhausted || renames < 3) throw faults[renames - 1];
+      return Reflect.apply(rename, fs, args);
+    }) as typeof fs.renameSync);
+    const waitHook = t.mock.method(Atomics, "wait", ((...args: Parameters<typeof Atomics.wait>) => { delays.push(args[3]); return Reflect.apply(wait, Atomics, args); }) as typeof Atomics.wait);
+    syncBuiltinESMExports();
+    try { writeTextAtomic(target, "after😀", { onBeforeReplace() { callbacks++; } }); }
+    catch (error) { rejected = true; caught = error; }
+    finally { hook.mock.restore(); waitHook.mock.restore(); syncBuiltinESMExports(); }
+    fs.writeFileSync(join(root, "fixture-frame.json"), JSON.stringify({ code, exhausted, renames, callbacks, delays, owner_pid: process.pid, host_exit: "not_asserted" }));
+    t.diagnostic(`Controlled atomic retry fixture retained: ${root}; no native/host exit asserted`);
+    assert.equal(callbacks, 1); assert.equal(renames, exhausted ? 20 : 3); assert.equal(rejected, exhausted);
+    assert.deepEqual(delays, Array.from({ length: exhausted ? 19 : 2 }, () => 50), "Keep the original actual Atomics.wait count and interval");
+    assert.equal(fs.readFileSync(target, "utf8"), exhausted ? "before" : "after😀");
+    if (exhausted) assert.equal(caught, faults[19], "Ordinary exhausted retry retains its exact last native-shaped rejection");
+  }
+});
 
 test("File mutation locks deterministically serialize sibling processes", async () => {
   const root = join(tmpdir(), `pi-actors-file-lock-${process.pid}-${Date.now()}`);

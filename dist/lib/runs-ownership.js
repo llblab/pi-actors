@@ -1,12 +1,13 @@
 /**
  * Async run state-directory ownership.
- * Owns: the marker proof required before launch and destructive retention.
+ * Owns: marker proof for lifecycle/retention and optional bounded readonly identity admission.
  */
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { writeJsonAtomic } from "./file-state.js";
+import { readJsonFileResilient } from "./state-readers.js";
 export const RUN_STATE_OWNERSHIP_FILE = ".pi-actors-run-state.json";
 function markerPath(stateDir) {
     return join(stateDir, RUN_STATE_OWNERSHIP_FILE);
@@ -39,10 +40,15 @@ function assertCanonicalDirectory(stateDir) {
     }
     return resolved;
 }
-function readMarker(stateDir) {
+function readMarker(stateDir, maxBytes) {
     try {
-        const value = JSON.parse(readFileSync(markerPath(stateDir), "utf8"));
-        if (value.version !== 1 ||
+        const path = markerPath(stateDir);
+        if (!lstatSync(path).isFile())
+            return undefined;
+        const value = maxBytes === undefined
+            ? JSON.parse(readFileSync(path, "utf8"))
+            : readJsonFileResilient(path, undefined, { maxBytes, strictUtf8: true }).value;
+        if (!value || value.version !== 1 ||
             typeof value.run !== "string" ||
             typeof value.state_dir !== "string" ||
             typeof value.ownership_token !== "string" ||
@@ -63,6 +69,22 @@ function assertMarkerMatches(marker, stateDir, run) {
         throw new Error(`Run state ownership marker does not match run ${run}: ${stateDir}`);
     }
     return marker;
+}
+/** Avoid acquiring the same lifecycle resource through a second path while its parent lock is held. */
+export function assertDistinctRunStateDirectories(parentStateDir, childStateDir) {
+    const parent = realpathSync.native(resolve(parentStateDir));
+    let child;
+    try {
+        child = realpathSync.native(resolve(childStateDir));
+    }
+    catch (error) {
+        if (error.code === "ENOENT")
+            return;
+        throw error;
+    }
+    if (comparablePath(parent) === comparablePath(child)) {
+        throw new Error("Run descendant preparation cannot target its parent state directory.");
+    }
 }
 export function claimRunStateDirectory(stateDir, run) {
     const resolved = resolve(stateDir);
@@ -88,6 +110,16 @@ export function claimRunStateDirectory(stateDir, run) {
         version: 1,
     });
     return canonical;
+}
+/** Read only the public marker identity, never its private ownership token. */
+export function readOwnedRunStateDirectory(stateDir, options = {}) {
+    if (options.maxBytes !== undefined && (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 0)) {
+        throw new Error("Run state ownership read budget must be a nonnegative safe integer.");
+    }
+    const canonical = assertCanonicalDirectory(stateDir);
+    const marker = readMarker(canonical, options.maxBytes);
+    const checked = assertMarkerMatches(marker, canonical, marker?.run ?? "");
+    return { run: checked.run, stateDir: canonical };
 }
 export function assertOwnedRunStateDirectory(stateDir, run) {
     const canonical = assertCanonicalDirectory(stateDir);

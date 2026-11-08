@@ -42,13 +42,27 @@ function sendToFifo(endpoint, payload) {
         throw new Error(`Run Control endpoint is not a FIFO: ${endpoint.path}`);
     }
     let fd;
+    let writeFailed = false, writeFailure;
     try {
         fd = openSync(endpoint.path, constants.O_WRONLY | constants.O_NONBLOCK);
         return writeSync(fd, payload);
     }
+    catch (error) {
+        writeFailed = true;
+        writeFailure = error;
+        throw error;
+    }
     finally {
-        if (fd !== undefined)
-            closeSync(fd);
+        if (fd !== undefined) {
+            try {
+                closeSync(fd);
+            }
+            catch (error) {
+                if (writeFailed)
+                    throw new AggregateError([writeFailure, error], "Run Control FIFO write and close failed", { cause: writeFailure });
+                throw error;
+            }
+        }
     }
 }
 function sendToNamedPipe(endpoint, payload, send) {
@@ -78,6 +92,9 @@ function sendToNamedPipe(endpoint, payload, send) {
         socket.on("connect", () => socket.end(payload, () => finish()));
     });
 }
+function aggregateControlFailure(failure, causes, recording) {
+    return Object.assign(new AggregateError([...causes, recording], failure.message, { cause: causes[0] }), failure);
+}
 export async function deliverRunControl(run, stateDir, request, options = {}) {
     const action = Control.normalizeControlAction(request.action);
     const input = request.input === undefined
@@ -96,14 +113,20 @@ export async function deliverRunControl(run, stateDir, request, options = {}) {
     const control = appendRunControlInStateDir(stateDir, normalizedRequest);
     const endpoint = readRunControlEndpoint(stateDir, request.run_instance_id);
     if (!endpoint) {
-        updateRunControlStatusInStateDir(stateDir, control.id, "failed", { error: "control endpoint is not ready for this Run generation" }, ["queued", "delivered"]);
-        throw Object.assign(new Error("Run Control endpoint is not ready."), {
+        const failure = Object.assign(new Error("Run Control endpoint is not ready."), {
             action,
             control_id: control.id,
             reason: "endpoint_not_ready",
             run,
             run_instance_id: request.run_instance_id,
         });
+        try {
+            updateRunControlStatusInStateDir(stateDir, control.id, "failed", { error: "control endpoint is not ready for this Run generation" }, ["queued", "delivered"]);
+        }
+        catch (recordingError) {
+            throw aggregateControlFailure(failure, [failure], recordingError);
+        }
+        throw failure;
     }
     try {
         const { bytes, payload } = encodeRunControlWire({
@@ -136,9 +159,18 @@ export async function deliverRunControl(run, stateDir, request, options = {}) {
         };
     }
     catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        updateRunControlStatusInStateDir(stateDir, control.id, "failed", { error: reason }, ["queued", "delivered"]);
-        throw Object.assign(new Error(`Run Control delivery failed: ${reason}`), {
+        let reason;
+        const causes = [error];
+        try {
+            reason = String(error instanceof Error ? error.message : error);
+        }
+        catch (formattingError) {
+            reason = "failure text unavailable";
+            causes.push(formattingError);
+        }
+        const message = `Run Control delivery failed: ${reason}`;
+        const failure = Object.assign(causes.length === 1 ? new Error(message, { cause: error })
+            : new AggregateError(causes, message, { cause: error }), {
             action,
             control_id: control.id,
             endpoint_type: endpoint.type,
@@ -146,5 +178,12 @@ export async function deliverRunControl(run, stateDir, request, options = {}) {
             run,
             run_instance_id: request.run_instance_id,
         });
+        try {
+            updateRunControlStatusInStateDir(stateDir, control.id, "failed", { error: reason }, ["queued", "delivered"]);
+        }
+        catch (recordingError) {
+            throw aggregateControlFailure(failure, causes, recordingError);
+        }
+        throw failure;
     }
 }

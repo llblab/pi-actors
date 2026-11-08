@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync, } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDeepStrictEqual } from "node:util";
+import { isDeepStrictEqual, types as UtilTypes } from "node:util";
 import { writeJsonAtomic } from "./file-state.js";
 import { CURRENT_MODEL_VALUE_KEY, CURRENT_THINKING_VALUE_KEY, describeCurrentPolicyProvenance, } from "./model-context.js";
 import * as Paths from "./paths.js";
@@ -17,17 +17,22 @@ import * as RecipesUsage from "./recipes-usage.js";
 import * as Schema from "./schema.js";
 import { resolveArtifactPaths, } from "./runs-artifacts.js";
 import { safeRunId } from "./runs-identity.js";
+import { recordRunDescendantLaunchIntentUnderLock, recordRunDescendantPreparationUnderLock, RUN_DESCENDANT_PREPARED_META_FILE } from "./runs-descendant-launches.js";
+import { RUN_OUTCOME_PROTOCOL } from "./runs-outcomes.js";
 import { buildTerminalProgress, markTerminalHandled, signalOwnedRunProcess, } from "./runs-control.js";
-import { claimRunStateDirectory } from "./runs-ownership.js";
-import { appendRunRetentionEvidence, archiveTerminalRun, pruneTerminalRun, } from "./runs-retention.js";
-import { captureRunProcessIdentity, verifyRunProcessIdentity, } from "./runs-process.js";
+import { assertDistinctRunStateDirectories, assertOwnedRunStateDirectory, claimRunStateDirectory } from "./runs-ownership.js";
+import { reportRunProducerCleanupFailure, revalidateRunWorkAdmission, withRunWorkAdmission } from "./runs-results.js";
+import { retainRun, } from "./runs-retention.js";
+import { captureSpawnedRunProcessIdentity, verifyRunProcessIdentity, } from "./runs-process.js";
 import * as RuntimeIdentity from "./runtime-identity.js";
 import * as RunsStart from "./runs-start.js";
+import { captureRunAdmissionSnapshotReferences } from "./runs-context-exports.js";
+import * as RunSupervision from "./run-supervision.js";
 import { appendRunTraceEvent } from "./runs-trace.js";
 import * as RunsIndex from "./runs-index.js";
 import * as RunsParentTeardown from "./runs-parent-teardown.js";
 import { deliverRunControl, } from "./runs-control-delivery.js";
-import { buildRunStatus, tailFile, } from "./runs-status.js";
+import { buildRunStatus, readRunInventoryStatuses, tailFile, } from "./runs-status.js";
 import { readJsonFileResilient } from "./state-readers.js";
 const RUNNER_IDENTITY_GRACE_MS = 5000;
 export function normalizeRunTransportContext(value) {
@@ -107,7 +112,7 @@ function resolveStateDir(params, run) {
 function assertNoActiveRunState(stateDir) {
     RunsStart.assertNoActiveRunState(stateDir, readJson, RUNNER_PATH);
 }
-function reuseCompatibleSingletonRun(stateDir, startParams, singletonValues) {
+function reuseCompatibleSingletonRun(stateDir, startParams, singletonValues, supervisionPolicy) {
     const existing = RunsStart.readActiveOwnedRunState(stateDir, readJson, RUNNER_PATH);
     if (!existing)
         return undefined;
@@ -118,6 +123,11 @@ function reuseCompatibleSingletonRun(stateDir, startParams, singletonValues) {
         isDeepStrictEqual(existing.control ?? [], startParams.control ?? []);
     if (!compatible) {
         throw new Error(`Active singleton Run ${String(existing.run ?? stateDir)} has incompatible Recipe identity, owner, startup values, or Control contract. Stop it before changing singleton configuration.`);
+    }
+    const clock = RunSupervision.readRunSupervisionClock(existing);
+    const existingPolicy = clock?.supervision ?? RunSupervision.resolveRunSupervisionPolicy();
+    if (!RunSupervision.sameRunSupervisionPolicy(existingPolicy, supervisionPolicy)) {
+        throw new Error(`Active singleton Run ${String(existing.run ?? stateDir)} has incompatible supervision policy. Stop it before changing singleton configuration.`);
     }
     return {
         ...existing,
@@ -283,10 +293,46 @@ function prepareStateDirForStart(stateDir) {
     RunsStart.prepareStateDirForStart(stateDir, readJson, RUNNER_PATH);
 }
 export function startRun(params, cwd, options = {}) {
+    const meta = startRunInternal(params, cwd, options);
+    // Internal return includes lifecycle release. Catalog failure must not retry or undo the accepted launch/attachment.
+    delete meta.catalog_registration;
+    delete meta.catalog_registration_error;
+    try {
+        RunsIndex.registerRunStateDirectory(DEFAULT_STATE_ROOT, meta.state_dir, meta);
+    }
+    catch (error) {
+        meta.catalog_registration = Object.freeze({ state: "unavailable", reason: "catalog_registration_failed" });
+        Object.defineProperty(meta, "catalog_registration_error", { value: error, enumerable: false });
+    }
+    return meta;
+}
+/** Kernel-only prepare path: real generation creation, but no native process, workload, launch receipt, or membership authority. */
+export function prepareDescendantRunGeneration(parentStateDir, producer, params, cwd, options = {}) {
+    return withRunWorkAdmission(parentStateDir, producer, () => {
+        const parent = Object.freeze({ run: producer.run, run_instance_id: producer.runInstanceId,
+            ...(producer.ownerId === undefined ? {} : { ownerId: producer.ownerId }),
+            state_dir: assertOwnedRunStateDirectory(parentStateDir, producer.run) });
+        return startRunInternal(params, cwd, options, {
+            parent, producer,
+            observe: (meta, preparation) => {
+                revalidateRunWorkAdmission(parentStateDir, producer);
+                return recordRunDescendantLaunchIntentUnderLock(parent.state_dir, producer, {
+                    run: meta.run, runInstanceId: meta.run_instance_id, ownerId: meta.ownerId, stateDir: meta.state_dir,
+                }, preparation);
+            },
+            onCleanupFailure: (error) => reportRunProducerCleanupFailure(producer, error),
+        });
+    });
+}
+function startRunInternal(params, cwd, options, prepared) {
     const startParams = resolveStartParams(params, cwd, options);
+    // Policy ingress stays closed until runtime enforcement is implemented.
+    const supervisionPolicy = RunSupervision.resolveRunSupervisionPolicy();
     const resolved = resolveRunTemplate(startParams);
     const run = safeRunId(startParams.run_id);
     const stateDir = resolveStateDir(startParams, run);
+    if (prepared)
+        assertDistinctRunStateDirectories(prepared.parent.state_dir, stateDir);
     const recipeFile = startParams.file
         ? resolveRecipeFile(startParams.file, cwd, options)
         : undefined;
@@ -324,27 +370,37 @@ export function startRun(params, cwd, options = {}) {
     });
     assertCurrentPlaceholderReferencesResolved(resolved.template, startParams.defaults, values, modelPolicy);
     const singletonValues = Object.fromEntries([...declaredArgs].map((key) => [key, values[key]]));
-    if (startParams.singleton !== true)
+    if (startParams.singleton !== true || prepared)
         assertNoActiveRunState(stateDir);
+    if (prepared)
+        RunsStart.assertFreshRunPreparationState(stateDir);
     mkdirSync(stateDir, { recursive: true });
     const releaseStartLock = acquireStateStartLock(stateDir, {
         onContention: startParams.lifecycleHooks?.onLockContention,
     });
     try {
         claimRunStateDirectory(stateDir, run);
-        if (recipeFile &&
+        if (prepared)
+            RunsStart.assertFreshRunPreparationState(stateDir);
+        if (!prepared && recipeFile &&
             isMutableUsageRecipeFile(recipeFile) &&
             !RecipesUsage.recordRecipeLaunch(recipeFile, new Date(), startParams.launch_source === "tool" ? "tool" : "spawn")) {
             throw new Error(`Recipe launch rejected because its source changed during activation: ${recipeFile}. Reload recipe tools and retry.`);
         }
         if (startParams.singleton === true) {
-            const existing = reuseCompatibleSingletonRun(stateDir, startParams, singletonValues);
-            if (existing)
+            const existing = reuseCompatibleSingletonRun(stateDir, startParams, singletonValues, supervisionPolicy);
+            if (existing) {
+                if (prepared)
+                    throw new Error("Run descendant preparation requires a new generation, not singleton attachment.");
                 return existing;
+            }
         }
         else
             assertNoActiveRunState(stateDir);
-        prepareStateDirForStart(stateDir);
+        const clockObserver = prepared ? undefined : options.onSupervisionClockCaptured;
+        const timeOrigin = clockObserver ? RunSupervision.captureRunSupervisionTimeOrigin() : undefined;
+        const capturedGeneration = timeOrigin ? randomUUID() : undefined;
+        const clock = RunSupervision.createRunSupervisionClock(supervisionPolicy, timeOrigin?.wall_ms ?? Date.now());
         const stdout = join(stateDir, "stdout.log");
         const stderr = join(stateDir, "stderr.log");
         const recipe = startParams.name || getRunIdFromFile(recipeFile);
@@ -361,8 +417,6 @@ export function startRun(params, cwd, options = {}) {
                 }
                 : record)
             : undefined;
-        const outFd = openSync(stdout, "a");
-        const errFd = openSync(stderr, "a");
         const argv = asyncRunnerArgv(stateDir);
         const outputValues = {
             ...(startParams.defaults || {}),
@@ -370,11 +424,13 @@ export function startRun(params, cwd, options = {}) {
         };
         const transportContext = normalizeRunTransportContext(startParams.transport_context);
         const artifacts = resolveArtifactPaths(startParams.artifacts, outputValues);
-        const runInstanceId = randomUUID();
+        const runInstanceId = capturedGeneration ?? randomUUID();
         const deliveryLineage = RunDeliveryLineage.inheritedRunDeliveryLineage(startParams.ownerId);
         const meta = {
             argv: [process.execPath, ...argv],
-            createdAt: new Date().toISOString(),
+            createdAt: clock.started_at,
+            ...clock,
+            supervision_provenance: supervisionPolicy.provenance,
             cwd,
             ...(startParams.launch_source
                 ? {
@@ -392,6 +448,7 @@ export function startRun(params, cwd, options = {}) {
             run_instance_id: runInstanceId,
             state_dir: stateDir,
             state_schema: RuntimeIdentity.RUN_STATE_SCHEMA,
+            outcome_protocol: RUN_OUTCOME_PROTOCOL,
             status: "running",
             ...(startParams.tool ? { tool: startParams.tool } : {}),
             template: runtimeTemplate,
@@ -422,7 +479,33 @@ export function startRun(params, cwd, options = {}) {
             ...(transportContext
                 ? { transport_context: transportContext } : {}),
         };
-        writeJsonAtomic(join(stateDir, "run.json"), meta);
+        // Finish fallible metadata assembly before handing off admission, clearing retained evidence or opening captures.
+        if (clockObserver && timeOrigin && capturedGeneration) {
+            const observation = Object.freeze({ kind: "run_clock_origin_captured", visibility: "kernel_only",
+                publication: "unpublished", work_started: false, state_dir: stateDir,
+                identity: Object.freeze({ run, run_instance_id: capturedGeneration, ...(startParams.ownerId ? { ownerId: startParams.ownerId } : {}) }),
+                clock: Object.freeze({ started_at: clock.started_at, supervision: Object.freeze({ ...clock.supervision }) }), origin: timeOrigin,
+                snapshot_references: captureRunAdmissionSnapshotReferences(stateDir, meta, timeOrigin) });
+            const returned = clockObserver.call(options, observation);
+            if (UtilTypes.isPromise(returned)) {
+                // Unsupported async retention may already have started; settle rejection without awaiting it under the lock.
+                void Promise.prototype.then.call(returned, undefined, () => undefined);
+                throw new Error("Run supervision admission observer must complete synchronously.");
+            }
+            if (returned && (typeof returned === "object" || typeof returned === "function") && "then" in returned) {
+                throw new Error("Run supervision admission observer must complete synchronously.");
+            }
+        }
+        if (!prepared)
+            prepareStateDirForStart(stateDir);
+        const captureFds = prepared ? undefined : [openSync(stdout, "a"), openSync(stderr, "a")];
+        writeJsonAtomic(join(stateDir, prepared ? RUN_DESCENDANT_PREPARED_META_FILE : "run.json"), meta);
+        if (prepared) {
+            const target = Object.freeze({ run: meta.run, run_instance_id: meta.run_instance_id,
+                ...(meta.ownerId === undefined ? {} : { ownerId: meta.ownerId }), state_dir: meta.state_dir });
+            const preparation = recordRunDescendantPreparationUnderLock(stateDir, target, prepared.parent, prepared.producer);
+            return prepared.observe(meta, preparation);
+        }
         writeJsonAtomic(join(stateDir, "progress.json"), {
             completed: 0,
             failures: [],
@@ -430,6 +513,7 @@ export function startRun(params, cwd, options = {}) {
             phase: "starting",
             updatedAt: new Date().toISOString(),
         });
+        const [outFd, errFd] = captureFds;
         const child = spawn(process.execPath, argv, {
             cwd,
             detached: true,
@@ -447,7 +531,7 @@ export function startRun(params, cwd, options = {}) {
         closeSync(outFd);
         closeSync(errFd);
         meta.pid = child.pid ?? 0;
-        const processIdentity = captureRunProcessIdentity(meta.pid, cwd, stateDir, RUNNER_PATH);
+        const processIdentity = captureSpawnedRunProcessIdentity(child, cwd, stateDir, RUNNER_PATH);
         if (processIdentity)
             meta.process_identity = processIdentity;
         writeJsonAtomic(join(stateDir, "run.json"), meta);
@@ -463,7 +547,16 @@ export function startRun(params, cwd, options = {}) {
         return meta;
     }
     finally {
-        releaseStartLock();
+        if (prepared) {
+            try {
+                releaseStartLock();
+            }
+            catch (error) {
+                prepared.onCleanupFailure(error);
+            }
+        }
+        else
+            releaseStartLock();
     }
 }
 function resolveRunStateDir(runOrDir) {
@@ -477,6 +570,10 @@ export function getRunStatus(runOrDir) {
     if (!meta)
         throw new Error(`Run not found: ${runOrDir}`);
     return buildRunStatus(stateDir, runOrDir, meta, readJson, RUNNER_PATH, RUNNER_IDENTITY_GRACE_MS);
+}
+/** Internal inventory acquisition; direct status and lifecycle readers remain independently scalar. */
+export function getRunInventoryStatuses(stateDirs) {
+    return readRunInventoryStatuses(stateDirs, readJson, getRunStatus);
 }
 export function listRunStateDirs(stateRoot = DEFAULT_STATE_ROOT) {
     return RunsIndex.listRunStateDirs(stateRoot);
@@ -565,6 +662,7 @@ export function tailRun(runOrDir, lines = 40) {
 export async function sendRunControl(runOrDir, request, options = {}) {
     const stateDir = resolveRunStateDir(runOrDir);
     const releaseControlLock = RunsStart.acquireStateStartLock(stateDir);
+    let requestFailed = false, requestFailure;
     try {
         const status = getRunStatus(stateDir);
         const run = String(status.run ?? runOrDir);
@@ -590,8 +688,20 @@ export async function sendRunControl(runOrDir, request, options = {}) {
         }
         return await deliverRunControl(run, stateDir, request, options);
     }
+    catch (error) {
+        requestFailed = true;
+        requestFailure = error;
+        throw error;
+    }
     finally {
-        releaseControlLock();
+        try {
+            releaseControlLock();
+        }
+        catch (releaseError) {
+            if (requestFailed)
+                throw new AggregateError([requestFailure, releaseError], "Run Control request and lifecycle release failed; effects may already exist.", { cause: requestFailure });
+            throw releaseError;
+        }
     }
 }
 export { getRunProcessSignalPlan } from "./runs-control.js";
@@ -781,52 +891,11 @@ export function cancelRun(runOrDir, expected = {}) {
         ? { cancelled: result.stopped, ...result }
         : result;
 }
-function retainRun(runOrDir, action, expected, options = {}) {
-    const stateDir = resolveRunStateDir(runOrDir);
-    const releaseControlLock = RunsStart.acquireStateStartLock(stateDir);
-    let status;
-    let evidenceId;
-    try {
-        expected.onLocked?.();
-        status = getRunStatus(stateDir);
-        if (expected.ownerId !== undefined && status.ownerId !== expected.ownerId) {
-            return { [`${action}d`]: false, reason: "ownership changed", status };
-        }
-        if (expected.runInstanceId !== undefined &&
-            status.run_instance_id !== expected.runInstanceId) {
-            return { [`${action}d`]: false, reason: "run generation changed", status };
-        }
-        if (status.status === "running") {
-            throw new Error("Only terminal runs can be archived or pruned.");
-        }
-        evidenceId = appendRunRetentionEvidence(status, action, "queued");
-        const result = action === "archive"
-            ? archiveTerminalRun(status)
-            : pruneTerminalRun(status, options);
-        appendRunRetentionEvidence(status, action, "handled", {
-            id: evidenceId,
-            result,
-        });
-        return { ...result, retention_id: evidenceId };
-    }
-    catch (error) {
-        if (status && evidenceId) {
-            appendRunRetentionEvidence(status, action, "failed", {
-                error: error instanceof Error ? error.message : String(error),
-                id: evidenceId,
-            });
-        }
-        throw error;
-    }
-    finally {
-        releaseControlLock();
-    }
-}
 export function archiveRun(runOrDir, expected = {}) {
-    return retainRun(runOrDir, "archive", expected);
+    return retainRun(resolveRunStateDir(runOrDir), "archive", expected, getRunStatus);
 }
 export function pruneRun(runOrDir, options = {}, expected = {}) {
-    return retainRun(runOrDir, "prune", expected, options);
+    return retainRun(resolveRunStateDir(runOrDir), "prune", expected, getRunStatus, options);
 }
 export function killRun(runOrDir, expected = {}) {
     const result = stopRun(runOrDir, "SIGKILL", "run.kill", expected);

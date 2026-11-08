@@ -3,9 +3,10 @@
  * Zones: pi agent sdk boundary, extension host adapters
  * Owns direct pi SDK imports and exposes narrow pi-actors-facing helpers/types for the composition root.
  */
-import type { ExtensionAPI, ExtensionContext, CustomMessageEntryDraft, TurnEndEvent, TurnEndEventResult } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionStartEvent, CustomMessageEntryDraft, TurnEndEvent, TurnEndEventResult } from "@earendil-works/pi-coding-agent";
 import * as SessionEvidence from "./session-evidence.ts";
-export type { ExtensionAPI, ExtensionContext, TurnEndEvent, TurnEndEventResult };
+export type { ExtensionAPI, ExtensionContext, SessionStartEvent, TurnEndEvent, TurnEndEventResult };
+export { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 export declare const RUN_COMPLETION_BATCH_CUSTOM_TYPE = "pi-actors-run-batch";
 export declare const RUN_STEER_CUSTOM_TYPE = "pi-actors-run-steer";
 export interface PiNotificationSink {
@@ -19,8 +20,8 @@ export interface PiNotificationSink {
 }
 export declare function getSessionId(ctx: ExtensionContext): string;
 export declare function createNotificationSink(pi: ExtensionAPI, ctx: ExtensionContext): PiNotificationSink;
-export declare function createRunCompletionBatchEntry(batchId: string, content: string): CustomMessageEntryDraft;
-export declare function sendRunCompletionBatch(pi: ExtensionAPI, batchId: string, content: string): void;
+export declare function createRunCompletionBatchEntry(batchId: string, content: string, presentation?: unknown): CustomMessageEntryDraft;
+export declare function sendRunCompletionBatch(pi: ExtensionAPI, batchId: string, content: string, presentation?: unknown): void;
 export declare function sendRunSteer(pi: ExtensionAPI, input: {
     content: string;
     eventId: string;

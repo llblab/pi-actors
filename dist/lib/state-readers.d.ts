@@ -20,6 +20,9 @@ export interface JsonlReadResult<T> {
 export interface JsonlReadOptions {
     maxBytes?: number;
 }
-export declare function readJsonFileResilient<T>(path: string, fallback: T): JsonReadResult<T>;
+export declare function readJsonFileResilient<T>(path: string, fallback: T, options?: {
+    maxBytes?: number;
+    strictUtf8?: boolean;
+}): JsonReadResult<T>;
 export declare function readJsonlFileResilient<T>(path: string, options?: JsonlReadOptions): JsonlReadResult<T>;
 export declare function formatStateReadDiagnostics(diagnostics: StateReadDiagnostic[], limit?: number): string[];

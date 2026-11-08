@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {

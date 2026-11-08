@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { CommandTemplateActorRecipeContext } from "./command-templates.ts";
 import * as RecipesReferences from "./recipes-references.ts";
@@ -64,8 +65,12 @@ function commandName(command: string): string {
   return basename(command).toLowerCase();
 }
 
-function isPiCommand(command: string): boolean {
-  return commandName(command) === "pi";
+const PI_NODE_CLI_PATHS = new Set(["./bundle/cli.js", "./cli.js"].map(path =>
+  fileURLToPath(new URL(path, import.meta.resolve("@earendil-works/pi-coding-agent")))));
+
+function isPiCommand(command: string, args: string[]): boolean {
+  const name = commandName(command);
+  return name === "pi" || ((name === "node" || name === "node.exe") && PI_NODE_CLI_PATHS.has(args[0]));
 }
 
 const PI_PRINT_FLAGS = new Set(["-p", "--print"]);
@@ -136,6 +141,21 @@ export function findPiPrintPromptIndex(args: string[]): number | undefined {
   return findPiPrintPromptIndexes(args).at(-1);
 }
 
+/** Pi text-print stdout (direct or resolved SDK CLI via Node) is the reply; JSON/RPC/interactive output is not. */
+export function piPrintResponseMode(command: string, args: string[]): "text" | "unsupported" | undefined {
+  if (!isPiCommand(command, args)) return undefined;
+  let print = false, mode = "text";
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (arg === "--") break;
+    if (isPiPrintFlag(arg)) print = true;
+    else if (arg === "--mode") mode = args[++index] ?? "";
+    else if (arg.startsWith("--mode=")) mode = arg.slice(7);
+    else if (piOptionConsumesNextArg(arg)) index++;
+  }
+  return print && mode === "text" ? "text" : "unsupported";
+}
+
 function matchesActorContext(
   record: TemplateRecipeContextRecord,
   context: CommandTemplateActorRecipeContext | undefined,
@@ -202,7 +222,7 @@ export function appendRecipeContextToPiArgs(
   records: TemplateRecipeContextRecord[] | undefined,
   context?: CommandTemplateActorRecipeContext,
 ): string[] {
-  if (!records || records.length === 0 || !isPiCommand(command)) return args;
+  if (!records || records.length === 0 || !isPiCommand(command, args)) return args;
   const promptIndex = findPiPrintPromptIndex(args);
   if (promptIndex === undefined) return args;
   const block = buildRecipeContextPromptBlock(records, context);
@@ -230,11 +250,12 @@ export function attachPiSessionDir(
   args: string[],
   sessionDir: string,
 ): ManagedPiSessionArgs {
-  if (!isPiCommand(command) || findPiPrintPromptIndex(args) === undefined) {
+  if (!isPiCommand(command, args) || findPiPrintPromptIndex(args) === undefined) {
     return { args };
   }
   if (args.some((arg) => PI_SESSION_POLICY_FLAGS.has(arg))) return { args };
-  return { args: ["--session-dir", sessionDir, ...args], sessionDir };
+  const prefix = commandName(command) === "pi" ? 0 : 1;
+  return { args: [...args.slice(0, prefix), "--session-dir", sessionDir, ...args.slice(prefix)], sessionDir };
 }
 
 export interface MaterializedPiPrintPromptArgs {
@@ -248,7 +269,7 @@ export function materializePiPrintPromptArg(
   args: string[],
   promptFile: string | (() => string),
 ): MaterializedPiPrintPromptArgs {
-  if (!isPiCommand(command)) return { args };
+  if (!isPiCommand(command, args)) return { args };
   const promptIndexes = findPiPrintPromptIndexes(args);
   if (promptIndexes.length === 0) return { args };
   const prompt = promptIndexes.map((index) => args[index]).join(" ");

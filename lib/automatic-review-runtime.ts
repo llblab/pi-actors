@@ -26,6 +26,7 @@ export interface AutomaticReviewRuntimeDeps {
   getActiveContext(): Pi.ExtensionContext | undefined;
   getRunOwnerId(ctx: Pi.ExtensionContext): string;
   getThinkingLevel(): unknown;
+  getRunAdmissionObserver?(ctx: Pi.ExtensionContext): AsyncRuns.AsyncRunStartOptions["onSupervisionClockCaptured"];
 }
 
 export const PACKAGE_RECIPE_MEMORY_CONTEXT =
@@ -88,6 +89,7 @@ export function createAutomaticReviewRuntime(
     start(ctx) {
       close();
       if (!Paths.isAutomaticRecipeReviewEnabled()) return;
+      const onSupervisionClockCaptured = deps.getRunAdmissionObserver?.(ctx);
       ToolReviewScheduler.applyApprovedToolReviewAtSessionBoundary({
         recipeRoot: Paths.getRecipeRoot(),
       });
@@ -108,7 +110,7 @@ export function createAutomaticReviewRuntime(
               values: { input_path: batch.reviewerInputPath },
             },
             ctx.cwd,
-            { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT },
+            { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT, onSupervisionClockCaptured },
           );
         },
         process: (state) =>
@@ -134,7 +136,7 @@ export function createAutomaticReviewRuntime(
               values: { input_path: batch.reviewerInputPath },
             },
             ctx.cwd,
-            { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT },
+            { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT, onSupervisionClockCaptured },
           );
         },
         process: (state) =>

@@ -53,6 +53,7 @@ export function createAutomaticReviewRuntime(deps) {
             close();
             if (!Paths.isAutomaticRecipeReviewEnabled())
                 return;
+            const onSupervisionClockCaptured = deps.getRunAdmissionObserver?.(ctx);
             ToolReviewScheduler.applyApprovedToolReviewAtSessionBoundary({
                 recipeRoot: Paths.getRecipeRoot(),
             });
@@ -70,7 +71,7 @@ export function createAutomaticReviewRuntime(deps) {
                         policy_values: policyValues(ctx),
                         run_id: DraftSleep.draftSleepRunId(batch.batchId),
                         values: { input_path: batch.reviewerInputPath },
-                    }, ctx.cwd, { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT });
+                    }, ctx.cwd, { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT, onSupervisionClockCaptured });
                 },
                 process: (state) => DraftSleep.processDraftSleepReview(state, {
                     getRunStatus: AsyncRuns.getRunStatus,
@@ -91,7 +92,7 @@ export function createAutomaticReviewRuntime(deps) {
                         policy_values: policyValues(ctx),
                         run_id: ToolReviewScheduler.toolReviewRunId(batch.reviewId),
                         values: { input_path: batch.reviewerInputPath },
-                    }, ctx.cwd, { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT });
+                    }, ctx.cwd, { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT, onSupervisionClockCaptured });
                 },
                 process: (state) => ToolReviewScheduler.processToolReviewResult(state, {
                     getRunStatus: AsyncRuns.getRunStatus,

@@ -1,12 +1,15 @@
 /**
- * Actor Inspector evidence readers.
- * Zones: owned actor-instance inventory and captured Recipe projection
- * Owns actor-instance TUI evidence; Trace, Control, and execution parsing stay in their domains.
+ * Actor Inspector owned-Run evidence and actions.
+ * Zones: owned inventory, captured Recipe reads, exact-session/generation action fencing
+ * Owns Inspector domain operations; command/overlay wiring and lifecycle actuation stay in adapters.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as SessionEvidence from "./session-evidence.js";
+import { join } from "node:path";
+import { projectRunRecipe } from "./recipe-projection.js";
+import { safeRunId } from "./runs-identity.js";
 import { readJsonFileResilient } from "./state-readers.js";
+import { formatMarkdownField } from "./tools-response.js";
 function matchesOwner(stateDir, ownerId) {
     const meta = readJsonFileResilient(path.join(stateDir, "run.json"), {}).value;
     return meta.ownerId === ownerId;
@@ -46,91 +49,77 @@ export function readActorInspectorRuns(stateRoot, ownerId) {
 }
 export function readActorInspectorRecipe(stateDir) {
     const result = readJsonFileResilient(path.join(stateDir, "run.json"), {});
-    const meta = result.value;
-    const contexts = Array.isArray(meta.recipe_context_records)
-        ? meta.recipe_context_records.filter((entry) => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
-        : [];
-    const primary = contexts.find((entry) => entry.depth === 0) ?? contexts[0];
-    const definition = primary?.recipe &&
-        typeof primary.recipe === "object" &&
-        !Array.isArray(primary.recipe)
-        ? primary.recipe
-        : undefined;
-    const stripPrivateOrigins = (value) => {
-        if (Array.isArray(value))
-            return value.map(stripPrivateOrigins);
-        if (!value || typeof value !== "object")
-            return value;
-        return Object.fromEntries(Object.entries(value)
-            .filter(([key, entry]) => entry !== undefined &&
-            key !== "recipe_dir" &&
-            key !== "skill_dir" &&
-            key !== "source_file")
-            .map(([key, entry]) => [
-            key,
-            key === "actorRecipeContext" && entry && typeof entry === "object"
-                ? stripPrivateOrigins(Object.fromEntries(Object.entries(entry).filter(([contextKey]) => contextKey !== "file")))
-                : stripPrivateOrigins(entry),
-        ]));
-    };
-    const redactedRecord = (value) => SessionEvidence.redactSessionEvidenceValue(stripPrivateOrigins(value));
-    const primarySourceKind = primary?.source_kind === "active_skill_component"
-        ? "active_skill_component"
-        : primary?.source_kind === "user_registry_capability" ||
-            meta.launch_source === "tool"
-            ? "user_registry_capability"
-            : "explicit_file_recipe";
-    const primaryLogicalReference = typeof primary?.logical_reference === "string"
-        ? primary.logical_reference
-        : typeof primary?.name === "string"
-            ? primary.name
-            : typeof meta.recipe === "string"
-                ? meta.recipe
-                : "unknown";
-    const launchValues = meta.values && typeof meta.values === "object" && !Array.isArray(meta.values)
-        ? Object.fromEntries(Object.entries(meta.values).filter(([key]) => key !== "recipe_dir" && key !== "skill_dir"))
-        : meta.values;
-    return {
-        composition: contexts.map((entry) => redactedRecord({
-            ...(typeof entry.alias === "string" ? { alias: entry.alias } : {}),
-            depth: entry.depth,
-            import_path: entry.import_path,
-            logical_reference: entry.logical_reference ?? entry.name,
-            recipe_stem: entry.name,
-            role: entry.role,
-            ...(typeof entry.skill === "string" ? { skill: entry.skill } : {}),
-            source_kind: entry.source_kind === "active_skill_component"
-                ? "active_skill_component"
-                : entry.source_kind === "user_registry_capability" ||
-                    (entry.depth === 0 && meta.launch_source === "tool")
-                    ? "user_registry_capability"
-                    : "explicit_file_recipe",
-        })),
-        ...(definition ? { definition: redactedRecord(definition) } : {}),
-        diagnostics: result.diagnostics.map((diagnostic) => diagnostic.message),
-        identity: redactedRecord({
-            run: meta.run,
-            recipe: meta.recipe,
-            recipe_stem: primary?.name ?? meta.recipe,
-            logical_reference: primaryLogicalReference,
-            ...(typeof primary?.skill === "string" ? { skill: primary.skill } : {}),
-            source_kind: primarySourceKind,
-            launch_kind: meta.launch_kind ?? meta.launch_source,
-            launch_source: meta.launch_source,
-            ...(meta.singleton === true
-                ? { singleton: true, singleton_recipe_id: meta.singleton_recipe_id }
-                : {}),
-        }),
-        launch: redactedRecord({
-            cwd: meta.cwd,
-            template: meta.template,
-            values: launchValues,
-            model_policy: meta.model_policy,
-            control: meta.control,
-            artifacts: meta.artifacts,
-            notification_policy: meta.notification_policy,
-            retire_when: meta.retire_when,
-            singleton_values: meta.singleton_values,
-        }),
-    };
+    return projectRunRecipe(result.value, result.diagnostics.map(diagnostic => diagnostic.message));
+}
+const FEEDBACK_LIMIT = 180;
+/** Pure presentation of an already selected value; legacy metadata grants no source/privacy authority. */
+export function formatActorInspectorKillFeedback(result, selected, legacy) {
+    const key = result === "unavailable" ? "state" : "diagnostic";
+    const fields = [formatMarkdownField("action", "kill"), formatMarkdownField("result", result)];
+    if (Buffer.from(selected).toString("utf8") !== selected) {
+        fields.push(formatMarkdownField(key, "unavailable"), formatMarkdownField(`${key}_reason`, "malformed_legacy_preview"), formatMarkdownField(`${key}_omission`, "[omitted: unknown]"));
+    }
+    else {
+        fields.push(formatMarkdownField(key, selected + (legacy?.clipped ? "…" : "")));
+        if (legacy?.clipped)
+            fields.push(formatMarkdownField(`${key}_omission`, "[omitted: unknown]"));
+    }
+    if (legacy)
+        fields.push(formatMarkdownField("preview_basis", "selected legacy preview; upstream completeness/privacy unproven"));
+    fields.push(formatMarkdownField("closure", "unconfirmed"));
+    if (result === "failed")
+        fields.push(formatMarkdownField("safety", "Do not repeat automatically."));
+    return fields.join("\n");
+}
+function bounded(result, value) {
+    const text = String(value ?? "").replaceAll(/\s+/g, " ").trim();
+    const clipped = text.length > FEEDBACK_LIMIT;
+    let end = clipped ? FEEDBACK_LIMIT - 1 : text.length;
+    if (clipped && end > 0 && /[\uD800-\uDBFF]/u.test(text[end - 1]) && /[\uDC00-\uDFFF]/u.test(text[end]))
+        end -= 1;
+    return formatActorInspectorKillFeedback(result, clipped ? text.slice(0, end) : text, { clipped });
+}
+export function killOwnedRunFromInspector(ownerId, run, stateRoot, expectedRunInstanceId, deps) {
+    let stateDir;
+    try {
+        stateDir = join(stateRoot, safeRunId(run));
+    }
+    catch (error) {
+        return {
+            ok: false,
+            message: bounded("rejected", error instanceof Error ? error.message : error),
+        };
+    }
+    try {
+        const status = deps.getRunStatus(stateDir);
+        if (status.ownerId !== ownerId) {
+            return { ok: false, message: formatActorInspectorKillFeedback("rejected", "run ownership changed.") };
+        }
+        if (status.status !== "running") {
+            return {
+                ok: false,
+                message: bounded("unavailable", status.status || "terminal"),
+            };
+        }
+        if (status.run_instance_id !== expectedRunInstanceId) {
+            return { ok: false, message: formatActorInspectorKillFeedback("rejected", "run generation changed.") };
+        }
+        const result = deps.killRun(stateDir, {
+            ownerId,
+            runInstanceId: expectedRunInstanceId,
+        });
+        if (result.killed === true) {
+            return { ok: true, message: `Killed run:${run}.` };
+        }
+        return {
+            ok: false,
+            message: bounded("failed", result.reason || "control rejected"),
+        };
+    }
+    catch (error) {
+        return {
+            ok: false,
+            message: bounded("failed", error instanceof Error ? error.message : error),
+        };
+    }
 }

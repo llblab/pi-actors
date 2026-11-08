@@ -15,12 +15,15 @@ import * as RecipesReferences from "./recipes-references.ts";
 import * as RecipesUsage from "./recipes-usage.ts";
 import * as Schema from "./schema.ts";
 import * as ToolsResponse from "./tools-response.ts";
+import { readRunFileNavigationForContext } from "./tools-access.ts";
 
 type JsonSchema = Schema.JsonSchema;
 
 export interface RuntimeToolContext extends ModelContext.CurrentModelContext {
   recipeResolutionContext?: RecipeResolution.RecipeResolutionContext;
   cwd: string;
+  /** Kernel-injected only; never sourced from tool input/actor values. */
+  onSupervisionClockCaptured?: AsyncRuns.AsyncRunStartOptions["onSupervisionClockCaptured"];
   sessionManager?: { getSessionId?: () => string };
 }
 
@@ -213,6 +216,11 @@ export function createRuntimeToolDefinition(
       _onUpdate: unknown,
       ctx: RuntimeToolContext,
     ) {
+      let dispatchEntered = false;
+      const execute: Execution.RegisteredToolExec = (...args) => {
+        dispatchEntered = true;
+        return exec(...args);
+      };
       try {
         if (
           cfg.sourcePath &&
@@ -231,37 +239,40 @@ export function createRuntimeToolDefinition(
             : typeof run_id === "string" && run_id.trim()
               ? run_id.trim()
               : `${cfg.name}-${Date.now()}`;
+          const startParams: AsyncRuns.AsyncRunStartParams = {
+            ...base,
+            launch_source: "tool",
+            launch_correlation: { tool_call_id: toolCallId },
+            ...(transport_context &&
+            typeof transport_context === "object" &&
+            !Array.isArray(transport_context)
+              ? {
+                  transport_context: transport_context as Record<string, unknown>,
+                } : {}),
+            ownerId: getRunOwnerId(ctx),
+            run_id: runId,
+            tool: cfg.name,
+            policy_values: ModelContext.withCurrentModelValues(
+              { ...(cfg.recipe?.values ?? {}), ...values },
+              ctx,
+            ),
+            values: resolveRecipeToolValues(cfg, values, ctx),
+          };
+          dispatchEntered = true;
           const meta = AsyncRuns.startRun(
-            {
-              ...base,
-              launch_source: "tool",
-              launch_correlation: { tool_call_id: toolCallId },
-              ...(transport_context &&
-              typeof transport_context === "object" &&
-              !Array.isArray(transport_context)
-                ? {
-                    transport_context: transport_context as Record<string, unknown>,
-                  } : {}),
-              ownerId: getRunOwnerId(ctx),
-              run_id: runId,
-              tool: cfg.name,
-              policy_values: ModelContext.withCurrentModelValues(
-                { ...(cfg.recipe?.values ?? {}), ...values },
-                ctx,
-              ),
-              values: resolveRecipeToolValues(cfg, values, ctx),
-            },
+            startParams,
             ctx.cwd,
-            { skillContext: ctx.recipeResolutionContext?.activeSkills },
+            { skillContext: ctx.recipeResolutionContext?.activeSkills, onSupervisionClockCaptured: ctx.onSupervisionClockCaptured },
           );
+          const details = { ...meta, file_navigation: readRunFileNavigationForContext(meta, ctx) };
           return {
             content: [
               {
                 type: "text" as const,
-                text: ToolsResponse.compactAsyncRunStatus(meta),
+                text: ToolsResponse.compactAsyncRunStatus(details),
               },
             ],
-            details: meta,
+            details,
           };
         }
         if (isRecipe && recipeTemplate) {
@@ -272,7 +283,7 @@ export function createRuntimeToolDefinition(
               params as Record<string, unknown>,
               ctx,
             ),
-            exec,
+            execute,
             ctx.cwd,
             signal,
           );
@@ -286,11 +297,13 @@ export function createRuntimeToolDefinition(
             ),
             cfg.argTypes,
           ),
-          exec,
+          execute,
           ctx.cwd,
           signal,
         );
       } catch (error) {
+        // Dispatch entry is not effect/closure proof; matching error text cannot justify argument repair or retry.
+        if (dispatchEntered) throw error;
         throw formatRuntimeToolArgumentError(
           cfg,
           error,

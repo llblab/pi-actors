@@ -4,7 +4,9 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import childProcess, { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +34,7 @@ import {
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
 import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
+import { observeFixtureBirth, captureFixtureBirths, bindFixtureBirth, joinFixtureRunners, requireFreshFixtureAbsence, throwFixtureErrors, type FixtureBirth } from "./fixtures/runner-completion.ts";
 
 const playerRecipe = {
   async: true,
@@ -45,7 +48,7 @@ const playerRecipe = {
   ],
   defaults: { command: "play", loop: "true", volume: "70" },
   control: ["play", "pause", "status"],
-  template: "echo {skill_dir} {command} {source} {loop} {volume} {state_dir}",
+  template: `${JSON.stringify(process.execPath)} -e "console.log(process.argv.slice(1).join(' '))" {skill_dir} {command} {source} {loop} {volume} {state_dir}`,
 };
 
 async function writeSkillRecipe(
@@ -62,25 +65,21 @@ async function writeSkillRecipe(
   return skillDir;
 }
 
-async function waitForFile(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      await readFile(path, "utf8");
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(`file did not appear: ${path}`);
-}
-
-test("0.46.1 registration truth journey closes the live Skill-wrapper contradiction", async () => {
+test("0.46.1 registration truth journey closes the live Skill-wrapper contradiction", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-registration-truth-"));
+  const timingModule = "./fixtures/windows-native-timing.mjs";
+  const { enrollTiming, markTiming } = await import(timingModule);
+  const timing = enrollTiming(root, "registration", true);
+  const errors: unknown[] = [];
+  const capture = captureFixtureBirths(t);
+  const joins: { birth: FixtureBirth; path: string }[] = [];
   const runId = `registration-truth-${process.pid}-${Date.now()}`;
   const wrapperRunId = `${runId}-wrapper`;
   const toolRunId = `${runId}-tool`;
   const runStateDir = join(getRunStateRoot(), runId);
+  let dispatchEntered = false, cleanupProven = false;
   try {
+    markTiming("registration_launch");
     const skillsRoot = join(root, "skills");
     const recipeRoot = join(root, "user-recipes");
     const mediaDir = await writeSkillRecipe(
@@ -113,6 +112,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
       root,
       skillContext,
     );
+    dispatchEntered = true;
     const spawnResult = await createSpawnToolDefinition().execute(
       "registration-truth-spawn",
       {
@@ -124,9 +124,8 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
       undefined,
       { recipeResolutionContext, cwd: root },
     );
+    joins.push({ birth: bindFixtureBirth(capture.births, spawnResult.details.pid), path: join(runStateDir, "result.json") });
     assert.equal(spawnResult.details.recipe_file, join(mediaDir, "recipes", "playback.json"));
-    await waitForFile(join(runStateDir, "result.json"));
-
     const tools = new Map<string, RegisteredTool>();
     const registered: RegisteredTool[] = [];
     const registration = await executeRegisterTool(
@@ -286,6 +285,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
       undefined,
       { recipeResolutionContext, cwd: root },
     );
+    joins.push({ birth: bindFixtureBirth(capture.births, wrapperSpawn.details.pid), path: join(getRunStateRoot(), wrapperRunId, "result.json") });
     const toolInvocation = await toolDefinition.execute(
       "registration-truth-tool-call",
       { command: "status", run_id: toolRunId },
@@ -297,6 +297,9 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
         sessionManager: { getSessionId: () => "registration-truth-session" },
       },
     );
+    joins.push({ birth: bindFixtureBirth(capture.births, toolInvocation.details.pid), path: join(getRunStateRoot(), toolRunId, "result.json") });
+    assert.equal(capture.births.length, 3);
+    assert.equal(new Set(joins.map(({ birth }) => birth)).size, 3);
     assert.equal(wrapperSpawn.details.launch_kind, "spawn");
     assert.equal(toolInvocation.details.launch_kind, "tool");
     const usage = readRecipeUsage(wrapperPath);
@@ -323,7 +326,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
           setActiveTools: () => undefined,
         },
       ),
-      /Recipe source "missing\/task" validation failed: Active Skill Recipe not found: missing\/task.*Active Skills: music-player, stale.*Next: inspect target=recipes view=doctor identity=missing\/task/s,
+      /missing\/task.*validation failed.*diagnostics_summary: Active Skill Recipe not found: missing\/task.*active_skills_summary: music-player, stale.*instruction: inspect target=recipes view=doctor identity=missing\/task/s,
     );
     await assert.rejects(
       readFile(join(recipeRoot, "missing_tool.json"), "utf8"),
@@ -343,21 +346,93 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
       true,
     );
     assert.equal(registered.length, 1);
+  } catch (error) { errors.push(error); }
+  finally {
+    // Birth-time listeners record close during the independent journey. All joins
+    // now share one deliberately amended 10s acceptance-phase watchdog.
+    try { markTiming("result_wait"); } catch (error) { errors.push(error); }
+    try { await joinFixtureRunners(joins); cleanupProven = joins.length === 3; } catch (error) { errors.push(error); }
+    try { capture.restore(); } catch (error) { errors.push(error); }
+    try { timing.finish(); } catch (error) { errors.push(error); }
+    if (errors.length === 0 && (!dispatchEntered || cleanupProven)) {
+      try {
+        const stateDirs = [runStateDir, join(getRunStateRoot(), wrapperRunId), join(getRunStateRoot(), toolRunId)];
+        for (const [index, { birth }] of joins.entries()) {
+          requireFreshFixtureAbsence(birth);
+          await rm(stateDirs[index], { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+        }
+        for (const { birth } of joins) requireFreshFixtureAbsence(birth);
+        await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      } catch (error) { errors.push(error); }
+    }
+  }
+  throwFixtureErrors(errors);
+});
+
+test("Synthetic registration joins preserve launch-order causes, falsy originals and restoration after failure", async (t) => {
+  const originalSpawn = childProcess.spawn;
+  const fake = t.mock.method(childProcess, "spawn", () => Object.assign(new EventEmitter(), { pid: 321 }) as unknown as childProcess.ChildProcess);
+  syncBuiltinESMExports();
+  const capture = captureFixtureBirths(t);
+  const later = new Error("third result invalid"), restoration = new Error("restoration fault");
+  const causes: unknown[] = [undefined, 0, later];
+  const children = causes.map((_, index) => Object.assign(new EventEmitter(), { pid: 100 + index }));
+  const entries = children.map((child, index) => ({ birth: observeFixtureBirth(child), path: String(index) }));
+  let expire!: () => void, timers = 0, canceled = 0, retained = true;
+  const joined = joinFixtureRunners(entries, {
+    async read(path) { throw causes[Number(path)]; },
+    liveness: () => "dead",
+    watchdog(callback, ms) { timers++; assert.equal(ms, 10_000); expire = callback; return () => { canceled++; }; },
+  });
+  const errors: unknown[] = [false]; // A falsy original launch/assertion rejection is still primary.
+  try {
+    // Driver-spawned runners only: exclude unrelated children from capture.
+    childProcess.spawn(process.execPath, ["unrelated.mjs"]);
+    childProcess.spawn(process.execPath, ["async-runner.mjs"]);
+    assert.equal(capture.births.length, 1);
+    children[2].emit("close", 0, null); children[0].emit("close", 0, null);
+    children[1].emit("close", 0, null);
+    try { await joined; retained = false; } catch (error) {
+      assert.ok(error instanceof AggregateError);
+      assert.deepEqual(error.errors, causes);
+      assert.equal(error.cause, undefined);
+      errors.push(error);
+    }
   } finally {
-    await rm(runStateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
-    await rm(join(getRunStateRoot(), wrapperRunId), {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 50,
-    });
-    await rm(join(getRunStateRoot(), toolRunId), {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 50,
-    });
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    try { capture.restore(); } finally { fake.mock.restore(); syncBuiltinESMExports(); }
+  }
+  assert.equal(childProcess.spawn, originalSpawn);
+  assert.equal(timers, 1); assert.equal(canceled, 1); assert.equal(retained, true);
+  assert.equal(typeof expire, "function");
+  errors.push(restoration);
+  try { throwFixtureErrors(errors); assert.fail("must reject"); } catch (error) {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.errors[0], false); assert.equal(error.errors[2], restoration);
+    assert.equal(error.cause, false);
+    assert.equal(Object.getOwnPropertyDescriptor(error, "errors")?.enumerable, false);
+    assert.equal(Object.getOwnPropertyDescriptor(error, "cause")?.enumerable, false);
+  }
+  let timeout!: () => void, reads = 0;
+  const pending = children.map((_, index) => {
+    const child = Object.assign(new EventEmitter(), { pid: 200 + index });
+    return { birth: observeFixtureBirth(child), path: String(index) };
+  });
+  const expired = joinFixtureRunners(pending, {
+    async read() { reads++; return '{"code":0}'; }, liveness: () => "dead",
+    watchdog(callback, ms) { assert.equal(ms, 10_000); timeout = callback; return () => { throw restoration; }; },
+  });
+  timeout();
+  try { await expired; assert.fail("must retain timed-out roots"); } catch (error) {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.errors.length, 4);
+    assert.equal(error.errors[3], restoration);
+    for (const cause of error.errors.slice(0, 3)) assert.match(cause.message, /watchdog expired/);
+  }
+  assert.equal(reads, 0); assert.ok(pending.every(({ birth }) => birth.close === undefined));
+  for (const original of [undefined, null, false, 0, later]) {
+    let caught = false;
+    try { throwFixtureErrors([original]); } catch (error) { caught = true; assert.equal(error, original); }
+    assert.equal(caught, true);
   }
 });
 

@@ -54,6 +54,12 @@ function hasExactFields(record, fields) {
     const keys = Object.keys(record);
     return keys.length === fields.size && keys.every((key) => fields.has(key));
 }
+function clipTraceSummary(summary) {
+    const last = summary.charCodeAt(999), next = summary.charCodeAt(1_000);
+    // Keep the UTF-16 allowance without bisecting an original surrogate pair.
+    const end = last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff ? 999 : 1_000;
+    return summary.slice(0, end);
+}
 function normalizeTraceEventInput(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
         throw new Error("Trace event must be an object");
@@ -91,7 +97,7 @@ function normalizeTraceEventInput(input) {
     return {
         kind: record.kind,
         ...(record.summary !== undefined
-            ? { summary: record.summary.slice(0, 1_000) }
+            ? { summary: clipTraceSummary(record.summary) }
             : {}),
         ...(record.data !== undefined ? { data: record.data } : {}),
         ...(record.level !== undefined
@@ -424,6 +430,7 @@ export function readRunTraceJournal(stateDir) {
                     path,
                 }],
             events: [],
+            omittedEvents: 0,
             fileBytes: 0,
             omittedPrefixBytes: 0,
             readBytes: 0,
@@ -432,6 +439,7 @@ export function readRunTraceJournal(stateDir) {
     const diagnostics = [];
     let events = [];
     let eventHead = 0;
+    let omittedEvents = 0;
     let ordinal = window.leadingPartialLines;
     const diagnose = (message, line) => {
         diagnostics.push({ message, path, ...(line === undefined ? {} : { line }) });
@@ -440,8 +448,10 @@ export function readRunTraceJournal(stateDir) {
     };
     const retain = (event) => {
         events.push({ event, ordinal });
-        if (events.length - eventHead > Limits.TRACE_JOURNAL_MAX_EVENTS)
+        if (events.length - eventHead > Limits.TRACE_JOURNAL_MAX_EVENTS) {
             eventHead += 1;
+            omittedEvents += 1;
+        }
         if (eventHead > Limits.TRACE_JOURNAL_MAX_EVENTS) {
             events = events.slice(eventHead);
             eventHead = 0;
@@ -469,6 +479,7 @@ export function readRunTraceJournal(stateDir) {
     return {
         diagnostics,
         events: events.slice(eventHead),
+        omittedEvents,
         fileBytes: window.fileBytes,
         omittedPrefixBytes: window.omittedPrefixBytes,
         readBytes: window.readBytes,
@@ -476,7 +487,7 @@ export function readRunTraceJournal(stateDir) {
 }
 export function summarizeRunTraceJournal(read) {
     const marker = [...read.events].reverse().map(({ event }) => markerData(event)).find(Boolean);
-    const incomplete = Boolean(marker) || read.omittedPrefixBytes > 0;
+    const incomplete = Boolean(marker) || read.omittedPrefixBytes > 0 || read.omittedEvents > 0 || read.diagnostics.length > 0;
     return {
         history_complete: !incomplete, compacted: Boolean(marker),
         compactions_total: marker?.compactions_total ?? 0,

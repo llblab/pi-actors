@@ -27,7 +27,18 @@ export interface SessionEvidenceToolCall {
   resultError?: boolean;
 }
 
+// Non-JSON provenance data. The enumerable Symbol survives turn copies; it grants no source/lifecycle authority.
+export const SESSION_TURN_IDENTITY = Symbol("session-turn-identity");
+interface SessionTurnIdentity {
+  basis: "entry" | "record";
+  entryId?: string;
+  sessionId?: string;
+  role: "assistant" | "user";
+  ordinal?: number;
+}
+
 export interface SessionEvidenceTurn {
+  [SESSION_TURN_IDENTITY]?: Readonly<SessionTurnIdentity>;
   assistantEntryId?: string;
   assistantText?: string;
   error?: string;
@@ -44,7 +55,20 @@ export interface SessionEvidenceTurn {
   userText?: string;
 }
 
+export const SESSION_EVIDENCE_CHRONOLOGY = Symbol("session-evidence-chronology");
+export interface SessionChronologyEntry {
+  ordinal: number;
+  timestamp: string;
+  identity: Readonly<SessionTurnIdentity>;
+}
+export type SessionChronologyReason = "source_unavailable" | "identity_unavailable" | "timestamp_unavailable" | "metadata_too_large";
+export type SessionChronology = Readonly<{
+  basis: "recorded_branch_metadata";
+  entries: readonly Readonly<SessionChronologyEntry>[];
+} & ({ state: "available" } | { state: "unavailable"; reason: SessionChronologyReason })>;
+
 export interface SessionEvidence {
+  [SESSION_EVIDENCE_CHRONOLOGY]?: SessionChronology;
   activeLeafId?: string;
   diagnostics: StateReadDiagnostic[];
   path: string;
@@ -289,7 +313,8 @@ function contentText(
   return boundedText(text, maxChars);
 }
 
-function activeBranch(
+/** Physical last-leaf ancestry, not current model context or a claim about a live SessionManager leaf. */
+export function selectLastRecordedSessionBranch(
   entries: SessionEntry[],
   path: string,
   diagnostics: StateReadDiagnostic[],
@@ -345,6 +370,28 @@ function toolCalls(
     }));
 }
 
+function sessionChronology(turns: readonly SessionEvidenceTurn[], sourceAvailable: boolean): SessionChronology {
+  const basis = "recorded_branch_metadata" as const;
+  const unavailable = (reason: SessionChronologyReason): SessionChronology => Object.freeze({
+    state: "unavailable", basis, reason, entries: Object.freeze([]),
+  });
+  if (!sourceAvailable) return unavailable("source_unavailable");
+  const entries: Readonly<SessionChronologyEntry>[] = [];
+  let bytes = Buffer.byteLength(JSON.stringify({ state: "available", basis, entries: [] }));
+  for (const turn of turns) {
+    const identity = turn[SESSION_TURN_IDENTITY];
+    if (identity?.basis !== "entry") return unavailable("identity_unavailable");
+    const timestamp = turn.timestamp;
+    if (typeof timestamp !== "string" || timestamp.length !== 24 || !Number.isFinite(Date.parse(timestamp)) ||
+      new Date(timestamp).toISOString() !== timestamp || redactSessionEvidenceValue(timestamp) !== timestamp) return unavailable("timestamp_unavailable");
+    const entry = Object.freeze({ ordinal: turn.index, timestamp, identity });
+    bytes += Buffer.byteLength(JSON.stringify(entry)) + Number(entries.length > 0);
+    if (bytes > Limits.SESSION_EVIDENCE_MAX_BYTES) return unavailable("metadata_too_large");
+    entries.push(entry);
+  }
+  return Object.freeze({ state: "available", basis, entries: Object.freeze(entries) });
+}
+
 export function readSessionEvidence(
   path: string,
   options: SessionEvidenceReadOptions = {},
@@ -368,9 +415,27 @@ export function readSessionEvidence(
   const read = readJsonlFileResilient<SessionEntry>(path, { maxBytes });
   const diagnostics = [...read.diagnostics];
   const header = read.records.find((entry) => entry.type === "session");
-  const branch = activeBranch(read.records, path, diagnostics);
+  const branch = selectLastRecordedSessionBranch(read.records, path, diagnostics);
+  const ordinals = new Map<SessionEntry, number>(branch.map(entry => [entry, 0]));
+  const idCounts = new Map(branch.map(entry => [String(entry.id), 0]));
+  let sessionHeaders = 0;
+  for (const [index, entry] of read.records.entries()) {
+    if (entry.type === "session") sessionHeaders++;
+    if (ordinals.has(entry)) ordinals.set(entry, index + 1);
+    if (entry.type !== "session" && typeof entry.id === "string" && idCounts.has(entry.id)) {
+      idCounts.set(entry.id, idCounts.get(entry.id)! + 1);
+    }
+  }
+  const sessionId = sessionHeaders === 1 && typeof header?.id === "string" && header.id &&
+    redactSessionEvidenceValue(header.id, maxTextChars) === header.id ? header.id : undefined;
+  const identity = (entry: SessionEntry, role: "assistant" | "user"): Readonly<SessionTurnIdentity> => {
+    const entryId = typeof entry.id === "string" ? entry.id : "";
+    const basis = sessionId && entryId && idCounts.get(entryId) === 1 && diagnostics.length === 0 &&
+      redactSessionEvidenceValue(entryId, maxTextChars) === entryId ? "entry" : "record";
+    return Object.freeze({ basis, role, ...(basis === "entry" ? { sessionId, entryId } : { ordinal: ordinals.get(entry)! }) });
+  };
   const turns: SessionEvidenceTurn[] = [];
-  let pendingUser: { id: string; text?: string } | undefined;
+  let pendingUser: { id: string; text?: string; identity: Readonly<SessionTurnIdentity> } | undefined;
   let currentTurn: SessionEvidenceTurn | undefined;
   for (const entry of branch) {
     if (entry.type !== "message") continue;
@@ -379,6 +444,7 @@ export function readSessionEvidence(
     if (role === "user") {
       pendingUser = {
         id: String(entry.id),
+        identity: identity(entry, "user"),
         text: contentText(message, "text", maxTextChars),
       };
       currentTurn = undefined;
@@ -386,6 +452,7 @@ export function readSessionEvidence(
     }
     if (role === "assistant") {
       currentTurn = {
+        [SESSION_TURN_IDENTITY]: identity(entry, "assistant"),
         ...(typeof entry.id === "string" ? { assistantEntryId: entry.id } : {}),
         ...(contentText(message, "text", maxTextChars)
           ? { assistantText: contentText(message, "text", maxTextChars) }
@@ -440,6 +507,7 @@ export function readSessionEvidence(
       toolCalls: [],
       unmatchedToolResults: 0,
       userEntryId: pendingUser.id,
+      [SESSION_TURN_IDENTITY]: pendingUser.identity,
       ...(pendingUser.text ? { userText: pendingUser.text } : {}),
     });
   }
@@ -448,7 +516,7 @@ export function readSessionEvidence(
     ...turn,
     index: firstVisibleIndex + index + 1,
   }));
-  return {
+  const evidence: SessionEvidence = {
     ...(branch.at(-1)?.id ? { activeLeafId: String(branch.at(-1)?.id) } : {}),
     diagnostics,
     path,
@@ -457,4 +525,8 @@ export function readSessionEvidence(
     truncated: read.truncated === true || turns.length > visibleTurns.length,
     turns: visibleTurns,
   };
+  Object.defineProperty(evidence, SESSION_EVIDENCE_CHRONOLOGY, {
+    value: sessionChronology(turns, sessionId !== undefined && read.truncated !== true && diagnostics.length === 0),
+  });
+  return evidence;
 }

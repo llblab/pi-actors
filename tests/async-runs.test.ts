@@ -1,32 +1,47 @@
-/**
- * Async run primitive regression tests
- * Covers detached state files, status/list/tail, and cancellation stale-state behavior
- */
-
+/** Mirrors lib/async-runs.ts; related contracts share this owner while retaining their fixtures and hooks. */
+import "./test-environment.mjs";
+import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import { syncBuiltinESMExports } from "node:module";
+import { mutationLockPath, writeJsonAtomic, writeTextAtomic } from "../lib/file-state.ts";
+import { acquireStateStartLock } from "../lib/runs-start.ts";
+import { signalOwnedRunProcess } from "../lib/runs-control.ts";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { parseDocument } from "yaml";
+import childProcess, {
+  execFile,
+} from "node:child_process";
+import {
+  existsSync,
+} from "node:fs";
 import {
   chmod,
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import {
+  tmpdir,
+} from "node:os";
+import {
+  join,
+} from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
-
-const execFileAsync = promisify(execFile);
-const controlRaceWorker = fileURLToPath(
-  new URL("./fixtures/run-control-race-worker.ts", import.meta.url),
-);
-
+import {
+  describe,
+} from "node:test";
+import {
+  promisify,
+} from "node:util";
+import {
+  fileURLToPath,
+  pathToFileURL,
+} from "node:url";
 import {
   archiveRun,
   cancelRun,
@@ -40,6 +55,7 @@ import {
   startRun,
   tailRun,
   teardownRunsOwnedByParent,
+  sendRunControl,
 } from "../lib/async-runs.ts";
 import {
   createRunUiObservationState,
@@ -49,10 +65,50 @@ import {
   summarizeRuns,
 } from "../lib/observability.ts";
 import * as Limits from "../lib/limits.ts";
-import { appendRunControlInStateDir } from "../lib/runs-controls.ts";
-import { appendRunTraceEvent, summarizeRunTraceJournal, readRunTraceJournal } from "../lib/runs-trace.ts";
-import { appendRunRetentionEvidence, pruneTerminalRun } from "../lib/runs-retention.ts";
-import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
+import { compactAsyncRunStatus } from "../lib/tools-response.ts";
+import {
+  readProcessLiveness,
+  readProcessIdentity,
+} from "../lib/runs-process.ts";
+import {
+  appendRunControlInStateDir,
+  readRunControlsFromStateDir,
+  updateRunControlStatusInStateDir,
+} from "../lib/runs-controls.ts";
+import {
+  appendRunTraceEvent,
+  summarizeRunTraceJournal,
+  readRunTraceJournal,
+} from "../lib/runs-trace.ts";
+import {
+  pruneTerminalRun,
+} from "../lib/runs-retention.ts";
+import {
+  createActiveSkillRecipeContext,
+} from "../lib/recipes-references.ts";
+import {
+  claimRunStateDirectory,
+} from "../lib/runs-ownership.ts";
+import {
+  getRunStateRoot,
+} from "../lib/paths.ts";
+import {
+  readRecipeUsage,
+} from "../lib/recipes-usage.ts";
+
+// Await each contract group so environment restoration and teardown finish before the next group builds.
+await describe("Run lifecycle", { concurrency: false }, async () => {
+/**
+ * Async run primitive regression tests
+ * Covers detached state files, status/list/tail, and cancellation stale-state behavior
+ */
+
+
+const execFileAsync = promisify(execFile);
+const controlRaceWorker = fileURLToPath(
+  new URL("./fixtures/run-control-race-worker.ts", import.meta.url),
+);
+
 
 async function waitForResult(
   stateDir: string,
@@ -145,16 +201,56 @@ async function waitForStatus(
 }
 
 async function waitForRunProcessExit(stateDir: string): Promise<void> {
-  for (let i = 0; i < 40; i++) {
-    const pid = Number(getRunStatus(stateDir).pid || 0);
-    if (!pid) return;
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
-    }
+  const pid = getRunStatus(stateDir).pid;
+  assert.ok(typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0);
+  for (let i = 0; i < 200; i++) {
+    if (readProcessLiveness(pid) === "dead") return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
+  assert.fail("Captured fixture runner exit remains unproven");
+}
+
+async function withFixtureCleanup<T>(body: () => T | Promise<T>, cleanup: () => unknown | Promise<unknown>): Promise<T> {
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  try { outcome = { ok: true, value: await body() }; }
+  catch (error) { outcome = { ok: false, error }; }
+  try { await cleanup(); } catch (error) {
+    if (!outcome.ok) throw new AggregateError([outcome.error, error], "Fixture body and cleanup failed; state may be retained");
+    throw error;
+  }
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
+}
+
+test("Fixture cleanup preserves exact falsy failures, ordered dual causes and proof-before-deletion", async () => {
+  const cleanupFailure = new Error("cleanup sentinel");
+  for (const primary of [undefined, null, false, 0, "", new Error("primary sentinel")]) {
+    for (const phase of ["primary", "cleanup", "both"] as const) {
+      let caught = false, actual: unknown, deleted = false;
+      try {
+        await withFixtureCleanup(async () => { if (phase !== "cleanup") throw primary; }, async () => {
+          if (phase !== "primary") throw cleanupFailure;
+          deleted = true;
+        });
+      } catch (error) { caught = true; actual = error; }
+      assert.equal(caught, true);
+      assert.equal(deleted, phase === "primary");
+      if (phase === "both") {
+        assert.ok(actual instanceof AggregateError);
+        assert.deepEqual(actual.errors, [primary, cleanupFailure]);
+        assert.equal(actual.errors[0], primary); assert.equal(actual.errors[1], cleanupFailure);
+      } else assert.equal(actual, phase === "primary" ? primary : cleanupFailure);
+    }
+  }
+  assert.equal(await withFixtureCleanup(async () => "retained result", async () => undefined), "retained result");
+});
+
+async function stopCapturedFixtureRun(meta: ReturnType<typeof startRun>, stateDir: string): Promise<void> {
+  if (readProcessLiveness(meta.pid) !== "dead") {
+    assert.ok(meta.process_identity, "Captured fixture birth identity is unavailable; retaining state");
+    signalOwnedRunProcess(meta.pid, "SIGKILL", meta.process_identity);
+  }
+  await waitForRunProcessExit(stateDir);
 }
 
 test("Async runs reject reuse of an active run state", async () => {
@@ -165,7 +261,7 @@ test("Async runs reject reuse of an active run state", async () => {
       {
         run_id: "active",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 10000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 10000)"`,
       },
       process.cwd(),
     );
@@ -176,7 +272,7 @@ test("Async runs reject reuse of an active run state", async () => {
           {
             run_id: "active",
             state_dir: stateDir,
-            template: `${process.execPath} -e "console.log('replacement')"`,
+            template: `${JSON.stringify(process.execPath)} -e "console.log('replacement')"`,
           },
           process.cwd(),
         ),
@@ -188,13 +284,15 @@ test("Async runs reject reuse of an active run state", async () => {
   }
 });
 
-test("Singleton Skill Recipes reuse one compatible active Run and reject conflicting identity or values", async () => {
+test("Singleton Skill Recipes reuse one compatible active Run and reject conflicting identity or values", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-singleton-"));
   const skillDir = join(root, "music-player");
   const recipeDir = join(skillDir, "recipes");
   const recipe = join(recipeDir, "playback.json");
   const alternateRecipe = join(recipeDir, "alternate.json");
-  const stateDir = join(root, "state");
+  const stateDir = join(root, "state"), ready = join(root, "ready");
+  const workload = "const fs=require('node:fs'),p=process.argv[1],tmp=p+'.'+process.pid; fs.writeFileSync(tmp,String(process.pid)); fs.renameSync(tmp,p); setTimeout(() => {}, Number(process.argv[2]));";
+  const template = (duration: number) => `${JSON.stringify(process.execPath)} -e ${JSON.stringify(workload)} ${JSON.stringify(ready)} ${duration}`;
   await mkdir(recipeDir, { recursive: true });
   await writeFile(
     join(skillDir, "SKILL.md"),
@@ -208,7 +306,7 @@ test("Singleton Skill Recipes reuse one compatible active Run and reject conflic
       args: ["source:string"],
       defaults: { source: "music" },
       control: ["stop"],
-      template: `${process.execPath} -e "setTimeout(() => {}, 10000)"`,
+      template: template(10000),
     }),
   );
   await writeFile(
@@ -219,24 +317,102 @@ test("Singleton Skill Recipes reuse one compatible active Run and reject conflic
       args: ["source:string"],
       defaults: { source: "music" },
       control: ["stop"],
-      template: `${process.execPath} -e "setTimeout(() => {}, 20000)"`,
+      template: template(20000),
     }),
   );
-  try {
-    const first = startRun(
-      { file: recipe, state_dir: stateDir, ownerId: "session-a" },
-      process.cwd(),
-    );
+  type Birth = { pid: number | undefined; close?: { code: number | null; signal: NodeJS.Signals | null }; meta?: ReturnType<typeof startRun>; stopAttempted?: boolean };
+  const births: Birth[] = [], workloads = new Set<number>(), spawn = childProcess.spawn;
+  let dispatched = false, accepted = false;
+  const spawnHook = t.mock.method(childProcess, "spawn", (...args: any[]) => {
+    const child: childProcess.ChildProcess = Reflect.apply(spawn, childProcess, args);
+    const birth: Birth = { pid: child.pid }; births.push(birth);
+    child.once("close", (code, signal) => { birth.close = { code, signal }; });
+    return child;
+  });
+  syncBuiltinESMExports();
+  const settle = async (birth: Birth) => {
+    assert.ok(typeof birth.pid === "number" && Number.isSafeInteger(birth.pid) && birth.pid > 0, `Unknown runner birth; retaining ${root}`);
+    if (!birth.stopAttempted && readProcessLiveness(birth.pid) !== "dead" && birth.meta?.process_identity) {
+      birth.stopAttempted = true;
+      signalOwnedRunProcess(birth.pid, "SIGKILL", birth.meta.process_identity);
+    }
+    for (let i = 0; i < 200; i++) {
+      if (birth.close && readProcessLiveness(birth.pid) === "dead") return;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.fail(`Captured singleton runner close/absence remains unproven; retaining ${root}`);
+  };
+  try { await withFixtureCleanup(async () => {
+    const launch = () => {
+      dispatched = true;
+      const meta = startRun({ file: recipe, state_dir: stateDir, ownerId: "session-a" }, process.cwd());
+      if (!meta.reused) {
+        const birth = births.find(item => item.pid === meta.pid && item.meta === undefined);
+        assert.ok(birth, `Returned runner has no captured birth; retaining ${root}`); birth.meta = meta;
+      }
+      return meta;
+    };
+    const first = launch();
+    await waitForFile(ready); // Producer admission and command launch precede deliberate metadata mutation.
     await waitForStatus(stateDir, "running");
+    const rememberWorkload = async () => {
+      const pid = Number(await readFile(ready, "utf8"));
+      assert.ok(Number.isSafeInteger(pid) && pid > 0); workloads.add(pid);
+    };
+    await rememberWorkload();
     assert.equal(first.run, "music-player");
     assert.equal(first.singleton, true);
-    const reused = startRun(
-      { file: recipe, state_dir: stateDir, ownerId: "session-a" },
-      process.cwd(),
-    );
+    assert.equal(first.started_at, first.createdAt);
+    assert.deepEqual(first.supervision, { report_every_ms: null, max_runtime_ms: null, deadline_at: null });
+    assert.deepEqual(first.supervision_provenance, { report_every: "unset", max_runtime: "unset" });
+    const beforeReuse = await readFile(join(stateDir, "run.json"), "utf8");
+    const catalog = join(getRunStateRoot(), "index.json");
+    const firstRegistration = JSON.parse(await readFile(catalog, "utf8")).entries.find((row: { state_dir: string }) => row.state_dir === stateDir);
+    assert.equal(firstRegistration.run_instance_id, first.run_instance_id); assert.equal(firstRegistration.ownerId, "session-a");
+    const reused = launch();
     assert.equal(reused.reused, true);
+    assert.match(compactAsyncRunStatus(reused), /existing Run reused/);
+    assert.doesNotMatch(compactAsyncRunStatus(first), /existing Run reused/);
     assert.equal(reused.pid, first.pid);
     assert.equal(reused.run_instance_id, first.run_instance_id);
+    assert.equal(reused.started_at, first.started_at);
+    assert.deepEqual(reused.supervision, first.supervision);
+    assert.equal(reused.catalog_registration, undefined);
+    const afterReuse = JSON.parse(await readFile(catalog, "utf8")).entries;
+    assert.equal(afterReuse[0].state_dir, stateDir); assert.equal(afterReuse[0].run_instance_id, first.run_instance_id);
+    assert.equal(afterReuse.filter((row: { state_dir: string }) => row.state_dir === stateDir).length, 1);
+    assert.equal(await readFile(join(stateDir, "run.json"), "utf8"), beforeReuse);
+    const stored = JSON.parse(beforeReuse);
+    const malformed = { ...stored };
+    delete malformed.supervision;
+    const malformedBytes = JSON.stringify(malformed);
+    writeTextAtomic(join(stateDir, "run.json"), malformedBytes);
+    assert.throws(launch, /supervision clock metadata is incomplete/);
+    assert.equal(await readFile(join(stateDir, "run.json"), "utf8"), malformedBytes);
+    const different = JSON.stringify({
+      ...stored,
+      supervision: {
+        ...stored.supervision,
+        max_runtime_ms: 60_000,
+        deadline_at: new Date(Date.parse(stored.started_at) + 60_000).toISOString(),
+      },
+      supervision_provenance: { report_every: "unset", max_runtime: "recipe" },
+    });
+    writeTextAtomic(join(stateDir, "run.json"), different);
+    assert.throws(launch, /incompatible supervision policy/);
+    assert.equal(await readFile(join(stateDir, "run.json"), "utf8"), different);
+    const legacy = { ...stored };
+    delete legacy.started_at;
+    delete legacy.supervision;
+    delete legacy.supervision_provenance;
+    const legacyBytes = JSON.stringify(legacy);
+    writeTextAtomic(join(stateDir, "run.json"), legacyBytes);
+    const legacyReused = launch();
+    assert.equal(legacyReused.reused, true);
+    assert.equal(legacyReused.started_at, undefined);
+    assert.equal(legacyReused.supervision, undefined);
+    assert.equal(await readFile(join(stateDir, "run.json"), "utf8"), legacyBytes);
+    writeTextAtomic(join(stateDir, "run.json"), beforeReuse);
     assert.throws(
       () =>
         startRun(
@@ -266,20 +442,31 @@ test("Singleton Skill Recipes reuse one compatible active Run and reject conflic
         ),
       /singleton Recipe run identity is run:music-player/,
     );
+    assert.equal(births.length, 1, "Reuse and refusals must not create another runner");
     await writeFile(join(stateDir, "workload-state.json"), "retained\n");
-    cancelRun(stateDir);
-    await waitForRunProcessExit(stateDir);
-    const restarted = startRun(
-      { file: recipe, state_dir: stateDir, ownerId: "session-a" },
-      process.cwd(),
-    );
+    births[0].stopAttempted = true; cancelRun(stateDir);
+    await settle(births[0]);
+    await rm(ready);
+    const restarted = launch();
+    await waitForFile(ready); await rememberWorkload();
     assert.equal(restarted.run, "music-player");
     assert.notEqual(restarted.run_instance_id, first.run_instance_id);
+    assert.equal(restarted.started_at, restarted.createdAt);
+    assert.deepEqual(restarted.supervision, first.supervision);
     assert.equal(await readFile(join(stateDir, "workload-state.json"), "utf8"), "retained\n");
-    cancelRun(stateDir);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+    assert.equal(births.length, 2); births[1].stopAttempted = true; cancelRun(stateDir); accepted = true;
+  }, async () => {
+    assert.ok(!dispatched || births.length > 0, `Runner birth remains unknown; retaining ${root}`);
+    for (const birth of [...births].reverse()) await settle(birth);
+    for (const pid of workloads) {
+      for (let i = 0; i < 200 && readProcessLiveness(pid) !== "dead"; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(readProcessLiveness(pid), "dead", `Captured workload absence remains unproven; retaining ${root}`);
+    }
+    for (const birth of births) assert.equal(readProcessLiveness(birth.pid!), "dead", `Fresh runner absence unproven; retaining ${root}`);
+    for (const pid of workloads) assert.equal(readProcessLiveness(pid), "dead", `Fresh workload absence unproven; retaining ${root}`);
+    if (accepted) await rm(root, { recursive: true, force: true });
+    else t.diagnostic(`Failed singleton fixture retained: ${root}`);
+  }); } finally { spawnHook.mock.restore(); syncBuiltinESMExports(); }
 });
 
 test("Singleton reuse rejects a terminal result while its runner process exits", async () => {
@@ -287,7 +474,8 @@ test("Singleton reuse rejects a terminal result while its runner process exits",
   const skillDir = join(root, "service");
   const recipeDir = join(skillDir, "recipes");
   const recipe = join(recipeDir, "worker.json");
-  const stateDir = join(root, "state");
+  const stateDir = join(root, "state"), ready = join(root, "ready");
+  let captured: ReturnType<typeof startRun> | undefined;
   await mkdir(recipeDir, { recursive: true });
   await writeFile(
     join(skillDir, "SKILL.md"),
@@ -298,14 +486,16 @@ test("Singleton reuse rejects a terminal result while its runner process exits",
     JSON.stringify({
       async: true,
       singleton: true,
-      template: `${process.execPath} -e "setTimeout(() => {}, 10000)"`,
+      template: `${JSON.stringify(process.execPath)} -e ${JSON.stringify("require('node:fs').writeFileSync(process.argv[1], 'ready'); setTimeout(() => {}, 10000)")} ${JSON.stringify(ready)}`,
     }),
   );
-  try {
+  await withFixtureCleanup(async () => {
     const first = startRun(
       { file: recipe, state_dir: stateDir, ownerId: "session-a" },
       process.cwd(),
     );
+    captured = first;
+    await waitForFile(ready); // Mutate evidence only after the real workload crossed producer admission.
     await waitForStatus(stateDir, "running");
     await writeFile(
       join(stateDir, "result.json"),
@@ -319,28 +509,31 @@ test("Singleton reuse rejects a terminal result while its runner process exits",
         ),
       /active owned process/,
     );
-    process.kill(first.pid, "SIGKILL");
-    await waitForRunProcessExit(stateDir);
-  } finally {
+  }, async () => {
+    if (!captured) return; // A throwing start does not prove that no process was born.
+    await stopCapturedFixtureRun(captured, stateDir);
     await rm(root, { recursive: true, force: true });
-  }
+  });
 });
 
 test("Async run controls fail closed on persisted process identity mismatch", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-process-identity-"));
-  const stateDir = join(root, "identity");
-  let runPid: number | undefined;
-  try {
+  const stateDir = join(root, "identity"), ready = join(root, "ready");
+  const template = `${JSON.stringify(process.execPath)} -e ${JSON.stringify("require('node:fs').writeFileSync(process.argv[1], 'ready'); setTimeout(() => {}, 30000)")} ${JSON.stringify(ready)}`;
+  let captured: ReturnType<typeof startRun> | undefined;
+  await withFixtureCleanup(async () => {
     const meta = startRun(
       {
         run_id: "identity",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
+        template,
       },
       process.cwd(),
     );
-    runPid = meta.pid;
+    captured = meta;
     assert.equal(typeof meta.process_identity?.start_time, "string");
+    await waitForFile(ready);
+    assert.deepEqual(readProcessIdentity(meta.pid), meta.process_identity, "Live runner identity must be readable before persisted-only mutation");
     const runPath = join(stateDir, "run.json");
     const stored = JSON.parse(await readFile(runPath, "utf8"));
     await writeFile(
@@ -359,7 +552,7 @@ test("Async run controls fail closed on persisted process identity mismatch", as
           {
             run_id: "identity",
             state_dir: stateDir,
-            template: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
+            template,
           },
           process.cwd(),
         ),
@@ -373,21 +566,11 @@ test("Async run controls fail closed on persisted process identity mismatch", as
     assert.equal(cancelled.process_identity_status, "owner_mismatch");
     assert.doesNotThrow(() => process.kill(meta.pid, 0));
     await writeFile(runPath, JSON.stringify(stored));
-    try {
-      killRun(stateDir);
-    } catch (error) {
-      if (process.platform !== "win32" || !/unsupported proof/.test(String(error))) throw error;
-    }
-  } finally {
-    if (runPid !== undefined) {
-      try {
-        process.kill(runPid, "SIGKILL");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-      }
-    }
+  }, async () => {
+    if (!captured) return;
+    await stopCapturedFixtureRun(captured, stateDir);
     await rm(root, { recursive: true, force: true });
-  }
+  });
 });
 
 test(
@@ -405,7 +588,7 @@ test(
         {
           run_id: "symlink-cwd",
           state_dir: stateDir,
-          template: `${process.execPath} -e "setTimeout(() => {}, 3000)"`,
+          template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 3000)"`,
         },
         aliasCwd,
       );
@@ -426,7 +609,7 @@ test("Async runs write state files and finish", async () => {
       {
         run_id: "hello",
         state_dir: stateDir,
-        template: `${process.execPath} -e "console.log('hello ' + process.argv[1])" {name}`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('hello ' + process.argv[1])" {name}`,
         values: { name: "world" },
       },
       process.cwd(),
@@ -463,6 +646,9 @@ test("Async runs write state files and finish", async () => {
     assert.deepEqual(evidence.commands[0].attempts, [
       {
         attempt: 1,
+        code: 0,
+        native_exit_code: 0,
+        killed: false,
         stdout: {
           path: "captures/command-001/attempt-001/stdout.log",
           bytes: 12,
@@ -488,7 +674,7 @@ test("Async review evidence rejects marker prefixes", async () => {
         state_dir: stateDir,
         template: {
           accept_output: "review_evidence",
-          template: `${process.execPath} -e "console.log('ACTOR_REVIEW_RESULT_BOGUS')"`,
+          template: `${JSON.stringify(process.execPath)} -e "console.log('ACTOR_REVIEW_RESULT_BOGUS')"`,
         },
       },
       process.cwd(),
@@ -535,7 +721,7 @@ test("Async review evidence accepts a large marker from complete capture", async
         state_dir: stateDir,
         template: {
           accept_output: "review_evidence",
-          template: `${process.execPath} -e "process.stdout.write(['ACTOR_REVIEW_RESULT','X'.repeat(1100000)].join(String.fromCharCode(10)))"`,
+          template: `${JSON.stringify(process.execPath)} -e "process.stdout.write(['ACTOR_REVIEW_RESULT','X'.repeat(1100000)].join(String.fromCharCode(10)))"`,
         },
       },
       process.cwd(),
@@ -572,12 +758,12 @@ test("Async review reports fail closed when complete evidence references are mis
           {
             actorRecipeContext: { alias: "reviewer", name: "reviewer" },
             accept_output: "review_evidence",
-            template: `${process.execPath} -e "console.log(['ACTOR_REVIEW_RESULT','review'].join(String.fromCharCode(10)))"`,
+            template: `${JSON.stringify(process.execPath)} -e "console.log(['ACTOR_REVIEW_RESULT','review'].join(String.fromCharCode(10)))"`,
           },
           {
             actorRecipeContext: { alias: "normalizer", name: "normalizer" },
             accept_output: "review_evidence",
-            template: `${process.execPath} -e "console.log(['ACTOR_REVIEW_RESULT','## Status','complete'].join(String.fromCharCode(10)))"`,
+            template: `${JSON.stringify(process.execPath)} -e "console.log(['ACTOR_REVIEW_RESULT','## Status','complete'].join(String.fromCharCode(10)))"`,
           },
         ],
       },
@@ -618,7 +804,7 @@ test("Async runs persist bounded high-volume command captures", async () => {
       {
         run_id: "capture",
         state_dir: stateDir,
-        template: `${process.execPath} -e "process.stdout.write('A'.repeat(1100000)); process.stderr.write('B'.repeat(1100000))"`,
+        template: `${JSON.stringify(process.execPath)} -e "process.stdout.write('A'.repeat(1100000)); process.stderr.write('B'.repeat(1100000))"`,
       },
       process.cwd(),
     );
@@ -689,7 +875,7 @@ test("Async runs emit command completion Trace events", async () => {
           report: "{report_path}",
           summary: "{state_dir}/result.json",
         },
-        template: `${process.execPath} -e "console.log('artifact')" ${longArg}`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('artifact')" ${longArg}`,
       },
       process.cwd(),
     );
@@ -717,13 +903,11 @@ test("Async runs emit command completion Trace events", async () => {
       String((commandDone.data as Record<string, unknown>).command),
       new RegExp(longArg),
     );
-    assert.deepEqual(
-      (commandDone.data as Record<string, unknown>).artifacts,
-      {
-        report: `${stateDir}/report.md`,
-        summary: `${stateDir}/result.json`,
-      },
-    );
+    const commandData = commandDone.data as Record<string, unknown>;
+    const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8"));
+    assert.equal(commandData.artifacts, undefined);
+    assert.deepEqual(commandData.artifact_inventory, result.artifact_inventory);
+    assert.equal((commandData.artifact_inventory as Record<string, unknown>).declarations_total, 2);
     assert.equal(Object.hasOwn(commandDone, "body"), false);
     assert.deepEqual(
       (commandDone.data as Record<string, unknown>).run_files,
@@ -748,7 +932,7 @@ test("Async runs expose failed terminal status", async () => {
       {
         run_id: "failed",
         state_dir: stateDir,
-        template: `${process.execPath} -e "process.exit(7)"`,
+        template: `${JSON.stringify(process.execPath)} -e "process.exit(7)"`,
       },
       process.cwd(),
     );
@@ -771,7 +955,7 @@ test("Async run restart clears all prior bounded evidence", async () => {
       {
         run_id: "restart",
         state_dir: stateDir,
-        template: `${process.execPath} -e "console.log('first')"`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('first')"`,
       },
       process.cwd(),
     );
@@ -790,7 +974,7 @@ test("Async run restart clears all prior bounded evidence", async () => {
       {
         run_id: "restart",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 1000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 1000)"`,
       },
       process.cwd(),
     );
@@ -822,7 +1006,7 @@ test("Async runs persist coordinator owner ids", async () => {
         run_id: "owned",
         ownerId: "session-a",
         state_dir: stateDir,
-        template: `${process.execPath} -e "console.log('owned')"`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('owned')"`,
       },
       process.cwd(),
     );
@@ -845,7 +1029,7 @@ test("Async runs can start from recipe files with overrides", async () => {
         {
           control: ["continue"],
           retire_when: "children_terminal",
-          template: `${process.execPath} -e "console.log(process.argv[1] + ' ' + process.argv[2])" {greeting} {name}`,
+          template: `${JSON.stringify(process.execPath)} -e "console.log(process.argv[1] + ' ' + process.argv[2])" {greeting} {name}`,
           values: { greeting: "hello", name: "file" },
         },
         null,
@@ -871,6 +1055,8 @@ test("Async runs can start from recipe files with overrides", async () => {
       /hello override/,
     );
   } finally {
+    // Accepted result data can precede final Trace publication and process exit.
+    if (existsSync(join(stateDir, "run.json"))) await waitForRunProcessExit(stateDir);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -889,7 +1075,7 @@ test("Async file Recipes expand runtime-owned recipe directories", async () => {
       JSON.stringify({
         artifacts: { report: "{recipe_dir}/report.md" },
         defaults: { helper: "{skill_dir}/scripts/helper.mjs" },
-        template: `${process.execPath} -e "console.log(process.argv[1] + '|' + process.argv[2] + '|' + process.argv[3])" {recipe_dir} {skill_dir} {helper}`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log(process.argv[1] + '|' + process.argv[2] + '|' + process.argv[3])" {recipe_dir} {skill_dir} {helper}`,
       }),
     );
     const meta = startRun(
@@ -924,7 +1110,7 @@ test("Async Recipe values follow caller then values then defaults then inline pr
         args: ["mode:enum(inline,default,bound,caller)=inline"],
         defaults: { mode: "default" },
         values: { mode: "bound" },
-        template: `${process.execPath} -e "console.log(process.argv[1])" {mode}`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log(process.argv[1])" {mode}`,
       }),
     );
     const boundState = join(root, "bound");
@@ -1016,7 +1202,7 @@ test("Async runs can start from Markdown recipe files", async () => {
         "---",
         "",
         "```template",
-        `${process.execPath} -e "console.log(process.argv[1])" {greeting}`,
+        `${JSON.stringify(process.execPath)} -e "console.log(process.argv[1])" {greeting}`,
         "```",
         "",
       ].join("\n"),
@@ -1039,7 +1225,7 @@ test("Async runs persist recipe context bundles for file-backed recipes", async 
   try {
     await writeFile(
       child,
-      JSON.stringify({ template: `${process.execPath} -e "console.log('child')"` }),
+      JSON.stringify({ template: `${JSON.stringify(process.execPath)} -e "console.log('child')"` }),
     );
     await writeFile(
       parent,
@@ -1128,6 +1314,7 @@ test("Async Pi commands persist owned session provenance in review evidence", {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-session-"));
   const stateDir = join(root, "session-run");
   const fakePi = join(root, "pi");
+  let settled = false;
   try {
     await writeFile(
       fakePi,
@@ -1159,8 +1346,17 @@ test("Async Pi commands persist owned session provenance in review evidence", {
       "sessions/command-001/session.jsonl",
     ]);
     assert.match(evidence.commands[0].command, /--session-dir/);
+    const output = result.output as Readonly<import("../lib/runs-outcomes.ts").RunPrimaryTextOutput>;
+    assert.equal(output.text_basis, "actor_response"); assert.equal(output.upstream_truncated, false);
+    assert.equal(await readFile(output.source.path, "utf8"), "done\n");
+    assert.doesNotMatch(output.preview, /--session-dir|inspect turns/);
+    const nontextDir = join(root, "json-session-run");
+    startRun({ state_dir: nontextDir, template: `${fakePi} --mode json -p inspect turns` }, process.cwd());
+    const nontext = await waitForResult(nontextDir);
+    assert.equal(nontext.code, 0); assert.equal(nontext.output, null); assert.equal(nontext.output_unavailable, "selection_not_supported");
+    await waitForRunProcessExit(stateDir); await waitForRunProcessExit(nontextDir); settled = true;
   } finally {
-    await rm(root, { recursive: true, force: true });
+    if (settled) await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -1173,7 +1369,7 @@ test("Async runs allow recipes to opt out of actor recipe context", async () => 
       file,
       JSON.stringify({
         actor_context: false,
-        template: `${process.execPath} -e "console.log('quiet')"`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('quiet')"`,
       }),
     );
     const meta = startRun({ file, state_dir: stateDir }, process.cwd());
@@ -1197,8 +1393,8 @@ test("Recipe files can put command-template flags at the recipe top level", asyn
         {
           parallel: true,
           template: [
-            `${process.execPath} -e "console.log('left')"`,
-            `${process.execPath} -e "console.log('right')"`,
+            `${JSON.stringify(process.execPath)} -e "console.log('left')"`,
+            `${JSON.stringify(process.execPath)} -e "console.log('right')"`,
           ],
         },
         null,
@@ -1242,11 +1438,11 @@ test("Parallel branch failure remains Trace-only when the root Run succeeds", as
           {
             parallel: true,
             template: [
-              `${process.execPath} -e "console.log('usable')"`,
-              `${process.execPath} -e "process.exit(7)"`,
+              `${JSON.stringify(process.execPath)} -e "console.log('usable')"`,
+              `${JSON.stringify(process.execPath)} -e "process.exit(7)"`,
             ],
           },
-          `${process.execPath} -e "process.stdin.pipe(process.stdout)"`,
+          `${JSON.stringify(process.execPath)} -e "process.stdin.pipe(process.stdout)"`,
         ],
       },
       process.cwd(),
@@ -1299,7 +1495,7 @@ test("Recipe imports execute under repeated parallel parent nodes", async () => 
       JSON.stringify(
         {
           args: ["word:string"],
-          template: `${process.execPath} -e "console.log(process.argv[1])" {word}-{index}-{_index}`,
+          template: `${JSON.stringify(process.execPath)} -e "console.log(process.argv[1])" {word}-{index}-{_index}`,
         },
         null,
         2,
@@ -1373,7 +1569,7 @@ test("Async run cancel terminates matching running runs", async () => {
       {
         run_id: "running",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
@@ -1407,7 +1603,7 @@ test("Async cancel and kill finalize in-flight review evidence", async () => {
           state_dir: stateDir,
           template: {
             accept_output: "review_evidence",
-            template: `${process.execPath} -e "process.stdout.write('partial');setInterval(()=>{},1000)"`,
+            template: `${JSON.stringify(process.execPath)} -e "process.stdout.write('partial');setInterval(()=>{},1000)"`,
           },
         },
         process.cwd(),
@@ -1465,7 +1661,7 @@ test("Async run cancel signals the running command process group", {
       {
         run_id: "running-group",
         state_dir: stateDir,
-        template: `${process.execPath} -e "const fs=require('fs');fs.writeFileSync(process.argv[1],String(process.pid));process.on('SIGTERM',()=>(fs.writeFileSync(process.argv[2],'term'),process.exit(0)));setTimeout(()=>0,5000)" {pidFile} {termFile}`,
+        template: `${JSON.stringify(process.execPath)} -e "const fs=require('fs');fs.writeFileSync(process.argv[1],String(process.pid));process.on('SIGTERM',()=>(fs.writeFileSync(process.argv[2],'term'),process.exit(0)));setTimeout(()=>0,5000)" {pidFile} {termFile}`,
         values: { pidFile, termFile },
       },
       process.cwd(),
@@ -1522,7 +1718,7 @@ test("Async run kill terminates matching stuck runs", async () => {
       {
         run_id: "stuck",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
@@ -1531,7 +1727,7 @@ test("Async run kill terminates matching stuck runs", async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     const result = killRun(stateDir);
-    assert.equal(result.killed, true);
+    assert.equal(result.killed, true, JSON.stringify(result));
     assert.equal(result.signal, "SIGKILL");
     const status = await waitForStatus(stateDir, "killed");
     assert.equal(status.status, "killed");
@@ -1559,7 +1755,7 @@ test("Canonical kill rejects a replacement run generation", async () => {
         ownerId: "session-a",
         run_id: "replacement",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
@@ -1593,16 +1789,19 @@ test("Same-directory restart cannot cross held canonical control", async () => {
   const blockedPath = join(root, "restart-blocked");
   const controlConfig = join(root, "control.json");
   const restartConfig = join(root, "restart.json");
+  const workers: Promise<unknown>[] = [];
   try {
     startRun(
       {
         ownerId: "session-a",
         run_id: "replacement",
         state_dir: stateDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 150)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 150)"`,
       },
       process.cwd(),
     );
+    await waitForResult(stateDir);
+    await waitForRunProcessExit(stateDir);
     const initial = getRunStatus(stateDir);
     await writeFile(controlConfig, JSON.stringify({
       mode: "control",
@@ -1634,9 +1833,10 @@ test("Same-directory restart cannot cross held canonical control", async () => {
         (error) => ({ error, ok: false as const }),
       );
     const control = settle(runWorker(controlConfig));
+    workers.push(control);
     await waitForFile(readyPath);
-    await new Promise((resolve) => setTimeout(resolve, 300));
     const restart = settle(runWorker(restartConfig));
+    workers.push(restart);
     await waitForFile(blockedPath);
     try {
       assert.equal(getRunStatus(stateDir).run_instance_id, initial.run_instance_id);
@@ -1652,6 +1852,8 @@ test("Same-directory restart cannot cross held canonical control", async () => {
     assert.notEqual(replacement.run_instance_id, initial.run_instance_id);
     assert.equal(replacement.ownerId, "session-b");
   } finally {
+    await writeFile(releasePath, "release\n");
+    await Promise.all(workers);
     try {
       killRun(stateDir);
     } catch {
@@ -1671,7 +1873,7 @@ test("Parent teardown kills only exact-session runs through canonical run contro
         ownerId: "session-a",
         run_id: "owned",
         state_dir: ownedDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
@@ -1680,7 +1882,7 @@ test("Parent teardown kills only exact-session runs through canonical run contro
         ownerId: "session-b",
         run_id: "other",
         state_dir: otherDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 5000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`,
       },
       process.cwd(),
     );
@@ -1758,7 +1960,7 @@ test("Async run retirement smoke stops supervisor after nested child is terminal
         run_id: "supervisor",
         state_dir: supervisorDir,
         retire_when: "children_terminal",
-        template: `${process.execPath} -e "setInterval(() => {}, 1000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setInterval(() => {}, 1000)"`,
       },
       process.cwd(),
     );
@@ -1766,7 +1968,7 @@ test("Async run retirement smoke stops supervisor after nested child is terminal
       {
         run_id: "child",
         state_dir: childDir,
-        template: `${process.execPath} -e "console.log('child done')"`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('child done')"`,
       },
       process.cwd(),
     );
@@ -1774,7 +1976,7 @@ test("Async run retirement smoke stops supervisor after nested child is terminal
       {
         run_id: "service",
         state_dir: serviceDir,
-        template: `${process.execPath} -e "setInterval(() => {}, 1000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setInterval(() => {}, 1000)"`,
       },
       process.cwd(),
     );
@@ -1826,7 +2028,7 @@ test("Async run cancel consistently classifies completed-run races as not runnin
         {
           run_id: `done-${iteration}`,
           state_dir: stateDir,
-          template: `${process.execPath} -e "console.log('done')"`,
+          template: `${JSON.stringify(process.execPath)} -e "console.log('done')"`,
         },
         process.cwd(),
       );
@@ -1846,28 +2048,14 @@ test("Async run state index rebuilds and corrupt index falls back", async () => 
   const parentDir = join(root, "parent");
   const childDir = join(parentDir, "child");
   try {
-    startRun(
-      {
-        ownerId: "session-a",
-        run_id: `index-parent-${process.pid}-${Date.now()}`,
-        state_dir: parentDir,
-        template: `${process.execPath} -e "console.log('parent')"`,
-        tool: "parent-tool",
-      },
-      process.cwd(),
-    );
-    startRun(
-      {
-        ownerId: "session-a",
-        run_id: `index-child-${process.pid}-${Date.now()}`,
-        state_dir: childDir,
-        template: `${process.execPath} -e "console.log('child')"`,
-        name: "child-recipe",
-      },
-      process.cwd(),
-    );
-    await waitForResult(parentDir);
-    await waitForResult(childDir);
+    // Controlled owned metadata/legacy display outcomes, not launched work or native exits.
+    for (const [stateDir, run] of [[parentDir, "index-parent"], [childDir, "index-child"]]) {
+      claimRunStateDirectory(stateDir, run);
+      await writeFile(join(stateDir, "run.json"), JSON.stringify({ run, state_dir: stateDir,
+        ownerId: "session-a", run_instance_id: `generation-${run}`, pid: 0,
+        createdAt: "2001-01-01T00:00:00.000Z" }));
+      await writeFile(join(stateDir, "result.json"), JSON.stringify({ code: 0 }));
+    }
     const index = rebuildRunStateIndex(root);
     assert.equal(index.length, 2);
     assert.deepEqual(index.map((entry) => entry.state_dir).sort(), [childDir, parentDir].sort());
@@ -1875,28 +2063,8 @@ test("Async run state index rebuilds and corrupt index falls back", async () => 
     assert.equal(listRuns(root, "done").length, 2);
     await writeFile(join(root, "index.json"), "not-json");
     assert.equal(listRuns(root, "done").length, 2);
-    assert.equal(readRunStateIndex(root)?.length, 2);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("Run retention journal keeps a bounded valid tail", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-actors-retention-bound-"));
-  const stateDir = join(root, "run");
-  try {
-    await mkdir(stateDir);
-    const status = { run: "bounded", run_instance_id: "generation-a", state_dir: stateDir };
-    await writeFile(join(root, "retention.jsonl"), `{bad json\n${JSON.stringify({ id: "legacy" })}\n`);
-    for (let index = 0; index <= Limits.RUN_RETENTION_MAX_RECORDS; index += 1) {
-      appendRunRetentionEvidence(status, "archive", "queued", { id: `retention-${index}` });
-    }
-    const content = await readFile(join(root, "retention.jsonl"), "utf8");
-    const records = content.trim().split("\n").map((line) => JSON.parse(line));
-    assert.equal(records.length, Limits.RUN_RETENTION_MAX_RECORDS);
-    assert.ok(Buffer.byteLength(content) <= Limits.RUN_RETENTION_MAX_BYTES);
-    assert.equal(records[0].id, "retention-1");
-    assert.equal(records.at(-1).id, `retention-${Limits.RUN_RETENTION_MAX_RECORDS}`);
+    assert.equal(readRunStateIndex(root), undefined);
+    assert.equal(await readFile(join(root, "index.json"), "utf8"), "not-json");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1913,7 +2081,7 @@ test("Async run archive and prune only allow terminal run state", async () => {
       {
         run_id: `active-${process.pid}-${Date.now()}`,
         state_dir: activeDir,
-        template: `${process.execPath} -e "setTimeout(() => {}, 3000)"`,
+        template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 3000)"`,
       },
       process.cwd(),
     );
@@ -1924,7 +2092,7 @@ test("Async run archive and prune only allow terminal run state", async () => {
       {
         run_id: `archive-${process.pid}-${Date.now()}`,
         state_dir: doneDir,
-        template: `${process.execPath} -e "console.log('done')"`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('done')"`,
       },
       process.cwd(),
     );
@@ -1948,7 +2116,7 @@ test("Async run archive and prune only allow terminal run state", async () => {
         },
         run_id: `prune-${process.pid}-${Date.now()}`,
         state_dir: pruneDir,
-        template: `${process.execPath} -e "console.log('done')"`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('done')"`,
       },
       process.cwd(),
     );
@@ -1987,7 +2155,7 @@ test("Async run archive and prune only allow terminal run state", async () => {
         artifacts: { report: { path: "{state_dir}/report.txt", required: true } },
         run_id: `failed-prune-${process.pid}-${Date.now()}`,
         state_dir: failedPruneDir,
-        template: `${process.execPath} -e "console.log('done')"`,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('done')"`,
       },
       process.cwd(),
     );
@@ -2007,4 +2175,393 @@ test("Async run archive and prune only allow terminal run state", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test("Real ordinary primary publication joins full UTF-8 source, classifies export EIO, and never retries a failed result commit", async () => {
+  for (const mode of ["success", "export_eio", "artifact_eio", "diagnostics_eio", "diagnostics_failure_eio", "workload_failure", "result_eio", "source_refusal", "diagnostics_refusal"]) {
+    const root = await mkdtemp(join(tmpdir(), "pi-actors-primary-live-")); const stateDir = join(root, "state");
+    const previousAgent = process.env.PI_CODING_AGENT_DIR; const previousOptions = process.env.NODE_OPTIONS;
+    let pid: number | undefined; let settled = false;
+    try {
+      const text = "HEAD🌍\n" + "x".repeat(128 * 1024) + "\nBearer hidden-live-token\nTAIL🌈";
+      const script = join(root, "emit.cjs"); await writeFile(script, `process.stdout.write(${JSON.stringify(text)});process.exitCode=${mode === "workload_failure" || mode === "diagnostics_failure_eio" ? 7 : 0};`);
+      const preload = join(root, "fault.mjs"); const attemptsPath = join(root, "result-attempts.txt");
+      await writeFile(preload, `
+        import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; import { createHash } from "node:crypto"; import { join } from "node:path";
+        const rename = fs.renameSync; const link = fs.linkSync; const stat = fs.lstatSync; const write = fs.writeFileSync; let attempts = 0; let refused = false;
+        fs.writeFileSync = function(path, ...args) {
+          if (${JSON.stringify(mode)} === "artifact_eio" && /artifact-inventory-[a-f0-9]{64}\\.json$/.test(String(path))) {
+            Reflect.apply(write, fs, [path, "partial", {flag:"wx"}]); throw Object.assign(Error("fixture artifact source EIO"), {code:"EIO"});
+          }
+          if (${JSON.stringify(mode)}.startsWith("diagnostics_") && ${JSON.stringify(mode)} !== "diagnostics_refusal" && /result-diagnostics-[a-f0-9]{64}\\.json$/.test(String(path))) {
+            Reflect.apply(write, fs, [path, "partial", {flag:"wx"}]); throw Object.assign(Error("fixture diagnostic source EIO"), {code:"EIO"});
+          }
+          return Reflect.apply(write, fs, [path, ...args]);
+        };
+        fs.lstatSync = function(path, ...args) {
+          if (${JSON.stringify(mode)} === "diagnostics_refusal" && /result-diagnostics-[a-f0-9]{64}\\.json$/.test(String(path)) && !refused) {
+            refused = true; fs.writeFileSync(path,"foreign diagnostic bytes");
+          }
+          if (${JSON.stringify(mode)} === "source_refusal" && String(path) === ${JSON.stringify(join(stateDir, "evidence"))} && !refused) {
+            refused = true; fs.mkdirSync(path, {recursive:true});
+            const meta = JSON.parse(fs.readFileSync(${JSON.stringify(join(stateDir, "run.json"))}, "utf8"));
+            const identity = createHash("sha256").update(JSON.stringify([meta.run, meta.run_instance_id, meta.ownerId ?? null])).digest("hex");
+            fs.writeFileSync(join(path, "primary-" + identity + ".txt"), "foreign bytes");
+          }
+          return Reflect.apply(stat, fs, [path, ...args]);
+        };
+        fs.renameSync = function(from, to, ...args) {
+          if (String(to) === ${JSON.stringify(join(stateDir, "result.json"))}) {
+            fs.writeFileSync(${JSON.stringify(attemptsPath)}, String(++attempts));
+            if (${JSON.stringify(mode)} === "result_eio" && attempts === 1) throw Object.assign(Error("fixture result EIO"), {code:"EIO"});
+          }
+          return Reflect.apply(rename, fs, [from, to, ...args]);
+        };
+        fs.linkSync = function(from, to, ...args) {
+          if (${JSON.stringify(mode)} === "export_eio" && String(to).includes("primary-")) throw Object.assign(Error("fixture export EIO"), {code:"EIO"});
+          return Reflect.apply(link, fs, [from, to, ...args]);
+        };
+        syncBuiltinESMExports();
+      `);
+      process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+      process.env.NODE_OPTIONS = `${previousOptions ?? ""} --import=${JSON.stringify(pathToFileURL(preload).href)}`;
+      const run = startRun({ run_id: "primary-live", state_dir: stateDir, template: "{node} {script}", values: { node: process.execPath, script },
+        artifacts: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`declared-${i}`, join(root, `never-created-${i}.bin`)])) }, root);
+      pid = run.pid; assert.ok(pid);
+      if (previousAgent === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousAgent;
+      if (previousOptions === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = previousOptions;
+      for (let i = 0; i < 200 && !settled; i++) { settled = readProcessLiveness(pid) === "dead"; if (!settled) await new Promise(resolve => setTimeout(resolve, 25)); }
+      assert.equal(settled, true);
+      const metadata = JSON.parse(await readFile(join(stateDir, "run.json"), "utf8"));
+      if (mode === "source_refusal" || mode === "diagnostics_refusal") {
+        assert.equal(existsSync(join(stateDir, "result.json")), false);
+        assert.equal(existsSync(attemptsPath), false, "Admission refusal is not an ordinary failed-command result");
+        assert.match(await readFile(join(stateDir, "stderr.log"), "utf8"), /different bytes/);
+      } else if (mode === "result_eio") {
+        assert.equal(existsSync(join(stateDir, "result.json")), false);
+        assert.equal(await readFile(attemptsPath, "utf8"), "1", "No fallback synthetic result after precommit failure");
+        assert.equal((await readdir(join(stateDir, "evidence"))).filter(name => /^primary-.*\.txt$/.test(name)).length, 1);
+      } else if (mode === "workload_failure" || mode === "diagnostics_failure_eio") {
+        const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8"));
+        assert.equal(result.code, 7); assert.equal(result.terminal_acceptance, "natural"); assert.equal(await readFile(attemptsPath, "utf8"), "1");
+        assert.equal(result.output, null); assert.equal(result.output_unavailable, "primary_not_selected_for_failure");
+        assert.equal(result.artifact_inventory_protocol, "run-artifact-inventory-v1"); assert.equal(result.artifact_inventory.declarations_total, 5);
+        const { summarizeRuns, detectRunTransitions, collectRunCompletionBatchMembers } = await import("../lib/observability.ts");
+        const { admitRunCompletionBatch, formatRunCompletionBatchMessage } = await import("../lib/run-delivery.ts");
+        const summary = summarizeRuns(root); const members = collectRunCompletionBatchMembers(detectRunTransitions(new Map([[stateDir, "running"]]), summary), summary.runs);
+        assert.equal(members.length, 1); assert.equal(members[0].output, undefined);
+        if (mode === "workload_failure") { assert.equal(members[0].diagnostic_excerpt?.field, "error"); assert.deepEqual(members[0].result_diagnostics, result.result_diagnostics); }
+        else { assert.equal(members[0].result_diagnostics, null); assert.equal(members[0].result_diagnostics_unavailable, "publication_failed"); }
+        const packet = admitRunCompletionBatch({ members, ownerId: metadata.ownerId ?? "primary-fixture", tempDir: root });
+        const message = formatRunCompletionBatchMessage(packet); assert.doesNotMatch(message, /hidden-live-token|Legacy diagnostic display/);
+        if (mode === "workload_failure") assert.match(message, /Diagnostic metadata only; not primary output/);
+        else {
+          const metadata = parseDocument(message, { version: "1.2", schema: "core", uniqueKeys: true });
+          assert.deepEqual(metadata.errors, []); assert.deepEqual(metadata.warnings, []);
+          assert.equal(metadata.get("diagnostic_metadata_unavailable"), "publication_failed");
+        }
+      } else {
+        const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8")); assert.equal(result.code, 0); assert.equal(result.terminal_acceptance, "natural");
+        assert.equal(result.artifact_inventory_protocol, "run-artifact-inventory-v1"); assert.equal(await readFile(attemptsPath, "utf8"), "1");
+        if (mode === "artifact_eio") { assert.equal(result.artifact_inventory, null); assert.equal(result.artifact_inventory_unavailable, "publication_failed"); }
+        else { assert.equal(result.artifact_inventory.declarations_total, 5); }
+        const { summarizeRuns, detectRunTransitions, collectRunCompletionBatchMembers } = await import("../lib/observability.ts");
+        const { admitRunCompletionBatch, readRunDeliveryJournal, formatRunCompletionBatchMessage } = await import("../lib/run-delivery.ts");
+        const summary = summarizeRuns(root);
+        const members = collectRunCompletionBatchMembers(detectRunTransitions(new Map([[stateDir, "running"]]), summary), summary.runs);
+        assert.equal(members.length, 1);
+        assert.deepEqual(members[0].primary_text, result.output === null
+          ? { output: null, output_unavailable: result.output_unavailable } : { output: result.output });
+        assert.equal(members[0].output, undefined, "Primary export loss cannot fall back to runner text");
+        const packetOwner = metadata.ownerId ?? "primary-fixture";
+        const packet = admitRunCompletionBatch({ members, ownerId: packetOwner, tempDir: root });
+        const message = formatRunCompletionBatchMessage(packet);
+        assert.equal(formatRunCompletionBatchMessage(readRunDeliveryJournal(root, packetOwner).completion_batch!), message);
+        assert.doesNotMatch(message, /hidden-live-token/);
+        if (result.output) { assert.ok(message.includes(result.output.preview), "Fresh completion retains the admitted source prefix without outer indentation"); assert.ok(message.includes(result.output.source.sha256)); }
+        else {
+          const metadata = parseDocument(message, { version: "1.2", schema: "core", uniqueKeys: true });
+          assert.deepEqual(metadata.errors, []); assert.deepEqual(metadata.warnings, []);
+          assert.equal(metadata.get("primary_unavailable"), "export_failed");
+        }
+        if (mode === "export_eio") { assert.equal(result.output, null); assert.equal(result.output_unavailable, "export_failed"); }
+        else {
+          const output = result.output; const body = await readFile(output.source.path, "utf8");
+          assert.equal(output.source.run_instance_id, metadata.run_instance_id); assert.ok(body.length > 128 * 1024);
+          assert.ok(body.startsWith("HEAD🌍")); assert.ok(body.endsWith("TAIL🌈")); assert.doesNotMatch(body, /hidden-live-token/);
+          assert.equal(output.bytes_total, Buffer.byteLength(body)); assert.equal(output.chars_total, [...body].length);
+          assert.equal(output.chars_shown + output.chars_omitted, output.chars_total);
+          assert.equal(Buffer.from(body).subarray(output.shown_bytes.start, output.shown_bytes.end).toString("utf8"), output.preview);
+          assert.equal(output.redacted, true);
+          const { readRunPrimaryTextSource } = await import("../lib/runs-context-exports.ts");
+          const recovered = readRunPrimaryTextSource(stateDir, metadata); assert.equal(recovered.state, "available");
+          if (recovered.state === "available") assert.deepEqual(recovered.output, output);
+          const bytes = Buffer.from(body); let rebuilt = ""; let start = 0;
+          while (start < bytes.length) {
+            let end = Math.min(start + 8192, bytes.length); while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
+            const page = readRunPrimaryTextSource(stateDir, metadata, { start, end }); assert.equal(page.state, "available");
+            if (page.state !== "available") throw Error("Published source page unavailable after captured producer exit");
+            rebuilt += page.output.preview; start = end;
+          }
+          assert.equal(rebuilt, body);
+        }
+      }
+      if (!["source_refusal", "diagnostics_refusal", "result_eio"].includes(mode)) {
+        const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8"));
+        assert.equal(result.result_diagnostics_protocol, "run-result-diagnostics-v1");
+        if (mode === "diagnostics_eio" || mode === "diagnostics_failure_eio") {
+          assert.equal(result.result_diagnostics, null); assert.equal(result.result_diagnostics_unavailable, "publication_failed");
+        } else {
+          const reference = result.result_diagnostics; const source = await readFile(reference.source.path);
+          const { createHash } = await import("node:crypto"); const data = JSON.parse(source.toString("utf8"));
+          assert.equal(reference.bytes_total, source.length); assert.equal(reference.source.sha256, createHash("sha256").update(source).digest("hex"));
+          assert.deepEqual(reference.fields, Object.keys(data.fields)); assert.equal(data.privacy_scope, "producer_admission");
+          assert.equal(data.primary_text, "not_included"); assert.doesNotMatch(source.toString(), /hidden-live-token/);
+        }
+      }
+    } finally {
+      if (previousAgent === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousAgent;
+      if (previousOptions === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = previousOptions;
+      if (pid && !settled) throw Error("Captured fixture runner exit remains unproven; retaining state");
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+});
+
+await describe("Control integration", { concurrency: false }, async () => {
+
+
+async function writeNamedPipeEndpoint(
+  stateDir: string,
+  runInstanceId: string,
+): Promise<void> {
+  await writeFile(
+    join(stateDir, "control-endpoint.json"),
+    `${JSON.stringify({
+      path: "named-pipe-test",
+      ready_at: new Date().toISOString(),
+      run_instance_id: runInstanceId,
+      type: "named-pipe",
+    })}\n`,
+  );
+}
+
+test("Runtime kill bypasses actor-local Control saturation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-kill-saturation-"));
+  const stateDir = join(root, "saturated");
+  const meta = startRun({ ownerId: "session-a", run_id: "saturated", state_dir: stateDir,
+    template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 30000)"` }, process.cwd());
+  try {
+    for (let index = 0; index < Limits.RUN_CONTROL_PENDING_LIMIT; index += 1)
+      appendRunControlInStateDir(stateDir, {
+        action: "pause", input: { index }, run_instance_id: meta.run_instance_id,
+      });
+    const killed = killRun(stateDir, { ownerId: "session-a", runInstanceId: meta.run_instance_id });
+    assert.equal(killed.killed, true);
+    assert.equal(readRunControlsFromStateDir(stateDir).length, Limits.RUN_CONTROL_PENDING_LIMIT);
+    assert.equal(readRunControlsFromStateDir(stateDir).every(({ status }) => status === "queued"), true);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Awaited Control facade preserves delivery and lifecycle-release failures without unlocking transport", { skip: process.platform !== "linux" }, async (t) => {
+  // Live-host identity is observed, but this controlled port launches/signals no runner/socket and proves no host/native exit.
+  for (const phase of ["delivery-error", "delivery-ok", "preflight-error", "preflight-aggregate", "preflight-undefined", "preflight-primitive", "preflight-hostile"] as const)
+    for (const releaseFails of [false, true]) {
+      const pid = process.pid, run = `control-release-${randomUUID()}`, generation = randomUUID(), owner = "control-release-owner";
+      const stateDir = join(getRunStateRoot(), run); const identity = readProcessIdentity(pid);
+      claimRunStateDirectory(stateDir, run);
+      const meta = { run, state_dir: stateDir, run_instance_id: generation, ownerId: owner, pid, process_identity: identity, control: ["pause"] };
+      writeJsonAtomic(join(stateDir, "run.json"), meta);
+      writeJsonAtomic(join(stateDir, "fixture-frame.json"), { ...meta, kind: "controlled_live_host_port", host_exit: "not_asserted" });
+      t.diagnostic(`Live-host Control fixture retained: ${stateDir}; phase=${phase}; host_exit=not_asserted; release_fault=${releaseFails}`);
+      assert.ok(Number.isSafeInteger(pid) && pid > 0 && identity && generation && owner && stateDir);
+      writeJsonAtomic(join(stateDir, "control-endpoint.json"), { type: "named-pipe", path: "CONTROLLED_PORT_NO_SOCKET", run_instance_id: generation });
+      const underlying = new Error("private delivery cause"); const transport = new AggregateError([underlying, undefined], "controlled transport fault", { cause: underlying });
+      let coerced = 0;
+      const preflight: unknown = phase === "preflight-undefined" ? undefined : phase === "preflight-primitive" ? 0
+        : phase === "preflight-hostile" ? { [Symbol.toPrimitive]() { coerced++; throw new Error("must not coerce facade error"); } }
+        : phase === "preflight-aggregate" ? new AggregateError([underlying, undefined], "original admission aggregate", { cause: underlying })
+        : Object.assign(new Error("original admission rejection", { cause: underlying }), { details: { private: true } });
+      const releaseFault = new Error("controlled lifecycle release fault");
+      const lock = mutationLockPath(join(stateDir, ".lifecycle")); const mkdir = fs.mkdirSync;
+      let releases = 0, sends = 0, payloadBytes = 0, wire: { id: string } | undefined, transportSettled = false;
+      let enter!: () => void, resolveSend!: (bytes: number) => void, rejectSend!: (error: unknown) => void;
+      const entered = new Promise<void>(resolve => { enter = resolve; });
+      const options = { ownerId: owner, namedPipeSend: (_path: string, payload: string) => {
+        sends++; payloadBytes = Buffer.byteLength(payload); wire = JSON.parse(payload);
+        return new Promise<number>((resolve, reject) => { resolveSend = resolve; rejectSend = reject; enter(); });
+      } };
+      if (phase.startsWith("preflight")) Object.defineProperty(options, "ownerId", { get() { throw preflight; } });
+      const hook = t.mock.method(fs, "mkdirSync", ((...args: Parameters<typeof fs.mkdirSync>) => {
+        if (String(args[0]).startsWith(lock + ".reclaim.") && String(args[0]).endsWith(".pending")) {
+          releases++; if (releaseFails) throw releaseFault;
+        }
+        return Reflect.apply(mkdir, fs, args);
+      }) as typeof fs.mkdirSync);
+      syncBuiltinESMExports();
+      const pending = sendRunControl(stateDir, { action: "pause", run_instance_id: generation }, options);
+      const observation = pending.then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
+      try {
+        if (!phase.startsWith("preflight")) {
+          await Promise.race([entered, observation.then(() => { throw new Error("Control never reached the admitted transport"); })]);
+          assert.ok(wire?.id); assert.equal(releases, 0);
+          const contention = new Error("lifecycle remains held across awaited transport");
+          assert.throws(() => acquireStateStartLock(stateDir, { onContention() { throw contention; } }), error => error === contention);
+          assert.equal(updateRunControlStatusInStateDir(stateDir, wire.id, "claimed"), true);
+          assert.equal(updateRunControlStatusInStateDir(stateDir, wire.id, "handled"), true);
+          transportSettled = true;
+          if (phase === "delivery-ok") resolveSend(payloadBytes); else rejectSend(transport);
+        }
+        const outcome = await observation;
+        assert.equal(releases, 1); assert.equal(coerced, 0);
+        if (phase === "delivery-ok" && !releaseFails) {
+          assert.equal(outcome.ok, true); if (outcome.ok) { assert.equal(outcome.value.delivery, "delivered"); assert.equal(outcome.value.control_id, wire?.id); }
+        } else {
+          assert.equal(outcome.ok, false); if (outcome.ok) assert.fail("Unexpected successful Control");
+          const error: unknown = outcome.error;
+          if (phase === "delivery-ok") assert.equal(error, releaseFault, "A release-only failure remains exact");
+          else {
+            let original: unknown = error;
+            if (releaseFails) {
+              assert.ok(error instanceof AggregateError); assert.equal(error.errors.length, 2); assert.equal(error.errors[1], releaseFault);
+              original = error.errors[0]; assert.equal(error.cause, original);
+              assert.equal(Object.getOwnPropertyDescriptor(error, "cause")?.enumerable, false);
+              assert.equal(Object.getOwnPropertyDescriptor(error, "errors")?.enumerable, false);
+              assert.deepEqual(Object.keys(error), []);
+            }
+            if (phase.startsWith("preflight")) {
+              assert.equal(original, preflight, "Original value/aggregate is not coerced, rebuilt or flattened");
+              if (releaseFails && phase === "preflight-undefined") assert.equal(Object.hasOwn(error as object, "cause"), true);
+            } else {
+              assert.ok(original instanceof Error); assert.equal(original.cause, transport);
+              assert.equal((original as Error & { control_id: string }).control_id, wire?.id);
+              assert.equal((original as Error & { reason: string }).reason, "delivery_failed");
+              assert.deepEqual(transport.errors, [underlying, undefined]); assert.equal(transport.cause, underlying);
+            }
+          }
+        }
+        const records = readRunControlsFromStateDir(stateDir);
+        assert.equal(sends, phase.startsWith("preflight") ? 0 : 1);
+        assert.equal(records.length, phase.startsWith("preflight") ? 0 : 1);
+        if (records.length) { assert.equal(records[0].status, "handled"); assert.equal(records[0].id, wire?.id); assert.equal(records[0].run_instance_id, generation); }
+      } finally {
+        if (!transportSettled && rejectSend) { transportSettled = true; rejectSend(new Error("controlled fixture settlement")); }
+        await Promise.allSettled([pending, observation]);
+        hook.mock.restore(); syncBuiltinESMExports();
+      }
+    }
+});
+
+test("Canonical Run Control revalidates owner and generation under the lifecycle lock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-canonical-control-"));
+  const stateDir = join(root, "demo");
+  const meta = startRun(
+    {
+      ownerId: "session-a",
+      run_id: "demo",
+      state_dir: stateDir,
+      template: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 30000)"`,
+    },
+    process.cwd(),
+  );
+  try {
+    await writeNamedPipeEndpoint(stateDir, meta.run_instance_id);
+    await assert.rejects(
+      sendRunControl(
+        stateDir,
+        { action: "pause", run_instance_id: meta.run_instance_id },
+        { ownerId: "session-b" },
+      ),
+      (error: unknown) => {
+        assert.equal((error as Record<string, unknown>).reason, "owner_mismatch");
+        return true;
+      },
+    );
+    await assert.rejects(
+      sendRunControl(
+        stateDir,
+        { action: "pause", run_instance_id: "replacement" },
+        { ownerId: "session-a" },
+      ),
+      (error: unknown) => {
+        assert.equal((error as Record<string, unknown>).reason, "generation_mismatch");
+        return true;
+      },
+    );
+    const receipt = await sendRunControl(
+      stateDir,
+      { action: "pause", run_instance_id: meta.run_instance_id },
+      {
+        ownerId: "session-a",
+        namedPipeSend: async (_path, payload) => Buffer.byteLength(payload),
+      },
+    );
+    assert.equal(receipt.delivery, "delivered");
+  } finally {
+    const killed = killRun(stateDir, {
+      ownerId: "session-a",
+      runInstanceId: meta.run_instance_id,
+    });
+    assert.equal(killed.killed, true);
+    assert.equal(Object.hasOwn(killed, "control_id"), false);
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+});
+
+await describe("Launch usage", { concurrency: false }, async () => {
+/**
+ * Async run usage telemetry regressions
+ * Covers extension-owned launch counter increments for recipe-file runs
+ */
+
+
+
+test("Async run start increments user recipe launch counter", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-actors-async-usage-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const { getRunStatus, startRun } = await import(
+      `../lib/async-runs.ts?usage=${Date.now()}`
+    );
+    async function waitForResult(stateDir: string): Promise<void> {
+      for (let i = 0; i < 40; i += 1) {
+        if (getRunStatus(stateDir).result) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("run did not finish");
+    }
+    const recipeRoot = join(agentDir, "recipes");
+    await import("node:fs/promises").then((fs) =>
+      fs.mkdir(recipeRoot, { recursive: true }),
+    );
+    const recipe = join(recipeRoot, "counted.json");
+    await writeFile(
+      recipe,
+      JSON.stringify({
+        async: true,
+        template: `${JSON.stringify(process.execPath)} -e "console.log('counted')"`,
+      }),
+    );
+    const meta = startRun({ file: recipe, run_id: "counted-run" }, process.cwd());
+    await waitForResult(meta.state_dir);
+    const usage = readRecipeUsage(recipe)!;
+    assert.equal(usage.calls, 1);
+    assert.equal(typeof usage.last_called, "string");
+    const unchanged = JSON.parse(await readFile(recipe, "utf8"));
+    assert.equal(unchanged.usage, undefined);
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 });

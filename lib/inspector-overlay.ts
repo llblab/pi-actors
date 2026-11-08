@@ -7,9 +7,11 @@
 import { readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
+import { Document, isScalar, visit } from "yaml";
 import {
   matchesKey,
+  Markdown,
   sliceByColumn,
   truncateToWidth,
   visibleWidth,
@@ -22,8 +24,9 @@ import * as RunsControls from "./runs-controls.ts";
 import * as RunControlDelivery from "./runs-control-delivery.ts";
 import * as RunsTrace from "./runs-trace.ts";
 import * as Limits from "./limits.ts";
-import { computeRunControlCapacity } from "./run-evidence-policy.ts";
+import { computeRunControlCapacity, runControlStatusTimestamp } from "./run-evidence-policy.ts";
 import * as RuntimeTriage from "./runtime-triage.ts";
+import { normalizeRecipeControl } from "./recipe-control.ts";
 import * as TraceProjection from "./trace-projection.ts";
 
 export type ActorInspectorTab = "recipe" | "trace" | "control";
@@ -50,6 +53,21 @@ export interface ActorInspectorOverlayOptions {
   stateRoot: string;
   theme: Theme;
   tui: TUI;
+}
+
+// Per-render provenance, not parsed from authored text or retained as source metadata.
+interface InspectorDocumentLine {
+  text: string;
+  label?: string;
+}
+
+type AgentDetailSegment = { kind: "metadata"; value: unknown } | { kind: "body"; text: string };
+
+interface ControlObservation {
+  run: string;
+  generation?: string;
+  document: Record<string, unknown>;
+  rows: Array<{ id: string; value: ControlProjection.ProjectedRunControl; age: number; reason?: string }>;
 }
 
 interface KillConfirmation {
@@ -84,12 +102,20 @@ export class ActorInspectorOverlay {
   private documentScroll = 0;
   private detailScroll = 0;
   private feedback?: ActorInspectorActionResult;
+  private feedbackFromAction = false;
+  private feedbackScroll = 0;
+  private feedbackPageRows = 1;
+  private inspectorFrame?: { width: number; lines: string[] };
   private focus: InspectorFocus = "runs";
   private killConfirmation?: KillConfirmation;
   private killDialogChoice: "cancel" | "kill" = "cancel";
+  private killDialogScroll = 0;
+  private killDialogPageRows = 1;
   private rowIndex = 0;
   private runCache?: ActorInspector.ActorInspectorRunItem[];
   private selectedTraceId?: string;
+  private controlCache?: ControlObservation;
+  private controlSelection?: { run: string; generation?: string; id: string };
   private runIndex = 0;
   private selectorIndex = 0;
   private selectorMode?: SelectorMode;
@@ -98,6 +124,7 @@ export class ActorInspectorOverlay {
     run: string;
     runInstanceId?: string;
     items: TraceProjection.TraceItem[];
+    journalSummary?: ReturnType<typeof RunsTrace.summarizeRunTraceJournal>;
   };
   private traceDetail?: TraceProjection.TraceItem;
   private traceSourceIndex = 0;
@@ -125,11 +152,10 @@ export class ActorInspectorOverlay {
   invalidate(): void {
     this.runCache = undefined;
     this.traceCache = undefined;
+    this.controlCache = undefined;
   }
 
   handleInput(data: string): void {
-    const runs = this.runs();
-    this.runIndex = Math.min(this.runIndex, Math.max(0, runs.length - 1));
     if (matchesKey(data, "ctrl+c")) {
       this.done();
       return;
@@ -139,8 +165,27 @@ export class ActorInspectorOverlay {
       this.tui.requestRender();
       return;
     }
+    if (this.feedback) {
+      if (matchesKey(data, "escape")) {
+        this.feedback = undefined;
+        this.feedbackFromAction = false;
+        this.feedbackScroll = 0;
+      } else if (matchesKey(data, "up")) this.feedbackScroll = Math.max(0, this.feedbackScroll - 1);
+      else if (matchesKey(data, "down")) this.feedbackScroll++;
+      else if (matchesKey(data, "pageUp")) this.feedbackScroll = Math.max(0, this.feedbackScroll - this.feedbackPageRows);
+      else if (matchesKey(data, "pageDown")) this.feedbackScroll += this.feedbackPageRows;
+      this.tui.requestRender();
+      return;
+    }
+    const runs = this.runs();
+    this.runIndex = Math.min(this.runIndex, Math.max(0, runs.length - 1));
     if (data.toLowerCase() === "k") {
       this.requestKill(runs[this.runIndex]);
+      this.tui.requestRender();
+      return;
+    }
+    if (this.tab === "control" && (this.focus === "list" || this.focus === "detail")) {
+      this.handleControlInput(data, runs[this.runIndex]);
       this.tui.requestRender();
       return;
     }
@@ -173,7 +218,8 @@ export class ActorInspectorOverlay {
       return;
     }
     if (this.focus === "document") {
-      if (matchesKey(data, "left")) this.focus = "tabs";
+      if (this.tab === "control" && matchesKey(data, "return")) this.openControlList(runs[this.runIndex]);
+      else if (matchesKey(data, "left")) this.focus = "tabs";
       else if (matchesKey(data, "up") && this.documentScroll === 0) this.focus = "tabs";
       else this.handleScrollableInput(data, "document");
       this.tui.requestRender();
@@ -204,6 +250,7 @@ export class ActorInspectorOverlay {
         }
       } else if (matchesKey(data, "return")) {
         if (this.tab === "trace") this.openSourceSelector(runs[this.runIndex]);
+        else if (this.tab === "control") this.openControlList(runs[this.runIndex]);
         else this.focus = "document";
       }
     } else if (this.focus === "list") {
@@ -244,32 +291,27 @@ export class ActorInspectorOverlay {
 
   render(width: number): string[] {
     const safeWidth = Math.max(24, width);
+    const modal = !!(this.killConfirmation || this.feedback);
+    if (!modal || !this.inspectorFrame) this.inspectorFrame = { width: safeWidth, lines: this.renderInspector(safeWidth) };
+    const lines = this.modalUnderlay(safeWidth);
+    if (this.killConfirmation) this.compositePopup(lines, this.renderKillDialog(safeWidth - 2, lines.length), safeWidth);
+    else if (this.feedback) this.compositePopup(lines, this.renderFeedbackPopup(safeWidth, lines.length), safeWidth);
+    return lines;
+  }
+
+  private renderInspector(safeWidth: number): string[] {
     const innerWidth = safeWidth - 2;
     const runs = this.runs();
     this.runIndex = Math.min(this.runIndex, Math.max(0, runs.length - 1));
     const run = runs[this.runIndex];
-    if (this.killConfirmation) return this.renderKillDialog(innerWidth);
-
     const lines = [this.border("╭", " Actor Inspector ", "╮", innerWidth)];
-    lines.push(this.row(this.renderRunControl(run, runs.length - this.runIndex - 1), innerWidth));
+    lines.push(this.row(this.renderRunControl(run, runs.length - this.runIndex - 1, innerWidth), innerWidth));
     lines.push(this.row(this.renderTabs(run), innerWidth));
     lines.push(this.border("├", "", "┤", innerWidth));
 
     this.contentSelectedRows.clear();
     this.contentStripeIndices = [];
     let content = this.renderContent(run, innerWidth);
-    if (this.feedback) {
-      const color = this.feedback.ok
-        ? "success"
-        : /^Kill (failed|rejected)/u.test(this.feedback.message)
-          ? "error"
-          : "warning";
-      content = [this.theme.fg(color, ` ${this.feedback.message}`), ...content];
-      this.contentSelectedRows = new Set(
-        [...this.contentSelectedRows].map((index) => index + 1),
-      );
-      this.contentStripeIndices = [0, ...this.contentStripeIndices];
-    }
     const viewportRows = this.contentViewportRows();
     content = content.slice(0, viewportRows);
     for (let index = 0; index < viewportRows; index += 1) {
@@ -284,9 +326,9 @@ export class ActorInspectorOverlay {
     if (this.focus === "select") {
       const runSelector = this.selectorMode === "run";
       const startRow = runSelector ? 2 : 3;
-      const horizontalOffset = runSelector ? 4 : 12;
+      const horizontalOffset = runSelector ? 5 : 12;
       const availableRows = Math.max(3, lines.length - startRow - 1);
-      const menu = this.renderSelector(run, availableRows);
+      const menu = this.renderSelector(run, availableRows, innerWidth);
       for (const [offset, menuLine] of menu.entries()) {
         const target = startRow + offset;
         if (target >= lines.length - 1) break;
@@ -333,12 +375,13 @@ export class ActorInspectorOverlay {
 
   private handleScrollableInput(data: string, target: "detail" | "document"): void {
     const key = target === "detail" ? "detailScroll" : "documentScroll";
+    const pageRows = () => this.contentViewportRows();
     if (matchesKey(data, "up")) this[key] = Math.max(0, this[key] - 1);
     else if (matchesKey(data, "down")) this[key] += 1;
     else if (matchesKey(data, "pageUp")) {
-      this[key] = Math.max(0, this[key] - this.contentViewportRows());
+      this[key] = Math.max(0, this[key] - pageRows());
     } else if (matchesKey(data, "pageDown")) {
-      this[key] += this.contentViewportRows();
+      this[key] += pageRows();
     } else if (matchesKey(data, "left") && target === "detail") {
       this.selectedTraceId = this.traceDetail?.id;
       this.traceDetail = undefined;
@@ -389,6 +432,8 @@ export class ActorInspectorOverlay {
 
   private requestKill(run?: ActorInspector.ActorInspectorRunItem): void {
     this.feedback = undefined;
+    this.feedbackFromAction = false;
+    this.feedbackScroll = 0;
     if (this.focus !== "runs") {
       this.feedback = { ok: false, message: "Focus Run before using Kill." };
       return;
@@ -415,12 +460,17 @@ export class ActorInspectorOverlay {
       status: run.status,
     };
     this.killDialogChoice = "cancel";
+    this.killDialogScroll = 0;
   }
 
   private handleKillInput(data: string): void {
     const key = data.toLowerCase();
-    if (matchesKey(data, "escape") || key === "n") {
-      this.feedback = { ok: false, message: "Kill cancelled." };
+    if (matchesKey(data, "pageUp")) {
+      this.killDialogScroll = Math.max(0, this.killDialogScroll - this.killDialogPageRows);
+    } else if (matchesKey(data, "pageDown")) {
+      this.killDialogScroll += this.killDialogPageRows;
+    } else if (matchesKey(data, "escape") || key === "n") {
+      this.feedback = undefined;
       this.killConfirmation = undefined;
       this.killDialogChoice = "cancel";
     } else if (matchesKey(data, "left") || matchesKey(data, "right") || matchesKey(data, "tab")) {
@@ -430,7 +480,7 @@ export class ActorInspectorOverlay {
     } else if (matchesKey(data, "return")) {
       if (this.killDialogChoice === "kill") this.confirmKill();
       else {
-        this.feedback = { ok: false, message: "Kill cancelled." };
+        this.feedback = undefined;
         this.killConfirmation = undefined;
       }
     }
@@ -441,52 +491,63 @@ export class ActorInspectorOverlay {
     this.killConfirmation = undefined;
     this.killDialogChoice = "cancel";
     if (!confirmation || !this.killRun) return;
+    this.feedbackFromAction = true;
     try {
       const result = this.killRun(confirmation.run, confirmation.runInstanceId);
       this.feedback = result.ok ? undefined : result;
       if (result.ok) this.invalidate();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const normalized = message.replaceAll(/\s+/g, " ");
+      let selected = normalized.slice(0, 160);
+      const clipped = typeof normalized === "string" && normalized.length > 160;
+      if (clipped && typeof selected === "string" && /[\uD800-\uDBFF]/u.test(selected.at(-1) ?? "") && /[\uDC00-\uDFFF]/u.test(normalized[160]!)) selected = selected.slice(0, -1);
       this.feedback = {
         ok: false,
-        message: `Kill failed: ${message.replaceAll(/\s+/g, " ").slice(0, 160)}.`,
+        message: ActorInspector.formatActorInspectorKillFeedback("failed", `${selected}`, { clipped }),
       };
     }
   }
 
-  private renderKillDialog(innerWidth: number): string[] {
+  private renderKillDialog(width: number, maxRows: number): string[] {
+    const innerWidth = Math.min(width, 70), textWidth = innerWidth - 2;
     const confirmation = this.killConfirmation!;
     const cancel = this.killDialogChoice === "cancel"
-      ? this.theme.bg("selectedBg", this.theme.fg("accent", "  Cancel  "))
-      : this.theme.fg("muted", "  Cancel  ");
+      ? this.theme.bg("selectedBg", this.theme.fg("accent", " Cancel "))
+      : this.theme.fg("muted", " Cancel ");
     const kill = this.killDialogChoice === "kill"
-      ? this.theme.bg("selectedBg", this.theme.fg("error", "  Kill actor  "))
-      : this.theme.fg("error", "  Kill actor  ");
-    const body = [
-      "",
-      this.theme.fg("error", "Kill this running actor?"),
-      "",
-      `${this.theme.fg("muted", "Run:")} ${this.theme.fg("accent", `run:${confirmation.run}`)}`,
-      `${this.theme.fg("muted", "Current status:")} ${this.theme.fg("warning", confirmation.status)}`,
-      "",
-      this.theme.fg("text", "This invokes generation-fenced runtime kill."),
-      "",
-      `${cancel}    ${kill}`,
-      "",
+      ? this.theme.bg("selectedBg", this.theme.fg("error", " Kill actor "))
+      : this.theme.fg("error", " Kill actor ");
+    const details = this.documentProjection({
+      run: confirmation.run,
+      state: confirmation.status,
+      action: "generation-fenced runtime kill",
+    }, textWidth).lines;
+    const safety = this.closureWarning(textWidth).map(line => this.theme.fg("warning", line));
+    const choices = visibleWidth(cancel) + 2 + visibleWidth(kill) <= textWidth
+      ? [this.center(`${cancel}  ${kill}`, textWidth)]
+      : [this.center(cancel, textWidth), this.center(kill, textWidth)];
+    const layout = this.popupLayout(maxRows, safety.length + 1 + choices.length, details.length);
+    this.killDialogPageRows = layout.pageRows;
+    this.killDialogScroll = Math.min(this.killDialogScroll, Math.max(0, details.length - this.killDialogPageRows));
+    const visible = details.slice(this.killDialogScroll, this.killDialogScroll + this.killDialogPageRows);
+    const hints = innerWidth < 30 ? this.keyHints(["↵", "pick"], ["esc", "back"])
+      : innerWidth < 60 ? this.keyHints(["←→/tab", "choose"], ["↵", "pick"], ["esc", "back"]) : this.renderKeyHints(true);
+    return [
+      this.border("╭", " Confirm Actor Kill ", "╮", innerWidth),
+      ...(layout.top ? [this.row("", innerWidth)] : []),
+      ...visible.map(line => this.row("  " + line, innerWidth)),
+      ...(layout.paged ? [this.row("  " + this.theme.fg("muted", `${this.killDialogScroll + 1}-${this.killDialogScroll + visible.length}/${details.length} pgup/pgdn`), innerWidth)] : []),
+      ...[...safety, "", ...choices].map(line => this.row("  " + line, innerWidth)),
+      ...(layout.bottom ? [this.row("", innerWidth)] : []),
+      this.footerBorder(hints, innerWidth),
     ];
-    const lines = [this.border("╭", " Confirm Actor Kill ", "╮", innerWidth)];
-    const availableRows = this.contentViewportRows() + 3;
-    const topPadding = Math.max(0, Math.floor((availableRows - body.length) / 2));
-    const rows = [...Array.from({ length: topPadding }, () => ""), ...body].slice(0, availableRows);
-    while (rows.length < availableRows) rows.push("");
-    for (const line of rows) lines.push(this.row(this.center(line, innerWidth), innerWidth));
-    lines.push(this.footerBorder(this.renderKeyHints(), innerWidth));
-    return lines;
   }
 
   private renderRunControl(
     run: ActorInspector.ActorInspectorRunItem | undefined,
     sequence: number,
+    width: number,
   ): string {
     const active = this.focus === "runs" || (this.focus === "select" && this.selectorMode === "run");
     const prefix = active ? this.theme.fg("accent", " ← ") : "   ";
@@ -496,11 +557,12 @@ export class ActorInspectorOverlay {
       return active ? this.theme.bg("selectedBg", empty) : empty;
     }
     const value = `${prefix}${this.theme.fg("muted", "Run: ")}${this.theme.fg("text", `#${sequence}`)}  ${this.theme.fg("accent", run.run)}  ${this.theme.fg(this.statusColor(run.status), run.status)}${suffix}`;
-    return active ? this.theme.bg("selectedBg", value) : value;
+    const bounded = truncateToWidth(value, width, "…");
+    return active ? this.theme.bg("selectedBg", bounded) : bounded;
   }
 
   private renderTabs(run?: ActorInspector.ActorInspectorRunItem): string {
-    const source = this.traceSource(run);
+    const source = this.tab === "trace" ? this.traceSource(run) : "all";
     return TABS.map((tab, index) => {
       const base = `${tab[0]!.toUpperCase()}${tab.slice(1)}`;
       const label = tab === "trace" && source !== "all" ? `${base}: ${source}` : base;
@@ -527,13 +589,20 @@ export class ActorInspectorOverlay {
     width: number,
   ): string[] {
     if (!run) return [this.theme.fg("muted", " No owned actor runs")];
+    if (this.tab === "control" && (this.focus === "list" || this.focus === "detail")) return this.renderControlContent(run, width);
     if (this.focus === "detail") return this.renderTraceDetail(width);
-    if (this.tab === "trace") return this.renderTraceList(run);
-    const stateDir = path.join(this.stateRoot, run.run);
+    if (this.tab === "trace") return this.renderTraceList(run, width);
+    const selectedRun = run.run;
+    const stateDir = path.join(this.stateRoot, selectedRun);
     const value = this.tab === "recipe"
       ? ActorInspector.readActorInspectorRecipe(stateDir)
       : this.controlDocument(run, stateDir);
-    const projection = this.documentProjection(value, width);
+    const body = this.documentProjection(value, width);
+    const identity = this.documentProjection({ selected_run_id: selectedRun }, width);
+    const projection = {
+      lines: [...identity.lines, ...body.lines],
+      stripes: [...identity.stripes, ...body.stripes.map(index => index + 1)],
+    };
     const maxStart = Math.max(0, projection.lines.length - this.contentViewportRows());
     this.documentScroll = Math.min(this.documentScroll, maxStart);
     this.contentStripeIndices = projection.stripes.slice(
@@ -546,12 +615,83 @@ export class ActorInspectorOverlay {
     );
   }
 
+  private modalUnderlay(width: number): string[] {
+    const frame = this.inspectorFrame!;
+    const height = this.contentViewportRows() + 5;
+    if (frame.width === width && frame.lines.length === height) return frame.lines.slice();
+    // Resize the frozen underlay without refreshing evidence behind an open modal.
+    const innerWidth = width - 2;
+    const content = (index: number) => sliceByColumn(frame.lines[index] ?? "", 1, frame.width - 2, true);
+    return [
+      this.border("╭", " Actor Inspector ", "╮", innerWidth),
+      this.row(content(1), innerWidth),
+      this.row(content(2), innerWidth),
+      this.border("├", "", "┤", innerWidth),
+      ...Array.from({ length: height - 5 }, (_, index) =>
+        this.row(index < frame.lines.length - 5 ? content(index + 4) : "", innerWidth)),
+      this.footerBorder(content(frame.lines.length - 1), innerWidth),
+    ];
+  }
+
+  private compositePopup(lines: string[], popup: string[], width: number): void {
+    const popupWidth = visibleWidth(popup[0]!);
+    const left = Math.floor((width - popupWidth) / 2);
+    const top = Math.floor((lines.length - popup.length) / 2);
+    for (const [offset, line] of popup.entries()) {
+      const base = lines[top + offset]!;
+      const right = left + popupWidth;
+      // Terminal-default background masks underlying stripes; selected buttons keep their own fill.
+      lines[top + offset] = `${sliceByColumn(base, 0, left, true)}\u001b[49m${line}\u001b[49m${sliceByColumn(base, right, width - right, true)}`;
+    }
+  }
+
+  private popupLayout(maxRows: number, fixedRows: number, detailRows: number): { top: boolean; bottom: boolean; pageRows: number; paged: boolean } {
+    // Reserve readable text, pinned safety and choices before decorative blank rows.
+    const minimum = 2 + fixedRows + Math.min(2, detailRows);
+    const paddingRows = Math.min(2, Math.max(0, maxRows - minimum));
+    const height = Math.min(maxRows, Math.max(maxRows - 2, minimum + paddingRows));
+    const slots = height - 2 - fixedRows - paddingRows;
+    const paged = detailRows > slots;
+    return { top: paddingRows > 0, bottom: paddingRows > 1, pageRows: Math.min(detailRows, slots - Number(paged)), paged };
+  }
+
+  private renderFeedbackPopup(width: number, maxRows: number): string[] {
+    const feedback = this.feedback!;
+    const innerWidth = Math.min(70, width - 2), textWidth = innerWidth - 2;
+    const color = feedback.ok
+      ? "success"
+      : /^(?:Kill (?:failed|rejected)|- action: kill\n- result: (?:failed|rejected)\n)/u.test(feedback.message) ? "error" : "warning";
+    const message = `${feedback.message}`;
+    const details = this.wrapDocument(message.split(/\r\n|\r|\n/u).map(text => ({ text })), textWidth).map(line => line.text);
+    const safety = this.feedbackFromAction ? [...this.closureWarning(textWidth), "No automatic retry."] : [];
+    const layout = this.popupLayout(maxRows, safety.length, details.length);
+    this.feedbackPageRows = layout.pageRows;
+    this.feedbackScroll = Math.min(this.feedbackScroll, Math.max(0, details.length - this.feedbackPageRows));
+    const visible = details.slice(this.feedbackScroll, this.feedbackScroll + this.feedbackPageRows);
+    return [
+      this.border("╭", " Notice ", "╮", innerWidth),
+      ...(layout.top ? [this.row("", innerWidth)] : []),
+      ...visible.map(line => this.row("  " + this.theme.fg(color, line), innerWidth)),
+      ...(layout.paged ? [this.row("  " + this.theme.fg("muted", `${this.feedbackScroll + 1}-${this.feedbackScroll + visible.length}/${details.length} ↑↓ pgup/pgdn`), innerWidth)] : []),
+      ...safety.map(line => this.row("  " + this.theme.fg("warning", line), innerWidth)),
+      ...(layout.bottom ? [this.row("", innerWidth)] : []),
+      this.footerBorder(this.keyHints(["esc", "close"]), innerWidth),
+    ];
+  }
+
+  private closureWarning(width: number): string[] {
+    return width >= visibleWidth("- closure: unconfirmed")
+      ? ["- closure: unconfirmed"] : ["- closure:", "  unconfirmed"];
+  }
+
   private renderSelector(
     run: ActorInspector.ActorInspectorRunItem,
     availableRows: number,
+    width: number,
   ): string[] {
+    // Run menu reserves five offset columns, two markers, two borders and one right-padding column.
     const options = this.selectorMode === "run"
-      ? this.runSelectorOptions()
+      ? this.runSelectorOptions(Math.max(0, width - 10))
       : this.traceSources(run).map((source) => ({
         content: `${this.theme.fg("accent", "Trace:")} ${this.theme.fg("text", source)}`,
         preserveColors: true,
@@ -559,7 +699,7 @@ export class ActorInspectorOverlay {
     return this.renderMenuBox(options, this.selectorIndex, availableRows);
   }
 
-  private runSelectorOptions(): SelectorOption[] {
+  private runSelectorOptions(width: number): SelectorOption[] {
     const runs = this.runs();
     const sequenceWidth = Math.max(
       2,
@@ -567,11 +707,11 @@ export class ActorInspectorOverlay {
     );
     const runWidth = Math.max(1, ...runs.map((item) => visibleWidth(item.run)));
     return runs.map((item, index) => ({
-      content: [
+      content: truncateToWidth([
         this.theme.fg("text", this.fit(`#${runs.length - index - 1}`, sequenceWidth)),
         this.theme.fg("accent", this.fit(item.run, runWidth)),
         this.theme.fg(this.statusColor(item.status), item.status),
-      ].join("  "),
+      ].join("  "), width, "…"),
       preserveColors: true,
     }));
   }
@@ -589,33 +729,46 @@ export class ActorInspectorOverlay {
     const maxStart = Math.max(0, options.length - visibleLimit);
     const start = Math.max(0, Math.min(focusedIndex - Math.floor(visibleLimit / 2), maxStart));
     const visible = options.slice(start, start + visibleLimit);
-    const width = Math.max(8, ...options.map((option) => visibleWidth(option.content) + 4));
-    const border = (left: string, right: string, marker = "") =>
-      this.theme.fg("borderAccent", `${left}${marker}${"─".repeat(Math.max(0, width - visibleWidth(marker)))}${right}`);
+    const runMenu = this.selectorMode === "run";
+    const width = Math.max(8, ...options.map((option) => visibleWidth(option.content) + (runMenu ? 3 : 4)));
+    // Reset both menu edges so sliced document backgrounds cannot bleed through.
+    const ownBackground = (line: string) => runMenu ? `\u001b[49m${line}\u001b[49m` : line;
+    const border = (left: string, right: string, marker = "") => ownBackground(
+      this.theme.fg("borderAccent", `${left}${marker}${"─".repeat(Math.max(0, width - visibleWidth(marker)))}${right}`));
     return [
       border("╭", "╮", start > 0 ? "↑" : ""),
       ...visible.map((option, offset) => {
         const index = start + offset;
         const marker = index === focusedIndex
-          ? this.theme.fg("accent", " ▶ ")
-          : "   ";
-        const row = this.fit(`${marker}${option.content}`, width);
+          ? this.theme.fg("accent", runMenu ? "▶ " : " ▶ ")
+          : runMenu ? "  " : "   ";
+        const row = this.fit(`${marker}${option.content}`, width - Number(runMenu)) + (runMenu ? " " : "");
         const colored = index === focusedIndex && !option.preserveColors
           ? this.theme.fg("accent", row)
           : row;
-        const styled = index === focusedIndex ? this.theme.bg("selectedBg", colored) : colored;
-        return `${this.theme.fg("borderAccent", "│")}${styled}${this.theme.fg("borderAccent", "│")}`;
+        const background = index === focusedIndex ? "selectedBg" : runMenu && index % 2 ? "customMessageBg" : undefined;
+        // Native truncation emits full SGR resets; repaint each resulting segment.
+        const styled = background === undefined ? colored : runMenu
+          ? colored.split("\u001b[0m").map(part => this.theme.bg(background, part)).join("\u001b[0m")
+          : this.theme.bg(background, colored);
+        return ownBackground(`${this.theme.fg("borderAccent", "│")}${styled}${this.theme.fg("borderAccent", "│")}`);
       }),
       border("╰", "╯", start + visible.length < options.length ? "↓" : ""),
     ];
   }
 
-  private renderTraceList(run: ActorInspector.ActorInspectorRunItem): string[] {
+  private traceTableLine(text: string, width: number): string {
+    const [first = "", ...rest] = text.split(/\r\n|\r|\n/u);
+    return truncateToWidth(first + (rest.length ? "…" : ""), width, "…");
+  }
+
+  private renderTraceList(run: ActorInspector.ActorInspectorRunItem, width: number): string[] {
     const items = this.traceItems(run);
-    const summary = RunsTrace.summarizeRunTraceJournal(
+    const summary = this.traceCache!.journalSummary ??= RunsTrace.summarizeRunTraceJournal(
       RunsTrace.readRunTraceJournal(path.join(this.stateRoot, run.run)));
     const banner = summary.history_complete ? [] : [this.theme.fg("warning",
-      ` ! Trace history incomplete: ${summary.compacted ? `${summary.compactions_total} compaction(s), ` : ""}${summary.dropped_event_count_exact ? summary.dropped_events : "unknown"} dropped event(s), ${summary.dropped_bytes} bytes`)];
+      width < visibleWidth(" ! Trace history incomplete:") ? " ! Trace incomplete…" : this.traceTableLine(
+        ` ! Trace history incomplete: ${summary.compacted ? `${summary.compactions_total} compaction(s), ` : ""}${summary.dropped_event_count_exact ? summary.dropped_events : "unknown"} dropped event(s), ${summary.dropped_bytes} bytes`, width))];
     if (items.length === 0) return [...banner, this.theme.fg("muted", " No Trace evidence")];
     if (this.selectedTraceId) {
       const selectedIndex = items.findIndex((item) => item.id === this.selectedTraceId);
@@ -645,25 +798,32 @@ export class ActorInspectorOverlay {
       const detail = item.detail && typeof item.detail === "object"
         ? item.detail as Record<string, unknown>
         : {};
-      const marker = item.level === "error"
-        ? this.theme.fg("error", "!")
-        : detail.attention
-          ? this.theme.fg("warning", "A")
-          : " ";
+      const attention = item.level !== "error" && detail.attention
+        ? this.theme.fg("warning", "A") + " "
+        : "";
       const prefix = this.focus === "list" && index === this.rowIndex
-        ? this.theme.fg("accent", " ▶ ")
-        : "   ";
-      const sequence = item[TraceProjection.TRACE_ITEM_SEQUENCE] ?? items.length - index - 1;
-      const row = `${prefix}${this.theme.fg("text", `#${sequence}`)} ${marker} ${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
+        ? this.theme.fg("accent", "▶ ")
+        : "  ";
+      const chronology = item[TraceProjection.TRACE_ITEM_CHRONOLOGY];
+      const sequence = chronology?.state === "available" ? chronology.ordinal : "?";
+      const row = `${prefix}${this.theme.fg("text", `#${sequence}`)} ${attention}${this.theme.fg("muted", item.source)}/${this.theme.fg(item.level === "error" ? "error" : "accent", item.kind)}  ${this.theme.fg("text", item.summary)}`;
+      const preview = this.traceTableLine(row, width);
       return this.focus === "list" && index === this.rowIndex
-        ? this.theme.fg("accent", row)
-        : row;
+        ? this.theme.fg("accent", preview)
+        : preview;
     })];
   }
 
   private renderTraceDetail(width: number): string[] {
     if (!this.traceDetail) return [this.theme.fg("warning", " Trace row is no longer available")];
-    const projection = this.documentProjection(this.traceDetail, width);
+    const sequence = this.traceDetail[TraceProjection.TRACE_ITEM_SEQUENCE];
+    const value = {
+      ...(sequence !== undefined ? { projection_sequence: sequence } : {}),
+      ...this.traceDetail,
+      chronology: this.traceDetail[TraceProjection.TRACE_ITEM_CHRONOLOGY] ?? { state: "unavailable", reason: "metadata_unavailable" },
+    };
+    const projection = this.traceDetail.source === "agent" && this.traceDetail.kind === "agent.turn"
+      ? this.agentDetailProjection(value, width) : this.documentProjection(value, width);
     const maxStart = Math.max(0, projection.lines.length - this.contentViewportRows());
     this.detailScroll = Math.min(this.detailScroll, maxStart);
     this.contentStripeIndices = projection.stripes.slice(
@@ -676,35 +836,238 @@ export class ActorInspectorOverlay {
     );
   }
 
+  private agentDetailSegments(value: unknown): AgentDetailSegment[] {
+    const extractedBody = Symbol("extracted-body");
+    const bodies: Array<{ field: Array<string | number>; text: string }> = [];
+    // Only typed SessionEvidenceTurn slots are bodies. Never inspect authored text for framing.
+    const select = (item: unknown, field: Array<string | number>): unknown => {
+      if (typeof item === "string") { bodies.push({ field, text: item }); return extractedBody; }
+      return item;
+    };
+    const record = value as Record<string, unknown>;
+    const detail = record.detail;
+    let metadata = value;
+    if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+      const retained = Object.fromEntries(Object.entries(detail).map(([key, item]) => {
+        if (["assistantText", "userText", "thinking"].includes(key) && typeof item === "string") {
+          return [key, select(item, ["detail", key])];
+        }
+        if (key !== "toolCalls" || !Array.isArray(item)) return [key, item];
+        return [key, item.map((call, callIndex) => {
+          if (!call || typeof call !== "object" || Array.isArray(call)) return call;
+          // Action-first display order only; retained tool-call data and body rendering stay unchanged.
+          const rank = (key: string) => key === "name" ? 0 : key === "arguments" ? 1 : key === "result" ? 3 : 2;
+          return Object.fromEntries(Object.entries(call).sort(([left], [right]) => rank(left) - rank(right)).map(([name, result]) => {
+            if (name !== "result") return [name, result];
+            const field = ["detail", key, callIndex, name];
+            if (typeof result === "string") return [name, select(result, field)];
+            if (!Array.isArray(result)) return [name, result];
+            return [name, result.map((block, blockIndex) => {
+              if (!block || typeof block !== "object" || block.type !== "text" || typeof block.text !== "string") return block;
+              select(block.text, [...field, blockIndex, "text"]);
+              return Object.fromEntries(Object.entries(block).filter(([slot]) => slot !== "text"));
+            })];
+          }).filter(([, item]) => item !== extractedBody));
+        })];
+      }).filter(([, item]) => item !== extractedBody));
+      metadata = { ...record, detail: retained };
+    }
+    return [{ kind: "metadata", value: metadata }, ...bodies.flatMap<AgentDetailSegment>(({ field, text }) => [
+      { kind: "metadata", value: { field } }, { kind: "body", text },
+    ])];
+  }
+
+  private metadataText(value: unknown): string {
+    // Copy own selected data, so the library cannot invoke an object's toJSON hook.
+    const copy = (item: unknown): unknown => {
+      // UI-only value state: keep an own undefined slot visible, distinct from null or literal text.
+      if (item === undefined) return { value_state: "undefined" };
+      if (typeof item === "function") throw new TypeError("Inspector metadata must be selected own data");
+      if (!item || typeof item !== "object") return item;
+      if (Array.isArray(item)) return Array.from({ length: item.length }, (_, index) => {
+        const descriptor = Object.getOwnPropertyDescriptor(item, String(index));
+        if (descriptor && !Object.hasOwn(descriptor, "value")) throw new TypeError("Inspector metadata must be selected own data");
+        return copy(descriptor?.value);
+      });
+      const result = Object.create(null) as Record<string, unknown>;
+      for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(item))) {
+        if (!descriptor.enumerable) continue;
+        if (!Object.hasOwn(descriptor, "value")) throw new TypeError("Inspector metadata must be selected own data");
+        result[key] = copy(descriptor.value);
+      }
+      return result;
+    };
+    const document = new Document(copy(value), { version: "1.2", schema: "core", aliasDuplicateObjects: false });
+    visit(document, { Pair(_key, pair) {
+      if (isScalar(pair.key) && typeof pair.key.value === "string" && pair.key.value.includes("\uFEFF")) pair.key.type = "QUOTE_DOUBLE";
+    } });
+    return document.toString({ collectionStyle: "block", indent: 2, lineWidth: 0, directives: false,
+      defaultStringType: "PLAIN", doubleQuotedAsJSON: true });
+  }
+
+  private agentDetailProjection(value: unknown, width: number): { lines: string[]; stripes: number[] } {
+    const segments = this.agentDetailSegments(value);
+    const lines: string[] = [], stripes: number[] = [];
+    const markdownTheme = { ...getMarkdownTheme(), codeBlockIndent: "" };
+    const detailStripe = Object.keys(value as object).indexOf("detail");
+    const append = (rendered: string[], stripe: number) => {
+      lines.push(...rendered); stripes.push(...rendered.map(() => stripe));
+    };
+    const metadata = (selected: unknown, stripe: number) => {
+      // yaml's standard serializer has no completion-wire budget/depth ceiling. Data is already admitted upstream.
+      const yaml = this.metadataText(selected).replace(/\n$/u, "");
+      append(this.wrapDocument(yaml.split("\n").map(text => ({ text })), width).map(line => this.theme.fg("muted", line.text)), stripe);
+    };
+    segments.forEach((segment, index) => {
+      if (index) append([""], detailStripe);
+      if (segment.kind === "body") {
+        append(new Markdown(segment.text, 0, 0, markdownTheme, { color: text => this.theme.fg("text", text) }).render(width), detailStripe);
+      } else if (index === 0) {
+        // Serialize root entries separately to retain root-field stripe provenance without parsing YAML rows.
+        Object.entries(segment.value as object).forEach(([key, item], stripe) => metadata({ [key]: item }, stripe));
+      } else {
+        if (segments[index + 1]?.kind === "body") append([this.theme.fg("muted", "---")], detailStripe);
+        metadata(segment.value, detailStripe);
+        if (segments[index + 1]?.kind === "body") append([this.theme.fg("muted", "---")], detailStripe);
+      }
+    });
+    return { lines, stripes };
+  }
+
   private controlDocument(
     run: ActorInspector.ActorInspectorRunItem,
     stateDir: string,
   ): Record<string, unknown> {
-    const endpoint = run.runInstanceId
-      ? RunControlDelivery.readRunControlEndpoint(stateDir, run.runInstanceId)
-      : undefined;
+    return this.controlObservation(run, stateDir).document;
+  }
+
+  private controlObservation(run: ActorInspector.ActorInspectorRunItem, stateDir = path.join(this.stateRoot, run.run)): ControlObservation {
+    if (this.controlCache?.run === run.run && this.controlCache.generation === run.runInstanceId) return this.controlCache;
     const meta = this.readRunMeta(stateDir);
-    const journal = RunsControls.readRunControlJournalFromStateDir(stateDir);
+    const bound = Boolean(meta && !Array.isArray(meta) && run.runInstanceId && meta.run === run.run
+      && meta.run_instance_id === run.runInstanceId && meta.ownerId === this.ownerId);
+    const diagnostics: Array<{ reason: string; line?: number }> = [];
+    let actions: string[] = [];
+    if (!bound) diagnostics.push({ reason: "metadata_binding_unavailable" });
+    else {
+      try { actions = normalizeRecipeControl(meta.control) ?? []; }
+      catch { diagnostics.push({ reason: "invalid_action_declarations" }); }
+    }
+    const endpoint = bound ? RunControlDelivery.readRunControlEndpoint(stateDir, run.runInstanceId!) : undefined;
+    const journal = bound ? RunsControls.readRunControlJournalFromStateDir(stateDir) : { records: [], diagnostics: [] };
+    diagnostics.push(...journal.diagnostics.map(item => item.line === undefined
+      ? { reason: "unreadable_control_journal" } : { reason: "invalid_control_json", line: item.line }));
+    const now = Date.now();
+    const ids = new Map<string, number>();
+    for (const value of journal.records) {
+      if (value && typeof value === "object" && typeof (value as Record<string, unknown>).id === "string") {
+        const id = (value as Record<string, unknown>).id as string;
+        ids.set(id, (ids.get(id) ?? 0) + 1);
+      }
+    }
+    const accepted: Array<{ id: string; value: ControlProjection.ProjectedRunControl; age: number; reason?: string; parsedIndex: number }> = [];
+    for (const [parsedIndex, value] of journal.records.entries()) {
+      const classification = RuntimeTriage.classifyRuntimeControl(run, value, now);
+      if (classification.diagnostic) { diagnostics.push({ reason: classification.diagnostic.reason }); continue; }
+      const record = value as RunsControls.RunControlRecord;
+      if (record.run_instance_id !== run.runInstanceId) { diagnostics.push({ reason: "foreign_generation" }); continue; }
+      if (ids.get(record.id) !== 1) { diagnostics.push({ reason: "duplicate_control_id" }); continue; }
+      if (["queued_at", "delivered_at", "claimed_at", "handled_at", "failed_at"].some(field => {
+        const timestamp = (record as unknown as Record<string, unknown>)[field];
+        return (field === "queued_at" || timestamp !== undefined) && (typeof timestamp !== "string" || !Number.isFinite(Date.parse(timestamp)));
+      })) {
+        diagnostics.push({ reason: "invalid_record_timestamp" }); continue;
+      }
+      accepted.push({ id: record.id, value: ControlProjection.projectRunControl(record), parsedIndex,
+        age: Math.max(0, now - Date.parse(runControlStatusTimestamp(record as unknown as Record<string, unknown>, record.status) as string)),
+        reason: classification.stale?.reason });
+    }
     const capacity = computeRunControlCapacity(journal.records);
-    const stalePending = journal.records.reduce<number>((count, control) => count + Number(Boolean(
-      RuntimeTriage.classifyRuntimeControl({ run: run.run,
-        runInstanceId: run.runInstanceId, status: run.status }, control, Date.now()).stale)), 0);
-    return {
-      status: run.status,
-      run_instance_id: run.runInstanceId,
-      pending: capacity.pending, pending_limit: capacity.limit,
-      available: capacity.available, backpressured: capacity.backpressured,
-      journal_bytes: (() => { try { return statSync(RunsControls.runControlsFile(stateDir)).size; } catch { return 0; } })(),
+    const partial = diagnostics.length > 0;
+    const rows = accepted.filter(row => row.parsedIndex >= journal.records.length - 20).reverse();
+    const readiness = partial ? "data_unavailable" : run.status !== "running" ? "not_ready"
+      : !actions.length ? "unsupported" : capacity.backpressured ? "backpressure" : endpoint ? "ready_recorded_endpoint" : "not_ready";
+    const reason = partial ? "partial_observation" : run.status !== "running" ? "run_terminal"
+      : !actions.length ? "no_declared_actor_actions" : capacity.backpressured ? "pending_limit_reached"
+        : endpoint ? "recorded_endpoint_only_not_connection_proof" : "recorded_endpoint_unavailable";
+    this.controlCache = { run: run.run, generation: run.runInstanceId, rows, document: {
+      actor_control_readiness: readiness, reason, actor_actions: actions,
+      data_state: partial ? "partial" : "available", pending: bound ? capacity.pending : null,
+      pending_limit: capacity.limit, available: partial ? null : capacity.available,
+      backpressured: bound ? capacity.backpressured : null,
+      runtime_actions: bound ? run.status === "running" ? this.killRun && run.runInstanceId ? ["kill"] : [] : ["archive", "prune"] : [],
+      runtime_actions_note: "API capabilities; only existing Run-focus Kill is interactive",
+      request_history: { shown: rows.length, retained: journal.records.length, parsed_suffix_limit: 20,
+        partial: partial || journal.records.length > 20, coverage: "recent parsed journal records; malformed-line coverage unavailable; not complete lifetime history" },
+      request_navigation: "Enter opens requests; Down scrolls overview",
+      evidence: "Saved non-atomic observation; delivered != handled; handled != Run completion; stale never expires requests",
+      status: run.status, run_instance_id: run.runInstanceId,
+      journal_bytes: (() => { try { return statSync(RunsControls.runControlsFile(stateDir)).size; } catch { return null; } })(),
       journal_limit: Limits.RUN_CONTROL_JOURNAL_MAX_BYTES,
-      stale_pending: stalePending,
-      diagnostics: journal.diagnostics.map((item) => item.line === undefined
-        ? { reason: "unreadable_control_journal" } : { line: item.line, reason: "invalid_control_json" }),
-      actor_actions: Array.isArray(meta.control) ? meta.control : [],
-      runtime_actions: run.status === "running" ? ["kill"] : ["archive", "prune"],
-      endpoint,
-      recent_controls: journal.records.slice(-20).reverse().map((control) =>
-        ControlProjection.projectRunControl(control as RunsControls.RunControlRecord)),
+      stale_pending: accepted.filter(row => row.reason).length, diagnostics,
+      endpoint, recent_controls: rows.map(row => row.value),
+    } };
+    return this.controlCache;
+  }
+
+  private selectedControl(observation: ControlObservation) {
+    const selection = this.controlSelection;
+    return selection?.run === observation.run && selection.generation === observation.generation
+      ? observation.rows.find(row => row.id === selection.id) : undefined;
+  }
+
+  private openControlList(run?: ActorInspector.ActorInspectorRunItem): void {
+    this.focus = "list";
+    this.rowIndex = 0;
+    const observation = run ? this.controlObservation(run) : undefined;
+    const first = observation?.rows[0];
+    this.controlSelection = first ? { run: observation!.run, generation: observation!.generation, id: first.id } : undefined;
+  }
+
+  private handleControlInput(data: string, run?: ActorInspector.ActorInspectorRunItem): void {
+    if (matchesKey(data, "escape") || matchesKey(data, "left")) {
+      this.focus = this.focus === "detail" ? "list" : "tabs";
+      this.detailScroll = 0;
+      return;
+    }
+    if (!run) return;
+    const observation = this.controlObservation(run);
+    const selected = this.selectedControl(observation);
+    if (this.focus === "detail") { this.handleScrollableInput(data, "detail"); return; }
+    const index = selected ? observation.rows.indexOf(selected) : -1;
+    let next = index;
+    if (matchesKey(data, "up")) next = Math.max(0, index - 1);
+    else if (matchesKey(data, "down")) next = Math.min(observation.rows.length - 1, index + 1);
+    else if (matchesKey(data, "pageUp")) next = Math.max(0, index - this.contentViewportRows());
+    else if (matchesKey(data, "pageDown")) next = Math.min(observation.rows.length - 1, index + this.contentViewportRows());
+    else if ((matchesKey(data, "return") || matchesKey(data, "right")) && selected) {
+      this.focus = "detail"; this.detailScroll = 0; return;
+    }
+    if (next !== index && observation.rows[next]) this.controlSelection = {
+      run: observation.run, generation: observation.generation, id: observation.rows[next]!.id,
     };
+  }
+
+  private renderControlContent(run: ActorInspector.ActorInspectorRunItem, width: number): string[] {
+    const observation = this.controlObservation(run);
+    const selected = this.selectedControl(observation);
+    if (this.focus === "detail") {
+      const projection = this.documentProjection(selected ? selected.value : { request: "unavailable", reason: "selected Run/generation/id no longer available" }, width);
+      this.detailScroll = Math.min(this.detailScroll, Math.max(0, projection.lines.length - this.contentViewportRows()));
+      this.contentStripeIndices = projection.stripes.slice(this.detailScroll, this.detailScroll + this.contentViewportRows());
+      return projection.lines.slice(this.detailScroll, this.detailScroll + this.contentViewportRows());
+    }
+    const coverage = observation.document.request_history as { shown: number; retained: number; partial: boolean };
+    const banner = this.traceTableLine(` Requests ${coverage.shown}/${coverage.retained} parsed; recent20${coverage.partial ? "; partial" : ""}`, width);
+    if (!observation.rows.length) return [banner, " No requests", this.traceTableLine(" Saved observation; history may be partial", width)];
+    const index = selected ? observation.rows.indexOf(selected) : -1;
+    const count = Math.max(1, this.contentViewportRows() - 2);
+    const start = Math.max(0, index - Math.floor(count / 2));
+    const rows = observation.rows.slice(start, start + count);
+    this.contentStripeIndices = [0, 0, ...rows.map((_row, offset) => start + offset + 1)];
+    if (index >= start) this.contentSelectedRows.add(index - start + 2);
+    return [banner, this.traceTableLine(index < 0 ? " Selection unavailable; arrows select a request" : " Status | action | status age | error/stale", width),
+      ...rows.map(row => this.traceTableLine(`${row === selected ? "▶" : " "} ${row.value.status} | ${row.value.action} | ${Math.floor(row.age / 1000)}s | ${row.value.error ?? row.reason ?? ""}`, width))];
   }
 
   private allTraceItems(run?: ActorInspector.ActorInspectorRunItem): TraceProjection.TraceItem[] {
@@ -752,195 +1115,95 @@ export class ActorInspectorOverlay {
     value: unknown,
     width: number,
   ): { lines: string[]; stripes: number[] } {
-    const sections = value && typeof value === "object" && !Array.isArray(value)
-      ? Object.entries(value as Record<string, unknown>).map(([key, item]) =>
-          this.labeledDocumentLines(key, item)
-        )
-      : [this.document(value)];
+    // Copy before enumerating roots: accessors and hooks must never run during projection.
+    const selected = this.metadataText(value);
+    const descriptors = value && typeof value === "object" && !Array.isArray(value)
+      ? Object.entries(Object.getOwnPropertyDescriptors(value)).filter(([, descriptor]) => descriptor.enumerable) : [];
+    const sections = descriptors.length
+      ? descriptors.map(([key, descriptor]) => this.metadataText({ [key]: descriptor.value }))
+      : [selected];
     const lines: string[] = [];
     const stripes: number[] = [];
     sections.forEach((section, sectionIndex) => {
-      const wrapped = this.wrapDocument(section, width);
-      lines.push(...wrapped.map((line) => this.styleDocumentLine(line)));
+      const wrapped = this.wrapDocument(section.replace(/\n$/u, "").split("\n").map(text => ({ text })), width);
+      lines.push(...wrapped.map((line) => this.theme.fg("muted", line.text)));
       stripes.push(...wrapped.map(() => sectionIndex));
     });
     return { lines, stripes };
   }
 
-  private inlineDocumentValue(value: unknown): string | undefined {
-    if (Array.isArray(value)) {
-      if (value.length === 0) return "[]";
-      if (value.every((item) =>
-        (item === null || typeof item !== "object") &&
-        !(typeof item === "string" && /[\r\n]/u.test(item))
-      )) {
-        return `[${value.map((item) => String(item ?? "none")).join(", ")}]`;
-      }
-      return undefined;
-    }
-    if (value && typeof value === "object") {
-      if (Object.keys(value as Record<string, unknown>).length === 0) return "{}";
-    }
-    return undefined;
-  }
-
-  private labeledDocumentLines(key: string, value: unknown, depth = 0): string[] {
-    const inline = this.inlineDocumentValue(value);
-    if (inline !== undefined) return [`${"  ".repeat(depth)}${key}: ${inline}`];
-    if (value && typeof value === "object") {
-      const indent = "  ".repeat(depth);
-      const nested = this.document(value, depth);
-      return [`${indent}${key}: ${nested[0]!.slice(indent.length)}`, ...nested.slice(1)];
-    }
-    return this.labeledScalarLines(key, value, depth);
-  }
-
-  private labeledScalarLines(key: string, value: unknown, depth = 0): string[] {
-    const indent = "  ".repeat(depth);
-    const [first = "", ...rest] = String(value ?? "none").split(/\r?\n/u);
-    return [
-      `${indent}${key}: ${first}`,
-      ...rest.map((line) => `${indent}  ${line}`),
-    ];
-  }
-
-  private document(value: unknown, depth = 0): string[] {
-    if (value === null || value === undefined) return [`${"  ".repeat(depth)}none`];
-    const inline = this.inlineDocumentValue(value);
-    if (inline !== undefined) return [`${"  ".repeat(depth)}${inline}`];
-    if (Array.isArray(value)) {
-      const indent = "  ".repeat(depth);
-      return [
-        `${indent}[`,
-        ...value.flatMap((item, index) => {
-          const itemDepth = depth + 1;
-          const itemIndent = "  ".repeat(itemDepth);
-          const marker = `#${index}`;
-          const itemInline = this.inlineDocumentValue(item);
-          let lines: string[];
-          if (itemInline !== undefined) {
-            lines = [`${itemIndent}${marker}: ${itemInline}`];
-          } else if (item && typeof item === "object") {
-            const nested = this.document(item, itemDepth);
-            lines = [
-              `${itemIndent}${marker}: ${nested[0]!.slice(itemIndent.length)}`,
-              ...nested.slice(1),
-            ];
-          } else {
-            lines = this.labeledScalarLines(marker, item, itemDepth);
-          }
-          if (index < value.length - 1) lines[lines.length - 1] += ",";
-          return lines;
-        }),
-        `${indent}]`,
-      ];
-    }
-    if (typeof value === "object") {
-      const indent = "  ".repeat(depth);
-      const entries = Object.entries(value as Record<string, unknown>);
-      return [
-        `${indent}{`,
-        ...entries.flatMap(([key, item], index) => {
-          const lines = this.labeledDocumentLines(key, item, depth + 1);
-          if (index < entries.length - 1) lines[lines.length - 1] += ",";
-          return lines;
-        }),
-        `${indent}}`,
-      ];
-    }
-    return String(value)
-      .split(/\r?\n/u)
-      .map((line) => `${"  ".repeat(depth)}${line}`);
-  }
-
-  private wrapDocument(lines: string[], width: number): string[] {
+  private wrapDocument(lines: InspectorDocumentLine[], width: number): InspectorDocumentLine[] {
     return lines.flatMap((line) => {
-      const normalized = line.replaceAll("\t", "  ");
-      if (visibleWidth(normalized) <= width) return [normalized];
-      const leading = normalized.match(/^ */u)?.[0] ?? "";
-      const continuation = `${leading}  `;
-      const wrapped: string[] = [];
-      let rest = normalized.slice(leading.length);
-      let prefix = leading;
-      while (rest && visibleWidth(`${prefix}${rest}`) > width) {
-        const available = Math.max(1, width - visibleWidth(prefix));
-        const candidate = this.visiblePrefix(rest, available);
-        const minimumBreak = Math.floor(candidate.length * 0.6);
-        const preferred = Math.max(
-          candidate.lastIndexOf(" "),
-          candidate.lastIndexOf("/"),
-          candidate.lastIndexOf(","),
-        );
-        const cut = preferred >= minimumBreak ? preferred + 1 : candidate.length;
-        wrapped.push(`${prefix}${rest.slice(0, cut).trimEnd()}`);
-        rest = rest.slice(cut).trimStart();
-        prefix = continuation;
+      // Keep the existing terminal tab display policy; never alter the source value.
+      const text = line.text.replaceAll("\t", "  ");
+      const label = line.label?.replaceAll("\t", "  ");
+      if (visibleWidth(text) <= width) return [{ text, label }];
+      const leading = text.match(/^ */u)?.[0] ?? "";
+      const hanging = label === undefined ? leading : `${leading}  `;
+      const continuation = hanging.length <= width - 2 ? hanging : "";
+      const wrapped: InspectorDocumentLine[] = [];
+      const columns = visibleWidth(text);
+      let offset = 0;
+      while (offset < columns) {
+        const prefix = offset === 0 ? "" : continuation;
+        const available = width - visibleWidth(prefix);
+        // Native cell slicing keeps graphemes; retain separators instead of trimming authored spaces.
+        let part = sliceByColumn(text, offset, available, true);
+        const preferred = Math.max(part.lastIndexOf(" "), part.lastIndexOf("/"), part.lastIndexOf(","));
+        if (offset + visibleWidth(part) < columns && preferred >= Math.floor(part.length * 0.6)) {
+          part = sliceByColumn(text, offset, visibleWidth(part.slice(0, preferred + 1)), true);
+        }
+        const consumed = visibleWidth(part);
+        const labelPart = label === undefined ? "" : sliceByColumn(label, offset, consumed, true);
+        wrapped.push({ text: prefix + part, ...(labelPart ? { label: prefix + labelPart } : {}) });
+        offset += consumed;
       }
-      if (rest) wrapped.push(`${prefix}${rest}`);
       return wrapped;
     });
   }
 
-  private styleDocumentLine(line: string): string {
-    const indent = line.match(/^ */u)?.[0] ?? "";
-    const content = line.slice(indent.length);
-    if (content.endsWith(":")) {
-      return `${indent}${this.theme.fg("accent", content)}`;
-    }
-    const indexed = /^(#\d+:)(.*)$/u.exec(content);
-    if (indexed) {
-      return `${indent}${this.theme.fg("accent", indexed[1])}${this.theme.fg("text", indexed[2])}`;
-    }
-    const labeled = /^([^:]+:)(.*)$/u.exec(content);
-    if (labeled) {
-      return `${indent}${this.theme.fg("muted", labeled[1])}${this.theme.fg("text", labeled[2])}`;
-    }
-    return `${indent}${this.theme.fg(content === "none" || content === "[]" ? "muted" : "text", content)}`;
-  }
-
-  private visiblePrefix(value: string, width: number): string {
-    let consumed = 0;
-    let result = "";
-    for (const character of value) {
-      const characterWidth = visibleWidth(character);
-      if (consumed + characterWidth > width) break;
-      result += character;
-      consumed += characterWidth;
-    }
-    return result;
-  }
-
-  private renderKeyHints(): string {
+  private keyHints(...items: Array<[string, string]>): string {
     const hint = (keys: string, description: string) =>
       `${this.theme.fg("accent", keys)}${this.theme.fg("borderAccent", ` ${description}`)}`;
     const divider = this.theme.fg("borderAccent", " ─ ");
-    const hints = (...items: Array<[string, string]>) =>
-      items.map(([keys, description]) => hint(keys, description)).join(divider);
-    if (this.killConfirmation) {
-      return hints(["←→/tab", "choose"], ["enter/y", "confirm"], ["esc/n", "cancel"]);
+    return items.map(([keys, description]) => hint(keys, description)).join(divider);
+  }
+
+  private renderKeyHints(killConfirmation = false): string {
+    if (killConfirmation) {
+      return this.keyHints(["←→/tab", "choose"], ["enter", "pick"], ["y", "kill"], ["esc/n", "cancel"]);
     }
     if (this.focus === "select") {
-      return hints(["↑↓", "option"], ["enter/→", "apply"], ["←/esc", "back"]);
+      return this.keyHints(["↑↓", "option"], ["enter/→", "apply"], ["←/esc", "back"]);
     }
     if (this.focus === "detail") {
-      return hints(["↑↓/pgup/pgdn", "scroll"], ["←/esc", "back"]);
+      return this.keyHints(["↑↓/pgup/pgdn", "scroll"], ["←/esc", "back"]);
+    }
+    if (this.tab === "control" && this.focus === "document") {
+      return this.keyHints(["↑↓/pgup/pgdn", "scroll"], ["enter", "requests"], ["←/esc", "tabs"]);
+    }
+    if (this.tab === "control" && this.focus === "list") {
+      return this.keyHints(["↑↓/pgup/pgdn", "row"], ["→/enter", "YAML"], ["←/esc", "tabs"]);
+    }
+    if (this.tab === "control" && this.focus === "tabs") {
+      return this.keyHints(["←→", "tabs"], ["↓", "overview"], ["enter", "requests"], ["esc", "close"]);
     }
     if (this.focus === "document") {
-      return hints(["↑↓/pgup/pgdn", "scroll"], ["↑ at top", "tabs"], ["←/esc", "tabs"]);
+      return this.keyHints(["↑↓/pgup/pgdn", "scroll"], ["↑ at top", "tabs"], ["←/esc", "tabs"]);
     }
     if (this.focus === "list") {
-      return hints(["↑↓/pgup/pgdn", "row"], ["→/enter", "open"], ["←", "tabs"], ["esc", "close"]);
+      return this.keyHints(["↑↓/pgup/pgdn", "row"], ["→/enter", "open"], ["←", "tabs"], ["esc", "close"]);
     }
     if (this.focus === "runs") {
       const items: Array<[string, string]> = [["←→", "run"], ["↓", "tabs"], ["enter", "list"]];
       const run = this.runs()[this.runIndex];
       if (this.killRun && run?.status === "running" && run.runInstanceId) items.push(["k", "kill"]);
       items.push(["esc", "close"]);
-      return hints(...items);
+      return this.keyHints(...items);
     }
     return this.tab === "trace"
-      ? hints(["←→", "tabs"], ["↑↓", "focus"], ["enter/f", "source"], ["esc", "close"])
-      : hints(["←→", "tabs"], ["↑↓", "focus"], ["enter", "open"], ["esc", "close"]);
+      ? this.keyHints(["←→", "tabs"], ["↑↓", "focus"], ["enter/f", "source"], ["esc", "close"])
+      : this.keyHints(["←→", "tabs"], ["↑↓", "focus"], ["enter", "open"], ["esc", "close"]);
   }
 
   private statusColor(status: string): "error" | "warning" | "success" | "muted" {

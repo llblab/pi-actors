@@ -3,20 +3,23 @@
  * Zones: file-backed actor state, JSON/JSONL diagnostics, inspect safety
  * Owns best-effort JSON and JSONL parsing helpers for operator-facing state reads.
  */
-import { closeSync, fstatSync, openSync, readFileSync, readSync, } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync, readSync, } from "node:fs";
 function isEnoent(error) {
     return error.code === "ENOENT";
 }
 function diagnosticMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
-function readTextFileCapped(path, maxBytes) {
+function readTextFileCapped(path, maxBytes, strictUtf8 = false) {
     if (maxBytes === undefined)
-        return readFileSync(path, "utf8");
+        return strictUtf8 ? new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path)) : readFileSync(path, "utf8");
     const limit = Math.max(0, Math.floor(maxBytes));
-    const fd = openSync(path, "r");
+    const fd = openSync(path, strictUtf8 ? constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0) : "r");
     try {
-        const size = fstatSync(fd).size;
+        const opened = fstatSync(fd);
+        if (strictUtf8 && !opened.isFile())
+            throw new Error("bounded strict read requires a regular file");
+        const size = opened.size;
         if (size > limit) {
             throw Object.assign(new Error(`file exceeds bounded read limit (${size} > ${limit} bytes)`), { code: "EFBIG" });
         }
@@ -28,17 +31,20 @@ function readTextFileCapped(path, maxBytes) {
                 break;
             offset += bytesRead;
         }
-        return content.subarray(0, offset).toString("utf8");
+        if (strictUtf8 && offset !== size)
+            throw new Error("file ended before its bounded strict read completed");
+        const observed = content.subarray(0, offset);
+        return strictUtf8 ? new TextDecoder("utf-8", { fatal: true }).decode(observed) : observed.toString("utf8");
     }
     finally {
         closeSync(fd);
     }
 }
-export function readJsonFileResilient(path, fallback) {
+export function readJsonFileResilient(path, fallback, options = {}) {
     try {
         return {
             diagnostics: [],
-            value: JSON.parse(readFileSync(path, "utf8")),
+            value: JSON.parse(readTextFileCapped(path, options.maxBytes, options.strictUtf8)),
         };
     }
     catch (error) {

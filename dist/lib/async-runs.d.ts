@@ -7,8 +7,13 @@ import { type CurrentPolicyProvenance } from "./model-context.ts";
 import * as RunDeliveryLineage from "./run-delivery-lineage.ts";
 import * as RecipesReferences from "./recipes-references.ts";
 import { type RunArtifactDeclaration } from "./runs-artifacts.ts";
+import { type RunDescendantLaunchIntent } from "./runs-descendant-launches.ts";
+import { RUN_OUTCOME_PROTOCOL } from "./runs-outcomes.ts";
+import { type RunResultProducer } from "./runs-results.ts";
 import { type RunProcessIdentity } from "./runs-process.ts";
 import * as RuntimeIdentity from "./runtime-identity.ts";
+import { type RunSnapshotReferenceReader } from "./runs-context-exports.ts";
+import * as RunSupervision from "./run-supervision.ts";
 import * as RunsIndex from "./runs-index.ts";
 import * as RunsParentTeardown from "./runs-parent-teardown.ts";
 import { type DeliverRunControlOptions, type DeliverRunControlRequest } from "./runs-control-delivery.ts";
@@ -71,6 +76,9 @@ export type { AsyncRunStatus } from "./runs-status.ts";
 export interface AsyncRunMeta {
     argv: string[];
     createdAt: string;
+    started_at?: string;
+    supervision?: RunSupervision.RunSupervisionState;
+    supervision_provenance?: RunSupervision.ResolvedRunSupervisionPolicy["provenance"];
     cwd: string;
     launch_kind?: AsyncRunLaunchSource;
     launch_source?: AsyncRunLaunchSource;
@@ -86,6 +94,7 @@ export interface AsyncRunMeta {
     run_instance_id: string;
     state_dir: string;
     state_schema: typeof RuntimeIdentity.RUN_STATE_SCHEMA;
+    outcome_protocol?: typeof RUN_OUTCOME_PROTOCOL;
     status: AsyncRunStatus;
     tool?: string;
     template: CommandTemplateValue;
@@ -105,15 +114,43 @@ export interface AsyncRunMeta {
     singleton_recipe_id?: string;
     singleton_values?: Record<string, unknown>;
     transport_context?: Record<string, unknown>;
+    /** Launch-return observation only; never persisted Run truth or a navigation/read capability. */
+    catalog_registration?: Readonly<{
+        state: "unavailable";
+        reason: "catalog_registration_failed";
+    }>;
+    /** Original Kernel-local cause, non-enumerable on the return object and excluded from tool details/JSON. */
+    catalog_registration_error?: unknown;
 }
 export { safeRunId } from "./runs-identity.ts";
 export { resolveArtifactManifest } from "./runs-artifacts.ts";
 export type { RunArtifactDeclaration, RunArtifactManifestEntry, } from "./runs-artifacts.ts";
+export interface AsyncRunAdmissionClock {
+    readonly kind: "run_clock_origin_captured";
+    readonly visibility: "kernel_only";
+    readonly publication: "unpublished";
+    readonly work_started: false;
+    readonly identity: Readonly<{
+        run: string;
+        run_instance_id: string;
+        ownerId?: string;
+    }>;
+    readonly state_dir: string;
+    readonly clock: Readonly<RunSupervision.RunSupervisionClock>;
+    readonly origin: Readonly<RunSupervision.RunSupervisionTimeOrigin>;
+    readonly snapshot_references?: Readonly<RunSnapshotReferenceReader>;
+}
 export interface AsyncRunStartOptions {
     skillContext?: RecipesReferences.ActiveSkillRecipeContext;
+    /** Ordinary fresh launches only: synchronously retain the exact origin; this is not a published/started Run receipt. */
+    onSupervisionClockCaptured?: (event: Readonly<AsyncRunAdmissionClock>) => void;
 }
 export declare function startRun(params: AsyncRunStartParams, cwd: string, options?: AsyncRunStartOptions): AsyncRunMeta;
+/** Kernel-only prepare path: real generation creation, but no native process, workload, launch receipt, or membership authority. */
+export declare function prepareDescendantRunGeneration(parentStateDir: string, producer: RunResultProducer, params: AsyncRunStartParams, cwd: string, options?: AsyncRunStartOptions): Readonly<RunDescendantLaunchIntent>;
 export declare function getRunStatus(runOrDir: string): Record<string, unknown>;
+/** Internal inventory acquisition; direct status and lifecycle readers remain independently scalar. */
+export declare function getRunInventoryStatuses(stateDirs: readonly string[]): (Record<string, unknown> | undefined)[];
 export type { RunStateIndexEntry } from "./runs-index.ts";
 export declare function listRunStateDirs(stateRoot?: string): string[];
 export declare function rebuildRunStateIndex(stateRoot?: string): RunsIndex.RunStateIndexEntry[];

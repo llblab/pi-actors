@@ -204,7 +204,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
           },
         },
       ),
-      /Recipe source "music-player\/playback" validation failed:.*Owning Skill "music-player" is not active.*Next: inspect target=recipes view=doctor identity=music-player\/playback/s,
+      /music-player\/playback.*validation failed.*Owning Skill "music-player" is not active.*instruction: inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
     assert.equal(existsSync(join(fixture.recipeRoot, "inactive_playback.json")), false);
   } finally {

@@ -4,9 +4,54 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { globSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+
+test("Test files mirror library owners except explicit cross-domain and package contracts", () => {
+  const exceptions: Record<string, string> = {
+    "agent-journeys.test.ts": "Cross-domain public agent journeys",
+    "capability-packs-dogfood.test.ts": "Capability-pack integration",
+    "installed.scripts.test.ts": "Source and packed-package journeys",
+    "invariants.test.ts": "Architecture and repository invariants",
+    "invocation-contract.test.ts": "Cross-tool invocation contract",
+    "recipe-utils.scripts.test.ts": "Capability-owned utility scripts",
+    "registration-truth.test.ts": "Registry, activation and runtime integration",
+    "release-workflow.test.ts": "GitHub publication workflow",
+    "resource-locker.scripts.test.ts": "Capability-owned resource-locker scripts",
+    "review-swarm-dogfood.test.ts": "Cross-domain review workflow",
+    "run-kernel-dogfood.test.ts": "Public Run kernel integration",
+    "skills.test.ts": "Packaged Skill resources",
+    "validate-recipe.scripts.test.ts": "Recipe validator script",
+  };
+  const owners = new Set(readdirSync(new URL("../lib/", import.meta.url)));
+  const tests = readdirSync(new URL("./", import.meta.url)).filter(name => name.endsWith(".test.ts"));
+  const unmirrored = tests.filter(name => !owners.has(name.replace(/\.test\.ts$/, ".ts"))).sort();
+  assert.deepEqual(unmirrored, Object.keys(exceptions).sort(),
+    "Consolidate contracts in their module owner; do not add an exception for another feature/case file");
+  assert.ok(Object.values(exceptions).every(reason => reason.length > 0));
+});
+
+test("Standard validation isolates default agent state even when an operator directory is configured", async () => {
+  const config = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  for (const command of ["test", "test:preservation"]) assert.match(config.scripts[command], /--import \.\/tests\/test-environment\.mjs/);
+  assert.match(await readFile(new URL("../scripts/conformance.mjs", import.meta.url), "utf8"), /"--import",\s*"\.\/tests\/test-environment\.mjs"/);
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  const operator = join(tmpdir(), "operator-agent-must-not-be-used");
+  process.env.PI_CODING_AGENT_DIR = operator;
+  try {
+    await import(new URL("./test-environment.mjs?isolation-invariant", import.meta.url).href);
+    const isolated = process.env.PI_CODING_AGENT_DIR!;
+    assert.notEqual(isolated, operator); assert.notEqual(isolated, previous);
+    assert.ok(isolated.startsWith(join(tmpdir(), "pi-actors-test-agent-")));
+    assert.equal(statSync(isolated).isDirectory(), true);
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+  }
+});
 
 const indexSource = await readFile(
   new URL("../index.ts", import.meta.url),
@@ -119,20 +164,16 @@ test("Runtime reports recipe watcher failures", () => {
   assert.match(runtimeSource, /notifyFailure\(ctx\)/);
 });
 
-test("Session shutdown tears down exact-parent runs through the run UI runtime", () => {
+test("Session shutdown delegates captured-parent teardown through the run UI runtime", () => {
   assert.match(indexSource, /pi\.on\("session_shutdown"/);
   assert.match(indexSource, /runtime\.onSessionShutdown\(event\.reason, ctx\)/);
   assert.match(
     extensionRuntimeSource,
-    /runUiRuntime\.shutdown\(reason, ownerId, ctx\)/,
+    /runUiRuntime\.shutdown\(reason, scope\.ownerId, ctx\)/,
   );
   assert.match(
     extensionRuntimeSource,
-    /const ownerId = runOwnerIdsByContext\.get\(ctx\)/,
-  );
-  assert.match(
-    extensionRuntimeSource,
-    /if \(activeRunContext === ctx\) closeActiveSessionRuntimes\(\)/,
+    /const known = parentSessionsByContext\.get\(ctx\)/,
   );
   assert.match(runUiRuntimeSource, /AsyncRuns\.teardownRunsOwnedByParent/);
   assert.match(runUiRuntimeSource, /session_shutdown:\$\{eventReason\}/);
@@ -252,9 +293,68 @@ test("Platform guidance uses one portable FIFO and named-pipe envelope", () => {
   }
 });
 
-test("Platform-neutral validation includes protocol conformance", () => {
-  assert.match(packageJson.scripts?.validate ?? "", /npm run conformance/);
-  assert.doesNotMatch(packageJson.scripts?.validate ?? "", /npm audit/);
+test("Platform-neutral validation executes every conformance assertion once through the full test profile", async () => {
+  const validate = packageJson.scripts?.validate ?? "", fullTest = packageJson.scripts?.test ?? "";
+  assert.equal(validate.split(/\s*&&\s*/u).filter((step: string) => step === "npm test").length, 1);
+  assert.doesNotMatch(validate, /npm run conformance|npm audit/);
+  const source = readFileSync("scripts/conformance.mjs", "utf8");
+  const suitesMatch = /const conformanceSuites = (\[[\s\S]*?\]);/u.exec(source);
+  assert.ok(suitesMatch);
+  const suites: string[] = JSON.parse(suitesMatch[1].replace(/,\s*\]$/u, "]"));
+  assert.ok(suites.length > 0); assert.equal(new Set(suites).size, suites.length);
+  const profile = /process\.execPath,\s*(\[[\s\S]*?\]),\s*\{/u.exec(source);
+  assert.ok(profile);
+  const common = JSON.parse(profile[1].replace(/\.\.\.conformanceSuites,?\s*/u, "").replace(/,\s*\]$/u, "]"));
+  const argv = fullTest.split(/\s+/u);
+  assert.equal(argv[0], "node"); assert.equal(argv.at(-1), "tests/*.test.ts");
+  assert.deepEqual(argv.slice(1, -1), common, "Conformance and full tests must keep identical preload/filter/concurrency flags");
+  const discovered = globSync("*.test.ts", { cwd: "tests" }).sort();
+  assert.deepEqual(discovered, readdirSync("tests").filter(name => name.endsWith(".test.ts")).sort());
+  const allTests = new Set(discovered.map(name => "tests/" + name));
+  const shardHelperUrl = new URL("../.github/scripts/test-shards.mjs", import.meta.url);
+  const { SHARDS, TEST_FLAGS, partitionTests, parseArgs, testArgs } = await import(shardHelperUrl.href) as {
+    SHARDS: string[]; TEST_FLAGS: string[];
+    partitionTests(names: string[]): Record<string, string[]>;
+    parseArgs(args: string[]): { shard: string; list: boolean };
+    testArgs(names: string[]): string[];
+  };
+  assert.deepEqual(TEST_FLAGS, common);
+  for (const shard of SHARDS) {
+    const result = spawnSync(process.execPath, [".github/scripts/test-shards.mjs", shard, "--list"], { encoding: "utf8" });
+    assert.equal(result.status, 0); assert.equal(result.stderr, "");
+    const listing = JSON.parse(result.stdout);
+    const selected = partitionTests(discovered)[shard];
+    assert.deepEqual(listing, { shard, count: selected.length, files: selected.map(name => join("tests", name)) });
+  }
+  assert.equal(packageJson.scripts?.["test:shard"], "node .github/scripts/test-shards.mjs");
+  for (const names of [discovered, [...discovered, "a synthetic 'quoted'.test.ts", "zz-new-owner.test.ts"]]) {
+    const groups = partitionTests([...names].reverse());
+    assert.deepEqual(groups.installed, ["installed.scripts.test.ts"]);
+    const owners = names.filter(name => name !== "installed.scripts.test.ts").sort();
+    assert.deepEqual(groups["owners-a"], owners.filter((_, index) => index % 2 === 0));
+    assert.deepEqual(groups["owners-b"], owners.filter((_, index) => index % 2 === 1));
+    const combined = SHARDS.flatMap(shard => groups[shard]);
+    assert.equal(new Set(combined).size, names.length);
+    assert.deepEqual(combined.sort(), [...names].sort());
+    for (const shard of SHARDS) {
+      assert.deepEqual(testArgs(groups[shard]), [...common, ...groups[shard].map(name => join("tests", name))]);
+      assert.deepEqual(parseArgs([shard, "--list"]), { shard, list: true });
+    }
+  }
+  for (const names of [[], ["installed.scripts.test.ts"], ["a.test.ts", "b.test.ts"], [...discovered, discovered[0]], [...discovered, "nested/file.test.ts"]]) {
+    assert.throws(() => partitionTests(names));
+  }
+  for (const args of [[], ["unknown"], ["installed", "--test-name-pattern=x"], ["installed", "--list", "extra"]]) {
+    assert.throws(() => parseArgs(args));
+    const result = spawnSync(process.execPath, [".github/scripts/test-shards.mjs", ...args], { encoding: "utf8" });
+    assert.equal(result.status, 1); assert.match(result.stderr, /Usage:/); assert.equal(result.stdout, "");
+  }
+  const helper = readFileSync(".github/scripts/test-shards.mjs", "utf8");
+  assert.match(helper, /spawn\(process\.execPath, testArgs\(selected\), \{ stdio: 'inherit', shell: false \}\)/);
+  assert.match(helper, /process\.exitCode = code \?\? 1/);
+  assert.doesNotMatch(helper, /--test-shard|--test-name|process\.exit\(|\.unref\(|setTimeout/);
+  for (const suite of suites) assert.ok(allTests.has(suite), `Full validation must execute ${suite}`);
+  assert.equal(packageJson.scripts?.conformance, "node scripts/conformance.mjs", "Standalone conformance remains available");
 });
 
 test("CI runs the dependency audit once on Ubuntu", () => {
@@ -263,14 +363,38 @@ test("CI runs the dependency audit once on Ubuntu", () => {
   assert.match(validateWorkflowSource, /dependency-audit:[\s\S]*runs-on: ubuntu-latest/);
 });
 
-test("CI runs normal product validation without project-policy gates", () => {
+test("CI runs normal product validation without project-policy gates", async () => {
   assert.equal(packageJson.scripts?.["release:validate"], undefined);
-  assert.match(validateWorkflowSource, /run: npm run validate/);
+  assert.equal(packageJson.scripts?.validate, "npm run validate:preflight && npm test && npm run pack:dry");
+  assert.equal(packageJson.scripts?.["validate:preflight"], "npx tsc --noEmit && npm run recipes:qa && npm run build:check && npm run check");
+  assert.match(validateWorkflowSource, /shard: \[installed, owners-a, owners-b\]/);
+  assert.match(validateWorkflowSource, /name: Product validation \(\$\{\{ matrix\.os \}\}, \$\{\{ matrix\.shard \}\}\)/);
+  assert.match(validateWorkflowSource, /fail-fast: false/);
+  assert.match(validateWorkflowSource, /timeout-minutes: \$\{\{ matrix\.os == 'windows-latest' && 60 \|\| 20 \}\}/);
+  for (const command of ["validate:preflight", "pack:dry"]) {
+    assert.equal(validateWorkflowSource.split(`run: npm run ${command}`).length - 1, 1);
+    assert.ok(validateWorkflowSource.includes(`if: matrix.shard == 'installed'\n        run: npm run ${command}`));
+  }
+  assert.match(validateWorkflowSource, /run: npm run test:shard -- \$\{\{ matrix\.shard \}\}/);
+  assert.match(validateWorkflowSource, /PI_ACTORS_WINDOWS_BOUNDARY_TIMING: \$\{\{ matrix\.os == 'windows-latest' && '1' \|\| '0' \}\}/);
+  assert.doesNotMatch(validateWorkflowSource, /continue-on-error|always\(\)|cancel-in-progress|run: npm run validate\s*\n/);
   assert.doesNotMatch(validateWorkflowSource, /release:validate|release-gates|domain-dag/);
   assert.doesNotMatch(releaseWorkflowSource, /release:validate|release-gates|domain-dag/);
+  for (const runner of ["ubuntu-latest", "macos-latest", "windows-latest"]) assert.ok(validateWorkflowSource.includes("- " + runner), runner);
+  const installed = await readFile(new URL("./installed.scripts.test.ts", import.meta.url), "utf8");
+  const native = installed.split('test("source and packed default SDK shutdown')[1]?.split('\ntest("')[0];
+  assert.ok(native, "The actual source/npm native shutdown journey must remain in product validation");
+  assert.match(installed, /timeout: process\.platform === "win32" \? 900_000 : 300_000/);
+  const supported = native.match(/skip:\s*!\[([^\]]+)\]\.includes\(process\.platform\)/)?.[1];
+  assert.ok(supported, "Native shutdown must not be Linux-only skipped on the declared CI platforms");
+  assert.deepEqual(JSON.parse("[" + supported + "]").sort(), ["darwin", "linux", "win32"]);
 });
 
 test("CI workflows use reusable validation and Node 24 action runtimes", () => {
+  const triggers = validateWorkflowSource.match(/^on:\n([\s\S]*?)(?=^\S)/mu)?.[1];
+  assert.ok(triggers, "Validation must declare its explicit trigger block");
+  assert.deepEqual([...triggers.matchAll(/^  ([a-z_]+):/gmu)].map(match => match[1]).sort(), ["pull_request", "workflow_call"],
+    "Ordinary CI runs only on PRs; release reuse must not create standalone push/tag runs");
   assert.match(validateWorkflowSource, /^  workflow_call:$/m);
   assert.equal(validateWorkflowSource.match(/actions\/checkout@v7/g)?.length, 2);
   assert.equal(validateWorkflowSource.match(/actions\/setup-node@v7/g)?.length, 2);
@@ -376,6 +500,14 @@ test("First-party scripts use only canonical Trace and Control journals", () => 
     assert.match(source, /appendRunTraceEvent/, file);
     assert.doesNotMatch(source, directTraceWrite, file);
   }
+});
+
+test("Async runner admits and publishes natural results through the lifecycle owner", () => {
+  const script = readFileSync("scripts/async-runner.mjs", "utf8");
+  assert.match(script, /importRuntimeModule\("runs-results"\)/);
+  assert.match(script, /admitRunResultProducer\(stateDir\)/);
+  assert.match(script, /publishRunResult\(stateDir, producer,/);
+  assert.doesNotMatch(script, /(?:writeJsonAtomic|writeFileSync|appendFileSync)\(\s*resultPath/u);
 });
 
 test("Music player helper keeps player processes inside the run process group", () => {

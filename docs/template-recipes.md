@@ -37,6 +37,8 @@ JSON is the most direct form for structured composition:
 }
 ```
 
+For shell-free Windows child Pi execution, use the Node executable followed immediately by the current Pi SDK's resolved `dist/bundle/cli.js` (or unbundled `dist/cli.js`) as its first argument. This exact SDK CLI form retains managed session placement, prompt materialization, Recipe context and text-print response selection; JSON/RPC/interactive streams remain withheld. An arbitrary script named `cli.js` is not recognized, and `.cmd` wrappers are not implicitly executed through a shell.
+
 ### Markdown
 
 Markdown uses YAML frontmatter for the Recipe contract and one executable fence for `template`:
@@ -76,6 +78,8 @@ A Recipe file must not declare top-level `name`. Within a command-template graph
 ## Recipe Field Reference
 
 The following fields belong to the file-level Recipe contract. Unless noted otherwise, each field is optional.
+
+Planned, not implemented: additional root Run policy fields are specified in [Run supervision and self-contained outcomes](./run-supervision.md#exact-launch-api). They are not supported fields in the current table below.
 
 | Field | Type | Default | Contract |
 | --- | --- | --- | --- |

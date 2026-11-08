@@ -13,21 +13,32 @@ import { fileURLToPath } from "node:url";
 
 const conformanceSuites = [
   "tests/agent-journeys.test.ts",
+  "tests/file-state.test.ts",
   "tests/control.test.ts",
   "tests/runs-controls.test.ts",
+  "tests/runs-control-delivery.test.ts",
+  "tests/runs-retention.test.ts",
   "tests/runs-trace.test.ts",
+  "tests/trace-projection.test.ts",
+  "tests/session-evidence.test.ts",
+  "tests/execution-sessions.test.ts",
   "tests/observability.test.ts",
-  "tests/async-run-control.test.ts",
+  "tests/run-delivery.test.ts",
+  "tests/run-ui-runtime.test.ts",
   "tests/run-kernel-dogfood.test.ts",
   "tests/installed.scripts.test.ts",
   "tests/inspector-overlay.test.ts",
-  "tests/tools-inspect-kernel.test.ts",
+  "tests/tools-inspect.test.ts",
   "tests/recipes-discovery.test.ts",
   "tests/review-swarm-dogfood.test.ts",
   "tests/registry.test.ts",
   "tests/runtime.test.ts",
   "tests/async-runs.test.ts",
   "tests/tools.test.ts",
+  "tests/tools-response.test.ts",
+  "tests/tools-message.test.ts",
+  "tests/tools-spawn.test.ts",
+  "tests/tools-local.test.ts",
 ];
 
 function packageRoot() {
@@ -37,6 +48,7 @@ function packageRoot() {
 const result = spawnSync(
   process.execPath,
   [
+    "--import", "./tests/test-environment.mjs",
     "--experimental-strip-types",
     "--test",
     "--test-concurrency=1",

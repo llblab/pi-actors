@@ -11,6 +11,7 @@ import {
   formatFailureOutput,
   formatOutput,
   formatToolText,
+  trimToTailBytes,
   truncateTailContent,
 } from "../lib/execution-output.ts";
 
@@ -34,10 +35,27 @@ test("Failure formatter includes stderr and stdout sections", () => {
   assert.match(output.text, /stdout:\npartial/);
 });
 
-test("Tail truncation reports byte truncation", () => {
-  const truncation = truncateTailContent("x".repeat(60 * 1024));
+test("Tail truncation preserves genuine replacement characters and exact byte counts at its budget boundary", () => {
+  const tail = "\uFFFD\uFFFD" + "x".repeat(Limits.TOOL_OUTPUT_MAX_BYTES - 6);
+  const content = "prefix-" + tail;
+  const truncation = truncateTailContent(content);
+  assert.equal(truncation.content, tail);
   assert.equal(truncation.truncated, true);
-  assert.equal(truncation.outputBytes <= Limits.TOOL_OUTPUT_MAX_BYTES, true);
+  assert.equal(truncation.outputBytes, Limits.TOOL_OUTPUT_MAX_BYTES);
+  assert.equal(truncation.totalBytes, Buffer.byteLength(content));
+  assert.equal(truncation.outputLines, 1);
+  assert.equal(truncation.totalLines, 1);
+});
+
+test("Byte tails are maximal scalar-boundary UTF-8 suffixes, not replacement-character repair", () => {
+  for (const value of ["", "ASCII", "a\uFFFD", "🙂\uFFFD\uFFFDtail", "A界é🙂e\u0301\r\n\uFFFDZ"]) {
+    const points = [...value];
+    const suffixes = points.map((_, index) => points.slice(index).join("")).concat("");
+    for (let budget = 0; budget <= Buffer.byteLength(value) + 1; budget += 0.5) {
+      const expected = suffixes.find(suffix => Buffer.byteLength(suffix) <= budget);
+      assert.equal(trimToTailBytes(value, budget), expected, JSON.stringify({ value, budget }));
+    }
+  }
 });
 
 test("Output and inspect limits are centralized", () => {

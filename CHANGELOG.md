@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 0.56.1: YAML Registry Receipts
+
+- `Registry Receipts`: Successful registration/update, listing/deletion and draft-promotion replies now use bare block YAML with native lists, whole-value omissions and exact opaque scalars within the existing16KiB limit. Complete warnings retain priority. Normal callability stays Boolean; draft preserves its selected string display. Getter/coercion and partial-effect behavior, machine details, notices and saved messages stay unchanged. No input migration, automatic reload or retry is introduced.
+
 ## 0.56.0: AX, File Navigation and Runtime Safety
 
 - `AX Records`: Compact spawn/async-tool receipts, full spawn metadata and fresh attention use block YAML with opaque selected content and whole reference sequences. Metadata-only replies stay bare; bodies follow closed headers without added outer indent. Ordinary attention remains unbounded; urgent complete-message fitting keeps16KiB and later-group coverage. Other surfaces retain flat records during rollout. Source/activation contracts, machine details and saved text stay unchanged.

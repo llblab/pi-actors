@@ -4,23 +4,15 @@ Canonical open work: `BACKLOG.md`. Contracts and durable constraints live in `AG
 
 Task IDs name bounded work, not execution order. The operator authorizes autonomous selection and execution of open pi-actors work in Grow Loop: choose dependency-ready high-value cohorts across this backlog without repeated routine permission questions. Dependencies, factual acceptance and specific safety/authority boundaries remain explicit; a gated task is not completed merely because another cohort can proceed. Completing a child does not complete its checkpoint.
 
-## 1. Release 0.56.0 — external convergence
-
-Outcome: Recover the failed immutable-tag validation without silently changing release identity. [PR#137](https://github.com/llblab/pi-actors/pull/137) is merged; `v0.56.0` remains at `48cd1348730f8d4ae8b19ea52dc1fd61ae017622`, whose tree passed all eleven PR checks. The [tag-owned Release run](https://github.com/llblab/pi-actors/actions/runs/42440646237) subsequently failed Windows `owners-a` at the snapshot canonical-facts test. Passing PR checks did not replace this mandatory tag gate. The operator explicitly authorized a correction PR through `dev → main` and conditional replacement of this failed unpublished tag after fresh corrected-main CI and a complete zero-publication/consumption audit. This is not permission for an unchanged rerun, main rewrite or manual publication.
-
-### R2 — Immutable publication completion
-
-Exit: Exact intended package, immutable tag and GitHub Release converge through the existing automation. A pushed tag is not a published/verified release.
-
-- [ ] **R2.3 — Validate and deliver release recovery.** Review the controlled busy-lifetime fixture correction in `tests/run-ui-runtime.test.ts`, then obtain fresh current-head full-matrix acceptance through [PR#138](https://github.com/llblab/pi-actors/pull/138), including Windows installed compiled SDK lifecycle/numbered-history. Keep production behavior, all existing assertions, deadlines, cleanup guards, versions and workflows unchanged. Preserve the existing tag until corrected protected-main CI and the immediately refreshed complete zero-publication/consumption audit pass. Then use only the operator-authorized exact leased failed-unpublished-tag replacement protocol; never rewrite main, rerun unchanged work for luck or publish manually.
-- [ ] **R2.4 — Verify external convergence.** After owning automation succeeds, confirm exact npm version/gitHead/package, immutable tag, published stable GitHub Release/latest and successful owning workflow identities. Visibility retries verify existing state; they never republish. Remove this release checkpoint only after both R2 exit conditions pass.
-
 ## Next bounded work
 
-- **Release:** Review and deliver the SDK busy-lifetime fixture correction through PR#138, obtain fresh current-head Windows/full-matrix acceptance, then finish the guarded R2 audit/tag-replacement/publication sequence. Do not move the existing tag early or compete with publication.
-- **Local implementation:** F1.3b is the next concrete projection cohort; success/list/delete/draft receipts still need migration. F1.3c, F1.3s and F1.4i remain separate attributable owners, not proof that all AX output already conforms. N1.4c also permits unrouted deterministic preparation within its reviewed contract.
+- **Separate remaining owners:** F1.3c, F1.3s and F1.4i remain separate attributable owners, not proof that all AX output already conforms. N1.4c also permits unrouted deterministic preparation within its reviewed contract.
 - **Explicit gates:** U1 requires authorized loaded-host observation/reload; N1.2p needs actual Windows profile evidence, N1.3 an asset-distribution decision, and N1.6 separate activation admission. Original-clock/native-scope, macOS research and composition decisions retain their own B/C/T gates. Existing release permission does not adopt them.
 - **Evidence reuse:** Reuse the accepted three-OS SOURCE/PACKED quit witnesses for B2.4; extend only the missing descendants/triggers/same-ID/crash cases. N1.9 stays a gated unresolved risk, not an instruction to repeat the completed ownership inquiry.
+
+## Release 0.56.1
+
+- [ ] **R3 — Complete the guarded 0.56.1 release.** Accept the exact dev-to-main PR through all nine product shards and the dependency audit; merge normally, tag the verified main commit once, then verify tag-owned validation, npm identity/package and GitHub Release convergence. Publication belongs only to release.yml; no tag replacement, manual publish, history rewrite or unrelated activation. Close only after external release evidence matches.
 
 ## 2. Uniform runtime presentation — adopted, rollout pending
 
@@ -30,7 +22,6 @@ Outcome: JSON structured inputs, block-YAML runtime-output metadata and unchange
 
 Exit: New owned runtime projections use YAML without pseudo-records or serialized JSON objects: bare when metadata-only, `---`-delimited headers only when a separate text body follows. Literal content, meaning, source/privacy bounds and saved messages remain intact. Service-carrier adoption has its own evidence gate; do not delete current framing to simulate completion.
 
-- [ ] **F1.3b — Migrate successful registry projections.** Convert registration/update, listing/deletion and draft-promotion receipts with their distinct selected facts, safety-warning priority and whole-value bounds. A separate selected body alone requires a delimited header. Preserve post-effect/coercion/transaction/callability truth and unchanged details. Verify: registry success/list/delete/draft owners and source/packed parity.
 - [ ] **F1.3c — Migrate registry-owned refusals.** Convert only locally authored mode/name/source/template/draft/transaction refusal projections. Keep original getter/coercion/fault order, private causes, opaque advice and whole-source limits; do not wrap host/dependency exceptions or infer no effects/retry. Verify: corresponding registry guard/failure properties and applicable packed witnesses.
 - [ ] **F1.3s — Separate synchronous tool metadata from selected output.** Migrate owned usage/guard/exit-label facts without parsing or reserializing stdout/stderr/report bodies or JSON invocation examples. Keep existing trim/tail/loss basis, exact executor failures and the pre-dispatch repair cutoff. Metadata plus selected text uses a delimited header; metadata-only output stays bare. Verify: tools-local/execution-output/spawn guards and packed dispatch-failure owners.
 - [ ] **F1.4 — Migrate inspection, Control and runtime notices.** Render selected structured/verbose metadata as YAML, including generated JSON Schema views; retain literal sources. Reconcile emitter execution/depth ceilings with actual caller budgets without narrowing public allowances. Preserve error/cause, request/delivery/handling/effects/closure distinctions and recipient fences. Verify: affected Control/inspect/runtime/notification owner properties.

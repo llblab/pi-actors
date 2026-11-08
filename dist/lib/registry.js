@@ -21,18 +21,18 @@ function textContent(text) {
     return { type: "text", text };
 }
 function registryListText(rows) {
-    const coverage = (shown, reason) => "\n- registered_tools_coverage:" +
-        (reason ? `\n  - reason: ${reason}` : "") + `\n  - shown: ${shown}\n  - omitted: ${rows.length - shown}\n  - total: ${rows.length}`;
+    const budget = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1;
+    const coverage = (shown, reason) => ({ ...(reason ? { reason } : {}), shown, omitted: rows.length - shown, total: rows.length });
     const malformed = rows.some(row => !row.isWellFormed());
     if (!malformed) {
-        // Rows already contain the old compiler-owned bullet and selected key coercion.
-        const body = rows.length ? "- registered_tools:\n" + rows.map(row => "  " + row.replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ")).join("\n")
-            : "- registered_tools: none";
-        const complete = body + coverage(rows.length);
-        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
-            return complete;
+        // Remove only the compiler prefix after the original key coercion and join.
+        const complete = ToolsResponse.renderYamlMetadata({ registered_tools: rows.map(row => row.slice(2)), registered_tools_coverage: coverage(rows.length) }, budget);
+        if (complete.state === "available")
+            return complete.text;
     }
-    return `- registered_tools: [${malformed ? "unavailable" : "omitted"}]` + coverage(0, malformed ? "malformed_selected_text" : "response_too_large");
+    const fallback = ToolsResponse.renderYamlMetadata({ registered_tools: malformed ? "[unavailable]" : "[omitted]", registered_tools_coverage: coverage(0, malformed ? "malformed_selected_text" : "response_too_large") }, budget);
+    // Fixed keys/reasons and finite array-length counts are bounded far below budget.
+    return fallback.text;
 }
 function listTools(deps) {
     const names = [...deps.getTools().keys()].sort();
@@ -84,13 +84,20 @@ function registrationNextActions(tool, source, callableNow) {
 }
 /** Read-time text only: callers supply the original post-activation selections, not live ports. */
 function registrationReceiptText(data) {
-    const field = ToolsResponse.formatMarkdownField;
-    const omission = (key, count, malformed) => `- ${key}: [${malformed ? "unavailable" : "omitted"}]\n- ${key}_omission:\n  - reason: ${malformed ? "malformed_selected_text" : "response_too_large"}\n  - shown: 0\n  - omitted: ${count}\n  - total: ${count}`;
-    const part = (full, omitted) => ({ full, selected: Buffer.byteLength(full) <= Buffer.byteLength(omitted) ? full : omitted });
-    const scalar = (key, value, literal = false) => {
+    const budget = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1;
+    const renderPart = (value) => ToolsResponse.renderYamlMetadata(value, budget);
+    const omission = (key, count, malformed) => ({
+        [key]: malformed ? "[unavailable]" : "[omitted]",
+        [key + "_omission"]: { reason: malformed ? "malformed_selected_text" : "response_too_large", shown: 0, omitted: count, total: count },
+    });
+    const part = (full, omitted) => {
+        const complete = renderPart(full), fallback = renderPart(omitted);
+        return { full, selected: complete.state === "available" && fallback.state === "available" && Buffer.byteLength(complete.text) <= Buffer.byteLength(fallback.text) ? full : omitted };
+    };
+    const scalar = (key, value) => {
         const wellFormed = value.isWellFormed();
         const omitted = omission(key, 1, !wellFormed);
-        return part(wellFormed ? field(key, literal ? ToolsResponse.formatLiteralBlock(value) : value) : omitted, omitted);
+        return part(wellFormed ? { [key]: value } : omitted, omitted);
     };
     const sequence = (key, values) => {
         const rows = [];
@@ -101,34 +108,34 @@ function registrationReceiptText(data) {
                 malformed = true;
                 break;
             }
-            rows.push("  - " + value.replaceAll(/\r\n|\r|\n/gu, newline => newline + "    "));
+            rows.push(value);
         }
         const omitted = omission(key, values.length, malformed);
-        return part(malformed ? omitted : rows.length ? `- ${key}:\n${rows.join("\n")}` : field(key, "none"), omitted);
+        return part(malformed ? omitted : { [key]: rows }, omitted);
     };
     const tool = scalar("tool", data.tool);
-    const source = scalar("source", data.source, data.source !== "template");
+    const source = scalar("source", data.source);
     const required = sequence("required_args", data.required), optional = sequence("optional_args", data.optional);
     const warnings = data.warnings.length ? sequence("warnings", data.warnings) : undefined;
     const nextWellFormed = data.next.isWellFormed();
     const omittedNext = omission("next_action", 1, !nextWellFormed);
     // This producer knows only its existing status hint; invocation advice stays opaque.
     const next = part(nextWellFormed
-        ? data.callable ? field("instruction", data.next) : ToolsResponse.formatInspectNextAction(`tool:${data.tool}`, "status")
+        ? data.callable ? { instruction: data.next } : { next: { tool: "inspect", target: `tool:${data.tool}`, view: "status" } }
         : omittedNext, omittedNext);
-    const render = () => [tool.selected, field("result", data.result), source.selected, field("callable_now", data.callable ? "true" : "false"),
-        ...(data.boundary === undefined ? [] : [field("activation_boundary", data.boundary)]), required.selected, optional.selected,
-        ...(warnings ? [warnings.selected] : []), next.selected].join("\n");
+    const render = () => renderPart({ ...tool.selected, result: data.result, ...source.selected, callable_now: data.callable,
+        ...(data.boundary === undefined ? {} : { activation_boundary: data.boundary }), ...required.selected, ...optional.selected,
+        ...(warnings ? warnings.selected : {}), ...next.selected });
     // Preserve complete safety notes before large argument lists; all seeds are monotone.
     for (const current of [...(warnings ? [warnings] : []), tool, source, next, required, optional]) {
         if (current.selected === current.full)
             continue;
         const previous = current.selected;
         current.selected = current.full;
-        if (Buffer.byteLength(render()) > Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+        if (render().state !== "available")
             current.selected = previous;
     }
-    return render();
+    return render().text;
 }
 function registryNoticeText(kind, name) {
     const report = { activated: "Tool activated", promoted: "Promoted draft recipe", deleted: "Deleted tool" }[kind];
@@ -244,28 +251,31 @@ function assertDraftPath(deps, draft) {
     return path;
 }
 function draftReceiptText(result, tool, callable, next) {
-    const field = ToolsResponse.formatMarkdownField;
+    const budget = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1;
+    const renderPart = (value) => ToolsResponse.renderYamlMetadata(value, budget);
     const part = (key, value, rendered) => {
         const wellFormed = value.isWellFormed();
-        const omitted = `- ${key}: [${wellFormed ? "omitted" : "unavailable"}]\n- ${key}_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
+        const omitted = { [key]: wellFormed ? "[omitted]" : "[unavailable]",
+            [key + "_omission"]: { reason: wellFormed ? "response_too_large" : "malformed_selected_text", shown: 0, omitted: 1, total: 1 } };
         const full = wellFormed ? rendered : omitted;
-        return { full, selected: Buffer.byteLength(full) <= Buffer.byteLength(omitted) ? full : omitted };
+        const complete = renderPart(full), fallback = renderPart(omitted);
+        return { full, selected: complete.state === "available" && fallback.state === "available" && Buffer.byteLength(complete.text) <= Buffer.byteLength(fallback.text) ? full : omitted };
     };
-    const identity = part("tool", tool, field("tool", tool));
-    const flag = part("callable_now", callable, field("callable_now", callable));
+    const identity = part("tool", tool, { tool });
+    const flag = part("callable_now", callable, { callable_now: callable });
     // Only this producer's exact canonical read-only status hint is typed, never body advice.
     const status = /^inspect target=(tool:[a-z][a-z0-9_]{0,63}) view=status$/u.exec(next);
-    const hint = part("next_action", next, status ? ToolsResponse.formatInspectNextAction(status[1], "status") : field("instruction", next));
-    const render = () => [identity.selected, field("result", result), field("source", "draft"), flag.selected, hint.selected].join("\n");
+    const hint = part("next_action", next, status ? { next: { tool: "inspect", target: status[1], view: "status" } } : { instruction: next });
+    const render = () => renderPart({ ...identity.selected, result, source: "draft", ...flag.selected, ...hint.selected });
     for (const current of [identity, flag, hint]) {
         if (current.selected === current.full)
             continue;
         const previous = current.selected;
         current.selected = current.full;
-        if (Buffer.byteLength(render()) > Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
+        if (render().state !== "available")
             current.selected = previous;
     }
-    return render();
+    return render().text;
 }
 function duplicateRegistrationText(value) {
     const render = (selected) => "- field: name\n" + selected + "\n- result: Tool already registered.\n- instruction: Use update=true to overwrite.";
@@ -358,17 +368,17 @@ function persistToolRecipe(deps, name, recipe) {
     return path;
 }
 function registryDeletionText(name, result) {
-    const field = ToolsResponse.formatMarkdownField;
-    const facts = [field("result", result), ...(result === "deleted"
-            ? [field("instruction", "Reload to remove it from the complete registry.")] : [])];
-    const render = (identity) => [identity, ...facts].join("\n");
+    const budget = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1;
+    const facts = { result, ...(result === "deleted" ? { instruction: "Reload to remove it from the complete registry." } : {}) };
     const wellFormed = name.isWellFormed();
     if (wellFormed) {
-        const complete = render(field("tool", name));
-        if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1)
-            return complete;
+        const complete = ToolsResponse.renderYamlMetadata({ tool: name, ...facts }, budget);
+        if (complete.state === "available")
+            return complete.text;
     }
-    return render(`- tool: [${wellFormed ? "omitted" : "unavailable"}]\n- tool_omission:\n  - reason: ${wellFormed ? "response_too_large" : "malformed_selected_text"}\n  - shown: 0\n  - omitted: 1\n  - total: 1`);
+    const fallback = ToolsResponse.renderYamlMetadata({ tool: wellFormed ? "[omitted]" : "[unavailable]", tool_omission: { reason: wellFormed ? "response_too_large" : "malformed_selected_text", shown: 0, omitted: 1, total: 1 }, ...facts }, budget);
+    // Fixed metadata is well formed and bounded far below budget.
+    return fallback.text;
 }
 function deleteTool(name, ctx, deps) {
     const tools = deps.getTools();

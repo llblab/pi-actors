@@ -413,19 +413,31 @@ function canonicalFixture(t: TestContext, stateName = "state") {
 
 // Canonical-data fixtures exercise readonly classification, not producer/native admission capabilities.
 test("Canonical facts share natural classification, retain exact references and never fabricate terminal timing", t => {
-  const f = canonicalFixture(t);
-  for (const code of [0, 7]) {
-    f.result.code = code; f.publish(); writeFileSync(join(f.stateDir, "stop-claim.json"), "malformed later stop");
-    const observed = f.read(); assert.equal(observed.state, "available"); if (observed.state !== "available") return;
-    assert.deepEqual(observed.facts, { identity, captured_at: capturedAt, lifecycle: { status: code === 0 ? "done" : "failed" },
-      timing: { basis: "unproven" }, cwd: f.meta.cwd, context_index: { identity, path: f.indexPath } });
-    for (const value of [observed, observed.facts, observed.facts.identity, observed.facts.lifecycle, observed.facts.timing, observed.facts.context_index]) assert.equal(Object.isFrozen(value), true);
-    assert.doesNotMatch(JSON.stringify(observed), /body-not-public|private-metadata-value|ownership_token|elapsed_ms|stopped|pid/);
-    assert.deepEqual(projectRunSnapshot(identity, observed.facts), { state: "unavailable", reason: "timing_unproven" });
-    assert.equal(observed.unchanged(), true);
-    writeFileSync(f.resultPath, JSON.stringify({ ...f.result, code: code === 0 ? 7 : 0 }));
-    assert.equal(observed.unchanged(), false); assert.equal(observed.facts.lifecycle.status, code === 0 ? "done" : "failed");
-  }
+  const f = canonicalFixture(t); const lstat = fs.lstatSync, stamp = lstat(f.resultPath, { bigint: true });
+  // Keep result timestamps in one filesystem tick; invalidation must not depend on clock precision.
+  fs.lstatSync = ((path: fs.PathLike, ...args: unknown[]) => {
+    const value = Reflect.apply(lstat, fs, [path, ...args]) as fs.Stats | fs.BigIntStats;
+    if (String(path) === f.resultPath && "mtimeNs" in value) Object.assign(value, { mtimeNs: stamp.mtimeNs, ctimeNs: stamp.ctimeNs });
+    return value;
+  }) as typeof fs.lstatSync;
+  syncBuiltinESMExports();
+  try {
+    for (const code of [0, 7]) {
+      f.result.code = code; f.publish(); writeFileSync(join(f.stateDir, "stop-claim.json"), "malformed later stop");
+      const observed = f.read(); assert.equal(observed.state, "available"); if (observed.state !== "available") return;
+      assert.deepEqual(observed.facts, { identity, captured_at: capturedAt, lifecycle: { status: code === 0 ? "done" : "failed" },
+        timing: { basis: "unproven" }, cwd: f.meta.cwd, context_index: { identity, path: f.indexPath } });
+      for (const value of [observed, observed.facts, observed.facts.identity, observed.facts.lifecycle, observed.facts.timing, observed.facts.context_index]) assert.equal(Object.isFrozen(value), true);
+      assert.doesNotMatch(JSON.stringify(observed), /body-not-public|private-metadata-value|ownership_token|elapsed_ms|stopped|pid/);
+      assert.deepEqual(projectRunSnapshot(identity, observed.facts), { state: "unavailable", reason: "timing_unproven" });
+      assert.equal(observed.unchanged(), true);
+      const previousSize = lstat(f.resultPath, { bigint: true }).size;
+      // Valid JSON whitespace makes the changed outcome visible to the metadata-only fence in that same tick.
+      writeFileSync(f.resultPath, JSON.stringify({ ...f.result, code: code === 0 ? 7 : 0 }) + "\n");
+      assert.notEqual(lstat(f.resultPath, { bigint: true }).size, previousSize);
+      assert.equal(observed.unchanged(), false); assert.equal(observed.facts.lifecycle.status, code === 0 ? "done" : "failed");
+    }
+  } finally { fs.lstatSync = lstat; syncBuiltinESMExports(); }
 });
 
 test("Legacy, active, captured, malformed or foreign outcomes remain lifecycle-unproven despite PID and actor flags", t => {

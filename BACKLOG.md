@@ -10,10 +10,6 @@ Task IDs name bounded work, not execution order. The operator authorizes autonom
 - **Explicit gates:** U1 requires authorized loaded-host observation/reload; N1.2p needs actual Windows profile evidence, N1.3 an asset-distribution decision, and N1.6 separate activation admission. Original-clock/native-scope, macOS research and composition decisions retain their own B/C/T gates. Existing release permission does not adopt them.
 - **Evidence reuse:** Reuse the accepted three-OS SOURCE/PACKED quit witnesses for B2.4; extend only the missing descendants/triggers/same-ID/crash cases. N1.9 stays a gated unresolved risk, not an instruction to repeat the completed ownership inquiry.
 
-## Release 0.56.1
-
-- [ ] **R3 — Complete the guarded 0.56.1 release.** Accept the exact dev-to-main PR through all nine product shards and the dependency audit; merge normally, tag the verified main commit once, then verify tag-owned validation, npm identity/package and GitHub Release convergence. Publication belongs only to release.yml; no tag replacement, manual publish, history rewrite or unrelated activation. Close only after external release evidence matches.
-
 ## 2. Uniform runtime presentation — adopted, rollout pending
 
 Outcome: JSON structured inputs, block-YAML runtime-output metadata and unchanged selected authored text/Markdown, as defined by [the AX contract](docs/agent-experience.md#json-input-yaml-output-opaque-content). This includes tool/spawn receipts, not only Actor results. Rollout remains partial; this checkpoint does not imply uniform emitter conformance, native continuation, package publication or a loaded-host change. Existing machine/input/source/history contracts remain separate.

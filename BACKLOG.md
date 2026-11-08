@@ -4,20 +4,8 @@ Canonical open work: `BACKLOG.md`. Contracts and durable constraints live in `AG
 
 Task IDs name bounded work, not execution order. The operator authorizes autonomous selection and execution of open pi-actors work in Grow Loop: choose dependency-ready high-value cohorts across this backlog without repeated routine permission questions. Dependencies, factual acceptance and specific safety/authority boundaries remain explicit; a gated task is not completed merely because another cohort can proceed. Completing a child does not complete its checkpoint.
 
-## 1. Release 0.56.0 — external convergence
-
-Outcome: Recover the failed immutable-tag validation without silently changing release identity. [PR#137](https://github.com/llblab/pi-actors/pull/137) is merged; `v0.56.0` remains at `48cd1348730f8d4ae8b19ea52dc1fd61ae017622`, whose tree passed all eleven PR checks. The [tag-owned Release run](https://github.com/llblab/pi-actors/actions/runs/42440646237) subsequently failed Windows `owners-a` at the snapshot canonical-facts test. Passing PR checks did not replace this mandatory tag gate. The operator explicitly authorized a correction PR through `dev → main` and conditional replacement of this failed unpublished tag after fresh corrected-main CI and a complete zero-publication/consumption audit. This is not permission for an unchanged rerun, main rewrite or manual publication.
-
-### R2 — Immutable publication completion
-
-Exit: Exact intended package, immutable tag and GitHub Release converge through the existing automation. A pushed tag is not a published/verified release.
-
-- [ ] **R2.3 — Validate and deliver release recovery.** Review the controlled busy-lifetime fixture correction in `tests/run-ui-runtime.test.ts`, then obtain fresh current-head full-matrix acceptance through [PR#138](https://github.com/llblab/pi-actors/pull/138), including Windows installed compiled SDK lifecycle/numbered-history. Keep production behavior, all existing assertions, deadlines, cleanup guards, versions and workflows unchanged. Preserve the existing tag until corrected protected-main CI and the immediately refreshed complete zero-publication/consumption audit pass. Then use only the operator-authorized exact leased failed-unpublished-tag replacement protocol; never rewrite main, rerun unchanged work for luck or publish manually.
-- [ ] **R2.4 — Verify external convergence.** After owning automation succeeds, confirm exact npm version/gitHead/package, immutable tag, published stable GitHub Release/latest and successful owning workflow identities. Visibility retries verify existing state; they never republish. Remove this release checkpoint only after both R2 exit conditions pass.
-
 ## Next bounded work
 
-- **Release:** Review and deliver the SDK busy-lifetime fixture correction through PR#138, obtain fresh current-head Windows/full-matrix acceptance, then finish the guarded R2 audit/tag-replacement/publication sequence. Do not move the existing tag early or compete with publication.
 - **Local implementation:** F1.3b is the next concrete projection cohort; success/list/delete/draft receipts still need migration. F1.3c, F1.3s and F1.4i remain separate attributable owners, not proof that all AX output already conforms. N1.4c also permits unrouted deterministic preparation within its reviewed contract.
 - **Explicit gates:** U1 requires authorized loaded-host observation/reload; N1.2p needs actual Windows profile evidence, N1.3 an asset-distribution decision, and N1.6 separate activation admission. Original-clock/native-scope, macOS research and composition decisions retain their own B/C/T gates. Existing release permission does not adopt them.
 - **Evidence reuse:** Reuse the accepted three-OS SOURCE/PACKED quit witnesses for B2.4; extend only the missing descendants/triggers/same-ID/crash cases. N1.9 stays a gated unresolved risk, not an instruction to repeat the completed ownership inquiry.

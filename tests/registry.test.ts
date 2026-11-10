@@ -31,12 +31,39 @@ function registryYaml(text: string): any {
   return document.toJS();
 }
 
+/** Bare block-YAML registry document text including the public adapter's one leading LF. */
+function registryDocumentText(value: Record<string, unknown>): string | undefined {
+  const rendered = renderYamlMetadata(value, Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1);
+  return rendered.state === "available" ? "\n" + rendered.text : undefined;
+}
+
+/** Expected selected registry document; any unrenderable projection fails the assertion. */
+function registryDocument(value: Record<string, unknown>): string {
+  const text = registryDocumentText(value);
+  assert.ok(text, "Expected a renderable registry document");
+  return text;
+}
+
+/** Largest single-byte payload whose complete document still fits the model bound. */
+function exactFit(document: (payload: string) => Record<string, unknown>): number {
+  let low = 0, high = 16384;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const text = registryDocumentText(document("x".repeat(middle)));
+    if (text !== undefined && Buffer.byteLength(text) <= 16384) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
 import type { RegisteredTool } from "../lib/config.ts";
 import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
 import { createActiveSkillRecipeContext, RUNTIME_OWNED_RECIPE_INPUT_NAMES } from "../lib/recipes-references.ts";
+import * as Limits from "../lib/limits.ts";
 import { executeRegisterTool } from "../lib/registry.ts";
 import { createRegisterToolDefinition } from "../lib/tools-register.ts";
 import { createAutoToolsRuntime } from "../lib/runtime.ts";
+import { renderYamlMetadata } from "../lib/tools-response.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -153,7 +180,8 @@ test("AX registry notices preserve selected-name coercion and native literal wra
   }
 });
 
-const transactionMessage = (stage: string, generation: string, summary: string, error: string) => "\n- result: Tool registration transaction failed.\n- stage: " + stage + "\n- resolution_generation: " + generation + "\n- active_skills_summary: " + summary + "\n- error: " + error;
+const transactionMessage = (stage: string, generation: string, summary: string, error: string) =>
+  registryDocument({ result: "Tool registration transaction failed.", stage, resolution_generation: generation, active_skills_summary: summary, error });
 
 async function captureTransactionText(h: Awaited<ReturnType<typeof createHarness>>, generation: string, summary: string[], message: string, failAt?: string, cause?: unknown) {
   const events: string[] = [], NativeError = Error, lower = new NativeError("PRIVATE_ORIGINAL", { cause: "PRIVATE_CAUSE" }); let skills = 0, rejected = false, error: unknown;
@@ -199,7 +227,7 @@ test("AX transaction failure text preserves real stage effects, restoration and 
     }); assert.equal(existsSync(join(h.root, "admission_tx.json")), false);
     await mkdir(h.root, { recursive: true }); const blocker = join(h.root, "not-directory"); await writeFile(blocker, "BLOCKER"); let roots = 0;
     await assert.rejects(executeRegisterTool({ name: "persist_tx", description: "Description", template: "echo" }, {}, { ...h.deps, getRecipeResolutionContext: () => context, get recipeRoot() { return ++roots === 4 ? blocker : h.root; } }), (error: unknown) => {
-      assert.ok(error instanceof Error); assert.match(error.message, /- stage: persist\n/u); assert.match(error.message, /ENOTDIR|EEXIST/u); return true;
+      assert.ok(error instanceof Error); assert.match(error.message, /\nstage: "persist"\n/u); assert.match(error.message, /ENOTDIR|EEXIST/u); return true;
     }); assert.equal(roots, 4); assert.equal(await readFile(blocker, "utf8"), "BLOCKER");
     for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const position of ["delete", "reactivate", "setActive"]) {
       h.tools.clear(); await rm(join(h.root, "cleanup_tx.json"), { force: true });
@@ -232,7 +260,7 @@ test("AX transaction post-cleanup template keeps coercion order, raw faults and 
   const order = ["skills:1", "skills:2", "activate", "setActive", "Error_lookup", "generation", "generation_coerce", "summary", "Error_lookup", "message", "error_coerce"];
   try {
     const result = await captureTransactionText(h, "RESOLUTION", ["zeta", "alpha, beta"], "  message\n"); assert.ok(result.error instanceof Error);
-    assert.equal(result.error.message, "\n- result: Tool registration transaction failed.\n- stage: runtime_activation\n- resolution_generation: RESOLUTION\n- active_skills_summary: alpha, beta, zeta\n- error:\n    message\n  "); assert.deepEqual(result.events, order);
+    assert.equal(result.error.message, transactionMessage("runtime_activation", "RESOLUTION", "alpha, beta, zeta", "  message\n")); assert.deepEqual(result.events, order);
     assert.deepEqual(Object.keys(result.error), []); assert.equal(Object.hasOwn(result.error, "cause"), false);
     for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["generation", "generation_coerce", "summary", "message", "error_coerce"]) {
       const fault = await captureTransactionText(h, "RESOLUTION", [], "message", stage, cause); assert.equal(fault.error, cause); assert.deepEqual(fault.events, order.slice(0, order.indexOf(stage) + 1));
@@ -242,11 +270,11 @@ test("AX transaction post-cleanup template keeps coercion order, raw faults and 
       const values = ["RESOLUTION", "<none>", "message"], slot = ["resolution_generation", "active_skills_summary", "error"].indexOf(key);
       const minimal = [...values]; minimal[slot] = "x"; const width = 16384 - Buffer.byteLength(transactionMessage("runtime_activation", minimal[0], minimal[1], minimal[2])) + 1;
       const exact = [...values]; exact[slot] = "x".repeat(width); assert.equal(await read(exact[0], exact[1], exact[2]), transactionMessage("runtime_activation", exact[0], exact[1], exact[2]));
-      const overflow = [...values]; overflow[slot] = "x".repeat(width + 1); assert.match(await read(overflow[0], overflow[1], overflow[2]), new RegExp("- " + key + ": \\[omitted\\]\\n- " + key + "_omission:"));
-      const malformed = [...values]; malformed[slot] = "bad\ud800"; assert.match(await read(malformed[0], malformed[1], malformed[2]), new RegExp("- " + key + ": \\[unavailable\\]\\n- " + key + "_omission:\\n  - reason: malformed_selected_text"));
+      const overflow = [...values]; overflow[slot] = "x".repeat(width + 1); assert.match(await read(overflow[0], overflow[1], overflow[2]), new RegExp("\\n" + key + ': "\\[omitted\\]"\\n' + key + '_omission:'));
+      const malformed = [...values]; malformed[slot] = "bad\ud800"; assert.match(await read(malformed[0], malformed[1], malformed[2]), new RegExp("\\n" + key + ': "\\[unavailable\\]"\\n' + key + '_omission:\\n  reason: "malformed_selected_text"'));
       const unit = "界👩‍💻é", unicode = [...values]; unicode[slot] = unit.repeat(Math.floor(width / Buffer.byteLength(unit))) + "x".repeat(width % Buffer.byteLength(unit)); assert.equal(Buffer.byteLength(await read(unicode[0], unicode[1], unicode[2])), 16384);
     }
-    for (const value of [undefined, "primitive", Symbol("selected")]) await assert.rejects(executeRegisterTool({ name: "primitive_tx", description: "Description", template: "echo" }, {}, { ...h.deps, registerRuntimeTool(): never { throw value; } }), (error: unknown) => { assert.ok(error instanceof Error); assert.ok(error.message.endsWith("- error: " + String(value))); return true; });
+    for (const value of [undefined, "primitive", Symbol("selected")]) await assert.rejects(executeRegisterTool({ name: "primitive_tx", description: "Description", template: "echo" }, {}, { ...h.deps, registerRuntimeTool(): never { throw value; } }), (error: unknown) => { assert.ok(error instanceof Error); assert.ok(error.message.endsWith('error: ' + JSON.stringify(String(value)) + '\n')); return true; });
     let rejected = false;
     try { await executeRegisterTool({ name: "unprintable_tx", description: "Description", template: "echo" }, {}, { ...h.deps, registerRuntimeTool(): never { throw { toString(): never { throw token; } }; } }); }
     catch (error) { rejected = true; assert.equal(error, token); }
@@ -318,7 +346,9 @@ async function captureRawDraftFailure(h: Awaited<ReturnType<typeof createHarness
   assert.equal(rejected, true); assert.equal(await readFile(draft, "utf8"), "null"); return { error, events };
 }
 
-const draftInvalidHeader = "\n- field: draft\n- result: Draft recipe is invalid.";
+const draftInvalidHeader = registryDocument({ field: "draft", result: "Draft recipe is invalid." });
+const draftInvalid = (key: "reason" | "diagnostics_summary", value: string) =>
+  registryDocument({ field: "draft", result: "Draft recipe is invalid.", [key]: value });
 
 test("AX draft raw refusal preserves two reads, reason presence and raw faults", async () => {
   const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce secondary fault"); } });
@@ -326,7 +356,7 @@ test("AX draft raw refusal preserves two reads, reason presence and raw faults",
   try {
     for (const reason of [undefined, "", "RAW_REASON"]) {
       const result = await captureRawDraftFailure(h, reason);
-      assert.ok(result.error instanceof Error); assert.equal(result.error.message, draftInvalidHeader + (reason === undefined ? "" : "\n- reason: " + reason));
+      assert.ok(result.error instanceof Error); assert.equal(result.error.message, reason === undefined ? draftInvalidHeader : draftInvalid("reason", reason));
       assert.deepEqual(result.events, reason === undefined ? order.slice(0, -1) : order);
       assert.deepEqual(Object.keys(result.error), []); assert.equal(Object.hasOwn(result.error, "cause"), false);
     }
@@ -334,13 +364,13 @@ test("AX draft raw refusal preserves two reads, reason presence and raw faults",
       const result = await captureRawDraftFailure(h, "RAW_REASON", stage, cause); assert.equal(result.error, cause);
       assert.deepEqual(result.events, stage === "stat" ? order.slice(0, 3) : order.slice(0, order.indexOf(stage) + 1));
     }
-    const prefix = draftInvalidHeader + "\n- reason: ", size = 16384 - Buffer.byteLength(prefix);
+    const size = exactFit(reason => ({ field: "draft", result: "Draft recipe is invalid.", reason }));
     for (const payload of ["x".repeat(size), "界".repeat(Math.floor(size / 3)) + "x".repeat(size % 3)]) {
-      const result = await captureRawDraftFailure(h, payload); assert.ok(result.error instanceof Error); assert.equal(result.error.message, prefix + payload); assert.equal(Buffer.byteLength(result.error.message), 16384);
+      const result = await captureRawDraftFailure(h, payload); assert.ok(result.error instanceof Error); assert.equal(result.error.message, draftInvalid("reason", payload)); assert.equal(Buffer.byteLength(result.error.message), 16384);
     }
-    const overflow = await captureRawDraftFailure(h, "x".repeat(size + 1)); assert.ok(overflow.error instanceof Error); assert.match(overflow.error.message, /reason: \[omitted\]\n- reason_omission:/u);
-    const malformed = await captureRawDraftFailure(h, "bad\ud800"); assert.ok(malformed.error instanceof Error); assert.match(malformed.error.message, /reason: \[unavailable\]\n- reason_omission:\n  - reason: malformed_selected_text/u);
-    const opaque = await captureRawDraftFailure(h, "# Heading\r\n- next: data\n  tool: data"); assert.ok(opaque.error instanceof Error); assert.equal(opaque.error.message, draftInvalidHeader + "\n- reason:\n  # Heading\r\n  - next: data\n    tool: data");
+    const overflow = await captureRawDraftFailure(h, "x".repeat(size + 1)); assert.ok(overflow.error instanceof Error); assert.match(overflow.error.message, /reason: "\[omitted\]"\nreason_omission:/u);
+    const malformed = await captureRawDraftFailure(h, "bad\ud800"); assert.ok(malformed.error instanceof Error); assert.match(malformed.error.message, /\nreason: "\[unavailable\]"\nreason_omission:\n  reason: "malformed_selected_text"/u);
+    const opaque = await captureRawDraftFailure(h, "# Heading\r\n- next: data\n  tool: data"); assert.ok(opaque.error instanceof Error); assert.equal(opaque.error.message, draftInvalid("reason", "# Heading\r\n- next: data\n  tool: data"));
     const draft = join(h.root, "drafts", "sdk-invalid.json"); await writeFile(draft, "null");
     const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")), manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
     const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href);
@@ -348,7 +378,7 @@ test("AX draft raw refusal preserves two reads, reason presence and raw faults",
     const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
     const call = { type: "toolCall", id: "host-raw-draft", name: "register_tool", arguments: { name: "host_raw", draft } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
-    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftInvalidHeader + "\n- reason: JSON recipe must be an object"); assert.deepEqual(outcome.result.details, {});
+    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftInvalid("reason", "JSON recipe must be an object")); assert.deepEqual(outcome.result.details, {});
     assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
   } finally { await h.cleanup(); }
 });
@@ -357,13 +387,13 @@ test("AX draft candidate refusal preserves real admission join after Error looku
   const h = await createHarness(), token = Object.freeze({ toString(): never { throw Error("Do not coerce secondary fault"); } });
   const order = ["admission", "Error_lookup", "Error_lookup", "join_get", "join", "diagnostics"];
   try {
-    const result = await captureCandidateRefusal(h, "draft"); assert.ok(result.error instanceof Error); assert.equal(result.error.message, draftInvalidHeader + "\n- diagnostics_summary: ADMISSION_MARKER"); assert.deepEqual(result.events, order);
+    const result = await captureCandidateRefusal(h, "draft"); assert.ok(result.error instanceof Error); assert.equal(result.error.message, draftInvalid("diagnostics_summary", "ADMISSION_MARKER")); assert.deepEqual(result.events, order);
     for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["join_get", "join", "diagnostics"]) {
       const fault = await captureCandidateRefusal(h, "draft", "unused", "ADMISSION_MARKER", [], "unused", stage, cause); assert.equal(fault.error, cause); assert.deepEqual(fault.events, order.slice(0, order.indexOf(stage) + 1));
     }
     const original = "界".repeat(5000), bounded = original.slice(0, 4095) + "…";
-    const capped = await captureCandidateRefusal(h, "draft", "unused", original); assert.ok(capped.error instanceof Error); assert.equal(capped.error.message, draftInvalidHeader + "\n- diagnostics_summary: " + bounded); assert.equal(capped.bounded, bounded);
-    const malformed = await captureCandidateRefusal(h, "draft", "unused", "x".repeat(4094) + "😀tail"); assert.ok(malformed.error instanceof Error); assert.match(malformed.error.message, /diagnostics_summary: \[unavailable\]\n- diagnostics_summary_omission:/u);
+    const capped = await captureCandidateRefusal(h, "draft", "unused", original); assert.ok(capped.error instanceof Error); assert.equal(capped.error.message, draftInvalid("diagnostics_summary", bounded)); assert.equal(capped.bounded, bounded);
+    const malformed = await captureCandidateRefusal(h, "draft", "unused", "x".repeat(4094) + "😀tail"); assert.ok(malformed.error instanceof Error); assert.match(malformed.error.message, /\ndiagnostics_summary: "\[unavailable\]"\ndiagnostics_summary_omission:/u);
     const draft = join(h.root, "drafts", "sdk-candidate.json"); await writeFile(draft, JSON.stringify({ description: "Description", template: "echo" }));
     const marker = "SDK_DRAFT_ADMISSION", context = { cwd: h.root, generation: "PRIVATE_GENERATION", sessionId: "PRIVATE_SESSION", get activeSkills(): never { throw new Error(marker); } };
     const definition = createRegisterToolDefinition({ ...h.deps, getRecipeResolutionContext: () => context });
@@ -372,15 +402,15 @@ test("AX draft candidate refusal preserves real admission join after Error looku
     const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
     const call = { type: "toolCall", id: "host-draft-admission", name: "register_tool", arguments: { name: "host_candidate", draft } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
-    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftInvalidHeader + "\n- diagnostics_summary: " + marker); assert.deepEqual(outcome.result.details, {});
+    assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftInvalid("diagnostics_summary", marker)); assert.deepEqual(outcome.result.details, {});
     assert.equal(existsSync(join(h.root, "candidate_error.json")), false); assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
   } finally { await h.cleanup(); }
 });
 
 const candidateMessage = (diagnostics: string, source?: string, summary = "<none>", instruction = "inspect target=recipes view=doctor identity=alpha/task") =>
-  "\n- field: recipe" + (source === undefined ? "" : "\n- source:\n  ```text\n  " + source + "\n  ```") +
-  "\n- result: " + (source === undefined ? "Tool recipe validation failed." : "Recipe source validation failed.") +
-  "\n- diagnostics_summary: " + diagnostics + (source === undefined ? "" : "\n- active_skills_summary: " + summary + "\n- instruction: " + instruction);
+  registryDocument({ field: "recipe", ...(source === undefined ? {} : { source }),
+    result: source === undefined ? "Tool recipe validation failed." : "Recipe source validation failed.",
+    diagnostics_summary: diagnostics, ...(source === undefined ? {} : { active_skills_summary: summary, instruction }) });
 
 for (const branch of ["source", "recipe"] as const) test(`AX candidate admission ${branch} refusal preserves real admission and branch evidence`, async () => {
   const h = await createHarness();
@@ -434,26 +464,28 @@ test("AX candidate refusal preserves legacy diagnostic cap and whole-field respo
     assert.deepEqual(await read("alpha/task", original, "<none>", "invalid", "recipe"), { text: candidateMessage(capped), bounded: capped });
     const malformed = "x".repeat(4094) + "😀tail";
     const unavailable = await read("alpha/task", malformed, "<none>", "invalid", "recipe");
-    assert.equal(unavailable.bounded.isWellFormed(), false); assert.match(unavailable.text, /diagnostics_summary: \[unavailable\]\n- diagnostics_summary_omission:\n  - reason: malformed_selected_text/u);
+    assert.equal(unavailable.bounded.isWellFormed(), false); assert.match(unavailable.text, /\ndiagnostics_summary: "\[unavailable\]"\ndiagnostics_summary_omission:\n  reason: "malformed_selected_text"/u);
     const hint = "inspect target=recipes view=doctor";
     for (const key of ["source", "active_skills_summary"]) {
       const base = candidateMessage("ADMISSION_MARKER", key === "source" ? "x" : "short", key === "active_skills_summary" ? "x" : "<none>", hint);
       const width = 16384 - Buffer.byteLength(base) + 1;
       const source = key === "source" ? "x".repeat(width) : "short", summary = key === "active_skills_summary" ? "x".repeat(width) : "<none>";
       assert.equal((await read(source, "ADMISSION_MARKER", summary)).text, candidateMessage("ADMISSION_MARKER", source, summary, hint));
-      assert.match((await read(key === "source" ? source + "x" : source, "ADMISSION_MARKER", key === "active_skills_summary" ? summary + "x" : summary)).text, new RegExp("- " + key + ": \\[omitted\\]\\n- " + key + "_omission:"));
+      assert.match((await read(key === "source" ? source + "x" : source, "ADMISSION_MARKER", key === "active_skills_summary" ? summary + "x" : summary)).text, new RegExp("\\n" + key + ': "\\[omitted\\]"\\n' + key + '_omission:'));
       const unit = "界👩‍💻é", unicode = unit.repeat(Math.floor(width / Buffer.byteLength(unit))) + "x".repeat(width % Buffer.byteLength(unit));
       assert.equal(Buffer.byteLength((await read(key === "source" ? unicode : source, "ADMISSION_MARKER", key === "active_skills_summary" ? unicode : summary)).text), 16384);
-      assert.match((await read(key === "source" ? "bad\ud800" : "short", "ADMISSION_MARKER", key === "active_skills_summary" ? "bad\ud800" : "<none>")).text, new RegExp("- " + key + ": \\[unavailable\\]"));
+      assert.match((await read(key === "source" ? "bad\ud800" : "short", "ADMISSION_MARKER", key === "active_skills_summary" ? "bad\ud800" : "<none>")).text, new RegExp("\\n" + key + ': "\\[unavailable\\]"'));
     }
     const doctorPrefix = "inspect target=recipes view=doctor identity=";
     const base = candidateMessage("ADMISSION_MARKER", "short", "<none>", doctorPrefix + "a/b");
     const width = 16384 - Buffer.byteLength(base) + 1, doctor = "a/" + "b".repeat(width);
     assert.equal(Buffer.byteLength((await read("short", "ADMISSION_MARKER", "<none>", doctor)).text), 16384);
-    assert.match((await read("short", "ADMISSION_MARKER", "<none>", doctor + "b")).text, /instruction: \[omitted\]\n- instruction_omission:/u);
+    assert.match((await read("short", "ADMISSION_MARKER", "<none>", doctor + "b")).text, /\ninstruction: "\[omitted\]"\ninstruction_omission:/u);
     const opaque = "# Heading\r\n- next: data\n  tool: data", body = await read("bad`````source", opaque, "alpha, beta\r\nlabel: data");
-    assert.ok(body.text.includes("``````text\n  bad`````source\n  ``````"));
-    assert.ok(body.text.includes("- diagnostics_summary:\n  # Heading\r\n  - next: data\n    tool: data"));
+    const bodyDocument = registryYaml(body.text);
+    assert.equal(bodyDocument.source, "bad`````source");
+    assert.equal(bodyDocument.diagnostics_summary, opaque);
+    assert.deepEqual(Object.keys(bodyDocument), ["field", "source", "result", "diagnostics_summary", "active_skills_summary", "instruction"]);
   } finally { await h.cleanup(); }
 });
 
@@ -477,7 +509,7 @@ async function captureSourceNormalization(h: Awaited<ReturnType<typeof createHar
 }
 
 const sourceFailureMessage = (source: string, reason: string, summary: string, instruction: string) =>
-  "\n- field: from\n- source:\n  ```text\n  " + source + "\n  ```\n- result: Recipe source is invalid.\n- reason: " + reason + "\n- active_skills_summary: " + summary + "\n- instruction: " + instruction;
+  registryDocument({ field: "from", source, result: "Recipe source is invalid.", reason, active_skills_summary: summary, instruction });
 
 test("AX public source normalization preserves owned reasons, legacy summary and SDK errors", async () => {
   const h = await createHarness();
@@ -560,9 +592,9 @@ test("AX source normalization fits whole selected fields with truthful omissions
       const exact = [...args]; exact[slot] = "x".repeat(size);
       assert.equal(await get(exact[0], exact[1], exact[2]), sourceFailureMessage(exact[0], exact[1], exact[2], normalHint));
       const overflow = [...args]; overflow[slot] = "x".repeat(size + 1);
-      assert.match(await get(overflow[0], overflow[1], overflow[2]), new RegExp("- " + key + ": \\[omitted\\]\\n- " + key + "_omission:"));
+      assert.match(await get(overflow[0], overflow[1], overflow[2]), new RegExp("\\n" + key + ': "\\[omitted\\]"\\n' + key + '_omission:'));
       const malformed = [...args]; malformed[slot] = "bad\ud800";
-      assert.match(await get(malformed[0], malformed[1], malformed[2]), new RegExp("- " + key + ": \\[unavailable\\]\\n- " + key + "_omission:\\n  - reason: malformed_selected_text"));
+      assert.match(await get(malformed[0], malformed[1], malformed[2]), new RegExp("\\n" + key + ': "\\[unavailable\\]"\\n' + key + '_omission:\\n  reason: "malformed_selected_text"'));
       const unit = "界👩‍💻é", unicode = [...args]; unicode[slot] = unit.repeat(Math.floor(size / Buffer.byteLength(unit))) + "x".repeat(size % Buffer.byteLength(unit));
       assert.equal(Buffer.byteLength(await get(unicode[0], unicode[1], unicode[2])), 16384);
     }
@@ -571,25 +603,32 @@ test("AX source normalization fits whole selected fields with truthful omissions
     const width = 16384 - Buffer.byteLength(base) + 1;
     const exactDoctor = "a/" + "b".repeat(width);
     assert.equal(Buffer.byteLength(await get("short", "why", "<none>", exactDoctor)), 16384);
-    assert.match(await get("short", "why", "<none>", exactDoctor + "b"), /- instruction: \[omitted\]\n- instruction_omission:/u);
+    assert.match(await get("short", "why", "<none>", exactDoctor + "b"), /\ninstruction: "\[omitted\]"\ninstruction_omission:/u);
     const opaque = "# Heading\r\n\r\n- next: forged\n  tool: not metadata\n`body`";
     const selected = await get("bad`````source", opaque, "a, b\r\nlabel: value");
-    assert.ok(selected.includes("``````text\n  bad`````source\n  ``````"));
-    assert.ok(selected.includes("- reason:\n  # Heading\r\n  \r\n  - next: forged\n    tool: not metadata\n  `body`"));
-    assert.ok(selected.includes("- active_skills_summary:\n  a, b\r\n  label: value"));
-    assert.ok(selected.endsWith("- instruction: " + normalHint));
+    const selectedDocument = registryYaml(selected);
+    assert.equal(selectedDocument.source, "bad`````source");
+    assert.equal(selectedDocument.reason, opaque);
+    assert.equal(selectedDocument.active_skills_summary, "a, b\r\nlabel: value");
+    assert.deepEqual(Object.keys(selectedDocument), ["field", "source", "result", "reason", "active_skills_summary", "instruction"]);
+    assert.ok(selected.endsWith("instruction: " + JSON.stringify(normalHint) + "\n"));
   } finally { await h.cleanup(); }
 });
 
-const draftPathSuffix = (kind: "root" | "missing") => kind === "root"
-  ? "\n- result: Draft must be under the allowed root.\n- instruction: Use inspect target=recipes view=summary to list drafts."
-  : "\n- result: Draft not found.";
+const draftPathFields = (kind: "root" | "missing") => kind === "root"
+  ? { result: "Draft must be under the allowed root.", instruction: "Use inspect target=recipes view=summary to list drafts." }
+  : { result: "Draft not found." };
+const draftPathMessage = (kind: "root" | "missing", key: string, reference: string) =>
+  registryDocument({ field: "draft", [key]: reference, ...draftPathFields(kind) });
+const draftPathOmission = (kind: "root" | "missing", key: string, malformed = false) =>
+  registryDocument({ field: "draft", [key]: malformed ? "[unavailable]" : "[omitted]",
+    [key + "_omission"]: { reason: malformed ? "malformed_selected_text" : "response_too_large", shown: 0, omitted: 1, total: 1 },
+    ...draftPathFields(kind) });
 
 for (const kind of ["root", "missing"] as const) test(`AX draft path ${kind} refusal preserves selected literal and whole-reference bounds`, async () => {
   const h = await createHarness(), key = kind === "root" ? "allowed_root" : "path";
-  const suffix = draftPathSuffix(kind), prefix = "\n- field: draft\n- " + key + ":\n  ```text\n  ";
-  const tail = "\n  ```" + suffix;
   const ref = (payload: string) => kind === "root" ? join(h.root, payload, "drafts") : join(h.root, "drafts", payload);
+  const expected = (reference: string) => draftPathMessage(kind, key, reference);
   const capture = async (reference: string, caller?: string) => {
     let roots = 0, rejected = false, result: unknown;
     try { await executeRegisterTool({ name: "draft_path", draft: kind === "root" ? caller ?? join(h.root, "FORBIDDEN_CALLER") : reference }, {}, { ...h.deps,
@@ -605,23 +644,21 @@ for (const kind of ["root", "missing"] as const) test(`AX draft path ${kind} ref
     assert.doesNotMatch(result.message, /FORBIDDEN_CALLER|- next:|not applied|no effects|callable_now|exists: true/u); return result.message;
   };
   try {
-    const plain = ref("short"); assert.equal(await capture(plain), prefix + plain + tail);
+    const plain = ref("short"); assert.equal(await capture(plain), expected(plain));
     if (kind === "root") {
-      assert.equal(await capture(plain, plain), prefix + plain + tail, "Equality still refuses");
-      assert.equal(await capture(plain, join(plain, "..prefix")), prefix + plain + tail, "Original dot-prefix refusal is not repaired into a new containment rule");
+      assert.equal(await capture(plain, plain), expected(plain), "Equality still refuses");
+      assert.equal(await capture(plain, join(plain, "..prefix")), expected(plain), "Original dot-prefix refusal is not repaired into a new containment rule");
     }
     const quoted = ref("literal`````界\r\nnext: data");
-    const formatted = await capture(quoted);
-    assert.ok(formatted.includes("- " + key + ":\n  ``````text\n  " + quoted.replaceAll(/\r\n|\r|\n/gu, newline => newline + "  ") + "\n  ``````"));
-    const fixed = Buffer.byteLength(ref("x")) - 1;
-    const allowance = 16384 - Buffer.byteLength(prefix + tail) - fixed;
+    assert.equal(await capture(quoted), expected(quoted));
+    const allowance = exactFit(payload => ({ field: "draft", [key]: ref(payload), ...draftPathFields(kind) }));
     const exact = ref("x".repeat(allowance));
-    assert.equal(await capture(exact), prefix + exact + tail); assert.equal(Buffer.byteLength(prefix + exact + tail), 16384);
-    const omitted = "\n- field: draft\n- " + key + ": [omitted]\n- " + key + "_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix;
+    assert.equal(await capture(exact), expected(exact)); assert.equal(Buffer.byteLength(expected(exact)), 16384);
+    const omitted = draftPathOmission(kind, key);
     assert.equal(await capture(ref("x".repeat(allowance + 1))), omitted);
     const unit = "界👩‍💻é", payload = unit.repeat(Math.floor(allowance / Buffer.byteLength(unit))) + "x".repeat(allowance % Buffer.byteLength(unit));
-    assert.equal(Buffer.byteLength(await capture(ref(payload))), 16384); assert.equal(await capture(ref(payload + "界")), omitted);
-    assert.equal(await capture(ref("bad\ud800")), "\n- field: draft\n- " + key + ": [unavailable]\n- " + key + "_omission:\n  - reason: malformed_selected_text\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix);
+    assert.ok(Buffer.byteLength(await capture(ref(payload))) <= 16384); assert.equal(await capture(ref(payload + "界")), omitted);
+    assert.equal(await capture(ref("bad\ud800")), draftPathOmission(kind, key, true));
     assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
   } finally { await h.cleanup(); }
 });
@@ -665,13 +702,14 @@ test("AX draft path refusals preserve root and draft observations, raw faults an
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
       const call = { type: "toolCall", id: "host-draft-path", name: "register_tool", arguments: { name: "host_path", draft } };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
-      assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, "\n- field: draft\n- " + key + ":\n  ```text\n  " + reference + "\n  ```" + draftPathSuffix(kind)); assert.deepEqual(outcome.result.details, {});
+      assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftPathMessage(kind, key, reference)); assert.deepEqual(outcome.result.details, {});
     }
     assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
   } finally { await h.cleanup(); }
 });
 
-const runtimeDefaultText = (key: string) => "\n- field: defaults\n- key: " + key + "\n- result: Tool defaults cannot set runtime-owned input.\n- instruction: remove that default and retry register_tool; the runtime supplies it.";
+const runtimeDefaultText = (key: string) => registryDocument({ field: "defaults", key,
+  result: "Tool defaults cannot set runtime-owned input.", instruction: "remove that default and retry register_tool; the runtime supplies it." });
 
 test("AX runtime-owned default refusal preserves finite first-key selection and copy order without values", async () => {
   const h = await createHarness(), draft = join(h.root, "drafts", "runtime-key.json");
@@ -751,10 +789,10 @@ test("AX runtime-owned default guard keeps late-copy faults, delegation conditio
 });
 
 const authoredGuardText = {
-  defaults: "\n- field: defaults\n- result: Tool defaults must be an object.",
-  description: "\n- field: description\n- result: Tool description is required for command-template registration.",
-  null: "\n- field: template\n- result: Tool template cannot be null here.",
-  required: "\n- field: template\n- result: Tool template is required.",
+  defaults: registryDocument({ field: "defaults", result: "Tool defaults must be an object." }),
+  description: registryDocument({ field: "description", result: "Tool description is required for command-template registration." }),
+  null: registryDocument({ field: "template", result: "Tool template cannot be null here." }),
+  required: registryDocument({ field: "template", result: "Tool template is required." }),
 };
 
 for (const kind of ["defaults", "description", "null", "required"] as const) test(`AX authored guard ${kind} preserves authoring stages without body echo`, async () => {
@@ -826,7 +864,7 @@ test("AX authored constants preserve Schema and observation faults plus SDK phas
     const { runToolCall } = await import(new URL(entry, pathToFileURL(coreManifest)).href);
     const definition = createRegisterToolDefinition(h.deps);
     for (const [params, isError, expectedCalls, pattern] of [
-      [{ name: "host_author", template: "echo", description: "" }, true, 1, /- field: description\n- result: Tool description is required/u],
+      [{ name: "host_author", template: "echo", description: "" }, true, 1, /\nfield: "description"\nresult: "Tool description is required/u],
       [{ name: "host_author", template: "echo", description: "Description", defaults: false }, true, 0, /Validation failed for tool "register_tool":/u],
       [{ name: "host_author", template: null }, false, 1, /result: "not found"/u],
     ] as const) {
@@ -842,9 +880,10 @@ test("AX authored constants preserve Schema and observation faults plus SDK phas
 });
 
 const templateShapeText = {
-  nested: "\n- field: template\n- result: Nested Recipe-shaped templates are not a register_tool source mode.\n- instruction: retry with from=<skill>/<recipe> and defaults={...}.",
-  empty: "\n- field: template\n- result: Tool template sequence is empty.",
-  type: "\n- field: template\n- result: unsupported template type\n- supported_types:\n  - string\n  - object\n  - sequence",
+  nested: registryDocument({ field: "template", result: "Nested Recipe-shaped templates are not a register_tool source mode.",
+    instruction: "retry with from=<skill>/<recipe> and defaults={...}." }),
+  empty: registryDocument({ field: "template", result: "Tool template sequence is empty." }),
+  type: registryDocument({ field: "template", result: "unsupported template type", supported_types: ["string", "object", "sequence"] }),
 };
 
 for (const kind of ["nested", "empty", "type"] as const) test(`AX template shape ${kind} refusal preserves both helper call paths without source echo`, async () => {
@@ -916,10 +955,10 @@ test("AX template shape guards preserve accessor and expansion faults, special v
       const result = await executeRegisterTool({ name: "absent_shape", template: value }, {}, { ...h.deps, getToolNameBlocker(): never { throw Error("Deletion precedes blocker"); } });
       assert.match(result.content[0].text, /result: "not found"/u);
     }
-    for (const [value, expected] of [[null, "- field: template\n- result: Tool template cannot be null here."], [undefined, "- field: template\n- result: Tool template is required."]] as const) {
+    for (const [value, expected] of [[null, registryDocument({ field: "template", result: "Tool template cannot be null here." })], [undefined, registryDocument({ field: "template", result: "Tool template is required." })]] as const) {
       let reads = 0;
       await assert.rejects(executeRegisterTool({ name: "late_shape", description: "Description", get template() { return ++reads === 1 ? "echo" : value; } }, {}, h.deps), (error: unknown) => {
-        assert.ok(error instanceof Error); assert.equal(error.message, "\n" + expected); return true;
+        assert.ok(error instanceof Error); assert.equal(error.message, expected); return true;
       }); assert.equal(reads, 2);
     }
     const unsupported = Object.assign(function privateBody() {}, { toString(): never { throw Error("No unsupported-value coercion"); } });
@@ -948,8 +987,8 @@ async function checkDuplicateRegistrationGuard(kind: "ordinary" | "draft") {
   const target = join(h.root, "smoke.json"), draft = join(h.root, "drafts", "candidate.json");
   const cfg: RegisteredTool = Object.freeze({ name: "smoke", description: "Existing", template: "echo prior", args: [], defaults: {}, async: false });
   const before = "PRIVATE_INVALID_TARGET", draftBytes = "PRIVATE_DRAFT_MUST_NOT_BE_READ";
-  const suffix = "\n- result: Tool already registered.\n- instruction: Use update=true to overwrite.";
-  const expected = "\n- field: name\n- value: smoke" + suffix;
+  const duplicateFields = { result: "Tool already registered.", instruction: "Use update=true to overwrite." };
+  const expected = registryDocument({ field: "name", value: "smoke", ...duplicateFields });
   try {
     await mkdir(kind === "draft" ? dirname(draft) : h.root, { recursive: true });
     if (kind === "draft") await writeFile(draft, draftBytes);
@@ -1008,12 +1047,13 @@ async function checkDuplicateRegistrationGuard(kind: "ordinary" | "draft") {
       assert.equal(rejected, true); assert.equal(conversions, 5, "Two normalizations, lock/target paths and original display conversion"); return result;
     };
     const message = async (value: string) => { const error = await capture(value); assert.ok(error instanceof Error); assert.ok(error.message.isWellFormed()); assert.ok(Buffer.byteLength(error.message) <= 16384); return error.message; };
-    const prefix = "\n- field: name\n- value: ", count = 16384 - Buffer.byteLength(prefix + suffix);
-    assert.equal(await message("x".repeat(count)), prefix + "x".repeat(count) + suffix);
-    assert.equal(await message("x".repeat(count + 1)), "\n- field: name\n- value: [omitted]\n- value_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix);
+    const count = exactFit(value => ({ field: "name", value, ...duplicateFields }));
+    assert.equal(await message("x".repeat(count)), registryDocument({ field: "name", value: "x".repeat(count), ...duplicateFields }));
+    assert.equal(await message("x".repeat(count + 1)), registryDocument({ field: "name", value: "[omitted]",
+      value_omission: { reason: "response_too_large", shown: 0, omitted: 1, total: 1 }, ...duplicateFields }));
     const unit = "界👩‍💻é", unicode = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "x".repeat(count % Buffer.byteLength(unit));
-    assert.equal(Buffer.byteLength(await message(unicode)), 16384); assert.match(await message(unicode + "界"), /value: \[omitted\]/u);
-    assert.match(await message("bad\ud800"), /value: \[unavailable\]\n- value_omission:\n  - reason: malformed_selected_text/u);
+    assert.ok(Buffer.byteLength(await message(unicode)) <= 16384); assert.match(await message(unicode + "界"), /value: "\[omitted\]"/u);
+    assert.match(await message("bad\ud800"), /value: "\[unavailable\]"\nvalue_omission:\n  reason: "malformed_selected_text"/u);
     for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) assert.equal(await capture("unused", true, cause), cause);
     assert.ok(await capture(Symbol("native template refusal")) instanceof TypeError);
     const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
@@ -1049,9 +1089,9 @@ test("AX ordinary registration name and missing-source guards preserve stage obs
       const params = new Proxy({ name: mode === "invalid" ? "@@@" : mode === "reserved" ? "BASH" : "fresh" }, {
         get(target, key, receiver) { reads.push(String(key)); if (["description", "defaults"].includes(String(key))) throw Error("Do not read undisplayed caller body"); return Reflect.get(target, key, receiver); },
       });
-      const expected = mode === "invalid" ? "\n- field: name\n- result: Invalid tool name."
-        : mode === "reserved" ? "\n- field: name\n- value: bash\n- result: Reserved tool name."
-        : "\n- result: New registration requires exactly one source mode.\n- source_modes:\n  - from\n  - template\n  - draft\n- instruction: retry register_tool with one source field.";
+      const expected = mode === "invalid" ? registryDocument({ field: "name", result: "Invalid tool name." })
+        : mode === "reserved" ? registryDocument({ field: "name", value: "bash", result: "Reserved tool name." })
+        : registryDocument({ result: "New registration requires exactly one source mode.", source_modes: ["from", "template", "draft"], instruction: "retry register_tool with one source field." });
       await assert.rejects(executeRegisterTool(params, {}, {
         ...h.deps,
         reservedToolNames: new Reserved(["bash"]),
@@ -1116,25 +1156,25 @@ test("AX ordinary registration guard projection preserves unowned faults, scalar
       assert.equal(coercions, 4, "Original two normalizations, lock path and final display conversion remain");
       assert.ok(message); assert.ok(message.isWellFormed()); assert.ok(Buffer.byteLength(message) <= 16384); return message;
     };
-    const prefix = "\n- field: name\n", suffix = "\n- result: Reserved tool name.";
-    const count = 16384 - Buffer.byteLength(prefix + "- value: " + suffix);
-    assert.equal(await capture("x".repeat(count)), prefix + "- value: " + "x".repeat(count) + suffix);
-    assert.equal(await capture("x".repeat(count + 1)), prefix + "- value: [omitted]\n- value_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix);
+    const count = exactFit(value => ({ field: "name", value, result: "Reserved tool name." }));
+    assert.equal(await capture("x".repeat(count)), registryDocument({ field: "name", value: "x".repeat(count), result: "Reserved tool name." }));
+    assert.equal(await capture("x".repeat(count + 1)), registryDocument({ field: "name", value: "[omitted]",
+      value_omission: { reason: "response_too_large", shown: 0, omitted: 1, total: 1 }, result: "Reserved tool name." }));
     const unit = "界👩‍💻é", unicode = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "x".repeat(count % Buffer.byteLength(unit));
-    assert.equal(Buffer.byteLength(await capture(unicode)), 16384);
-    assert.match(await capture(unicode + "界"), /value: \[omitted\]/u);
-    assert.match(await capture("bad\ud800"), /value: \[unavailable\]\n- value_omission:\n  - reason: malformed_selected_text/u);
+    assert.ok(Buffer.byteLength(await capture(unicode)) <= 16384);
+    assert.match(await capture(unicode + "界"), /value: "\[omitted\]"/u);
+    assert.match(await capture("bad\ud800"), /value: "\[unavailable\]"\nvalue_omission:\n  reason: "malformed_selected_text"/u);
     const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
     const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
     const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
     const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
     const definition = createRegisterToolDefinition(h.deps);
     for (const [params, isError, callsExpected, pattern] of [
-      [{ name: "@@@" }, true, 1, /- field: name\n- result: Invalid tool name./u],
-      [{ name: "BASH" }, true, 1, /- value: bash\n- result: Reserved tool name./u],
-      [{ name: "host_fresh" }, true, 1, /- result: New registration requires exactly one source mode./u],
+      [{ name: "@@@" }, true, 1, /\nfield: "name"\nresult: "Invalid tool name."/u],
+      [{ name: "BASH" }, true, 1, /\nvalue: "bash"\nresult: "Reserved tool name."/u],
+      [{ name: "host_fresh" }, true, 1, /\nresult: "New registration requires exactly one source mode."/u],
       [{ name: "" }, false, 1, /registered_tools:\n  \[\]/u],
-      [{ name: 7 }, true, 1, /- result: New registration requires exactly one source mode./u],
+      [{ name: 7 }, true, 1, /\nresult: "New registration requires exactly one source mode."/u],
       [{ name: {} }, true, 0, /Validation failed for tool "register_tool":/u],
     ] as const) {
       let calls = 0, receivedName: unknown;
@@ -1152,10 +1192,15 @@ test("AX ordinary registration guard projection preserves unowned faults, scalar
 test("AX registry source-mode guard constants preserve descriptor and getter order without source echo", async () => {
   const h = await createHarness();
   const expected = {
-    values: "\n- field: values\n- result: register_tool values was removed.\n- replacement_fields:\n  - defaults\n  - from\n- instruction: retry register_tool with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition.",
-    from: "\n- field: from\n- result: Tool from must be a non-empty Recipe reference.\n- reference_forms:\n  - <skill>/<recipe>\n  - explicit .json path\n  - explicit .md path\n- instruction: retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path.",
-    mixed: "\n- result: Use exactly one register_tool source mode.\n- source_modes:\n  - from\n  - template\n  - draft\n- instruction: remove the extra source fields and retry register_tool.",
-    inherited: "\n- field: from\n- result: register_tool from inherits args and async behavior.\n- inherited_fields:\n  - args\n  - async\n- instruction: retry register_tool with from and optional defaults only; omit args and async.",
+    values: registryDocument({ field: "values", result: "register_tool values was removed.", replacement_fields: ["defaults", "from"],
+      instruction: "retry register_tool with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition." }),
+    from: registryDocument({ field: "from", result: "Tool from must be a non-empty Recipe reference.",
+      reference_forms: ["<skill>/<recipe>", "explicit .json path", "explicit .md path"],
+      instruction: "retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path." }),
+    mixed: registryDocument({ result: "Use exactly one register_tool source mode.", source_modes: ["from", "template", "draft"],
+      instruction: "remove the extra source fields and retry register_tool." }),
+    inherited: registryDocument({ field: "from", result: "register_tool from inherits args and async behavior.", inherited_fields: ["args", "async"],
+      instruction: "retry register_tool with from and optional defaults only; omit args and async." }),
   };
   try {
     for (const named of [false, true]) for (const mode of ["values", "from", "from_empty", "mixed", "args", "async", "both"] as const) {
@@ -1216,10 +1261,10 @@ test("AX registry source-mode refusals keep unowned observation faults and host 
       [{ values: { caller: "data" } }, true, false, /Validation failed for tool "register_tool":/u],
       [{ from: {} }, true, false, /Validation failed for tool "register_tool":/u],
       [{ from: 7 }, false, true, /registered_tools:\n  \[\]/u],
-      [{ from: "" }, true, true, /- field: from\n- result: Tool from must be a non-empty Recipe reference./u],
-      [{ from: "PRIVATE_SOURCE", template: "echo" }, true, true, /- result: Use exactly one register_tool source mode./u],
-      [{ from: "PRIVATE_SOURCE", args: "x" }, true, true, /- inherited_fields:\n  - args\n  - async/u],
-      [{ from: "PRIVATE_SOURCE", async: true }, true, true, /- inherited_fields:\n  - args\n  - async/u],
+      [{ from: "" }, true, true, /\nfield: "from"\nresult: "Tool from must be a non-empty Recipe reference."/u],
+      [{ from: "PRIVATE_SOURCE", template: "echo" }, true, true, /\nresult: "Use exactly one register_tool source mode."/u],
+      [{ from: "PRIVATE_SOURCE", args: "x" }, true, true, /inherited_fields:\n  - "args"\n  - "async"/u],
+      [{ from: "PRIVATE_SOURCE", async: true }, true, true, /inherited_fields:\n  - "args"\n  - "async"/u],
     ] as const) {
       let calls = 0, receivedFrom: unknown;
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; receivedFrom = (args[1] as { from?: unknown }).from; return definition.execute(...args, {}); } };
@@ -1911,7 +1956,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /music-player\/playback.*validation failed.*volume.*integer.*instruction: inspect target=recipes view=doctor identity=music-player\/playback/is,
+      /music-player\/playback.*validation failed.*volume.*integer.*instruction: "inspect target=recipes view=doctor identity=music-player\/playback/is,
     );
     await assert.rejects(
       executeRegisterTool(
@@ -1923,7 +1968,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /music-player\/playback.*validation failed.*Unknown delegated Recipe default argument: unknown.*instruction: inspect target=recipes view=doctor identity=music-player\/playback/is,
+      /music-player\/playback.*validation failed.*Unknown delegated Recipe default argument: unknown.*instruction: "inspect target=recipes view=doctor identity=music-player\/playback/is,
     );
     await assert.rejects(
       executeRegisterTool(
@@ -1935,7 +1980,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /key: state_dir.*runtime-owned.*instruction: remove that default and retry register_tool/is,
+      /key: "state_dir".*runtime-owned.*instruction: "remove that default and retry register_tool/is,
     );
     await assert.rejects(readFile(join(harness.root, "bad_volume.json"), "utf8"));
     await assert.rejects(readFile(join(harness.root, "bad_default.json"), "utf8"));
@@ -1951,35 +1996,35 @@ test("Registry mutations reject ambiguous or copied Recipe source modes", async 
     for (const [params, pattern] of [
       [
         { description: "Mixed", from: "music-player/playback", name: "mixed", template: "echo" },
-        /exactly one register_tool source mode.*- instruction: remove the extra source fields and retry register_tool/s,
+        /exactly one register_tool source mode.*instruction: \"remove the extra source fields and retry register_tool/s,
       ],
       [
         { args: "source:path", from: "music-player/playback", name: "copied_args" },
-        /from inherits args and async behavior.*- instruction: retry register_tool with from and optional defaults only/s,
+        /from inherits args and async behavior.*instruction: \"retry register_tool with from and optional defaults only/s,
       ],
       [
         { name: "missing_source" },
-        /requires exactly one source mode.*- instruction: retry register_tool with one source field/s,
+        /requires exactly one source mode.*instruction: \"retry register_tool with one source field/s,
       ],
       [
         { from: "", name: "empty_from" },
-        /non-empty Recipe reference.*- instruction: retry register_tool with from=<skill>\/<recipe>/s,
+        /non-empty Recipe reference.*instruction: \"retry register_tool with from=<skill>\/<recipe>/s,
       ],
       [
         { from: "skill:music-player/playback", name: "prefixed_from" },
-        /skill: Recipe references were removed.*instruction: inspect target=recipes view=doctor identity=music-player\/playback/s,
+        /skill: Recipe references were removed.*instruction: "inspect target=recipes view=doctor identity=music-player\/playback/s,
       ],
       [
         { from: "std:player", name: "std_from" },
-        /std: Recipe references were removed.*instruction: inspect target=recipes view=doctor/s,
+        /std: Recipe references were removed.*instruction: "inspect target=recipes view=doctor/s,
       ],
       [
         { description: "Nested", name: "nested", template: { template: "music-player/playback" } },
-        /Nested Recipe-shaped templates.*- instruction: retry with from=<skill>\/<recipe> and defaults=/is,
+        /Nested Recipe-shaped templates.*instruction: \"retry with from=<skill>\/<recipe> and defaults=/is,
       ],
       [
         { description: "Legacy values", name: "legacy_values", template: "echo", values: { x: 1 } },
-        /values was removed.*- instruction: retry register_tool with defaults/is,
+        /values was removed.*instruction: \"retry register_tool with defaults/is,
       ],
     ] as const) {
       await assert.rejects(executeRegisterTool(params, {}, harness.deps), pattern);
@@ -2246,7 +2291,7 @@ test("Registry activation failure restores prior bytes state and active tools", 
         {},
         failingDeps,
       ),
-      /Tool "working_tool" activation failed at active_tool_set.*callable_now=false.*Registration was rolled back.*Next: inspect target=runtime view=status; do not use spawn as proof/s,
+      /Tool \\\"working_tool\\\" activation failed at active_tool_set.*callable_now=false.*Registration was rolled back.*Next: inspect target=runtime view=status; do not use spawn as proof/s,
     );
     assert.equal(await readFile(path, "utf8"), priorBytes);
     assert.equal(harness.tools.get("working_tool")?.description, "Working tool");
@@ -2269,7 +2314,7 @@ test("Registry activation failure restores prior bytes state and active tools", 
           }),
         },
       ),
-      /Tool "broken_new" activation failed at host_registration.*callable_now=false.*Registration was rolled back.*Next: inspect target=runtime view=status; do not use spawn as proof/s,
+      /Tool \\"broken_new\\\" activation failed at host_registration.*callable_now=false.*Registration was rolled back.*Next: inspect target=runtime view=status; do not use spawn as proof/s,
     );
     await assert.rejects(readFile(join(harness.root, "broken_new.json"), "utf8"));
     assert.equal(harness.tools.has("broken_new"), false);

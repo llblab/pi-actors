@@ -27,12 +27,17 @@ test("Output formatter returns no-output marker for empty stdout", () => {
   });
 });
 
-test("Failure formatter includes stderr and stdout sections", () => {
+test("Failure formatter puts exit facts in a YAML header and keeps both stream bodies", () => {
   const output = formatFailureOutput("tool", 2, false, "partial", "boom");
   assert.equal(output.truncated, false);
-  assert.match(output.text, /Exit code 2/);
-  assert.match(output.text, /stderr:\nboom/);
-  assert.match(output.text, /stdout:\npartial/);
+  assert.equal(output.text, "\n---\nexit_code: 2\nkilled: false\n---\nstderr:\nboom\n\nstdout:\npartial");
+});
+
+test("Failure formatter stays metadata-only bare YAML when no stream text was selected", () => {
+  assert.deepEqual(formatFailureOutput("tool", 2, true, "", " \n "), {
+    text: "\nexit_code: 2\nkilled: true\n",
+    truncated: false,
+  });
 });
 
 test("Tail truncation preserves genuine replacement characters and exact byte counts at its budget boundary", () => {

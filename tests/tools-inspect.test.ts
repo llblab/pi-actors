@@ -1,15 +1,52 @@
 import "./test-environment.mjs";
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { parseDocument } from "yaml";
 
 import * as Limits from "../lib/limits.ts";
 import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
 import { createInspectToolDefinition } from "../lib/tools-inspect.ts";
-import { spaceToolError } from "../lib/tools-response.ts";
+import { renderYamlMetadata, spaceToolError } from "../lib/tools-response.ts";
+
+/** Expected bare block-YAML inspect refusal text; the public adapter adds the single leading LF. */
+function inspectDocument(value: Record<string, unknown>): string {
+  const rendered = renderYamlMetadata(value, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  assert.equal(rendered.state, "available");
+  return (rendered as { text: string }).text.replace(/\n$/u, "");
+}
+/** Expected compact metadata document: one leading LF, no trailing LF. */
+function compactInspectDocument(value: Record<string, unknown>): string {
+  const rendered = renderYamlMetadata(value, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  assert.equal(rendered.state, "available");
+  return "\n" + (rendered as { text: string }).text.replace(/\n$/u, "");
+}
+const compactTriage = (failed: number, pending_controls: number, stale_controls: number, backpressured: number,
+  incomplete_trace: number, attention: number) => compactInspectDocument({ runtime: "triage", failed, pending_controls,
+  stale_controls, backpressured, incomplete_trace, attention });
+const omittedField = (key: string) => ({ [key]: { state: "omitted", reason: "response_too_large", shown: 0, omitted: 1, total: 1 } });
+/** Assert one refused inspect request returned the expected YAML document. */
+function refuses(expected: string) {
+  return (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, expected);
+    return true;
+  };
+}
+/** Largest single-byte payload whose complete refusal text still fits the shared budget. */
+function exactFit(document: (payload: string) => Record<string, unknown>): number {
+  let low = 0, high = Limits.RUN_DELIVERY_MODEL_MAX_BYTES;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const rendered = renderYamlMetadata(document("x".repeat(middle)), Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+    if (rendered.state === "available") low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
 import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
 
 const sessionAContext = {
@@ -77,16 +114,16 @@ test("AX inspect owned refusals preserve all ten guards, sequences and original 
   });
   const hostile = "## source\r\n\r\n- next: do not promote\n  - tool: no action · literal";
   const cases = [
-    [{ target: "runtime", view: "snapshot" }, "- target_kind: runtime\n- result: unsupported view\n- supported_views:\n  - status\n  - runs\n  - triage", []],
-    [{ target: "recipes", view: "trace" }, "- target_kind: recipes\n- result: unsupported view\n- supported_views:\n  - status\n  - summary\n  - doctor\n  - imports\n  - reviews", []],
-    [{ target: "recipes", view: "status", identity: "missing/task" }, "- target_kind: recipes\n- result: identity requires view=doctor", []],
-    [{ target: "run:demo", view: "status" }, "- target_kind: run\n- result: unsupported view\n- supported_views:\n  - recipe\n  - trace\n  - control", []],
-    [{ target: "run:demo", view: "trace", source: hostile }, "- target_kind: run\n- source:\n  " + hostile.replaceAll(/\r\n|\r|\n/gu, match => match + "  ") + "\n- result: unsupported Trace source\n- supported_sources:\n  - all\n  - lifecycle\n  - control\n  - process\n  - agent\n  - artifact\n  - runtime", ["run:demo"]],
-    [{ target: "tool:../missing", view: "status" }, "- target: tool:../missing\n- result: invalid tool target", []],
-    [{ target: "tool:demo", view: "trace" }, "- target_kind: tool\n- result: unsupported view\n- supported_views:\n  - status\n  - schema", []],
-    [{ target: "tool:missing", view: "status" }, "- tool: missing\n- result: registered tool not found\n- safety: Do not substitute spawn for tool invocation.\n- next:\n  - tool: inspect\n  - target: recipes\n  - view: doctor", ["tool:missing", "status:missing"]],
-    [{ target: "tool:dormant", view: "schema" }, "- tool: dormant\n- result: registered; callable schema unavailable\n- callable_now: false\n- activation_boundary: active_tool_set\n- next:\n  - tool: inspect\n  - target: tool:dormant\n  - view: status", ["tool:dormant", "status:dormant"]],
-    [{ target: "coordinator", view: "status" }, "- target: coordinator\n- result: unsupported inspect target\n- supported_targets:\n  - run:<id>\n  - runtime\n  - recipes\n  - tool:<name>", []],
+    [{ target: "runtime", view: "snapshot" }, inspectDocument({ target_kind: "runtime", result: "unsupported view", supported_views: ["status", "runs", "triage"] }), []],
+    [{ target: "recipes", view: "trace" }, inspectDocument({ target_kind: "recipes", result: "unsupported view", supported_views: ["status", "summary", "registry", "doctor", "imports", "reviews"] }), []],
+    [{ target: "recipes", view: "status", identity: "missing/task" }, inspectDocument({ target_kind: "recipes", result: "identity requires view=doctor" }), []],
+    [{ target: "run:demo", view: "status" }, inspectDocument({ target_kind: "run", result: "unsupported view", supported_views: ["recipe", "trace", "control"] }), []],
+    [{ target: "run:demo", view: "trace", source: hostile }, inspectDocument({ target_kind: "run", source: hostile, result: "unsupported Trace source", supported_sources: ["all", "lifecycle", "control", "process", "agent", "artifact", "runtime"] }), ["run:demo"]],
+    [{ target: "tool:../missing", view: "status" }, inspectDocument({ target: "tool:../missing", result: "invalid tool target" }), []],
+    [{ target: "tool:demo", view: "trace" }, inspectDocument({ target_kind: "tool", result: "unsupported view", supported_views: ["status", "schema"] }), []],
+    [{ target: "tool:missing", view: "status" }, inspectDocument({ tool: "missing", result: "registered tool not found", safety: "Do not substitute spawn for tool invocation.", next: { tool: "inspect", target: "recipes", view: "doctor" } }), ["tool:missing", "status:missing"]],
+    [{ target: "tool:dormant", view: "schema" }, inspectDocument({ tool: "dormant", result: "registered; callable schema unavailable", callable_now: "false", activation_boundary: "active_tool_set", next: { tool: "inspect", target: "tool:dormant", view: "status" } }), ["tool:dormant", "status:dormant"]],
+    [{ target: "coordinator", view: "status" }, inspectDocument({ target: "coordinator", result: "unsupported inspect target", supported_targets: ["run:<id>", "runtime", "recipes", "tool:<name>"] }), []],
   ] as const;
   const before = await readFile(join(root, "controls.jsonl"), "utf8");
   try {
@@ -110,8 +147,10 @@ test("AX inspect owned refusals preserve all ten guards, sequences and original 
 
 test("AX inspect error whole-field budgets preserve exact boundaries and unowned failures without repair", async () => {
   const unknown = createInspectToolDefinition();
-  const tail = "\n- result: unsupported inspect target\n- supported_targets:\n  - run:<id>\n  - runtime\n  - recipes\n  - tool:<name>";
-  const allowance = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1 - Buffer.byteLength("- target: " + tail);
+  const targetDocument = (target: unknown) => ({ target, result: "unsupported inspect target",
+    supported_targets: ["run:<id>", "runtime", "recipes", "tool:<name>"] });
+  const omission = { state: "omitted", reason: "response_too_large", shown: 0, omitted: 1, total: 1 };
+  const allowance = exactFit((payload) => targetDocument(payload));
   const capture = async (tool: ReturnType<typeof createInspectToolDefinition>, request: unknown, ctx: unknown = {}) => {
     let captured: unknown;
     let rejected = false;
@@ -119,52 +158,61 @@ test("AX inspect error whole-field budgets preserve exact boundaries and unowned
     assert.equal(rejected, true);
     return captured;
   };
-  for (const value of ["x".repeat(allowance), "界".repeat(Math.floor(allowance / 3)), "👩‍💻é".repeat(12), "next:\r\n- tool: literal", "\ud800"]) {
+  for (const value of ["x".repeat(allowance), "界".repeat(Math.floor(allowance / 3)), "👩‍💻é".repeat(12), "next:\r\n- tool: literal"]) {
     const error = await capture(unknown, { target: value, view: "status" });
     assert.ok(error instanceof Error);
-    assert.equal(error.message, "- target:" + (/[\r\n]/u.test(value) ? "\n  " + value.replaceAll(/\r\n|\r|\n/gu, match => match + "  ") : " " + value) + tail);
+    assert.equal(error.message, inspectDocument(targetDocument(value)));
     assert.ok(Buffer.byteLength(error.message) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
   }
+  // Malformed selected text is unavailable as a whole field; it is never repaired or emitted raw.
+  const malformedTarget = await capture(unknown, { target: "\ud800", view: "status" });
+  assert.ok(malformedTarget instanceof Error);
+  assert.equal(malformedTarget.message, inspectDocument(targetDocument(omission)));
   const exact = await capture(unknown, { target: "x".repeat(allowance), view: "status" });
   assert.ok(exact instanceof Error);
   assert.equal(spaceToolError(exact), exact);
   assert.equal(Buffer.byteLength(exact.message), Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
-  assert.equal(exact.message, "\n- target: " + "x".repeat(allowance) + tail);
+  assert.equal(exact.message, "\n" + inspectDocument(targetDocument("x".repeat(allowance))));
   for (const value of ["x".repeat(allowance + 1), "界".repeat(allowance), "👩‍💻".repeat(allowance)]) {
     const error = await capture(unknown, { target: value, view: "status", verbose: true });
     assert.ok(error instanceof Error);
-    assert.equal(error.message, "- target:\n  - state: omitted\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + tail);
+    assert.equal(error.message, inspectDocument(targetDocument(omission)));
     assert.ok(Buffer.byteLength(error.message) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
-    assert.doesNotMatch(error.message, /…|chars|^- next:/mu);
+    assert.doesNotMatch(error.message, /…|chars|^next:/mu);
   }
   const name = "a".repeat(Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
   const selected = createInspectToolDefinition({ getToolStatus: () => ({ callable_now: false, activation_boundary: "active_tool_set" }) });
   const schema = await capture(selected, { target: "tool:" + name, view: "schema" });
   assert.ok(schema instanceof Error);
-  assert.match(schema.message, /^- tool:\n  - state: omitted/);
-  assert.match(schema.message, /- result: registered; callable schema unavailable\n- callable_now: false\n- activation_boundary: active_tool_set/);
-  assert.match(schema.message, /- next_action:\n  - state: omitted\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1$/);
+  assert.match(schema.message, /^tool:\n  state: "omitted"/u);
+  assert.match(schema.message, /result: "registered; callable schema unavailable"\ncallable_now: "false"\nactivation_boundary: "active_tool_set"/u);
+  assert.match(schema.message, /next_action:\n  state: "omitted"\n  reason: "response_too_large"\n  shown: 0\n  omitted: 1\n  total: 1$/u);
   assert.ok(Buffer.byteLength(schema.message) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
-  assert.doesNotMatch(schema.message, /^- next:/mu);
+  assert.doesNotMatch(schema.message, /^next:/mu);
+  const omittedDocument = (key: string) => `${key}:\n  state: "omitted"\n  reason: "response_too_large"\n  shown: 0\n  omitted: 1\n  total: 1`;
   for (const remaining of [512, 384, 256, 192, 128, 64, 1]) {
     const boundaryName = "a".repeat(Limits.RUN_DELIVERY_MODEL_MAX_BYTES - remaining);
     const error = await capture(selected, { target: "tool:" + boundaryName, view: "schema" });
     assert.ok(error instanceof Error);
-    const omitted = (key: string) => `- ${key}:\n  - state: omitted\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
-    if (error.message.startsWith(omitted("tool"))) assert.ok(Buffer.byteLength(error.message.replace(omitted("tool"), "- tool: " + boundaryName)) + 1 > Limits.RUN_DELIVERY_MODEL_MAX_BYTES,
-      "An omitted whole field must actually exceed the final shared budget, not merely a larger reserved placeholder");
-    if (error.message.endsWith(omitted("next_action"))) assert.ok(Buffer.byteLength(error.message.replace(omitted("next_action"), "- next:\n  - tool: inspect\n  - target: tool:" + boundaryName + "\n  - view: status")) + 1 > Limits.RUN_DELIVERY_MODEL_MAX_BYTES,
-      "An omitted action must actually exceed the final shared budget");
+    if (error.message.startsWith(omittedDocument("tool"))) {
+      assert.ok(Buffer.byteLength(error.message.replace(omittedDocument("tool"), `tool: ${JSON.stringify(boundaryName)}`)) + 1 > Limits.RUN_DELIVERY_MODEL_MAX_BYTES,
+        "An omitted whole field must actually exceed the final shared budget, not merely a larger reserved placeholder");
+    }
+    if (error.message.endsWith(omittedDocument("next_action"))) {
+      assert.ok(Buffer.byteLength(error.message.replace(omittedDocument("next_action"),
+        `next:\n  tool: "inspect"\n  target: ${JSON.stringify("tool:" + boundaryName)}\n  view: "status"`)) + 1 > Limits.RUN_DELIVERY_MODEL_MAX_BYTES,
+        "An omitted action must actually exceed the final shared budget");
+    }
   }
   const missing = await capture(unknown, { target: "tool:" + name, view: "status" });
   assert.ok(missing instanceof Error);
-  assert.match(missing.message, /^- tool:\n  - state: omitted/);
-  assert.match(missing.message, /- safety: Do not substitute spawn for tool invocation\./);
-  assert.ok(missing.message.endsWith("- next:\n  - tool: inspect\n  - target: recipes\n  - view: doctor"));
+  assert.match(missing.message, /^tool:\n  state: "omitted"/u);
+  assert.match(missing.message, /safety: "Do not substitute spawn for tool invocation\."/u);
+  assert.ok(missing.message.endsWith('next:\n  tool: "inspect"\n  target: "recipes"\n  view: "doctor"'));
   assert.ok(Buffer.byteLength(missing.message) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
   const defaults = await capture(createInspectToolDefinition({ getToolStatus: () => ({}) }), { target: "tool:demo", view: "schema" });
   assert.ok(defaults instanceof Error);
-  assert.match(defaults.message, /- callable_now: false\n- activation_boundary: host_registration/);
+  assert.match(defaults.message, /callable_now: "false"\nactivation_boundary: "host_registration"/u);
   let trapReads = 0;
   const trapped = Object.defineProperty(new Error("not observed"), "message", { get() { trapReads += 1; throw Symbol("message trap"); } });
   const raw = [undefined, "primitive", Symbol("opaque"), trapped, Object.freeze({ message: "not an Error", private: true }),
@@ -202,13 +250,41 @@ test("AX inspect error whole-field budgets preserve exact boundaries and unowned
     }) });
     const error = await capture(once, { target: "tool:demo", view: "schema" });
     assert.ok(error instanceof Error);
-    assert.ok(error.message.includes("- activation_boundary:\n  " + opaque.replaceAll(/\r\n|\r|\n/gu, match => match + "  ")));
+    assert.equal(error.message, inspectDocument({ tool: "demo", result: "registered; callable schema unavailable",
+      callable_now: "false", activation_boundary: opaque, next: { tool: "inspect", target: "tool:demo", view: "status" } }));
     assert.equal(callableReads, 1); assert.equal(boundaryReads, 1);
     const fallback = createInspectToolDefinition({ listRuns: () => [status], getRunStatus: () => { throw undefined; } });
     const result = await fallback.execute("fallback", { target: "runtime", view: "runs" }, undefined, undefined, sessionAContext);
     assert.equal(result.details.runs.length, 1);
     assert.deepEqual(result.details.runs[0], status);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Compact tool inspection omits whole unfit argument groups without breaking verbose JSON", async () => {
+  const large = Array.from({ length: 1600 }, (_, i) => "input_" + i);
+  for (const required_args of [large, ["\ud800"], ["file"]]) {
+    const facts = { callable_now: true, required_args, optional_args: large };
+    const tool = createInspectToolDefinition({ getToolStatus: () => facts });
+    for (const verbose of [false, true]) {
+      const result = await tool.execute("bounds", { target: "tool:demo", view: "status", verbose }, undefined, undefined, {});
+      assert.deepEqual(result.details.required_args, required_args);
+      if (verbose) {
+        assert.equal(result.content[0].text, "\n" + JSON.stringify(result.details, null, 2));
+        continue;
+      }
+      const text = result.content[0].text, doc = parseDocument(text);
+      assert.deepEqual(doc.errors, []); assert.ok(Buffer.byteLength(text) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+      const value = doc.toJS();
+      assert.equal(value.tool, "demo"); assert.equal(value.callable_now, true);
+      assert.equal(value.optional_args, "[omitted]");
+      assert.deepEqual(value.optional_args_omission, { reason: "response_too_large", shown: 0, omitted: large.length, total: large.length });
+      if (required_args === large) assert.equal(value.required_args, "[omitted]");
+      else if (required_args[0] === "\ud800") {
+        assert.equal(value.required_args, "[unavailable]");
+        assert.equal(value.required_args_omission.reason, "malformed_selected_text");
+      } else assert.deepEqual(value.required_args, ["file"]);
+    }
+  }
 });
 
 test("AX compact inspection preserves Run views, tool facts and opaque advice while verbose schema stays exact", async () => {
@@ -218,7 +294,7 @@ test("AX compact inspection preserves Run views, tool facts and opaque advice wh
     for (const view of ["recipe", "trace", "control"]) {
       const compact = await tool.execute("compact", { target: "run:demo", view }, undefined, undefined, sessionAContext);
       const verbose = await tool.execute("verbose", { target: "run:demo", view, verbose: true }, undefined, undefined, sessionAContext);
-      assert.equal(compact.content[0].text, "\n- run: demo\n- view: " + view);
+      assert.equal(compact.content[0].text, compactInspectDocument({ run: "demo", view }));
       assert.deepEqual(compact.details, verbose.details); assert.equal(verbose.content[0].text, "\n" + JSON.stringify(verbose.details, null, 2));
       assert.doesNotMatch(JSON.stringify(compact), /TOOL_.*_SECRET|\/private\/recipes|run: run:/);
     }
@@ -229,17 +305,26 @@ test("AX compact inspection preserves Run views, tool facts and opaque advice wh
   const before = JSON.stringify(facts);
   const tool = createInspectToolDefinition({ getTool: () => ({ description: "Demo", parameters: { type: "object", properties: {} } }), getToolStatus: () => facts });
   const result = await tool.execute("tool", { target: "tool:demo", view: "status" }, undefined, undefined, {});
-  assert.equal(result.content[0].text, "\n- tool: demo\n- source: sample/task\n- callable_now: true\n- activation_boundary: current_session\n- required_args:\n  - file\n  - input path\n- optional_args:\n  - mode\n- launch_kind: tool\n- spawn_calls: 2\n- tool_calls: 3\n- instruction:\n  " + advice.replaceAll(/\r\n|\r|\n/gu, match => match + "  "));
+  assert.equal(result.content[0].text, compactInspectDocument({ tool: "demo", source: "sample/task", callable_now: true,
+    activation_boundary: "current_session", required_args: ["file", "input path"], optional_args: ["mode"],
+    launch_kind: "tool", spawn_calls: 2, tool_calls: 3, next: { instruction: advice } }));
   assert.equal(JSON.stringify(facts), before); assert.equal(result.details.next_actions, facts.next_actions);
-  assert.doesNotMatch(result.content[0].text, /^- next:|\bnext=/mu);
+  assert.equal(result.content[0].text.split("next:").length, 2, "Only one selected hint becomes a next node");
   const verbose = await tool.execute("verbose", { target: "tool:demo", view: "status", verbose: true }, undefined, undefined, {});
   assert.equal(verbose.content[0].text, "\n" + JSON.stringify(verbose.details, null, 2)); assert.deepEqual(verbose.details, result.details);
   const schema = await tool.execute("schema", { target: "tool:demo", view: "schema" }, undefined, undefined, {});
-  assert.equal(schema.content[0].text, "\n" + JSON.stringify(schema.details, null, 2));
+  // Generated definition metadata is YAML; the unchanged machine object still lives in details.
+  assert.equal(schema.content[0].text, [
+    "", 'name: "demo"', 'description: "Demo"', "parameters:", '  type: "object"', "  properties:", "    {}",
+  ].join("\n") + "\n");
+  assert.deepEqual(schema.details, { description: "Demo", name: "demo", parameters: { properties: {}, type: "object" },
+    promptSnippet: undefined });
+  assert.doesNotMatch(schema.content[0].text, /promptSnippet|undefined/u);
   const empty = createInspectToolDefinition({ getToolStatus: () => ({ callable_now: false, required_args: [], next_actions: ["inspect target=recipes view=doctor"] }) });
   const sparse = await empty.execute("sparse", { target: "tool:dormant", view: "status" }, undefined, undefined, {});
-  assert.ok(sparse.content[0].text.includes("- required_args: none\n- optional_args: unknown"));
-  assert.ok(sparse.content[0].text.endsWith("- next:\n  - tool: inspect\n  - target: recipes\n  - view: doctor"));
+  assert.equal(sparse.content[0].text, compactInspectDocument({ tool: "dormant", source: "unknown", callable_now: false,
+    activation_boundary: "unknown", required_args: "none", optional_args: "unknown", launch_kind: "none",
+    spawn_calls: 0, tool_calls: 0, next: { tool: "inspect", target: "recipes", view: "doctor" } }));
 });
 
 test("Inspect exposes canonical Run Recipe, Trace, and Control views", async () => {
@@ -361,7 +446,68 @@ test("Inspect rejects removed Run views on the canonical target", async () => {
     const tool = createInspectToolDefinition({ getRunStatus: () => status });
     await assert.rejects(
       tool.execute("status", { target: "run:demo", view: "status" }, undefined, undefined, sessionAContext),
-      /- target_kind: run\n- result: unsupported view\n- supported_views:\n  - recipe\n  - trace\n  - control/,
+      refuses(inspectDocument({ target_kind: "run", result: "unsupported view", supported_views: ["recipe", "trace", "control"] })),
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Inspect treats recipes registry and summary as one inspection path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-recipe-alias-"));
+  const recipeRoot = join(root, "recipes");
+  try {
+    await mkdir(join(recipeRoot, "drafts"), { recursive: true });
+    await writeFile(join(recipeRoot, "task.json"), JSON.stringify({ template: "echo task" }));
+    await writeFile(join(recipeRoot, "broken.json"), JSON.stringify({ description: "missing template" }));
+    await writeFile(join(recipeRoot, "drafts", "draft.json"), JSON.stringify({ template: "echo draft" }));
+    const tool = createInspectToolDefinition({ recipeRoot });
+    for (const verbose of [false, true]) {
+      const summary = await tool.execute(
+        "summary",
+        { target: "recipes", view: "summary", verbose },
+        undefined,
+        undefined,
+        {},
+      );
+      const registry = await tool.execute(
+        "registry",
+        { target: "recipes", view: "registry", verbose },
+        undefined,
+        undefined,
+        {},
+      );
+      assert.deepEqual(registry.details, summary.details);
+      assert.equal(registry.content[0].text, summary.content[0].text);
+      assert.deepEqual(summary.details.next_actions.slice(0, 2), [
+        "inspect target=recipes view=doctor",
+        "inspect target=recipes view=summary verbose=true",
+      ]);
+      assert.match(
+        String(summary.details.next_actions[2]),
+        /^spawn file=.*\/recipes\/drafts\/draft\.json$/,
+      );
+    }
+    const compact = await tool.execute(
+      "registry-compact",
+      { target: "recipes", view: "registry" },
+      undefined,
+      undefined,
+      {},
+    );
+    assert.match(
+      compact.content[0].text,
+      /^\nrecipes: "registry"\nactive: [1-9]\d*\ndrafts: 1\nshadowed: 0\ninvalid: 1\n/u,
+    );
+    await assert.rejects(
+      tool.execute(
+        "registry-identity",
+        { target: "recipes", view: "registry", identity: "missing/task" },
+        undefined,
+        undefined,
+        {},
+      ),
+      refuses(inspectDocument({ target_kind: "recipes", result: "identity requires view=doctor" })),
     );
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -448,10 +594,10 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
       undefined,
       { recipeResolutionContext },
     );
-    assert.match(compactCatalog.content[0].text, /- skill_catalog_partial: true/);
+    assert.match(compactCatalog.content[0].text, /skill_catalog_partial: true/u);
     assert.match(
       compactCatalog.content[0].text,
-      /- next:\n  - tool: inspect\n  - target: recipes\n  - view: imports\n  - verbose: true/,
+      /next:\n  tool: "inspect"\n  target: "recipes"\n  view: "imports"\n  verbose: true/u,
     );
 
     const focused = await tool.execute(
@@ -474,14 +620,14 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
         "register_tool name=<tool-name> from=sample/task",
       ],
     });
-    assert.match(
-      focused.content[0].text,
-      /- identity: sample\/task\n- skill_active: true\n- resolvable: true\n- catalog_partial: true\n- component_status: available/,
-    );
+    assert.equal(focused.content[0].text, compactInspectDocument({ recipes: "doctor", identity: "sample/task",
+      skill_active: "true", resolvable: "true", catalog_partial: "true", component_status: "available",
+      source_location: "<active-skill:sample>/task.json", resolution_generation: focused.details.resolution_generation,
+      next: { instruction: "spawn recipe=sample/task" } }));
     assert.doesNotMatch(focused.content[0].text, new RegExp(root));
-    assert.ok(focused.content[0].text.includes("- source_location:\n  ```text\n  <active-skill:sample>/task.json\n  ```\n"));
-    assert.ok(focused.content[0].text.endsWith("- instruction: spawn recipe=sample/task"));
-    assert.doesNotMatch(focused.content[0].text, /^- next:|register_tool/mu);
+    assert.ok(focused.content[0].text.includes('source_location: "<active-skill:sample>/task.json"\n'));
+    assert.ok(focused.content[0].text.endsWith('next:\n  instruction: "spawn recipe=sample/task"'));
+    assert.doesNotMatch(focused.content[0].text, /register_tool|next:-/mu);
 
     const inactive = await tool.execute(
       "inactive-component",
@@ -541,7 +687,7 @@ test("Inspect Recipe diagnostics distinguish user capabilities and active Skill 
         undefined,
         { recipeResolutionContext },
       ),
-      /- target_kind: recipes\n- result: identity requires view=doctor/,
+      refuses(inspectDocument({ target_kind: "recipes", result: "identity requires view=doctor" })),
     );
 
     await rm(join(sampleSkill, "recipes", "bad.json"));
@@ -582,10 +728,11 @@ test("AX runtime records preserve existing facts, full inventory and independent
     const byDir = new Map(rows.map(row => [row.state_dir, row])); let reads = 0;
     const before = JSON.stringify(rows), tool = createInspectToolDefinition({ listRuns: () => [...rows], getRunStatus: dir => { reads++; return byDir.get(dir)!; }, runStateRoot: root });
     const runtime = await tool.execute("status", { target: "runtime", view: "status" }, undefined, undefined, {});
-    assert.equal(runtime.content[0].text, "\n- runtime: status\n- version: " + runtime.details.version + "\n- state_schema: " + runtime.details.state_schema + "\n- automatic_review: " + runtime.details.automatic_review);
-    assert.equal(reads, 0); assert.doesNotMatch(runtime.content[0].text, /elapsed|snapshot|^- next:/mu);
+    assert.equal(runtime.content[0].text, compactInspectDocument({ runtime: "status", version: String(runtime.details.version),
+      state_schema: String(runtime.details.state_schema), automatic_review: String(runtime.details.automatic_review) }));
+    assert.equal(reads, 0); assert.doesNotMatch(runtime.content[0].text, /elapsed|snapshot|^next:/mu);
     const compact = await tool.execute("runs", { target: "runtime", view: "runs", lines: "1" }, undefined, undefined, sessionAContext);
-    assert.equal(compact.content[0].text, "\n- runtime: runs\n- runs: 240"); assert.equal(compact.details.runs.length, 240);
+    assert.equal(compact.content[0].text, compactInspectDocument({ runtime: "runs", runs: 240 })); assert.equal(compact.details.runs.length, 240);
     assert.equal(reads, 241); assert.equal(Object.hasOwn(compact.details, "navigation"), false);
     const verbose = await tool.execute("verbose", { target: "runtime", view: "runs", lines: "1", verbose: true }, undefined, undefined, sessionAContext);
     assert.equal(reads, 482); assert.deepEqual(verbose.details.runs, compact.details.runs); assert.ok(Object.hasOwn(verbose.details, "navigation"));
@@ -593,7 +740,7 @@ test("AX runtime records preserve existing facts, full inventory and independent
     assert.doesNotMatch(JSON.stringify(compact), /foreign/); assert.equal(JSON.stringify(rows), before);
     const failed = { ...status, status: "failed" }, triage = createInspectToolDefinition({ listRuns: () => [failed], getRunStatus: () => failed });
     const result = await triage.execute("triage", { target: "runtime", view: "triage" }, undefined, undefined, sessionAContext);
-    assert.equal(result.content[0].text, "\n- runtime: triage\n- failed: 1\n- pending_controls: 0\n- stale_controls: 0\n- backpressured: 0\n- incomplete_trace: 0\n- attention: 0");
+    assert.equal(result.content[0].text, compactTriage(1, 0, 0, 0, 0, 0));
     assert.equal(result.details.failed_runs.length, 1); assert.doesNotMatch(result.content[0].text, /^- next:|^- instruction:|elapsed|snapshot/mu);
     const structured = await triage.execute("triage-json", { target: "runtime", view: "triage", verbose: true }, undefined, undefined, sessionAContext);
     assert.deepEqual(structured.details, result.details); assert.equal(structured.content[0].text, "\n" + JSON.stringify(structured.details, null, 2));
@@ -616,7 +763,7 @@ test("Runtime status reports immutable source package identity", async () => {
     );
     assert.equal(result.details.version, pkg.version);
     assert.equal(result.details.state_schema, "run-kernel-v1");
-    assert.match(result.content[0].text, new RegExp(`- version: ${pkg.version}\\n- state_schema: run-kernel-v1`));
+    assert.match(result.content[0].text, new RegExp(`version: "${pkg.version.replaceAll(".", "\\.")}"\\nstate_schema: "run-kernel-v1"`));
   } finally {
     if (previous === undefined) delete process.env.npm_package_version;
     else process.env.npm_package_version = previous;
@@ -769,7 +916,7 @@ test("Runtime triage distinguishes fresh saturation from stale work", async () =
     }]);
     assert.deepEqual(result.details.next_actions, ["inspect target=run:demo view=control"]);
     const compact = await tool.execute("compact-triage", { target: "runtime", view: "triage" }, undefined, undefined, sessionAContext);
-    assert.equal(compact.content[0].text, "\n- runtime: triage\n- failed: 0\n- pending_controls: 66\n- stale_controls: 2\n- backpressured: 1\n- incomplete_trace: 0\n- attention: 0");
+    assert.equal(compact.content[0].text, compactTriage(0, 66, 2, 1, 0, 0));
     assert.equal(compact.details.pending_controls.length, 40); assert.equal(compact.details.pending_control_count, 66);
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -914,13 +1061,12 @@ test("Inspect treats tools as capability definitions, not runtime actors", async
   assert.equal(result.details.source, "sample/task");
   assert.deepEqual(result.details.required_args, ["file"]);
   assert.deepEqual(result.details.optional_args, ["mode"]);
-  assert.match(
-    result.content[0].text,
-    /- tool: demo\n- source: sample\/task\n- callable_now: true\n- activation_boundary: current_session\n- required_args:\n  - file\n- optional_args:\n  - mode\n- launch_kind: tool\n- spawn_calls: 2\n- tool_calls: 3/,
-  );
+  assert.equal(result.content[0].text, compactInspectDocument({ tool: "demo", source: "sample/task", callable_now: true,
+    activation_boundary: "current_session", required_args: ["file"], optional_args: ["mode"], launch_kind: "tool",
+    spawn_calls: 2, tool_calls: 3, next: { instruction: "call tool demo" } }));
   await assert.rejects(
     tool.execute("runtime", { target: "tool:pi-actors", view: "triage" }, undefined, undefined, {}),
-    /- target_kind: tool\n- result: unsupported view\n- supported_views:\n  - status\n  - schema/,
+    refuses(inspectDocument({ target_kind: "tool", result: "unsupported view", supported_views: ["status", "schema"] })),
   );
 });
 
@@ -954,10 +1100,9 @@ test("Inspect diagnoses registered but inactive and unknown tools without spawn 
   );
   assert.equal(status.details.callable_now, false);
   assert.equal(status.details.activation_boundary, "active_tool_set");
-  assert.match(
-    status.content[0].text,
-    /- tool: dormant\n- source: sample\/task\n- callable_now: false\n- activation_boundary: active_tool_set[\s\S]*- instruction: register_tool name=dormant update=true/,
-  );
+  assert.equal(status.content[0].text, compactInspectDocument({ tool: "dormant", source: "sample/task", callable_now: false,
+    activation_boundary: "active_tool_set", required_args: ["file"], optional_args: ["mode"], launch_kind: "none",
+    spawn_calls: 1, tool_calls: 0, next: { instruction: "register_tool name=dormant update=true" } }));
   assert.doesNotMatch(status.content[0].text, /next=spawn|spawn recipe=/);
   await assert.rejects(
     tool.execute(
@@ -967,7 +1112,8 @@ test("Inspect diagnoses registered but inactive and unknown tools without spawn 
       undefined,
       {},
     ),
-    /- tool: dormant\n- result: registered; callable schema unavailable\n- callable_now: false\n- activation_boundary: active_tool_set\n- next:\n  - tool: inspect\n  - target: tool:dormant\n  - view: status/,
+    refuses(inspectDocument({ tool: "dormant", result: "registered; callable schema unavailable", callable_now: "false",
+      activation_boundary: "active_tool_set", next: { tool: "inspect", target: "tool:dormant", view: "status" } })),
   );
   await assert.rejects(
     tool.execute(
@@ -977,7 +1123,8 @@ test("Inspect diagnoses registered but inactive and unknown tools without spawn 
       undefined,
       {},
     ),
-    /- tool: missing\n- result: registered tool not found\n- safety: Do not substitute spawn for tool invocation\.\n- next:\n  - tool: inspect\n  - target: recipes\n  - view: doctor/,
+    refuses(inspectDocument({ tool: "missing", result: "registered tool not found",
+      safety: "Do not substitute spawn for tool invocation.", next: { tool: "inspect", target: "recipes", view: "doctor" } })),
   );
 });
 

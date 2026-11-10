@@ -25,7 +25,6 @@ import * as ToolsAccess from "./tools-access.js";
 import * as ToolsResponse from "./tools-response.js";
 import * as TraceProjection from "./trace-projection.js";
 const asRecord = ToolsResponse.asRecord;
-const maybeJsonText = ToolsResponse.maybeJsonText;
 function runtimeStatus() {
     return {
         automatic_review: Paths.isAutomaticRecipeReviewEnabled(),
@@ -154,44 +153,80 @@ function runtimeTriage(ctx, deps) {
         ],
     };
 }
+/** Compact metadata-only documents share the same emitter/omission policy as other receipts. */
+function compactDocument(value) {
+    return ToolsResponse.compactYamlDocument(value);
+}
+/** Generated definition metadata is YAML like other owned output; the machine JSON stays in details. */
+function schemaDocument(details) {
+    // Absent definition fields stay absent exactly as JSON.stringify omitted them; values are native nodes.
+    const selected = {};
+    for (const key of ["name", "description", "parameters", "promptSnippet"])
+        if (details[key] !== undefined)
+            selected[key] = details[key];
+    // The shared emitter's own execution ceiling is the only wider allowance; a pathological schema
+    // keeps the exact legacy JSON text rather than being clipped or partly reformatted.
+    const rendered = ToolsResponse.renderYamlMetadata(selected, 49152);
+    return rendered.state === "available"
+        ? `\n${rendered.text}` : `\n${JSON.stringify(details, null, 2)}`;
+}
+function compactSelected(key, value) {
+    return ToolsResponse.selectYamlField(key, value, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+}
+function compactArguments(key, value) {
+    const selected = Array.isArray(value) && value.length
+        ? value.map(item => String(item)) : Array.isArray(value) ? "none" : "unknown";
+    return ToolsResponse.selectYamlField(key, selected, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+}
 function compactRuntime(view, details) {
-    const fields = view === "runs" ? { runs: details.runs?.length ?? 0 }
+    const count = (value) => (Array.isArray(value) ? value.length : 0);
+    return compactDocument(view === "runs" ? { runtime: view, runs: count(details.runs) }
         : view === "triage" ? {
-            failed: details.failed_runs?.length ?? 0,
+            runtime: view, failed: count(details.failed_runs),
             pending_controls: Number(details.pending_control_count ?? 0), stale_controls: Number(details.stale_control_count ?? 0),
             backpressured: Number(details.backpressured_run_count ?? 0), incomplete_trace: Number(details.trace_diagnostic_count ?? 0),
-            attention: details.attention_events?.length ?? 0,
-        } : { version: String(details.version), state_schema: String(details.state_schema), automatic_review: String(details.automatic_review) };
-    return "\n" + [ToolsResponse.formatMarkdownField("runtime", view),
-        ...Object.entries(fields).map(([key, value]) => ToolsResponse.formatMarkdownField(key, String(value)))].join("\n");
+            attention: count(details.attention_events),
+        } : { runtime: view, version: String(details.version), state_schema: String(details.state_schema),
+            automatic_review: String(details.automatic_review) });
 }
 // Projects local refusals only; does not intercept other throws or change existing catches.
 function formatInspectFailure(fields, next) {
-    // The unchanged public adapter adds exactly one leading LF to these Error messages.
-    const budget = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1;
-    const omitted = (key) => `- ${key}:\n  - state: omitted\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
-    const field = ([key, value]) => typeof value === "string"
-        ? ToolsResponse.formatMarkdownField(key, value)
-        : `- ${key}:\n${value.map(item => `  - ${item}`).join("\n")}`;
-    // Unmarked fields are bounded compiler literals/lists. Short values seed full so admission only grows.
-    const formatted = fields.map(field);
-    const projected = fields.map((item, index) => {
-        const full = formatted[index], fallback = omitted(item[0]);
-        return item[2] && Buffer.byteLength(full, "utf8") > Buffer.byteLength(fallback, "utf8") ? fallback : full;
+    // The unchanged public adapter replaces this document's trailing LF with its one leading LF.
+    const budget = Limits.RUN_DELIVERY_MODEL_MAX_BYTES;
+    // Field-local coverage record: an unfit selected scalar/sequence is omitted whole, never clipped.
+    const omitted = { state: "omitted", reason: "response_too_large", shown: 0, omitted: 1, total: 1 };
+    const render = (value) => {
+        const rendered = ToolsResponse.renderYamlMetadata(value, budget);
+        return rendered.state === "available" ? rendered.text : undefined;
+    };
+    const parts = fields.map(([key, value, omittable]) => {
+        const full = typeof value === "string" ? { [key]: value } : { [key]: [...value] };
+        const fallback = { [key]: omitted };
+        // Unmarked fields are bounded compiler literals/lists. Short values seed full so admission only grows.
+        const complete = render(full);
+        const selected = omittable && (complete === undefined || Buffer.byteLength(complete) > Buffer.byteLength(render(fallback) ?? ""))
+            ? fallback : full;
+        return { omittable, full, selected };
     });
-    let action = next ? ToolsResponse.formatInspectNextAction(next[0], next[1]) : "";
-    const text = () => [...projected, ...(action ? [action] : [])].join("\n");
-    if (next && Buffer.byteLength(text(), "utf8") > budget)
-        action = omitted("next_action");
-    fields.forEach((item, index) => {
-        if (!item[2])
-            return;
-        const fallback = projected[index];
-        projected[index] = formatted[index];
-        if (Buffer.byteLength(text(), "utf8") > budget)
-            projected[index] = fallback;
-    });
-    return text();
+    // Only producer-known read-only inspect literals become a typed next, never a parsed action.
+    const typedNext = next ? { next: { tool: "inspect", target: next[0], view: next[1] } } : undefined;
+    const nextFallback = { next_action: omitted };
+    const document = () => ({ ...Object.assign({}, ...parts.map((part) => part.selected)),
+        ...(typedNext ?? nextFallback) });
+    let selectedNext = typedNext;
+    if (next && render(document()) === undefined)
+        selectedNext = undefined;
+    const nextValue = () => (next ? (selectedNext ?? nextFallback) : {});
+    for (const part of parts) {
+        if (!part.omittable)
+            continue;
+        const previous = part.selected;
+        part.selected = part.full;
+        if (render({ ...Object.assign({}, ...parts.map((item) => item.selected)), ...nextValue() }) === undefined)
+            part.selected = previous;
+    }
+    const text = render({ ...Object.assign({}, ...parts.map((item) => item.selected)), ...nextValue() });
+    return (text ?? "").replace(/\n$/u, "");
 }
 function inspectRuntime(view, input, ctx, deps) {
     if (view === "status")
@@ -312,7 +347,9 @@ function inspectRecipeIdentity(identity, resolutionContext, namespaces, inventor
                 : ["inspect target=recipes view=imports verbose=true"],
     };
 }
-function inspectRecipes(view, input, deps, context) {
+function inspectRecipes(requestedView, input, deps, context) {
+    // `registry` and `summary` name one inspection path; only `verbose` selects compact versus full output.
+    const view = requestedView === "registry" ? "summary" : requestedView;
     if (view !== "status" &&
         view !== "summary" &&
         view !== "doctor" &&
@@ -320,7 +357,7 @@ function inspectRecipes(view, input, deps, context) {
         view !== "reviews") {
         throw new Error(formatInspectFailure([
             ["target_kind", "recipes"], ["result", "unsupported view"],
-            ["supported_views", ["status", "summary", "doctor", "imports", "reviews"]],
+            ["supported_views", ["status", "summary", "registry", "doctor", "imports", "reviews"]],
         ]));
     }
     const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
@@ -515,40 +552,49 @@ function compactResult(target, view, details) {
     if (target === "runtime")
         return compactRuntime(view, details);
     if (target === "recipes" && typeof details.identity === "string") {
-        const fields = [ToolsResponse.formatMarkdownField("recipes", "doctor"),
-            ...["identity", "skill_active", "resolvable", "catalog_partial", "component_status"]
-                .map(key => ToolsResponse.formatMarkdownField(key, String(details[key]))),
-            ...(details.source_location ? [ToolsResponse.formatMarkdownField("source_location", ToolsResponse.formatLiteralBlock(String(details.source_location)))] : []),
-            ToolsResponse.formatMarkdownField("resolution_generation", String(details.resolution_generation)),
-            ...(details.rejected_reason ? [ToolsResponse.formatMarkdownField("rejected_reason", String(details.rejected_reason))] : [])];
+        const identity = compactSelected("identity", String(details.identity));
+        const location = typeof details.source_location === "string"
+            ? compactSelected("source_location", details.source_location) : undefined;
+        const generation = compactSelected("resolution_generation", String(details.resolution_generation));
+        const rejected = typeof details.rejected_reason === "string"
+            ? compactSelected("rejected_reason", details.rejected_reason) : undefined;
         const actions = details.next_actions;
-        if (actions?.length)
-            fields.push(ToolsResponse.formatInspectionHint(String(actions[0])));
-        return "\n" + fields.join("\n");
+        const hint = actions?.length
+            ? ToolsResponse.nextActionMetadata(String(actions[0]), Limits.RUN_DELIVERY_MODEL_MAX_BYTES) : undefined;
+        const parts = [identity, ...(location ? [location] : []), generation, ...(rejected ? [rejected] : []), ...(hint ? [hint] : [])];
+        const render = () => ({ recipes: "doctor", ...identity.selected,
+            skill_active: String(details.skill_active), resolvable: String(details.resolvable),
+            catalog_partial: String(details.catalog_partial), component_status: String(details.component_status),
+            ...(location ? location.selected : {}), ...generation.selected, ...(rejected ? rejected.selected : {}),
+            ...(hint ? hint.selected : {}) });
+        return `\n${ToolsResponse.growYamlDocument(render, parts, Limits.RUN_DELIVERY_MODEL_MAX_BYTES).replace(/\n$/u, "")}`;
     }
     if (target === "recipes")
         return ToolsResponse.compactRecipeRegistry(details);
     if (target.startsWith("tool:") && view === "status") {
-        const argumentsField = (key, value) => Array.isArray(value) && value.length
-            ? "- " + key + ":\n" + value.map(item => "  - " + String(item).replace(/\r\n|\r|\n/gu, match => match + "    ")).join("\n")
-            : ToolsResponse.formatMarkdownField(key, Array.isArray(value) ? "none" : "unknown");
+        const name = target.slice(5);
+        const tool = compactSelected("tool", name);
+        const source = compactSelected("source", String(details.source ?? "unknown"));
+        const boundary = compactSelected("activation_boundary", String(details.activation_boundary ?? "unknown"));
         const next = Array.isArray(details.next_actions) && details.next_actions.length > 0
             ? String(details.next_actions[0])
             : details.callable_now === true
-                ? `call tool ${target.slice(5)}`
-                : `register_tool name=${target.slice(5)} update=true`;
-        return "\n" + [ToolsResponse.formatMarkdownField("tool", target.slice(5)),
-            ToolsResponse.formatMarkdownField("source", String(details.source ?? "unknown")),
-            ToolsResponse.formatMarkdownField("callable_now", String(details.callable_now ?? false)),
-            ToolsResponse.formatMarkdownField("activation_boundary", String(details.activation_boundary ?? "unknown")),
-            argumentsField("required_args", details.required_args), argumentsField("optional_args", details.optional_args),
-            ToolsResponse.formatMarkdownField("launch_kind", String(details.launch_kind ?? "none")),
-            ToolsResponse.formatMarkdownField("spawn_calls", String(Number(details.spawn_calls ?? 0))),
-            ToolsResponse.formatMarkdownField("tool_calls", String(Number(details.tool_calls ?? 0))), ToolsResponse.formatInspectionHint(next)].join("\n");
+                ? `call tool ${name}`
+                : `register_tool name=${name} update=true`;
+        const hint = ToolsResponse.nextActionMetadata(next, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+        const required = compactArguments("required_args", details.required_args);
+        const optional = compactArguments("optional_args", details.optional_args);
+        const render = () => ({ ...tool.selected, ...source.selected,
+            callable_now: details.callable_now === true, ...boundary.selected,
+            ...required.selected, ...optional.selected,
+            launch_kind: String(details.launch_kind ?? "none"),
+            spawn_calls: Number(details.spawn_calls ?? 0), tool_calls: Number(details.tool_calls ?? 0),
+            ...hint.selected });
+        return `\n${ToolsResponse.growYamlDocument(render, [tool, source, boundary, required, optional, hint], Limits.RUN_DELIVERY_MODEL_MAX_BYTES).replace(/\n$/u, "")}`;
     }
     if (target.startsWith("tool:"))
-        return "\n" + ToolsResponse.formatMarkdownField("tool", target.slice(5)) + "\n" + ToolsResponse.formatMarkdownField("view", view);
-    return "\n" + ToolsResponse.formatMarkdownField("run", target.slice(4)) + "\n" + ToolsResponse.formatMarkdownField("view", view);
+        return compactDocument({ tool: target.slice(5), view });
+    return compactDocument({ run: target.slice(4), view });
 }
 export function createInspectToolDefinition(deps = {}) {
     return {
@@ -562,7 +608,7 @@ export function createInspectToolDefinition(deps = {}) {
             status: Schema.stringSchema("Optional runtime Run status filter. With verbose runs, failed prioritizes observed failed subtrees without filtering the navigation map."),
             target: Schema.stringSchema("Target: run:<id>, runtime, recipes, or tool:<name>."),
             verbose: Schema.booleanSchema("Return full JSON instead of compact text."),
-            view: Schema.stringSchema("Run view recipe|trace|control, or target-specific management view."),
+            view: Schema.stringSchema("Run view recipe|trace|control, or one target-specific management view. runtime status|runs|triage; recipes status|summary|doctor|imports|reviews, where registry aliases summary; tool status|schema."),
         }, ["target", "view"]),
         async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
             const input = asRecord(params);
@@ -592,7 +638,11 @@ export function createInspectToolDefinition(deps = {}) {
             return {
                 content: [{
                         type: "text",
-                        text: maybeJsonText(details, input.verbose === true || (target.startsWith("tool:") && view === "schema"), compactResult(target, view, details)),
+                        text: input.verbose === true
+                            ? ToolsResponse.jsonText(details)
+                            : target.startsWith("tool:") && view === "schema"
+                                ? schemaDocument(details)
+                                : compactResult(target, view, details),
                     }],
                 details,
             };

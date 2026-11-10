@@ -6,8 +6,11 @@ Preserve the intended logical identity and diagnose through public pi-actors sur
 
 ```text
 inspect target=recipes view=status
+inspect target=recipes view=summary
 inspect target=recipes view=doctor identity=<skill>/<recipe>
 ```
+
+`summary` and `registry` name the same inspection path: identical facts, details and rendering for identical `verbose` input, so only `verbose` selects compact text versus structured output. The compact label still reports `recipes: registry`, and that label is not a separate view to request. Unsupported-view refusals list the actual accepted view names.
 
 Compact Recipe/Run/tool replies use flat AX fields without changing their existing evidence or authorization. Required/optional tool arguments are sequences, with none distinct from unknown. Focused source_location remains one exact literal value. Run compact replies still identify only run/view: request verbose for structured evidence, and tool schema remains structured even without verbose. Compact text selects at most one existing hint; only exact read-only recipes doctor/imports/summary inspection literals become typed next nodes. Other advice stays instruction content with its original Markdown, never executable metadata or authority to rerun work/register a tool. The full original next_actions array remains in details; do not infer callability from an advisory string.
 

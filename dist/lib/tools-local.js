@@ -4,6 +4,7 @@
  * Owns wrapping saved local capabilities as executable pi tools
  */
 import * as AsyncRuns from "./async-runs.js";
+import * as Limits from "./limits.js";
 import * as ModelContext from "./model-context.js";
 import * as Execution from "./execution.js";
 import * as Prompts from "./prompts.js";
@@ -44,6 +45,16 @@ function shouldAddRuntimeToolUsageHint(error) {
     const message = error instanceof Error ? error.message : String(error);
     return (/^Argument \S+ must /.test(message) || /^Missing .* value: /.test(message));
 }
+/** Owned usage facts only; the JSON invocation example stays unparsed instructional body text. */
+function runtimeToolUsageMetadata(cfg, required, includeRunId) {
+    const optional = cfg.args.filter((arg) => !RecipesReferences.isRuntimeOwnedRecipeInput(arg) &&
+        !required.includes(arg));
+    const budget = Limits.RUN_DELIVERY_MODEL_MAX_BYTES;
+    const tool = ToolsResponse.selectYamlField("tool", cfg.name, budget);
+    const requiredPart = ToolsResponse.selectYamlField("required", required, budget);
+    const optionalPart = ToolsResponse.selectYamlField("optional", [...optional, ...(includeRunId ? ["run_id"] : [])], budget);
+    return ToolsResponse.growYamlDocument(() => ({ ...tool.selected, ...requiredPart.selected, ...optionalPart.selected }), [tool, requiredPart, optionalPart], budget);
+}
 function formatRuntimeToolUsageHint(cfg, required, includeRunId) {
     const optional = cfg.args.filter((arg) => !RecipesReferences.isRuntimeOwnedRecipeInput(arg) &&
         !required.includes(arg));
@@ -59,15 +70,10 @@ function formatRuntimeToolUsageHint(cfg, required, includeRunId) {
         example[arg] = sampleValueForArg(arg, cfg.argTypes?.[arg], exampleDefaults);
     if (includeRunId)
         example.run_id = `${cfg.name}-1`;
-    const lines = [
+    return [
         `Expected call shape for ${cfg.name}:`,
         `${cfg.name}(${JSON.stringify(example, null, 2)})`,
-    ];
-    if (required.length)
-        lines.push(`Required: ${required.join(", ")}`);
-    if (optional.length || includeRunId)
-        lines.push(`Optional: ${[...optional, ...(includeRunId ? ["run_id"] : [])].join(", ")}`);
-    return lines.join("\n");
+    ].join("\n");
 }
 function resolveRecipeToolValues(cfg, callerValues, ctx) {
     const recipeRuntimeValues = {
@@ -88,7 +94,9 @@ function formatRuntimeToolArgumentError(cfg, error, required, includeRunId) {
     const message = error instanceof Error ? error.message : String(error);
     if (!shouldAddRuntimeToolUsageHint(error))
         return error instanceof Error ? error : new Error(message);
-    return new Error(`Invalid arguments for tool "${cfg.name}": ${message}\n\n${formatRuntimeToolUsageHint(cfg, required, includeRunId)}`);
+    // Whole usage groups fit the header budget or carry explicit omission; the JSON example stays opaque.
+    const header = runtimeToolUsageMetadata(cfg, required, includeRunId);
+    return new Error(ToolsResponse.withLeadingLineBreak(ToolsResponse.frameMetadataDocument(header, `Invalid arguments for tool "${cfg.name}": ${message}\n\n${formatRuntimeToolUsageHint(cfg, required, includeRunId)}`)));
 }
 export function createRuntimeToolDefinition(cfg, exec) {
     const paramSchema = {};

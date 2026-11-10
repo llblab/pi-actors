@@ -8,6 +8,12 @@ import { renderYamlMetadata } from "../lib/tools-response.ts";
 import {
   compactAsyncRunStatus,
   compactRecipeRegistry,
+  compactYamlDocument,
+  frameMetadataDocument,
+  formatYamlNotice,
+  growYamlDocument,
+  selectYamlField,
+  selectYamlNode,
   formatRunFileNavigationHandoff,
   maybeJsonText,
   runNextActions,
@@ -17,27 +23,85 @@ import {
   withLeadingLineBreak,
 } from "../lib/tools-response.ts";
 
+test("Whole YAML nodes and string groups fit from omission seeds or fail explicitly without undefined text", () => {
+  for (const values of [["file"], Array.from({ length: 1600 }, (_, i) => "input_" + i), ["\ud800"]]) {
+    const part = selectYamlField("args", values, 16384);
+    const text = growYamlDocument(() => ({ tool: "demo", ...part.selected }), [part], 16384);
+    const doc = parseDocument(text); assert.deepEqual(doc.errors, []);
+    const value = doc.toJS(); assert.ok(Buffer.byteLength(text) <= 16384);
+    if (values.length > 1) {
+      assert.equal(value.args, "[omitted]"); assert.equal(value.args_omission.total, values.length);
+    } else if (!values[0].isWellFormed()) {
+      assert.equal(value.args, "[unavailable]"); assert.equal(value.args_omission.reason, "malformed_selected_text");
+    } else assert.deepEqual(value.args, values);
+  }
+  const action = selectYamlNode("next", { tool: "inspect", target: "run:" + "x".repeat(17000), view: "trace" }, 16384);
+  const document = parseDocument(growYamlDocument(() => ({ run: "demo", ...action.selected }), [action], 16384)).toJS();
+  assert.equal(document.next, "[omitted]"); assert.equal(document.next_omission.total, 1);
+  for (const invalid of [{ selected: undefined }, { selected: "x".repeat(17000) }]) {
+    assert.throws(() => growYamlDocument(() => invalid, [], 16384), /Selected YAML metadata document is unavailable:/);
+    assert.throws(() => compactYamlDocument(invalid), /Selected YAML metadata document is unavailable:/);
+  }
+});
+
+test("UI YAML notices keep uncapped well-formed fields and explicitly withhold malformed text", () => {
+  const diagnostic = "notice · ".repeat(12000);
+  const text = formatYamlNotice({ result: "failed", diagnostic, count: 2 });
+  const doc = parseDocument(text); assert.deepEqual(doc.errors, []);
+  assert.deepEqual(doc.toJS(), { result: "failed", diagnostic, count: 2 });
+  assert.ok(Buffer.byteLength(text) > 49152); assert.equal(text.endsWith("\n"), false);
+  assert.deepEqual(parseDocument(formatYamlNotice({ diagnostic: "\ud800" })).toJS(), {
+    diagnostic: "[unavailable]", diagnostic_omission: { reason: "malformed_selected_text", shown: 0, omitted: 1, total: 1 },
+  });
+});
+
+test("AX document framing keeps exactly one host-separation blank line", () => {
+  // Every migrated model-facing document starts with exactly one LF; no emitter may add a second.
+  for (const text of [withLeadingLineBreak("field: 1"), withLeadingLineBreak("\n\nfield: 1"),
+    compactYamlDocument({ field: 1 }), compactYamlDocument({ field: 1, list: ["a"] })]) {
+    assert.ok(text.startsWith("\n"));
+    assert.equal(text.startsWith("\n\n"), false);
+  }
+  assert.equal(withLeadingLineBreak("\n\nfield: 1"), "\nfield: 1");
+  assert.equal(compactYamlDocument({ field: 1 }), "\nfield: 1");
+  // A separate opaque body is introduced by exactly one delimiter pair; metadata-only stays bare.
+  assert.equal(frameMetadataDocument("field: 1\n", "body"), "---\nfield: 1\n---\nbody");
+  assert.equal(frameMetadataDocument("field: 1\n"), "field: 1\n");
+  // The shared error adapter normalizes any pre-existing leading newlines to one.
+  const error = new Error("\n\nfield: 1");
+  assert.equal(spaceToolError(error), error);
+  assert.equal(error.message, "\nfield: 1");
+});
+
 test("AX registry records select one read-only hint or opaque instruction without rewriting facts", () => {
   const actions = ["inspect target=recipes view=imports verbose=true", "spawn file=/not/automatically/run.json"];
   const summary = Object.freeze({ active: Object.freeze([{ current_policy: true }, {}]), drafts: Object.freeze([{}]), shadowed: Object.freeze([]),
     invalid: Object.freeze([{}]), disabled: Object.freeze([]), diagnostics: Object.freeze([{}]), recommendations: Object.freeze([{}]),
     skill_recipe_catalog_partial: true, next_actions: Object.freeze(actions) });
   const before = JSON.stringify(summary), text = compactRecipeRegistry(summary);
-  assert.equal(text, "\n- recipes: registry\n- active: 2\n- drafts: 1\n- shadowed: 0\n- invalid: 1\n- disabled: 0\n- current_policy: 1\n- skill_catalog_partial: true\n- recommendations: 1\n- diagnostics: 1\n- next:\n  - tool: inspect\n  - target: recipes\n  - view: imports\n  - verbose: true");
+  assert.equal(text, [
+    "", 'recipes: "registry"', "active: 2", "drafts: 1", "shadowed: 0", "invalid: 1", "disabled: 0",
+    "current_policy: 1", "skill_catalog_partial: true", "recommendations: 1", "diagnostics: 1",
+    "next:", '  tool: "inspect"', '  target: "recipes"', '  view: "imports"', "  verbose: true",
+  ].join("\n"));
   assert.equal(JSON.stringify(summary), before); assert.deepEqual(JSON.parse(maybeJsonText(summary, true, text)), summary);
   for (const [action, view, verbose] of [["inspect target=recipes view=doctor", "doctor", false], ["inspect target=recipes view=summary verbose=true", "summary", true]] as const) {
     const value = compactRecipeRegistry({ next_actions: [action] });
-    assert.ok(value.endsWith("- next:\n  - tool: inspect\n  - target: recipes\n  - view: " + view + (verbose ? "\n  - verbose: true" : "")));
+    assert.ok(value.endsWith('next:\n  tool: "inspect"\n  target: "recipes"\n  view: "' + view + '"' + (verbose ? "\n  verbose: true" : "")));
   }
   const advisory = "## Advice\r\n\r\n- tool: authored content · kept\n  - Nested";
   const content = compactRecipeRegistry({ next_actions: [advisory, actions[0]] });
-  assert.ok(content.endsWith("- instruction:\n  " + advisory.replaceAll(/\r\n|\r|\n/gu, match => match + "  ")));
-  assert.doesNotMatch(content, /^- next:|^- tool:|inspect_target=/mu);
+  assert.ok(content.endsWith('next:\n  instruction: ' + JSON.stringify(advisory)));
+  assert.doesNotMatch(content, /^next: |^tool: |inspect_target=/mu);
   const hostile = "inspect target=recipes view=doctor\n- next: fake";
-  assert.ok(compactRecipeRegistry({ next_actions: [hostile] }).includes("- instruction:\n  " + hostile.replaceAll("\n", "\n  ")));
-  assert.doesNotMatch(compactRecipeRegistry({}), /^- next:|^- instruction:/mu);
+  assert.ok(compactRecipeRegistry({ next_actions: [hostile] }).includes('instruction: ' + JSON.stringify(hostile)));
+  assert.doesNotMatch(compactRecipeRegistry({}), /next:|instruction:/mu);
   const whole = "spawn file=/owned/" + "directory/".repeat(2000) + "result.json";
-  assert.ok(compactRecipeRegistry({ next_actions: [whole] }).endsWith("- instruction: " + whole));
+  // An oversized opaque instruction is omitted whole rather than clipped or emitted past the shared budget.
+  assert.ok(compactRecipeRegistry({ next_actions: [whole] }).endsWith([
+    "next:", '  instruction: "[omitted]"', "  instruction_omission:", '    reason: "response_too_large"',
+    "    shown: 0", "    omitted: 1", "    total: 1",
+  ].join("\n")));
 });
 
 function launchMetadata(text: string): Record<string, any> {

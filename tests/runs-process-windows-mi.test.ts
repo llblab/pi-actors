@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { queryArguments, decodeResponse, decodeProvenanceBinding } from "../lib/runs-process-windows-mi.ts";
+import { createHash } from 'node:crypto';
+import {
+  decodeProvenanceBinding, decodeResponse, helperInvocation, loadHelperAsset, queryArguments,
+  readHelperManifest, resolveHelperAsset,
+} from "../lib/runs-process-windows-mi.ts";
 
 const date = { profile: 'mi-timestamp-v1', year: 2000, month: 2, day: 29, hour: 23, minute: 59, second: 59, microseconds: 999999, utc: 0 };
 const row = { date, exe: ' C:\\a.exe ', cmd: ' "a" \\ 😀\ud800\udfff ' };
@@ -145,4 +149,155 @@ test('native failures expose only closed stages; module has no higher-domain imp
   const source = readFileSync(new URL("../lib/runs-process-windows-mi.ts", import.meta.url), 'utf8');
   assert.doesNotMatch(source, /(?:from\s*|import\s*\()['"]\./);
   assert.doesNotMatch(JSON.stringify(decode(envelope())), /start_time|identity|accepted|dead_pid|\/Date\(/);
+});
+
+const manifestClaims = () => ({
+  helper_version: '1.2.3', architecture: 'windows-x64', protocol: 'native-mi-v1', profiles: ['scalar', 'shared'],
+  native_source_sha256: '0'.repeat(64), executable_bytes: 4, executable_sha256: 'a'.repeat(64),
+  toolchain: { compiler: 'MSVC 19.44', sdk: 'Windows SDK 10.0.26100', build_arguments: ['/O2', '/utf-8'] },
+  dependencies: ['kernel32.dll'],
+  originating_source_commit: '0'.repeat(40), originating_build_job: '12345',
+});
+const manifestBytes = (value: unknown = manifestClaims()) => Buffer.from(JSON.stringify(value));
+const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+
+test('helper manifest reader is bounded, exact-shape and fresh-claim only', () => {
+  const claims = manifestClaims();
+  const input = manifestBytes(claims);
+  const first = readHelperManifest(input);
+  const second = readHelperManifest(input);
+  assert.equal(first.kind, 'manifest_unadmitted');
+  assert.equal(second.kind, 'manifest_unadmitted');
+  if (first.kind !== 'manifest_unadmitted' || second.kind !== 'manifest_unadmitted') return;
+  assert.deepEqual(first.manifest, { ...claims, architecture: 'windows-x64', protocol: 'native-mi-v1', profiles: ['scalar', 'shared'] });
+  assert.notEqual(first.manifest, second.manifest);
+  assert.notEqual(first.manifest, claims);
+  claims.helper_version = '9.9.9';
+  claims.dependencies.push('user32.dll');
+  assert.equal(first.manifest.helper_version, '1.2.3');
+  assert.deepEqual(first.manifest.dependencies, ['kernel32.dll']);
+
+  // Complete-document bounds: over 32KiB is refused before any parse.
+  const padded = Buffer.concat([input, Buffer.from(' '.repeat(32 * 1024 - input.length + 1))]);
+  assert.deepEqual(readHelperManifest(padded), { kind: 'unusable', reason: 'oversize_manifest' });
+  const exact = Buffer.concat([input, Buffer.from(' '.repeat(32 * 1024 - input.length))]);
+  assert.equal(readHelperManifest(exact).kind, 'manifest_unadmitted');
+  assert.deepEqual(readHelperManifest(Buffer.alloc(0)), { kind: 'unusable', reason: 'invalid_manifest' });
+
+  const invalid = (value: unknown) => assert.deepEqual(readHelperManifest(manifestBytes(value)), { kind: 'unusable', reason: 'invalid_manifest' });
+  for (const extra of [
+    Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from([0xff]), Buffer.from(JSON.stringify(manifestClaims()), 'utf8'),
+  ]) if (extra[0] !== 0x7b) assert.deepEqual(readHelperManifest(Buffer.concat([extra, input])), { kind: 'unusable', reason: 'invalid_manifest' });
+  invalid({ ...manifestClaims(), extra: true });
+  invalid({ ...manifestClaims(), dependencies: undefined });
+  invalid({ ...manifestClaims(), native_source_sha256: 'A'.repeat(64) });
+  invalid({ ...manifestClaims(), native_source_sha256: '0'.repeat(63) });
+  invalid({ ...manifestClaims(), executable_sha256: 'a'.repeat(63) });
+  invalid({ ...manifestClaims(), originating_source_commit: '0'.repeat(39) });
+  invalid({ ...manifestClaims(), originating_build_job: '0' });
+  invalid({ ...manifestClaims(), executable_bytes: 0 });
+  invalid({ ...manifestClaims(), executable_bytes: 1.5 });
+  invalid({ ...manifestClaims(), toolchain: { compiler: 'c', sdk: 's' } });
+  invalid({ ...manifestClaims(), toolchain: { compiler: '', sdk: 's', build_arguments: [] } });
+  invalid({ ...manifestClaims(), dependencies: ['kernel32.dll', 'kernel32.dll'] });
+  invalid({ ...manifestClaims(), dependencies: ['k'.repeat(129)] });
+  invalid({ ...manifestClaims(), dependencies: ['bad\u0001name'] });
+  const unsupported = (value: unknown) => assert.deepEqual(readHelperManifest(manifestBytes(value)), { kind: 'unusable', reason: 'unsupported_manifest' });
+  unsupported({ ...manifestClaims(), helper_version: '1.2' });
+  unsupported({ ...manifestClaims(), helper_version: '01.2.3' });
+  unsupported({ ...manifestClaims(), architecture: 'windows-arm64' });
+  unsupported({ ...manifestClaims(), protocol: 'native-mi-v2' });
+  unsupported({ ...manifestClaims(), profiles: ['shared', 'scalar'] });
+  unsupported({ ...manifestClaims(), profiles: [] });
+  unsupported({ ...manifestClaims(), executable_bytes: 8 * 1024 * 1024 + 1 });
+});
+
+test('helper asset lookup is fixed, versioned and package-relative to this module only', () => {
+  const source = resolveHelperAsset(new URL('../lib/runs-process-windows-mi.ts', import.meta.url).href, { platform: 'win32', arch: 'x64' }, '1.2.3');
+  assert.equal(source.kind, 'located');
+  if (source.kind !== 'located') return;
+  assert.ok(source.manifest_url.href.endsWith('/native/windows-mi/win32-x64/1.2.3/manifest.json'));
+  assert.ok(source.executable_url.href.endsWith('/native/windows-mi/win32-x64/1.2.3/helper.exe'));
+  assert.equal(source.manifest_url.href.includes('/lib/'), false);
+  const compiled = resolveHelperAsset('file:///pkg/dist/lib/runs-process-windows-mi.js', { platform: 'win32', arch: 'x64' }, '1.2.3');
+  assert.equal(compiled.kind, 'located');
+  if (compiled.kind === 'located') {
+    assert.equal(compiled.manifest_url.href, 'file:///pkg/dist/native/windows-mi/win32-x64/1.2.3/manifest.json');
+    assert.equal(compiled.executable_url.href, 'file:///pkg/dist/native/windows-mi/win32-x64/1.2.3/helper.exe');
+  }
+  const unusable = (moduleUrl: unknown, runtime: unknown, version: unknown, reason: string) =>
+    assert.deepEqual(resolveHelperAsset(moduleUrl, runtime, version), { kind: 'unusable', reason });
+  const sourceUrl = new URL('../lib/runs-process-windows-mi.ts', import.meta.url).href;
+  unusable(sourceUrl, { platform: 'linux', arch: 'x64' }, '1.2.3', 'unsupported_target');
+  unusable(sourceUrl, { platform: 'win32', arch: 'arm64' }, '1.2.3', 'unsupported_target');
+  unusable(sourceUrl, { platform: 'win32' }, '1.2.3', 'unsupported_target');
+  unusable(sourceUrl, { platform: 'win32', arch: 'x64' }, '1.2', 'unsupported_version');
+  unusable(sourceUrl, { platform: 'win32', arch: 'x64' }, '../../etc', 'unsupported_version');
+  unusable('file:///pkg/lib/other-owner.ts', { platform: 'win32', arch: 'x64' }, '1.2.3', 'unsupported_location');
+  const rootModule = resolveHelperAsset('file:///pkg/lib/runs-process-windows-mi.ts', { platform: 'win32', arch: 'x64' }, '1.2.3');
+  assert.equal(rootModule.kind, 'located');
+  if (rootModule.kind === 'located') assert.equal(rootModule.manifest_url.href, 'file:///pkg/native/windows-mi/win32-x64/1.2.3/manifest.json');
+  unusable('https://example.test/lib/runs-process-windows-mi.ts', { platform: 'win32', arch: 'x64' }, '1.2.3', 'unsupported_location');
+  unusable('not a url', { platform: 'win32', arch: 'x64' }, '1.2.3', 'unsupported_location');
+});
+
+test('helper asset loading verifies exact declared bytes and never partial data', () => {
+  const location = resolveHelperAsset(new URL('../lib/runs-process-windows-mi.ts', import.meta.url).href, { platform: 'win32', arch: 'x64' }, '1.2.3');
+  assert.equal(location.kind, 'located');
+  if (location.kind !== 'located') return;
+  const executable = Buffer.from('MZ-helper-bytes');
+  const claims = { ...manifestClaims(), executable_bytes: executable.byteLength, executable_sha256: sha256(executable) };
+  const manifest = manifestBytes(claims);
+  const reader = (files: Record<string, Uint8Array | undefined>) => (url: URL, maximumBytes: number) => {
+    const value = files[url.href];
+    return value === undefined ? undefined : value.subarray(0, Math.min(value.byteLength, maximumBytes));
+  };
+  const verified = loadHelperAsset(location, reader({ [location.manifest_url.href]: manifest, [location.executable_url.href]: executable }));
+  assert.deepEqual(verified, { kind: 'asset_verified_unadmitted', manifest: loadManifestClaim(manifest), executable_sha256: claims.executable_sha256, executable_bytes: executable.byteLength });
+  assert.deepEqual(loadHelperAsset(location, reader({})), { kind: 'unusable', reason: 'missing_manifest' });
+  // A limit-respecting reader must not admit a valid prefix of an over-limit document.
+  const prefix = Buffer.from(JSON.stringify(claims).padEnd(32 * 1024, ' ') + 'not JSON');
+  assert.deepEqual(loadHelperAsset(location, reader({ [location.manifest_url.href]: prefix, [location.executable_url.href]: executable })),
+    { kind: 'unusable', reason: 'oversize_manifest' });
+  const exact = Buffer.from(JSON.stringify(claims).padEnd(32 * 1024, ' '));
+  assert.equal(loadHelperAsset(location, reader({ [location.manifest_url.href]: exact, [location.executable_url.href]: executable })).kind, 'asset_verified_unadmitted');
+  // A reader that over-delivers is still refused by the bounded manifest read.
+  assert.deepEqual(loadHelperAsset(location, () => Buffer.alloc(32 * 1024 + 1)), { kind: 'unusable', reason: 'oversize_manifest' });
+  assert.deepEqual(loadHelperAsset(location, reader({ [location.manifest_url.href]: Buffer.from('null') })), { kind: 'unusable', reason: 'invalid_manifest' });
+  const wrongVersion = { ...claims, helper_version: '1.2.4' };
+  assert.deepEqual(loadHelperAsset(location, reader({ [location.manifest_url.href]: manifestBytes(wrongVersion), [location.executable_url.href]: executable })), { kind: 'unusable', reason: 'version_mismatch' });
+  assert.deepEqual(loadHelperAsset(location, reader({ [location.manifest_url.href]: manifest })), { kind: 'unusable', reason: 'missing_asset' });
+  assert.deepEqual(loadHelperAsset(location, reader({ [location.manifest_url.href]: manifest, [location.executable_url.href]: Buffer.concat([executable, Buffer.from('!')]) })), { kind: 'unusable', reason: 'oversize_asset' });
+  assert.deepEqual(loadHelperAsset(location, reader({ [location.manifest_url.href]: manifest, [location.executable_url.href]: executable.subarray(0, executable.byteLength - 1) })), { kind: 'unusable', reason: 'size_mismatch' });
+  const tampered = Buffer.from(executable);
+  tampered[0] = 0x4e;
+  assert.deepEqual(loadHelperAsset(location, reader({ [location.manifest_url.href]: manifest, [location.executable_url.href]: tampered })), { kind: 'unusable', reason: 'digest_mismatch' });
+  // A reader may return more than requested; the exact declared size still decides.
+  const overDelivering = (url: URL) => url.href === location.manifest_url.href ? manifest : executable;
+  assert.deepEqual(loadHelperAsset(location, overDelivering), { kind: 'asset_verified_unadmitted', manifest: loadManifestClaim(manifest), executable_sha256: claims.executable_sha256, executable_bytes: executable.byteLength });
+});
+
+function loadManifestClaim(bytes: Uint8Array) {
+  const reading = readHelperManifest(bytes);
+  assert.equal(reading.kind, 'manifest_unadmitted');
+  if (reading.kind !== 'manifest_unadmitted') throw new Error('unexpected manifest reading');
+  return reading.manifest;
+}
+
+test('helper invocation is a shell-free spec with the fixed query arguments only', () => {
+  const executable = 'C:\\Program Files\\pi-actors\\helper.exe';
+  assert.deepEqual(helperInvocation(executable, 'scalar', [7]), {
+    kind: 'invocation_unadmitted', command: executable,
+    args: ['scalar', '7'], options: { shell: false, windowsHide: true },
+  });
+  const shared = helperInvocation('C:/helper.exe', 'shared', [1, 64]);
+  assert.equal(shared.kind, 'invocation_unadmitted');
+  if (shared.kind === 'invocation_unadmitted') assert.deepEqual(shared.args, ['shared', '1', '64']);
+  for (const bad of [undefined, '', 'helper.exe', 'relative\\helper.exe', 'C:\\helper\\', 'C:\\he"lper.exe',
+    'C:\\helper.exe\r\nstart calc', 'C:\\helper.exe\u0000', 'x'.repeat(4097)]) {
+    assert.deepEqual(helperInvocation(bad, 'scalar', [1]), { kind: 'unusable', reason: 'unsupported_executable' });
+  }
+  for (const [profile, pids] of [['other', [1]], ['scalar', []], ['scalar', [1, 2]], ['shared', [0]], ['shared', [1, 1]], ['shared', [1.5]]] as const) {
+    assert.deepEqual(helperInvocation(executable, profile, pids), { kind: 'unusable', reason: 'invalid_query' });
+  }
 });

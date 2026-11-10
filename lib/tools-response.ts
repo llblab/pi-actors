@@ -84,6 +84,69 @@ export function renderYamlMetadata(value: unknown, byteBudget: number): YamlMeta
   }
 }
 
+export type YamlPart = { full: Record<string, unknown>; selected: Record<string, unknown> };
+
+/** One selected metadata node, kept whole or covered by a field/group omission. */
+export function selectYamlNode(key: string, value: unknown, byteBudget: number, total = 1): YamlPart {
+  const full = { [key]: value };
+  const complete = renderYamlMetadata(full, byteBudget);
+  const invalid = complete.state === "unavailable" && complete.reason === "metadata_invalid";
+  const omitted = { [key]: invalid ? "[unavailable]" : "[omitted]",
+    [key + "_omission"]: { reason: invalid ? "invalid_selected_metadata" : "response_too_large", shown: 0, omitted: total, total } };
+  const fallback = renderYamlMetadata(omitted, byteBudget);
+  // Seed the shorter complete-or-omitted form: omission scaffolding must never manufacture overflow.
+  const selected = complete.state === "available" && fallback.state === "available" &&
+    Buffer.byteLength(complete.text) <= Buffer.byteLength(fallback.text) ? full : omitted;
+  return { full: invalid ? omitted : full, selected };
+}
+
+/** Opaque selected text or string sequence; malformed selections stay unavailable without repair. */
+export function selectYamlField(key: string, value: string | readonly string[], byteBudget: number): YamlPart {
+  const values = typeof value === "string" ? [value] : value;
+  if (values.every(item => item.isWellFormed()))
+    return selectYamlNode(key, typeof value === "string" ? value : [...value], byteBudget, typeof value === "string" ? 1 : value.length);
+  const total = typeof value === "string" ? 1 : value.length;
+  const omitted = { [key]: "[unavailable]",
+    [key + "_omission"]: { reason: "malformed_selected_text", shown: 0, omitted: total, total } };
+  return { full: omitted, selected: omitted };
+}
+
+/** Grow whole selected fields in priority order while the complete document still fits. */
+export function growYamlDocument(
+  render: () => Record<string, unknown>,
+  order: readonly YamlPart[],
+  byteBudget: number,
+): string {
+  const fits = () => renderYamlMetadata(render(), byteBudget).state === "available";
+  for (const part of order) {
+    if (part.selected === part.full) continue;
+    const previous = part.selected;
+    part.selected = part.full;
+    if (!fits()) part.selected = previous;
+  }
+  const rendered = renderYamlMetadata(render(), byteBudget);
+  if (rendered.state !== "available")
+    throw new Error("Selected YAML metadata document is unavailable: " + rendered.reason);
+  return rendered.text;
+}
+
+/** Uncapped UI-only flat metadata; never borrow a model-output allowance for notices. */
+export function formatYamlNotice(value: Record<string, string | number | boolean>): string {
+  const selected: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (typeof field === "string" && !field.isWellFormed()) {
+      selected[key] = "[unavailable]";
+      selected[key + "_omission"] = { reason: "malformed_selected_text", shown: 0, omitted: 1, total: 1 };
+    } else selected[key] = field;
+  }
+  return yamlMetadataText(selected).replace(/\n$/u, "");
+}
+
+/** Close one rendered YAML header; a separate opaque body gets exactly one delimiter pair. */
+export function frameMetadataDocument(header: string, body?: string): string {
+  return body === undefined ? header : `---\n${header}---\n${body}`;
+}
+
 export function formatMarkdownField(key: string, value: string, depth = 0): string {
   const indent = "  ".repeat(depth);
   return /[\r\n]/u.test(value)
@@ -463,6 +526,28 @@ export function recipeRegistryNextActions(
   return [...new Set(actions)].slice(0, 4);
 }
 
+/** Compact metadata-only document text: one leading LF, no trailing LF, shared emitter budget. */
+export function compactYamlDocument(value: Record<string, unknown>): string {
+  const text = growYamlDocument(() => value, [], Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  return `\n${text.replace(/\n$/u, "")}`;
+}
+
+/** Only the closed read-only Recipe inspect literals become typed next; other advice stays opaque content. */
+export function nextActionMetadata(action: string, byteBudget: number): YamlPart {
+  const recognized = [
+    ["inspect target=recipes view=doctor", "doctor", false],
+    ["inspect target=recipes view=imports verbose=true", "imports", true],
+    ["inspect target=recipes view=summary verbose=true", "summary", true],
+  ] as const;
+  const match = recognized.find(([literal]) => literal === action);
+  if (match) {
+    const typed = { next: { tool: "inspect", target: "recipes", view: match[1], ...(match[2] ? { verbose: true } : {}) } };
+    return { full: typed, selected: typed };
+  }
+  const instruction = selectYamlField("instruction", action, byteBudget);
+  return { full: { next: instruction.full }, selected: { next: instruction.selected } };
+}
+
 /** Only these existing read-only inspection hints become action nodes; other advice stays content. */
 export function formatInspectionHint(action: string): string {
   if (action === "inspect target=recipes view=doctor") return formatInspectNextAction("recipes", "doctor");
@@ -474,21 +559,11 @@ export function formatInspectionHint(action: string): string {
 export function compactRecipeRegistry(
   summary: Record<string, unknown>,
 ): string {
-  const active = Array.isArray(summary.active) ? summary.active.length : 0;
-  const shadowed = Array.isArray(summary.shadowed)
-    ? summary.shadowed.length
-    : 0;
-  const invalid = Array.isArray(summary.invalid) ? summary.invalid.length : 0;
-  const disabled = Array.isArray(summary.disabled)
-    ? summary.disabled.length
-    : 0;
-  const diagnostics = Array.isArray(summary.diagnostics)
-    ? summary.diagnostics.length
-    : 0;
-  const drafts = Array.isArray(summary.drafts) ? summary.drafts.length : 0;
-  const recommendations = Array.isArray(summary.recommendations)
-    ? summary.recommendations.length
-    : 0;
+  const count = (key: string, source: unknown) => Array.isArray(source) ? source.length : 0;
+  const active = count("active", summary.active), shadowed = count("shadowed", summary.shadowed);
+  const invalid = count("invalid", summary.invalid), disabled = count("disabled", summary.disabled);
+  const diagnostics = count("diagnostics", summary.diagnostics), drafts = count("drafts", summary.drafts);
+  const recommendations = count("recommendations", summary.recommendations);
   const skillCatalogPartial = summary.skill_recipe_catalog_partial === true;
   const currentPolicy = Array.isArray(summary.active)
     ? (summary.active as Array<Record<string, unknown>>).filter(
@@ -498,11 +573,13 @@ export function compactRecipeRegistry(
   const nextActions = Array.isArray(summary.next_actions)
     ? (summary.next_actions as string[])
     : [];
-  const fields = [formatMarkdownField("recipes", "registry"), ...Object.entries({ active, drafts, shadowed, invalid, disabled,
-    current_policy: currentPolicy, skill_catalog_partial: skillCatalogPartial, recommendations, diagnostics })
-    .map(([key, value]) => formatMarkdownField(key, String(value)))];
-  if (nextActions.length) fields.push(formatInspectionHint(nextActions[0]));
-  return "\n" + fields.join("\n");
+  const hint = nextActions.length ? nextActionMetadata(nextActions[0]!, Limits.RUN_DELIVERY_MODEL_MAX_BYTES) : undefined;
+  const render = (): Record<string, unknown> => ({ recipes: "registry", active, drafts, shadowed, invalid, disabled,
+    current_policy: currentPolicy, skill_catalog_partial: skillCatalogPartial, recommendations, diagnostics,
+    ...(hint ? hint.selected : {}) });
+  return hint
+    ? `\n${growYamlDocument(render, [hint], Limits.RUN_DELIVERY_MODEL_MAX_BYTES).replace(/\n$/u, "")}`
+    : compactYamlDocument(render());
 }
 
 export const DEFAULT_INSPECT_LINES = Limits.DEFAULT_INSPECT_LINES;

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { sanitizeFilePart } from "./identity.js";
 import * as Limits from "./limits.js";
 import * as Paths from "./paths.js";
+import * as ToolsResponse from "./tools-response.js";
 export function writeFullOutput(toolName, stream, content) {
     try {
         const outputRoot = join(Paths.getExtensionTmpDir(), "outputs");
@@ -80,10 +81,20 @@ export function formatOutput(toolName, stream, content) {
     };
 }
 export function formatFailureOutput(toolName, code, killed, stdout, stderr) {
-    const parts = [`Exit code ${code}${killed ? " (killed)" : ""}`];
+    const parts = [];
     if (stderr.trim())
         parts.push(`stderr:\n${stderr.trimEnd()}`);
     if (stdout.trim())
         parts.push(`stdout:\n${stdout.trimEnd()}`);
-    return formatOutput(toolName, "error", parts.join("\n\n"));
+    // Compiler-owned exit status is far below the shared metadata bound.
+    const header = ToolsResponse.renderYamlMetadata({ exit_code: code, killed }, Limits.RUN_DELIVERY_MODEL_MAX_BYTES).text;
+    // A failure with no selected stream text stays metadata-only bare YAML; no filler body is invented.
+    if (parts.length === 0)
+        return { text: formatToolText(ToolsResponse.frameMetadataDocument(header)), truncated: false };
+    // The existing formatter keeps trim/tail/temp-file/loss basis; only the exit label moves into YAML.
+    const formatted = formatOutput(toolName, "error", parts.join("\n\n"));
+    return {
+        ...formatted,
+        text: formatToolText(ToolsResponse.frameMetadataDocument(header, formatted.text.replace(/^\n+/u, ""))),
+    };
 }

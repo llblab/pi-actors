@@ -956,7 +956,7 @@ test("Registered tool execution throws formatted command failures", async () => 
       }),
       "/work",
     ),
-    /Exit code 1[\s\S]*stderr:\nboom[\s\S]*stdout:\npartial/,
+    /\n---\nexit_code: 1\nkilled: false\n---\nstderr:\nboom\n\nstdout:\npartial/,
   );
 });
 
@@ -1155,7 +1155,7 @@ test("Registered tool execution aborts on root composition failures", async () =
       },
       "/work",
     ),
-    /Exit code 1[\s\S]*stderr:\nfatal/,
+    /\n---\nexit_code: 1\nkilled: false\n---\nstderr:\nfatal/,
   );
   assert.deepEqual(calls, ["/work/scan"]);
 });
@@ -1312,7 +1312,7 @@ test("Registered tool execution stops retries when recover fails", async () => {
       },
       "/work",
     ),
-    /Exit code 3[\s\S]*stderr:\nreset failed/,
+    /\n---\nexit_code: 3\nkilled: false\n---\nstderr:\nreset failed/,
   );
   assert.deepEqual(calls, ["/work/write", "/work/validate", "/work/reset"]);
 });

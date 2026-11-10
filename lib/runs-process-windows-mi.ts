@@ -1,6 +1,15 @@
-// Owns: Bounded raw MI wire decoding, query inputs and unadmitted provenance fragments, subordinate to process acquisition.
-// Excludes: Identity construction/digest/comparison, status/liveness/lifecycle/publication/admission,
-// fallback, native invocation and asset loading. Decoded data never admits a representation profile.
+// Owns: Bounded raw MI wire decoding, query inputs, unadmitted provenance fragments, and unrouted
+// helper manifest/asset verification plus a shell-free invocation spec, subordinate to process acquisition.
+// Excludes: Identity construction/digest/comparison, status/liveness/lifecycle/publication/admission, fallback,
+// process spawning and package inventory. No production reader imports this owner; decoded data, verified
+// asset bytes and the invocation spec never admit a representation profile, architecture or activation.
+
+import { createHash } from 'node:crypto';
+
+const MANIFEST_MAX_BYTES = 32 * 1024;
+const EXECUTABLE_MAX_BYTES = 8 * 1024 * 1024;
+const HELPER_VERSION = /^(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})$/u;
+const MODULE_FILE = /\/lib\/runs-process-windows-mi\.(?:ts|js)$/u;
 
 type NativeStage = 'application' | 'session' | 'input' | 'retrieval' | 'operation' | 'representation' | 'cleanup';
 type RawTimestamp = {
@@ -110,4 +119,159 @@ export function decodeResponse(bytes: Uint8Array, profile: unknown, pids: unknow
   }
   if (optionalNull) return { kind: 'unusable', reason: 'unsupported_optional_fields' };
   return { kind: 'decoded_unadmitted', rows };
+}
+
+/**
+ * Complete-helper manifest claim. Bounded reading, exact-key schema and closed lexemes only; a valid
+ * manifest is integrity/provenance input, never executable authenticity, an approved asset or activation.
+ */
+type HelperManifest = {
+  readonly helper_version: string;
+  readonly architecture: 'windows-x64';
+  readonly protocol: 'native-mi-v1';
+  readonly profiles: readonly ['scalar', 'shared'];
+  readonly native_source_sha256: string;
+  readonly executable_bytes: number;
+  readonly executable_sha256: string;
+  readonly toolchain: { readonly compiler: string; readonly sdk: string; readonly build_arguments: readonly string[] };
+  readonly dependencies: readonly string[];
+  readonly originating_source_commit: string;
+  readonly originating_build_job: string;
+};
+
+type ManifestUnusable =
+  | { readonly kind: 'unusable'; readonly reason: 'oversize_manifest' | 'invalid_manifest' | 'unsupported_manifest' };
+
+function boundedText(bytes: Uint8Array, maximumBytes: number): string | undefined {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength > maximumBytes) return undefined;
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return undefined;
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { return undefined; }
+}
+
+function boundedLexemes(value: unknown, maximum: number): string[] | undefined {
+  if (!Array.isArray(value) || value.length > maximum) return undefined;
+  const selected: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || item.length === 0 || item.length > 128 || !/^[\x20-\x7e]+$/.test(item) || selected.includes(item)) return undefined;
+    selected.push(item);
+  }
+  return selected;
+}
+
+/** Bounded complete-manifest reader: one strict UTF-8 JSON document with an exact reviewed shape. */
+export function readHelperManifest(bytes: Uint8Array):
+  | { readonly kind: 'manifest_unadmitted'; readonly manifest: HelperManifest }
+  | ManifestUnusable {
+  const invalid: ManifestUnusable = { kind: 'unusable', reason: 'invalid_manifest' };
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength > MANIFEST_MAX_BYTES) return { kind: 'unusable', reason: 'oversize_manifest' };
+  const text = boundedText(bytes, MANIFEST_MAX_BYTES);
+  if (text === undefined) return invalid;
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch { return invalid; }
+  if (!exactKeys(value, ['helper_version', 'architecture', 'protocol', 'profiles', 'native_source_sha256',
+    'executable_bytes', 'executable_sha256', 'toolchain', 'dependencies', 'originating_source_commit', 'originating_build_job']))
+    return invalid;
+  const { helper_version, architecture, protocol, profiles, native_source_sha256, executable_bytes,
+    executable_sha256, toolchain, dependencies, originating_source_commit, originating_build_job } = value;
+  if (typeof helper_version !== 'string' || !HELPER_VERSION.test(helper_version) ||
+    architecture !== 'windows-x64' || protocol !== 'native-mi-v1' ||
+    !Array.isArray(profiles) || profiles.length !== 2 || profiles[0] !== 'scalar' || profiles[1] !== 'shared')
+    return { kind: 'unusable', reason: 'unsupported_manifest' };
+  if (typeof native_source_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(native_source_sha256) ||
+    typeof executable_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(executable_sha256) ||
+    typeof originating_source_commit !== 'string' || !/^[0-9a-f]{40}$/.test(originating_source_commit) ||
+    typeof originating_build_job !== 'string' || !/^[1-9][0-9]*$/.test(originating_build_job) ||
+    typeof executable_bytes !== 'number' || !Number.isSafeInteger(executable_bytes) || executable_bytes <= 0)
+    return invalid;
+  if (executable_bytes > EXECUTABLE_MAX_BYTES) return { kind: 'unusable', reason: 'unsupported_manifest' };
+  if (!exactKeys(toolchain, ['compiler', 'sdk', 'build_arguments'])) return invalid;
+  const compiler = boundedLexemes([toolchain.compiler], 1)?.[0];
+  const sdk = boundedLexemes([toolchain.sdk], 1)?.[0];
+  const buildArguments = boundedLexemes(toolchain.build_arguments, 32);
+  const dependencyNames = boundedLexemes(dependencies, 32);
+  if (compiler === undefined || sdk === undefined || buildArguments === undefined || dependencyNames === undefined) return invalid;
+  // Fresh primitive claims only; the caller still owns target/version/source-digest policy.
+  return {
+    kind: 'manifest_unadmitted',
+    manifest: {
+      helper_version, architecture: 'windows-x64', protocol: 'native-mi-v1', profiles: ['scalar', 'shared'],
+      native_source_sha256, executable_bytes, executable_sha256,
+      toolchain: { compiler, sdk, build_arguments: buildArguments }, dependencies: dependencyNames,
+      originating_source_commit, originating_build_job,
+    },
+  };
+}
+
+type HelperAssetLocation = {
+  readonly kind: 'located';
+  readonly helper_version: string;
+  readonly manifest_url: URL;
+  readonly executable_url: URL;
+};
+
+/**
+ * Fixed versioned package-relative lookup. Never searches cwd, PATH or caller locations: the only base is
+ * the sibling `native/` directory of this module's own `lib/` (source) or `dist/lib/` (compiled) home.
+ */
+export function resolveHelperAsset(moduleUrl: unknown, runtime: unknown, helperVersion: unknown):
+  | HelperAssetLocation
+  | { readonly kind: 'unusable'; readonly reason: 'unsupported_location' | 'unsupported_target' | 'unsupported_version' } {
+  let url: URL;
+  try { url = new URL(String(moduleUrl)); }
+  catch { return { kind: 'unusable', reason: 'unsupported_location' }; }
+  if (url.protocol !== 'file:' || !MODULE_FILE.test(url.pathname)) return { kind: 'unusable', reason: 'unsupported_location' };
+  const target = runtime as { platform?: unknown; arch?: unknown } | null | undefined;
+  if (target?.platform !== 'win32' || target?.arch !== 'x64') return { kind: 'unusable', reason: 'unsupported_target' };
+  if (typeof helperVersion !== 'string' || !HELPER_VERSION.test(helperVersion)) return { kind: 'unusable', reason: 'unsupported_version' };
+  const directory = `../native/windows-mi/win32-x64/${helperVersion}/`;
+  return {
+    kind: 'located', helper_version: helperVersion,
+    manifest_url: new URL(`${directory}manifest.json`, url),
+    executable_url: new URL(`${directory}helper.exe`, url),
+  };
+}
+
+/** Injected bounded reader: exact bytes for one fixed URL or nothing. Never a path, cwd or PATH lookup. */
+export type HelperAssetReader = (url: URL, maximumBytes: number) => Uint8Array | undefined;
+
+type HelperAssetOutcome =
+  | { readonly kind: 'asset_verified_unadmitted'; readonly manifest: HelperManifest; readonly executable_sha256: string; readonly executable_bytes: number }
+  | { readonly kind: 'unusable'; readonly reason:
+    'missing_manifest' | 'oversize_manifest' | 'invalid_manifest' | 'unsupported_manifest' | 'version_mismatch' |
+    'missing_asset' | 'oversize_asset' | 'size_mismatch' | 'digest_mismatch' };
+
+/** Trusted exact-byte selection: bounded manifest read, exact declared size, then exact SHA-256 match. */
+export function loadHelperAsset(location: HelperAssetLocation, read: HelperAssetReader): HelperAssetOutcome {
+  const manifestBytes = read(location.manifest_url, MANIFEST_MAX_BYTES + 1);
+  if (manifestBytes === undefined) return { kind: 'unusable', reason: 'missing_manifest' };
+  if (manifestBytes.byteLength > MANIFEST_MAX_BYTES) return { kind: 'unusable', reason: 'oversize_manifest' };
+  const reading = readHelperManifest(manifestBytes);
+  if (reading.kind === 'unusable') return { kind: 'unusable', reason: reading.reason };
+  const { manifest } = reading;
+  if (manifest.helper_version !== location.helper_version) return { kind: 'unusable', reason: 'version_mismatch' };
+  // One extra byte detects growth; a shorter read can never satisfy the declared size.
+  const executableBytes = read(location.executable_url, manifest.executable_bytes + 1);
+  if (executableBytes === undefined) return { kind: 'unusable', reason: 'missing_asset' };
+  if (executableBytes.byteLength > manifest.executable_bytes) return { kind: 'unusable', reason: 'oversize_asset' };
+  if (executableBytes.byteLength !== manifest.executable_bytes) return { kind: 'unusable', reason: 'size_mismatch' };
+  const digest = createHash('sha256').update(executableBytes).digest('hex');
+  if (digest !== manifest.executable_sha256) return { kind: 'unusable', reason: 'digest_mismatch' };
+  return { kind: 'asset_verified_unadmitted', manifest, executable_sha256: digest, executable_bytes: executableBytes.byteLength };
+}
+
+type HelperInvocation =
+  | { readonly kind: 'invocation_unadmitted'; readonly command: string; readonly args: readonly string[];
+      readonly options: { readonly shell: false; readonly windowsHide: true } }
+  | { readonly kind: 'unusable'; readonly reason: 'unsupported_executable' | 'invalid_query' };
+
+/** Shell-free invocation spec only: no spawn, retry, fallback or execution-policy bypass. */
+export function helperInvocation(executablePath: unknown, profile: unknown, pids: unknown): HelperInvocation {
+  if (typeof executablePath !== 'string' || executablePath.length === 0 || executablePath.length > 4096 ||
+    !/^[A-Za-z]:[\\/][^\x00\r\n"]*\.exe$/.test(executablePath)) return { kind: 'unusable', reason: 'unsupported_executable' };
+  const query = queryArguments(profile, pids);
+  if (!query) return { kind: 'unusable', reason: 'invalid_query' };
+  return { kind: 'invocation_unadmitted', command: executablePath, args: query,
+    options: { shell: false, windowsHide: true } };
 }

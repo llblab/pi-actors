@@ -1545,6 +1545,54 @@ test("AX overlay caught Kill feedback preserves the selected 160-unit stage with
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("AX Kill feedback recognition classifies every current producer result without promoting authored text", async () => {
+  const { root } = await fixture("running");
+  try {
+    const running = { ownerId: "owner", run_instance_id: "generation-a", status: "running" };
+    const produce = (status: Record<string, unknown>, kill: Record<string, unknown>) =>
+      Inspector.killOwnedRunFromInspector("owner", "demo", root, "generation-a", {
+        getRunStatus: () => status,
+        killRun: () => kill,
+      });
+    const cases = [
+      ["rejected", produce({ ...running, ownerId: "other" }, { killed: true }), "error"],
+      ["rejected", produce({ ...running, run_instance_id: "generation-b" }, { killed: true }), "error"],
+      ["failed", produce(running, { killed: false, reason: "control rejected" }), "error"],
+      ["unavailable", produce({ ...running, status: "done" }, { killed: true }), "warning"],
+    ] as const;
+    for (const [result, feedback, color] of cases) {
+      assert.equal(feedback.ok, false);
+      assert.ok(feedback.message.startsWith(`- action: kill\n- result: ${result}\n`));
+      const { instance } = overlay(root, () => feedback);
+      try {
+        instance.handleInput("k"); instance.handleInput("y");
+        assert.equal((instance as unknown as { feedback: { message: string } }).feedback.message, feedback.message);
+        themeCalls.length = 0;
+        instance.render(90);
+        assert.ok(themeCalls.some(([kind, value, text]) => kind === "fg" && value === color && text === "- action: kill"), `${result} keeps its selected color`);
+        if (color === "warning") {
+          assert.ok(!themeCalls.some(([kind, value, text]) => kind === "fg" && value === "error" && text === "- action: kill"), "Availability is not a failure");
+        }
+      } finally { instance.dispose(); }
+    }
+    for (const message of [
+      "Kill note: - action: kill\n- result: failed",
+      "- run: demo\n- action: kill\n- result: failed",
+      "- action: kill\n- result: done",
+      "  - action: kill\n- result: failed",
+    ]) {
+      const { instance } = overlay(root, () => ({ ok: false, message }));
+      try {
+        instance.handleInput("k"); instance.handleInput("y");
+        themeCalls.length = 0;
+        const popup = popupFrame(instance.render(90), "Notice");
+        assert.ok(popup.lines.join("\n").includes(message.split("\n")[0]!), message);
+        assert.ok(!themeCalls.some(([kind, value]) => kind === "fg" && value === "error"), message);
+      } finally { instance.dispose(); }
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("Popover text has two-column left padding vertical breathing room and the Inspector hint color grammar", async () => {
   const { root } = await fixture("running");
   try {

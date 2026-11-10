@@ -4020,20 +4020,21 @@ test("installed dist enforces the same bounded Trace, Control, and inspect contr
       ["runs-retention", "Manual retirement preserves exact failures|Retirement chains recording", 2],
       ["async-runs", "Awaited Control facade preserves", process.platform === "linux" ? 1 : 0],
       ["file-state", "Locked file mutation preserves|Atomic replacement preserves", 2],
-      ["tools-message", ".*", process.platform === "linux" ? 16 : 15],
+      ["tools-message", ".*", process.platform === "linux" ? 17 : 16],
       ["tools-spawn", ".*", 2],
+      ["tools-local", ".*", 5],
       ["registry", ".*", 55],
       ["runtime", ".*", process.platform === "win32" || process.platform === "darwin" ? 12 : 13],
-      ["tools-response", ".*", 25],
-      ["tools-inspect", ".*", 21],
+      ["tools-response", ".*", 28],
+      ["tools-inspect", ".*", 23],
       ["run-delivery", ".*", 92],
       ["execution", "^Final response selection", 1],
       ["recipes-context", "^Pi response selection|^Pi Node CLI", 2],
       ["runs-context-exports", "^Final executor responses|^Completion text selects", 2],
       ["pi", ".*", 8],
-      ["runs-process-windows-mi", ".*", 9],
+      ["runs-process-windows-mi", ".*", 13],
       ["runs-controls", "^Run Control journal distinguishes empty regular files from zero-sized nonregular descriptors$", 1],
-      ["inspector-overlay", ".*", 48],
+      ["inspector-overlay", ".*", 49],
       ["trace-projection", ".*", 17],
       ["session-evidence", "Session chronology retains only bounded", 1],
       ["execution-sessions", "Execution chronology joins pre-tail", 1],
@@ -4123,10 +4124,10 @@ test("packed Run retirement shares the compiled owner without treating retained 
     const retention = await import(pathToFileURL(join(packageDir, "dist/lib/runs-retention.js")).href);
     const message = await import(pathToFileURL(join(packageDir, "dist/lib/tools-message.js")).href);
     assert.equal(message.compactControlResult({ target: "run:demo", action: "kill" }, { stopped: true, killed: true }),
-      "\n- run: demo\n- action: kill\n- result: kill attempted\n- termination: unconfirmed\n- next:\n  - tool: inspect\n  - target: run:demo\n  - view: trace");
+      '\nrun: "demo"\naction: "kill"\nresult: "kill attempted"\ntermination: "unconfirmed"\nnext:\n  tool: "inspect"\n  target: "run:demo"\n  view: "trace"\n');
     const publicControl = message.createControlToolDefinition({ handleRuntimeControl: () => ({ status: "handled", private_payload: "DETAIL_ONLY" }) });
     const compactControl = await publicControl.execute("packed-control-copy", { target: "runtime", action: "review.retry" }, undefined, undefined, {});
-    assert.equal(compactControl.content[0].text, "\n- target: runtime\n- action: review.retry\n- result: handled");
+    assert.equal(compactControl.content[0].text, '\ntarget: "runtime"\naction: "review.retry"\nresult: "handled"\n');
     assert.doesNotMatch(compactControl.content[0].text, /DETAIL_ONLY/);
     const ownership = await import(pathToFileURL(join(packageDir, "dist/lib/runs-ownership.js")).href);
     const temp = await import(pathToFileURL(join(packageDir, "dist/lib/temp.js")).href);

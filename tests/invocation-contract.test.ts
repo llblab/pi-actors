@@ -176,7 +176,7 @@ test("Canonical management inspect examples pass the real dispatcher", async () 
     }
     await assert.rejects(
       inspect.execute("call", { target: "runtime" }, undefined, undefined, {}),
-      /- target_kind: runtime\n- result: unsupported view\n- supported_views:\n  - status\n  - runs\n  - triage/,
+      /target_kind: "runtime"\nresult: "unsupported view"\nsupported_views:\n  - "status"\n  - "runs"\n  - "triage"$/u,
     );
   } finally {
     await rm(stateRoot, { recursive: true, force: true });

@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+## 0.57.0: YAML Runtime Output
+
+- `Control and Inspection`: Compact Control receipts and inspect views/refusals use block YAML with native lists, whole-value omissions and conservative delivery/handling facts. Generated tool schemas use YAML when renderable, retaining the legacy JSON fallback and explicit verbose JSON. Recipe view=registry aliases summary. Large argument groups and next actions stay bounded without breaking verbose inspection.
+- `Registry Refusals`: Locally authored registration mode/name/source/template/draft/transaction errors now use bare YAML. Selected values stay whole or explicitly omitted/unavailable; prior correction advice stays content, not permission to retry. Guard/coercion ordering, original faults and post-effect uncertainty remain unchanged.
+- `Execution Guidance`: Command failures separate exit_code/killed metadata from selected stderr/stdout; empty-stream failures stay metadata-only. Argument-repair guidance uses a bounded YAML usage header, with whole argument-group omissions when needed, followed by the original validation prose and verbatim JSON example. Stream tail/spill behavior and post-dispatch error identity remain unchanged.
+- `UI Notices`: Callback, completion recovery, steer diagnostic, teardown, watcher and retirement reports use block YAML. Full well-formed UI diagnostics remain uncapped rather than borrowing the model-output budget; malformed selected text is explicitly unavailable. Existing preview limits, deduplication, callback errors and closure uncertainty remain.
+- `Windows Preparation`: Adds an unrouted bounded helper-manifest reader, versioned package-relative lookup, executable size/SHA-256 verification and shell-free invocation spec. Complete manifest reads detect overflow, and arguments match the native helper CLI. PowerShell remains the production backend; no binary is shipped, approved or activated.
+- `Compatibility`: Machine details, verbose JSON and retained history keep their contracts. Metadata-only output is bare YAML; a separate selected body follows a closed header. Registry activation notices and startup warnings retain their earlier layout. Loaded terminal/phone acceptance remains pending; no host reload, public-stream or supervision activation is implied.
+
 ## 0.56.1: YAML Registry Receipts
 
 - `Registry Receipts`: Successful registration/update, listing/deletion and draft-promotion replies now use bare block YAML with native lists, whole-value omissions and exact opaque scalars within the existing16KiB limit. Complete warnings retain priority. Normal callability stays Boolean; draft preserves its selected string display. Getter/coercion and partial-effect behavior, machine details, notices and saved messages stay unchanged. No input migration, automatic reload or retry is introduced.

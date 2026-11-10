@@ -483,9 +483,9 @@ test("Inspect treats recipes registry and summary as one inspection path", async
         "inspect target=recipes view=doctor",
         "inspect target=recipes view=summary verbose=true",
       ]);
-      assert.match(
-        String(summary.details.next_actions[2]),
-        /^spawn file=.*\/recipes\/drafts\/draft\.json$/,
+      assert.equal(
+        summary.details.next_actions[2],
+        `spawn file=${join(recipeRoot, "drafts", "draft.json")}`,
       );
     }
     const compact = await tool.execute(

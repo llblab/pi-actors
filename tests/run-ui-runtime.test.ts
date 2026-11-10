@@ -337,7 +337,7 @@ test("Candidate epoch property: only pinned lifetimes capture or ACK; saved pack
         }
         const proposal = harness.runtime.onTurnEnd(completedBoundary(), first.context);
         assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_stream, undefined);
-        assert.equal(pending()!.result_layout, "completion_yaml_core_v1");
+        assert.equal(pending()!.result_layout, "completion_yaml_files_v1");
         held();
         if (scenario === "capture-return") {
           assert.equal(proposal, undefined); assert.equal(harness.sendAttempts(), 0);
@@ -397,7 +397,7 @@ test("Candidate generation property: captured data cannot handle a replacement g
   try {
     const entry = harness.runtime.onTurnEnd(completedBoundary(), active.context)!.entries![0] as any;
     const captured = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
-    assert.equal(captured.result_layout, "completion_yaml_core_v1");
+    assert.equal(captured.result_layout, "completion_yaml_files_v1");
     assert.equal(captured.members[0].run_instance_id, oldGeneration);
     await writeTerminalRun(ownerId, run, newGeneration);
     assert.equal(JSON.parse(await readFile(join(directory, "run.json"), "utf8")).run_instance_id, newGeneration);
@@ -508,7 +508,7 @@ test("Candidate composition property: private extension port and passive supervi
     const directory = await writeTerminalRun(ownerId, ownerId, "candidate-extension-generation");
     const entry = extension.onTurnEnd(completedBoundary(), first.context)!.entries![0] as any;
     const pending = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
-    assert.equal(captures, 1); assert.equal(pending.result_layout, "completion_yaml_core_v1");
+    assert.equal(captures, 1); assert.equal(pending.result_layout, "completion_yaml_files_v1");
     await extension.onSessionStart(replacement.context);
     const wrapper = { ...replacement.context, isIdle: () => true };
     const currentObserver = extension.getRunAdmissionObserver(wrapper)!;
@@ -1167,7 +1167,7 @@ test("Fresh completion renderer separates metadata, Markdown and cut markers wit
       assert.match(text, /^\[4 characters omitted\]\s*$/mu);
       assert.ok(text.includes("[7 characters omitted]")); assert.ok(text.includes("KEEP_BODY_REFERENCE"));
       assert.ok(text.includes("KEEP_BODY_LOCATION")); assert.ok(text.includes("index: 99"));
-      assert.equal(text.includes("primary-"), false); assert.equal(text.includes(batch.batch_id), false);
+      assert.equal(text.includes("primary-"), true); assert.ok(text.includes("files:")); assert.equal(text.includes(batch.batch_id), false);
       assert.doesNotMatch(text, /^#0:|^- (?:result|preview):|^Run Batch\s*$/mu);
       component.invalidate(); assert.deepEqual(component.render(width).map(stripTerminalSequences), lines);
     }
@@ -1325,7 +1325,7 @@ test("Fresh UI completion admissions select AX while all historical formats reco
           const admitted = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
           assert.equal(admitted.presentation_format, "ax_records"); assert.equal(admitted.excerpt_format, undefined);
           assert.equal(admitted.members.length, 1); assert.equal(admitted.members[0].run, freshRun); assert.equal(admitted.members[0].run_instance_id, freshGeneration);
-          assert.equal(admitted.result_layout, "completion_yaml_core_v1"); assert.equal(admitted.single_result, undefined);
+          assert.equal(admitted.result_layout, "completion_yaml_files_v1"); assert.equal(admitted.single_result, undefined);
           const header = freshCoreHeaders(fresh.content)[0];
           assert.deepEqual([header.index, header.run, header.state], [0, freshRun, "done"]);
           assert.equal(header._completion.codec, "completion_yaml_core_v1"); assert.equal(header._completion.batch_id, admitted.batch_id);
@@ -1357,7 +1357,14 @@ test("New terminal admissions capture current-session file locations once and pr
     if (locations.state !== "available") return;
     assert.equal(locations.directory, directory); assert.equal(locations.run_instance_id, generation);
     assert.equal(locations.files.find(file => file.role === "result")!.path, join(directory, "result.json"));
-    assert.deepEqual(freshCoreHeaders(entry.content)[0].run_files, { run, run_instance_id: generation, locations });
+    const files = freshCoreHeaders(entry.content)[0].files;
+    const { group, ...observation } = files.observation;
+    const { directory: _directory, files: originalFiles, ...originalObservation } = locations;
+    assert.deepEqual(observation, originalObservation);
+    assert.equal(files.groups[group].root, directory);
+    const decodedFiles = files.groups[group].entries.filter((item: any) => item.format_hint).map(({ purpose, path, ...item }: any) =>
+      ({ ...item, path: path === null ? null : join(directory, path) }));
+    assert.deepEqual(decodedFiles, originalFiles);
     await rm(join(directory, "result.json"));
     const retry = harness.runtime.onTurnEnd(completedBoundary(), active.context)!.entries![0] as any;
     assert.equal(retry.content, entry.content, "An admitted/proposed packet is never refreshed from current sources");

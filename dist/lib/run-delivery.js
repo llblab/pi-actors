@@ -278,8 +278,11 @@ function parseInventorySource(value, batch) {
 function isFrontmatterCompletionLayout(layout) {
     return layout === "frontmatter_v1" || layout === "frontmatter_v2";
 }
+function isYamlCompletionLayout(layout) {
+    return layout === "completion_yaml_core_v1" || layout === "completion_yaml_files_v1";
+}
 function isSharedCompletionLayout(layout) {
-    return layout === "headings_shared_results" || layout === "headings_shared_kinds" || layout === "completion_yaml_core_v1" || isFrontmatterCompletionLayout(layout);
+    return layout === "headings_shared_results" || layout === "headings_shared_kinds" || isYamlCompletionLayout(layout) || isFrontmatterCompletionLayout(layout);
 }
 function parseBatch(value) {
     const record = asRecord(value, "Completion batch");
@@ -322,7 +325,7 @@ function parseBatch(value) {
         throw new Error("Completion shared text budget is invalid");
     }
     const numberingDescriptor = Object.getOwnPropertyDescriptor(record, "numbering");
-    if (numberingDescriptor && (resultLayout === "completion_yaml_core_v1" || !Object.hasOwn(numberingDescriptor, "value") || presentationFormat !== "ax_records" || (resultLayout !== "headings" && resultLayout !== "headings_flat_omissions" && resultLayout !== "headings_outcomes" && !isSharedCompletionLayout(resultLayout)))) {
+    if (numberingDescriptor && (isYamlCompletionLayout(resultLayout) || !Object.hasOwn(numberingDescriptor, "value") || presentationFormat !== "ax_records" || (resultLayout !== "headings" && resultLayout !== "headings_flat_omissions" && resultLayout !== "headings_outcomes" && !isSharedCompletionLayout(resultLayout)))) {
         throw new Error("Completion numbering requires a canonical captured heading layout");
     }
     const numbering = numberingDescriptor ? parseCompletionNumbering(numberingDescriptor.value, members.length) : undefined;
@@ -685,7 +688,7 @@ export function requestRunCompletionStream(input) {
     });
 }
 export function admitRunCompletionBatch(input) {
-    return captureCompletionBatch(input, false, "completion_yaml_core_v1");
+    return captureCompletionBatch(input, false, "completion_yaml_files_v1");
 }
 /** Kernel-only opt-in; ordinary Pi capture stays fenced until session/lifecycle integration is admitted. */
 export function captureRunCompletionStreamBatch(input) {
@@ -693,7 +696,7 @@ export function captureRunCompletionStreamBatch(input) {
 }
 /** Private ordinary candidate composition; stream capture retains its separately gated codec. */
 export function captureRunCompletionYamlCandidateBatch(input) {
-    return captureCompletionBatch(input, false, "completion_yaml_core_v1");
+    return captureCompletionBatch(input, false, "completion_yaml_files_v1");
 }
 function captureCompletionBatch(input, numbered, layout = "frontmatter_v2") {
     const now = (input.now ?? new Date()).toISOString();
@@ -710,7 +713,7 @@ function captureCompletionBatch(input, numbered, layout = "frontmatter_v2") {
         members: input.members,
         phase: "pending",
     });
-    const draft = layout === "completion_yaml_core_v1"
+    const draft = isYamlCompletionLayout(layout)
         ? parseBatch({ ...captured, result_layout: layout }) : { ...captured, result_layout: layout };
     return mutateJournal(input.tempDir, input.ownerId, (journal) => {
         let batch = draft;
@@ -741,10 +744,10 @@ function captureCompletionBatch(input, numbered, layout = "frontmatter_v2") {
         else if (journal.completion_stream) {
             throw new Error("Completion stream capture requires the numbered kernel path; stream state is retained");
         }
-        if (layout !== "completion_yaml_core_v1")
+        if (!isYamlCompletionLayout(layout))
             batch = retainSharedCompletionTexts(batch);
         if (projectCompletionBatchMessage(batch).membersShown === batch.members.length) {
-            if (layout === "completion_yaml_core_v1")
+            if (isYamlCompletionLayout(layout))
                 batch = retainSharedCompletionTexts(batch);
             journal.completion_batch = batch;
             return batch;
@@ -1281,7 +1284,7 @@ function isRoutineCompletionSummary(member) {
     return member.summary === (member.status === "done" ? "Run completed." : `Run ${member.status}.`);
 }
 function completionRecordRow(member, index, byIdentity, flat = false, layout, textBudget) {
-    const frontmatter = isFrontmatterCompletionLayout(layout) || layout === "completion_yaml_core_v1";
+    const frontmatter = isFrontmatterCompletionLayout(layout) || isYamlCompletionLayout(layout);
     const simpleKinds = frontmatter || layout === "headings_shared_kinds", shared = isSharedCompletionLayout(layout);
     const outcomes = shared || layout === "headings_outcomes", directOmission = outcomes || layout === "headings_flat_omissions";
     const run = member.run.startsWith("run:") ? member.run.slice(4) : member.run;
@@ -1604,8 +1607,97 @@ function completionYamlReferences(row) {
             })) };
     return technical;
 }
+/** Split selected paths without normalize/resolve/relative: dot and symlink routes must not be rewritten. */
+function rootedCompletionPath(path, runRoot) {
+    if (typeof path !== "string" || !path.isWellFormed())
+        return undefined;
+    const windows = /^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+[\\/])/u.test(path);
+    const separator = windows ? /[\\/]/u : /\//u;
+    if (!windows && !path.startsWith("/"))
+        return undefined;
+    if (path.split(separator).some(part => part === "." || part === ".."))
+        return undefined;
+    if (runRoot && path.startsWith(runRoot)) {
+        const tail = path.slice(runRoot.length);
+        if (separator.test(runRoot.slice(-1)) ? tail.length > 0 : separator.test(tail[0] ?? "")) {
+            const relative = separator.test(runRoot.slice(-1)) ? tail : tail.slice(1);
+            if (relative && !separator.test(relative[0]))
+                return { root: runRoot, path: relative };
+        }
+    }
+    let split = -1;
+    for (let i = 0; i < path.length; i++)
+        if (separator.test(path[i]))
+            split = i;
+    if (split < 0 || split === path.length - 1)
+        return undefined;
+    const end = split === 0 || (windows && split === 2 && path[1] === ":") ? split + 1 : split;
+    return { root: path.slice(0, end), path: path.slice(split + 1) };
+}
+/** Body-free, read-free navigation over already selected references. Roots are presentation bases, not containment proof. */
+function completionRootedFiles(row, member, locations) {
+    const technical = completionYamlReferences(row), files = {};
+    const groups = [];
+    const runRoot = locations?.state === "available" ? locations.directory : undefined;
+    const group = (root) => {
+        const found = groups.findIndex(item => item.root === root);
+        if (found >= 0)
+            return found;
+        groups.push({ root, entries: [] });
+        return groups.length - 1;
+    };
+    let priority = Infinity;
+    const add = (path, entry, rank = Infinity, base) => {
+        const selected = rootedCompletionPath(path, runRoot);
+        const index = group(selected?.root ?? (base === undefined ? null : completionYamlString(base)));
+        const selectedPath = selected?.path ?? path;
+        groups[index].entries.push({ ...entry, path: selectedPath,
+            ...(!selected && base === undefined ? { path_basis: "as_recorded", base_unavailable: true } : {}) });
+        if (selected && rank < priority) {
+            priority = rank;
+            files.read_first = { group: index, entry: groups[index].entries.length - 1 };
+        }
+    };
+    for (const [role, purpose, rank] of [
+        ["primary", "Full result text", 0], ["diagnostic_metadata", "Recorded error and command metadata", 1],
+        ["artifact_inventory", "Declared artifact inventory; target availability unproven", 2],
+    ]) {
+        const detail = technical[role];
+        if (!detail)
+            continue;
+        const { source: rawSource, ...facts } = detail;
+        const { path, ...binding } = rawSource;
+        add(path, { role, purpose, ...facts, source: binding }, rank);
+        delete technical[role];
+    }
+    const artifacts = technical.artifacts;
+    if (artifacts) {
+        for (const item of artifacts.declarations)
+            add(item.path, { role: "artifact", purpose: "Declared artifact", name: item.name, scope: artifacts.scope, state: "declared" });
+        delete technical.artifacts;
+    }
+    if (locations?.state === "available") {
+        const { directory, files: selectedFiles, ...observation } = locations;
+        files.observation = { ...observation, run: completionYamlString(locations.run), run_instance_id: completionYamlString(locations.run_instance_id),
+            group: group(completionYamlString(directory)) };
+        for (const item of selectedFiles) {
+            const { path, ...facts } = item;
+            const purpose = item.role === "result" ? "Recorded result metadata" : item.role === "execution" ? "Recorded execution and capture locations" : "Recorded Run file";
+            add(typeof path === "string" ? completionYamlString(path) : null, { ...facts, purpose }, item.state === "present" && item.role === "result" ? 3 : item.state === "present" && item.role === "execution" ? 4 : Infinity, directory);
+        }
+    }
+    else if (locations)
+        files.observation = { ...locations, run: completionYamlString(member.run), run_instance_id: completionYamlString(member.run_instance_id) };
+    if (groups.length) {
+        files.groups = groups;
+    }
+    if (Object.keys(technical).length)
+        files.notes = technical;
+    return files;
+}
 function prepareCompletionYamlProjection(safe, candidates, references, ordered) {
     const packet = { batchId: safe.batch_id, records: [] };
+    const rooted = safe.result_layout === "completion_yaml_files_v1";
     if (!safe.batch_id.isWellFormed())
         return { state: "unsupported" };
     for (const [index, { row, location }] of candidates.entries()) {
@@ -1630,18 +1722,24 @@ function prepareCompletionYamlProjection(safe, candidates, references, ordered) 
             else
                 metadata[key] = completionYamlString(value);
         }
-        const technical = completionYamlReferences(row);
-        if (Object.keys(technical).length)
-            metadata.references = technical;
-        if (references.has(index) && location) {
-            const navigation = safe.file_navigation.find(item => safe.members[item.member_index] === member);
-            // Navigation is already decoded native data, not the JSON display field.
-            const locations = navigation.locations;
-            metadata.run_files = { run: completionYamlString(member.run), run_instance_id: completionYamlString(member.run_instance_id),
-                locations: locations.state === "available" ? { ...locations, run: completionYamlString(locations.run),
-                    run_instance_id: completionYamlString(locations.run_instance_id), directory: completionYamlString(locations.directory),
-                    files: locations.files.map(file => ({ ...file, ...(typeof file.path === "string" ? { path: completionYamlString(file.path) } : {}) })) }
-                    : { ...locations } };
+        const navigation = references.has(index) && location
+            ? safe.file_navigation.find(item => safe.members[item.member_index] === member).locations : undefined;
+        if (rooted) {
+            const files = completionRootedFiles(row, member, navigation);
+            if (Object.keys(files).length)
+                metadata.files = files;
+        }
+        else {
+            const technical = completionYamlReferences(row);
+            if (Object.keys(technical).length)
+                metadata.references = technical;
+            if (navigation) {
+                metadata.run_files = { run: completionYamlString(member.run), run_instance_id: completionYamlString(member.run_instance_id),
+                    locations: navigation.state === "available" ? { ...navigation, run: completionYamlString(navigation.run),
+                        run_instance_id: completionYamlString(navigation.run_instance_id), directory: completionYamlString(navigation.directory),
+                        files: navigation.files.map(file => ({ ...file, ...(typeof file.path === "string" ? { path: completionYamlString(file.path) } : {}) })) }
+                        : { ...navigation } };
+            }
         }
         const parts = [];
         const add = (part) => { if (parts.length)
@@ -1650,13 +1748,22 @@ function prepareCompletionYamlProjection(safe, candidates, references, ordered) 
             if (piece.block) {
                 if (!piece.text.isWellFormed())
                     return { state: "unsupported" };
-                add(piece.block === "body" ? { body: piece.text } : { marker: piece.text });
+                if (rooted && piece.block === "marker" && !/^\[[0-9]+ characters omitted\]$/u.test(piece.text)) {
+                    metadata.text_warnings ??= [];
+                    metadata.text_warnings.push(piece.text);
+                }
+                else
+                    add(piece.block === "body" ? { body: piece.text } : { marker: piece.text });
             }
-        if (safe.file_navigation !== undefined && !references.has(index))
-            add({ marker: "Run-file reference omitted (packet byte limit)." });
+        if (safe.file_navigation !== undefined && !references.has(index)) {
+            if (rooted)
+                metadata.run_files_omission = { reason: "packet_byte_limit", shown: 0, omitted: 1, total: 1 };
+            else
+                add({ marker: "Run-file reference omitted (packet byte limit)." });
+        }
         packet.records.push({ metadata, parts });
     }
-    const service = {};
+    const service = rooted ? { header_layout: "rooted_files_v1" } : {};
     const omitted = safe.members.length - candidates.length;
     if (omitted) {
         service.omitted_results = omitted;
@@ -1676,8 +1783,11 @@ function prepareCompletionYamlProjection(safe, candidates, references, ordered) 
         if (safe.numbering.kind === "unavailable")
             service.numbering_unavailable = safe.numbering.reason;
     }
-    if (safe.inventory_source)
-        service.result_inventory = { ...safe.inventory_source, path: completionYamlString(safe.inventory_source.path) };
+    if (safe.inventory_source) {
+        const path = rooted ? rootedCompletionPath(safe.inventory_source.path) : undefined;
+        service.result_inventory = { ...safe.inventory_source,
+            ...(path ? { root: path.root, path: path.path } : { path: completionYamlString(safe.inventory_source.path) }) };
+    }
     if (Object.keys(service).length)
         packet.service = service;
     const chunks = [];
@@ -1737,7 +1847,7 @@ export function projectRunCompletionYamlPrototype(batch) {
         throw error;
     }
 }
-function projectCompletionRecords(safe, assembler = safe.result_layout === "completion_yaml_core_v1" ? "yaml" : "legacy") {
+function projectCompletionRecords(safe, assembler = isYamlCompletionLayout(safe.result_layout) ? "yaml" : "legacy") {
     const frontmatter = isFrontmatterCompletionLayout(safe.result_layout) || assembler === "yaml";
     const shared = isSharedCompletionLayout(safe.result_layout);
     const maxBytes = shared ? Limits.RUN_COMPLETION_MODEL_MAX_BYTES : Limits.RUN_DELIVERY_MODEL_MAX_BYTES;
@@ -2024,7 +2134,7 @@ export function projectRunCompletionBatchPresentation(batch) {
     if (safe.presentation_format !== "ax_records" && safe.presentation_format !== "ax_records_v3")
         return { content: projectCompletionBatchMessage(safe).message };
     const result = safe.result_layout !== undefined ? projectCompletionRecords(safe) : projectRetainedRecordCompletionBatch(safe);
-    if (safe.result_layout === "completion_yaml_core_v1")
+    if (isYamlCompletionLayout(safe.result_layout))
         return { content: result.message, presentation: Object.freeze({
                 format: "completion_yaml_core_v1", content_sha256: createHash("sha256").update(result.message).digest("hex"),
             }) };
@@ -2192,10 +2302,14 @@ export function readRunCompletionPresentation(content, value) {
             hint.content_sha256 !== createHash("sha256").update(content).digest("hex"))
             return full;
         const segments = [];
+        const rooted = core.packet.service?.header_layout === "rooted_files_v1";
+        const facts = Object.fromEntries(Object.entries(core.packet.service ?? {}).filter(([key]) => key !== "header_layout"));
         for (const [index, record] of core.packet.records.entries()) {
             if (index)
                 segments.push({ kind: "separator", text: "\n" });
-            const metadata = Object.fromEntries(Object.entries(record.metadata).filter(([key]) => key !== "references" && key !== "run_files"));
+            const metadata = Object.fromEntries(Object.entries(record.metadata).filter(([key]) => rooted || (key !== "references" && key !== "run_files")));
+            if (rooted && index === 0 && Object.keys(facts).length)
+                metadata.delivery = facts;
             const header = renderYamlMetadata(metadata, completionYamlMaxBytes);
             if (header.state !== "available")
                 return full;
@@ -2203,13 +2317,13 @@ export function readRunCompletionPresentation(content, value) {
             for (const part of record.parts)
                 segments.push("body" in part ? { kind: "body", text: part.body } : { kind: "marker", text: part.marker });
         }
-        if (core.packet.service) {
-            const service = renderYamlMetadata(core.packet.service, completionYamlMaxBytes);
+        if (core.packet.service && (!rooted || !core.packet.records.length)) {
+            const service = renderYamlMetadata(rooted ? facts : core.packet.service, completionYamlMaxBytes);
             if (service.state !== "available")
                 return full;
             if (segments.length)
                 segments.push({ kind: "separator", text: "\n" });
-            segments.push({ kind: "service", text: service.text.replace(/\n$/u, "") });
+            segments.push({ kind: rooted ? "header" : "service", text: service.text.replace(/\n$/u, "") });
         }
         return { text: segments.map(segment => segment.text).join("\n"), compact: true, records: true, yaml: true,
             segments: Object.freeze(segments.map(segment => Object.freeze(segment))) };

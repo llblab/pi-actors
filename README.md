@@ -228,6 +228,8 @@ Core files:
 
 The runtime preserves owner filtering, process-identity verification, lifecycle locking, shutdown kill independent of actor-local Control capacity, terminal reconciliation, bounded captures, owned Pi sessions, path containment, and redaction. Trace/Control quotas do not constrain user-declared artifacts, repositories, media sources, complete captures, or actor-owned workload state. Restart clears generation-local Trace, Control, endpoint, execution, and terminal evidence; archive preserves the bounded tree, while prune preserves only requested artifacts.
 
+New completion captures in 0.57.1 keep runtime metadata above the Actor Markdown, with no service/file footer. [Rooted completion files](docs/agent-experience.md#rooted-completion-files) show one explicit path base per group, relative entries, English purpose labels and a read-first pointer. External paths have separate roots; unresolved bases stay explicit. Existing captured messages keep their original layout.
+
 ## Actor Inspector
 
 Open the owner-filtered TUI:

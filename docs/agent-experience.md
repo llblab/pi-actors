@@ -4,9 +4,9 @@ Status: Adopted project-wide design standard. The operator has selected **JSON i
 
 ## One first AX contract
 
-AX is one canonical Agent Experience being prepared for its first release, not a product family of numbered drafts or user/model-selectable formats. The selected target is YAML metadata plus optional opaque authored content; the former Markdown-list key/value grammar is an implemented pre-unification layout, not another target to preserve for new output. Ordinary source and normally built package Batch admission now capture ax_records/completion_yaml_core_v1, and fresh attention/steer use typed block-YAML metadata plus opaque raw body text. The inactive numbered-stream path and saved frontmatter_v1/v2 retain their older layouts. Bounded source/compiled/actual-default accepted-path evidence exists; it does not establish default-disk, global lifetime-policy or loaded-host acceptance. Remaining rollout is tracked in [BACKLOG.md](../BACKLOG.md).
+AX is one canonical Agent Experience being prepared for its first release, not a product family of numbered drafts or user/model-selectable formats. The selected target is YAML metadata plus optional opaque authored content; the former Markdown-list key/value grammar is an implemented pre-unification layout, not another target to preserve for new output. Ordinary source and normally built package Batch admission now capture ax_records/completion_yaml_files_v1 over the unchanged completion_yaml_core_v1 carrier, and fresh attention/steer use typed block-YAML metadata plus opaque raw body text. The inactive numbered-stream path and saved frontmatter_v1/v2 retain their older layouts. Bounded source/compiled/actual-default accepted-path evidence exists; it does not establish default-disk, global lifetime-policy or loaded-host acceptance. Remaining rollout is tracked in [BACKLOG.md](../BACKLOG.md).
 
-A completion group is the result sequence itself, not a container with members. Each result's YAML metadata begins index, run, state, then kind:primary for admitted primary text/final Actor response or kind:diagnostic for explicit diagnostics. The admitted Markdown follows from the left margin, outside metadata, with no #N heading, result:/preview: wrapper or whole-body literal fence. One blank separator distinguishes records. Known display loss appears only at the cut as [N characters omitted], counting Unicode scalar characters of the admitted retained source; no extra truncation ellipsis or body clipping flags/counters appear in YAML. Unknown upstream completeness/privacy remains explicit at the body boundary without inventing a count or claiming a known positive loss. Untracked fallback has no primary kind. Missing text stays explicit; a checkpoint retains its Actor-authored notification body. Successful automatic delivery has no extra receipt, routine outer counters, members wrapper, Batch caption, time window, status-summary copies or standing full-map instruction; real failures stay reportable. Exact source/generation/location references remain in complete model content, with whole-reference/result omission and non-done omitted states explicit. A group with one visible row stays a group. Fresh ordinary packets put minimal packet identity and relative body/marker lengths in YAML metadata, without compiler HTML tails. Older saved layouts retain their original compiler boundary/correlation framing; neither encoding grants authenticity, read permission or acceptance. Their compatibility boundary is governed separately below; never strip required historical framing. This is one new-capture contract, not a selectable AX product version.
+A completion group is the result sequence itself, not a container with members. Each result's YAML metadata begins index, run, state, then kind:primary for admitted primary text/final Actor response or kind:diagnostic for explicit diagnostics. The admitted Markdown follows from the left margin, outside metadata, with no #N heading, result:/preview: wrapper or whole-body literal fence. One blank separator distinguishes records. Known display loss appears only at the cut as [N characters omitted], counting Unicode scalar characters of the admitted retained source; no extra truncation ellipsis or body clipping flags/counters appear in YAML. New rooted captures keep unknown upstream completeness/privacy in header text_warnings without inventing a count or claiming a known positive loss. Retained captures preserve their original body-boundary warnings. Untracked fallback has no primary kind. Missing text stays explicit; a checkpoint retains its Actor-authored notification body. Successful automatic delivery has no extra receipt, routine outer counters, members wrapper, Batch caption, time window, status-summary copies or standing full-map instruction; real failures stay reportable. Exact source/generation/location references remain in complete model content, with whole-reference/result omission and non-done omitted states explicit. A group with one visible row stays a group. Fresh ordinary packets put minimal packet identity and relative body/marker lengths in YAML metadata, without compiler HTML tails. Older saved layouts retain their original compiler boundary/correlation framing; neither encoding grants authenticity, read permission or acceptance. Their compatibility boundary is governed separately below; never strip required historical framing. This is one new-capture contract, not a selectable AX product version.
 
 Illustrative compact completion shape (not actual Run data):
 
@@ -31,9 +31,48 @@ Module was not found.
 [120 characters omitted]
 ```
 
-An only item uses the same first block, not a second format. Full text has no cut marker; an unavailable index is the YAML string "?", never a fabricated zero. The compact TUI renders compiler headers and markers as literal Text and each body as independent native Markdown, so an unfinished fence/list/quote cannot consume another block. Only whole compiler header reference/location rows and framing are hidden; expansion or invalid/missing hints reveals the full original text. Source bodies and retained structured coverage facts are not rewritten.
+An only item uses the same first block, not a second format. Full text has no cut marker; an unavailable index is the YAML string "?", never a fabricated zero. The compact TUI renders compiler headers and markers as literal Text and each body as independent native Markdown, so an unfinished fence/list/quote cannot consume another block. New rooted headers keep navigation visible and put packet omission/inventory facts in the first header, never after the Markdown. Retained core-v1 compact views keep their original whole-reference/location hiding. Expansion or invalid/missing hints reveals the full original text. Source bodies and retained structured coverage facts are not rewritten.
 
 Storage compatibility is separate: already-captured Batch snapshots need their original codec to reproduce exact delivery text, while steer envelopes replay their saved content directly. Do not relabel, migrate or reformat existing journals/session messages to make the interface look uniform. Retained encoding identifiers are internal replay data, not alternate AX products. See [retained capture compatibility](coordinator-delivery.md#retained-capture-compatibility).
+
+## Rooted completion files
+
+New source captures use a private `completion_yaml_files_v1` snapshot layout; this is replay data, not an input selector or a new product format. The YAML carrier/hint stays `completion_yaml_core_v1`. Existing snapshots keep their exact previous projection.
+
+All runtime metadata belongs above the selected Markdown. New compact views have no service footer, appended file list or runtime warning after the body. A known cut alone adds `[N characters omitted]` at that cut; unknown loss/privacy and whole-reference omissions belong in header fields. Authored Markdown, filenames and paths keep their original language/bytes; compiler keys and purpose explanations are English.
+
+`files.groups` stores each literal absolute path base once, with relative `entries[].path` beneath it. Source entries retain scope, generation/hash and other already-selected binding facts. `files.read_first` points to zero-based group/entry indices, preferring admitted primary text, diagnostic metadata, artifact inventory, then observed result/execution metadata; it is advice, not an automatic read. An artifact declaration does not prove that its target exists or was produced. `files.observation.group` binds existing mutable Run-file observations to their captured root; it does not add body permission or native proof.
+
+Paths under the observed Run root share that group. External absolute paths have their own literal parent roots. Relative, malformed or dot-segment paths without a safe captured base remain as recorded under a null root with explicit base unavailability; no cwd/Run-id guess, normalization, source read or symlink resolution is allowed. A reader combines a known root and its relative path, never its own cwd. Packet-level inventory references likewise use one root plus relative leaf.
+
+Illustrative abbreviated header, not actual Run data or a complete source binding:
+
+```text
+---
+index: 0
+run: "review"
+state: "done"
+kind: "primary"
+files:
+  read_first:
+    group: 0
+    entry: 0
+  groups:
+    - root: "/work/runs/review"
+      entries:
+        - role: "primary"
+          purpose: "Full result text"
+          path: "evidence/primary.txt"
+        - role: "artifact"
+          purpose: "Declared artifact"
+          state: "declared"
+          path: "artifacts/report.md"
+---
+
+The selected Actor Markdown ends here.
+```
+
+The unchanged 48 KiB packet budget includes every root, entry and compiler hint. Outcomes retain priority over optional Run-file rows; whole omitted rows/locations remain explicitly covered. Stored member data, file-navigation DTOs, privacy/source fences and phase recovery are unchanged.
 
 ## Purpose
 

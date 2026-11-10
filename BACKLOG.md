@@ -18,7 +18,7 @@ Outcome: JSON structured inputs, block-YAML runtime-output metadata and unchange
 
 Exit: New owned runtime projections use YAML without pseudo-records or serialized JSON objects: bare when metadata-only, `---`-delimited headers only when a separate text body follows. Literal content, meaning, source/privacy bounds and saved messages remain intact. Service-carrier adoption has its own evidence gate; do not delete current framing to simulate completion.
 
-- [ ] **F1.7 — Accept the rollout on a loaded host.** Source/headless audit is done: one shared framing owner keeps exactly one host-separation blank line on migrated paths, no runtime-authored object dump or pseudo-record remains in the migrated set, history/literal bodies are unchanged, and source/compiled/package parity passes. Remainder is the permitted loaded terminal/phone observation of one rollout candidate, which needs the same separate authorization as U1; keep capture codecs and live claims distinct and claim no automatic default activation.
+- [ ] **F1.7 — Accept the rollout on a loaded host.** Source/headless audit is done: one shared framing owner keeps exactly one host-separation blank line on migrated paths, no runtime-authored object dump or pseudo-record remains in the migrated set, history/literal bodies are unchanged, and source/compiled/package parity passes. Remainder is the permitted loaded terminal/phone observation of one rollout candidate, including rooted completion headers, English read-first guidance and no post-Markdown runtime footer, which needs the same separate authorization as U1; keep capture codecs and live claims distinct and claim no automatic default activation.
 
 ### U1 — Loaded UI/AX acceptance
 

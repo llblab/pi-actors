@@ -1369,7 +1369,10 @@ test("Eligible natural outcomes join canonical artifact bindings only after body
   const metadata = parseDocument(message, { version: "1.2", schema: "core", uniqueKeys: true });
   assert.deepEqual(metadata.errors, []); assert.deepEqual(metadata.warnings, []);
   assert.equal(metadata.get("artifact_declarations"), 5);
-  assert.ok(message.includes(JSON.stringify(path))); assert.ok(message.includes(binding.artifact_inventory.source.sha256)); assert.match(message, /Metadata only; target availability\/production not asserted; bodies not read\./u);
+  const sourceEntries = metadata.toJS().files.groups.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
+  assert.ok(sourceEntries.some((entry: any) => entry.role === "artifact_inventory" && join(entry.root, entry.path) === path
+    && entry.source.sha256 === binding.artifact_inventory.source.sha256));
+  assert.match(message, /Metadata only; target availability\/production not asserted; bodies not read\./u);
   assert.doesNotMatch(message, /never-created/); fs.unlinkSync(path);
   assert.equal(formatRunCompletionBatchMessage(readRunDeliveryJournal(f.root, f.meta.ownerId).completion_batch!), message);
   const summary = summarizeRuns(f.root); const changed = collectRunCompletionBatchMembers(detectRunTransitions(new Map([[f.stateDir, "running"]]), summary), summary.runs);
@@ -3648,7 +3651,11 @@ test("Eligible canonical diagnostic outcomes verify source only after body-free 
     const raw = body(f.sourcePath).fields.error as string; assert.equal(captured.diagnostic_excerpt?.text, Array.from(raw).slice(0, 1000).join(""));
     assert.equal(captured.diagnostic_excerpt?.chars_total, Array.from(raw).length); assert.doesNotMatch(raw, /PRIVATE_TAIL_SECRET/);
     const packet = admitRunCompletionBatch({ members, ownerId: "owner-a", tempDir: f.root }); const message = formatRunCompletionBatchMessage(packet);
-    assert.ok(message.includes(JSON.stringify(f.sourcePath))); assert.doesNotMatch(message, /PRIVATE_LEGACY_BODY|PRIVATE_TAIL_SECRET/);
+    const header = parseDocument(message.slice(4, message.indexOf("\n---\n", 4))); assert.deepEqual(header.errors, []);
+    const sourceEntries = header.toJS().files.groups.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
+    assert.ok(sourceEntries.some((entry: any) => entry.role === "diagnostic_metadata" && join(entry.root, entry.path) === f.sourcePath
+      && entry.source.run_instance_id === captured.run_instance_id));
+    assert.doesNotMatch(message, /PRIVATE_LEGACY_BODY|PRIVATE_TAIL_SECRET/);
     const sourceOpens = opens; rmSync(f.sourcePath);
     assert.equal(formatRunCompletionBatchMessage(readRunDeliveryJournal(f.root, "owner-a").completion_batch!), message); assert.equal(opens, sourceOpens);
   } finally { fs.openSync = open; syncBuiltinESMExports(); }

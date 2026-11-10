@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 0.57.1: Rooted Completion Headers
+
+- `Completion Headers`: New captures keep all runtime metadata above the Actor Markdown, with no service/file footer. File references share literal roots with relative entries, English purposes and a read-first pointer. External roots and unresolved bases stay explicit; declarations do not prove production. Known cut counts remain at the cut. Original Markdown, source/generation/privacy fences, shared budgets and exact historical replay are preserved.
+
 ## 0.57.0: YAML Runtime Output
 
 - `Control and Inspection`: Compact Control receipts and inspect views/refusals use block YAML with native lists, whole-value omissions and conservative delivery/handling facts. Generated tool schemas use YAML when renderable, retaining the legacy JSON fallback and explicit verbose JSON. Recipe view=registry aliases summary. Large argument groups and next actions stay bounded without breaking verbose inspection.

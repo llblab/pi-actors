@@ -11,7 +11,7 @@ import { settleCapturedRunner, readSettlementFailureWitness } from "./sdk-runner
 import { createHash } from "node:crypto";
 import { constants, readFileSync } from "node:fs";
 import { lstat, mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { constants as osConstants } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -526,7 +526,8 @@ function completionCore(text) {
       batchId = bookkeeping.batch_id;
       if (Object.hasOwn(bookkeeping, "service")) {
         service = bookkeeping.service;
-        exactKeys(service, [], ["omitted_results", "omitted_states", "inventory_warning", "result_inventory"]);
+        exactKeys(service, [], ["header_layout", "omitted_results", "omitted_states", "inventory_warning", "result_inventory"]);
+        if (service.header_layout !== undefined) assert.equal(service.header_layout, "rooted_files_v1");
         assert.ok(Object.keys(service).length > 0);
         if (Object.hasOwn(service, "omitted_results")) assert.ok(Number.isSafeInteger(service.omitted_results) && service.omitted_results > 0);
         if (Object.hasOwn(service, "omitted_states")) {
@@ -538,7 +539,7 @@ function completionCore(text) {
         if (Object.hasOwn(service, "inventory_warning")) assert.equal(typeof service.inventory_warning, "string");
         if (Object.hasOwn(service, "result_inventory")) {
           const ref = service.result_inventory;
-          exactKeys(ref, ["path", "sha256", "bytes_total", "members_total"]);
+          exactKeys(ref, ["path", "sha256", "bytes_total", "members_total"], ["root"]);
           assert.ok(typeof ref.path === "string" || mapping(ref.path));
           assert.match(ref.sha256, /^[a-f0-9]{64}$/u);
           assert.ok(Number.isSafeInteger(ref.bytes_total) && ref.bytes_total > 0);
@@ -574,12 +575,18 @@ function completionCore(text) {
     assert.equal(typeof header.run, "string"); assert.ok(header.run.length > 0);
     assert.ok(["done", "failed", "killed", "exited"].includes(header.state));
     const allowed = ["index", "run", "state", "kind", "preview_field", "redacted", "result_state", "parent_run", "primary_unavailable",
-      "diagnostic_metadata_unavailable", "artifact_declarations", "artifact_inventory_unavailable", "run_files_unavailable", "references", "run_files"];
+      "diagnostic_metadata_unavailable", "artifact_declarations", "artifact_inventory_unavailable", "run_files_unavailable", "references", "run_files", "files", "run_files_omission", "text_warnings"];
     assert.ok(keys.every(key => allowed.includes(key)), "No body-coverage metadata or legacy facade fields");
     if (Object.hasOwn(header, "kind")) {
       assert.equal(keys[3], "kind"); assert.ok(["primary", "diagnostic"].includes(header.kind));
     }
     if (Object.hasOwn(header, "redacted")) assert.equal(header.redacted, true);
+    if (header.files) {
+      const restored = rootedTechnical(header);
+      // Non-enumerable compatibility facts keep subsequent independent raw-header cost checks honest.
+      Object.defineProperty(header, "references", { value: restored.references });
+      if (restored.runFiles) Object.defineProperty(header, "run_files", { value: restored.runFiles });
+    }
     for (const detail of [header.references?.primary, header.references?.diagnostic_metadata].filter(Boolean)) {
       for (const key of ["state", "chars_shown", "chars_total", "chars_omitted", "utf8_range", "shown_bytes", "truncated", "upstream_truncated"])
         assert.equal(Object.hasOwn(detail, key), false, `No YAML body coverage: ${key}`);
@@ -599,10 +606,50 @@ function completionPacket(text) {
   try { completionCore(text); return true; } catch { return false; }
 }
 function completionRecords(text) { return completionCore(text).records; }
+function containsRootedPath(text, path) {
+  return completionRecords(text).some(record => record.header.files?.groups?.some(group => typeof group.root === "string"
+    && group.entries.some(entry => typeof entry.path === "string" && join(group.root, entry.path) === path)));
+}
+// Independent reconstruction of selected source bindings from explicit header roots.
+// No body parsing, cwd lookup, product projector or evidence refresh participates.
+function rootedTechnical(header) {
+  const files = header.files, references = { ...files?.notes };
+  let runFiles;
+  if (!files) return {};
+  const entries = (files.groups ?? []).flatMap(group => group.entries.map(entry => ({
+    ...entry, path: typeof group.root === "string" && typeof entry.path === "string" ? join(group.root, entry.path) : entry.path,
+  })));
+  for (const role of ["primary", "diagnostic_metadata", "artifact_inventory"]) {
+    const entry = entries.find(entry => entry.role === role);
+    if (!entry) continue;
+    const { role: _role, purpose, path, source, ...detail } = entry;
+    references[role] = { ...detail, source: { path, ...source } };
+  }
+  const declarations = entries.filter(entry => entry.role === "artifact");
+  if (declarations.length) references.artifacts = { scope: declarations[0].scope,
+    declarations: declarations.map(entry => ({ name: entry.name, path: entry.path })) };
+  if (files.observation) {
+    const { group, ...observation } = files.observation;
+    if (observation.state === "available") {
+      const directory = files.groups[group].root;
+      const selected = entries.filter(entry => entry.format_hint).map(({ purpose, ...entry }) => entry);
+      runFiles = { run: observation.run, run_instance_id: observation.run_instance_id,
+        locations: { ...observation, directory, files: selected } };
+    } else {
+      const { run, run_instance_id, ...locations } = observation;
+      runFiles = { run, run_instance_id, locations };
+    }
+  }
+  return { references, runFiles };
+}
+
 function technicalObjects(text) {
   const packet = typeof text === "string" ? completionCore(text) : { records: [text], service: {} };
   return [...packet.records.flatMap(record => [record.header.references, record.header.run_files].filter(Boolean)),
-    ...(packet.service.result_inventory ? [packet.service.result_inventory] : [])];
+    ...(packet.service.result_inventory ? [(() => {
+      const { root, ...reference } = packet.service.result_inventory;
+      return { ...reference, path: root ? join(root, reference.path) : reference.path };
+    })()] : [])];
 }
 function deliveredBody(record, full) {
   assert.ok(full.isWellFormed());
@@ -643,14 +690,23 @@ function requiredReferenceFacts(member) {
       recorded_fields_not_shown: diagnostic.fields, source: { ...diagnostic.source, bytes_total: diagnostic.bytes_total, fields: diagnostic.fields } },
   };
 }
+function rootedRequiredFacts(member, minimal = false) {
+  const facts = requiredReferenceFacts(member), groups = [];
+  assert.equal(dirname(facts.primary.source.path), dirname(facts.diagnostic_metadata.source.path), "Independent evidence-root cost premise");
+  for (const [role, purpose] of [["primary", "Full result text"], ["diagnostic_metadata", "Recorded error and command metadata"]]) {
+    const { source: { path, ...source }, ...detail } = facts[role];
+    const root = dirname(path);
+    let group = groups.find(item => item.root === root);
+    if (!group) { group = { root, entries: [] }; groups.push(group); }
+    group.entries.push({ role, purpose, ...(minimal ? { scope: detail.scope } : detail), source, path: basename(path) });
+  }
+  return { read_first: { group: 0, entry: 0 }, groups };
+}
 function mandatoryOutcomeBytes(members) {
-  // Dropping all scopes/annotations except these required references, state and kind can only
-  // decrease this fixed block-YAML cost. No body, framing, service, parts or locations counted.
-  return members.reduce((sum, member, index) => {
-    const references = requiredReferenceFacts(member);
-    delete references.diagnostic_metadata.recorded_fields_not_shown;
-    return sum + Buffer.byteLength(oracleYaml({ index, run: member.run, state: "done", kind: "primary", references }));
-  }, 0);
+  // Native fixture sources share evidence/; their parent-root representation is no larger than
+  // Run-root plus repeated evidence/ prefixes. Keep required roles/purposes/privacy scopes/read_first; drop optional facts and all non-reference metadata.
+  return members.reduce((sum, member, index) => sum + Buffer.byteLength(oracleYaml({ index, run: member.run,
+    state: "done", kind: "primary", files: rootedRequiredFacts(member, true) })), 0);
 }
 function outcome65UpperBound(inventory, inventoryReference, batchId, legacyCompanionRuns) {
   // Constructor-owned set plus caller marker-absence check binds this private legacy-only model.
@@ -663,7 +719,7 @@ function outcome65UpperBound(inventory, inventoryReference, batchId, legacyCompa
   // At most64 production candidates => maximum frozen equal body share floor(49152/64).
   // Hypothetically adding65th row must not enlarge that share. This is NOT a65-row encoder call.
   const maximumBodyBytes = Math.floor(49152 / 64);
-  const locationOmission = "Run-file reference omitted (packet byte limit).";
+  const locationOmission = { reason: "packet_byte_limit", shown: 0, omitted: 1, total: 1 };
   const unknown = "[omitted: unknown] (upstream completeness unproven)";
   let bytes = 0;
   for (const [index, member] of inventory.members.entries()) {
@@ -671,22 +727,23 @@ function outcome65UpperBound(inventory, inventoryReference, batchId, legacyCompa
     if (index === 0) {
       const output = member.primary_text.output;
       metadata = { index, run: member.run, state: "done", kind: "primary", redacted: true,
-        references: requiredReferenceFacts(member) };
+        files: rootedRequiredFacts(member), text_warnings: [unknown], run_files_omission: locationOmission };
       // Decimal maximum source count bounds omitted-count spelling; no full source bytes charged.
       const omitted = `[${output.chars_total} characters omitted]`;
-      parts = [{ body: maximumBodyBytes }, { marker: 1 }, { marker: omitted.length },
-        { marker: 1 }, { marker: unknown.length }, { marker: 1 }, { marker: locationOmission.length }];
-      payloadBytes = maximumBodyBytes + 3 + Buffer.byteLength(omitted + unknown + locationOmission);
+      parts = [{ body: maximumBodyBytes }, { marker: 1 }, { marker: omitted.length }];
+      payloadBytes = maximumBodyBytes + 1 + Buffer.byteLength(omitted);
     } else {
       assert.equal(member.primary_text, undefined); assert.equal(member.result_diagnostics, undefined);
       assert.equal(member.artifact_inventory, undefined);
       assert.ok(legacyCompanionRuns.has(member.run), "Unproven legacy companion constructor");
       metadata = { index, run: member.run, state: "done", result_state: "not captured",
-        run_files_unavailable: "identity_unavailable" };
-      parts = [{ marker: locationOmission.length }]; payloadBytes = Buffer.byteLength(locationOmission);
+        run_files_unavailable: "identity_unavailable", run_files_omission: locationOmission };
+      parts = []; payloadBytes = 0;
     }
     metadata._completion = { ...(index === 0 ? { codec: "completion_yaml_core_v1", batch_id: batchId,
-      service: { omitted_results: 1, result_inventory: inventoryReference } } : {}), parts };
+      service: { header_layout: "rooted_files_v1", omitted_results: 1,
+        result_inventory: { ...inventoryReference, root: dirname(inventoryReference.path), path: basename(inventoryReference.path) } } } : {}),
+      ...(parts.length ? { parts } : {}) };
     // Includes complete canonical header, both fences, payload and two-LF record separator.
     // Extra omitted_results:1 remains as conservative service overhead even in hypothetical65 rows.
     bytes += Buffer.byteLength(oracleYaml(metadata)) + 8 + payloadBytes + (index < 64 ? 2 : 0);
@@ -707,7 +764,8 @@ function candidateRecord(text, batchId) {
   assert.deepEqual(Object.keys(header).slice(0, 4), ["index", "run", "state", "kind"]);
   assert.equal(header.index, 0); assert.equal(header.state, "done"); assert.equal(header.kind, "primary");
   const core = header._completion;
-  assert.deepEqual(Object.keys(core), ["codec", "batch_id", "parts"]);
+  assert.deepEqual(Object.keys(core), ["codec", "batch_id", "service", "parts"]);
+  assert.deepEqual(core.service, { header_layout: "rooted_files_v1" });
   assert.equal(core.codec, "completion_yaml_core_v1"); assert.equal(core.batch_id, batchId);
   assert.ok(Array.isArray(core.parts) && core.parts.length > 0);
   const blocks = []; let cursor = end + 5;
@@ -719,10 +777,13 @@ function candidateRecord(text, batchId) {
     blocks.push({ kind, text: value }); cursor += length;
   }
   assert.equal(cursor, text.length, "Whole packet consumed: no extra compiler HTML tail or unadmitted bytes");
+  const restored = rootedTechnical(header);
+  Object.defineProperty(header, "references", { value: restored.references });
+  if (restored.runFiles) Object.defineProperty(header, "run_files", { value: restored.runFiles });
   for (const ref of [header.references?.primary, header.references?.diagnostic_metadata].filter(Boolean)) {
     for (const key of ["chars_shown", "chars_total", "chars_omitted", "shown_bytes", "truncated", "upstream_truncated"]) assert.equal(Object.hasOwn(ref, key), false);
   }
-  assert.match(yaml, /references:\n/u); assert.match(yaml, /_completion:\n  codec:/u);
+  assert.match(yaml, /files:\n/u); assert.match(yaml, /_completion:\n  codec:/u);
   const decoded = delivery.readCompletionYamlCarrier(text); assert.equal(decoded.state, "available");
   assert.equal(decoded.packet.batchId, batchId); // Auxiliary consistency, NOT the expected body/source oracle.
   return { header, blocks };
@@ -930,7 +991,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               const { input, batch, journal: capturedJournal } = candidateCaptures[0];
               assert.deepEqual(capturedJournal.completion_batch, batch);
               assert.equal(capturedJournal.owner_id, ownerId); assert.equal(batch.phase, "pending");
-              assert.equal(input.ownerId, ownerId); assert.equal(batch.result_layout, "completion_yaml_core_v1");
+              assert.equal(input.ownerId, ownerId); assert.equal(batch.result_layout, "completion_yaml_files_v1");
               assert.equal(batch.members.length, 1); assert.equal(batch.members[0].run, currentRun.run);
               assert.equal(batch.members[0].run_instance_id, currentRun.run_instance_id);
               const record = candidateRecord(matches[0], batch.batch_id);
@@ -944,7 +1005,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               if (record.header.run_files) {
                 assert.equal(record.header.run_files.run_instance_id, currentRun.run_instance_id);
                 assert.equal(record.header.run_files.locations.directory, currentRun.state_dir);
-              } else assert.ok(record.blocks.some(block => block.kind === "marker" && block.text === "Run-file reference omitted (packet byte limit)."));
+              } else assert.equal(record.header.run_files_omission?.omitted, 1);
               assert.deepEqual(record.header.references.diagnostic_metadata.source, { ...diagnosticSources.get(currentRun.run).reference.source,
                 bytes_total: diagnosticSources.get(currentRun.run).reference.bytes_total, fields: diagnosticSources.get(currentRun.run).reference.fields });
               const full = await readSource(record.header.references.primary.source, primary.output);
@@ -991,7 +1052,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               const omitted = service.omitted_results ?? 0;
               assert.equal(records.length + omitted, expectedMembers);
               const locations = technical.filter(value => value.locations), shown = locations.length;
-              const omittedReferences = records.filter(record => record.blocks.some(block => block.kind === "marker" && block.text === "Run-file reference omitted (packet byte limit).")).length;
+              const omittedReferences = records.filter(record => record.header.run_files_omission?.omitted === 1 || record.blocks.some(block => block.kind === "marker" && block.text === "Run-file reference omitted (packet byte limit).")).length;
               assert.equal(shown + omittedReferences, records.length, "Each displayed result has a whole reference or its explicit omission");
               for (const record of records) {
                 const run = record.header.run; assert.ok(run);
@@ -1084,15 +1145,23 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                 const rowSelectionBytes = records.reduce((bytes, record, index) => {
                   const metadata = structuredClone(record.header); delete metadata.run_files;
                   const parts = record.blocks.filter(block => block.kind !== "header").map(block => ({ [block.kind]: block.text }));
-                  if (!parts.some(part => part.marker === "Run-file reference omitted (packet byte limit).")) {
-                    if (parts.length) parts.push({ marker: "\n" });
-                    parts.push({ marker: "Run-file reference omitted (packet byte limit)." });
+                  if (metadata.files) {
+                    delete metadata.files.observation;
+                    if (metadata.files.groups) {
+                      for (const group of metadata.files.groups) group.entries = group.entries.filter(entry => !entry.format_hint);
+                      // Fixture reference groups precede the navigation-only group, so filtering empty suffix groups preserves read_first.
+                      metadata.files.groups = metadata.files.groups.filter(group => group.entries.length);
+                      if (!metadata.files.groups.length) delete metadata.files.groups;
+                    }
+                    if (!metadata.files.groups) delete metadata.files.read_first;
+                    if (!Object.keys(metadata.files).length) delete metadata.files;
                   }
+                  metadata.run_files_omission = { reason: "packet_byte_limit", shown: 0, omitted: 1, total: 1 };
                   metadata._completion = { ...(index === 0 ? { codec: "completion_yaml_core_v1",
                     batch_id: completionCore(batchText).batchId, service } : {}),
-                    parts: parts.map(part => { const kind = Object.keys(part)[0]; return { [kind]: part[kind].length }; }) };
-                  return bytes + Buffer.byteLength(oracleYaml(metadata)) + 8
-                    + parts.reduce((sum, part) => sum + Buffer.byteLength(Object.values(part)[0]), 0) + (index < 63 ? 2 : 0);
+                    ...(parts.length ? { parts: parts.map(part => { const kind = Object.keys(part)[0]; return { [kind]: part[kind].length }; }) } : {}) };
+                  return bytes + Buffer.byteLength(oracleYaml(metadata)) + (parts.length ? 8 : 0)
+                    + parts.reduce((sum, part) => sum + Buffer.byteLength(Object.values(part)[0]), 0) + (index < 63 ? parts.length ? 2 : 1 : 0);
                 }, 0);
                 assert.ok(withOmittedRowBytes < 49152, "Hypothetical65 outcomes fit bytes before locations; production64-row cap omits one");
                 for (const member of inventory.members.filter(member => member.run !== currentRun.run)) {
@@ -1174,7 +1243,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                 assert.ok(omittedChars > 0); assert.equal([...body].length, primary.output.chars_total);
                 assert.equal(Buffer.byteLength(body), primary.output.bytes_total);
                 assert.equal(Buffer.from(body).subarray(0, Buffer.byteLength(shownText)).toString("utf8"), shownText);
-                const unknown = primaryRecord.blocks.filter(block => block.kind === "marker" && block.text.includes("upstream completeness unproven"));
+                const unknown = (primaryRecord.header.text_warnings ?? []).filter(text => text.includes("upstream completeness unproven"));
                 assert.equal(unknown.length, primary.output.upstream_truncated ? 1 : 0);
                 assert.equal(diagnosticReferences.length, 1); const diagnostic = diagnosticSources.get(`${mode}-first`); assert.ok(diagnostic);
                 const diagnosticReference = diagnosticReferences[0]; assert.deepEqual(diagnosticReference, { ...diagnostic.reference.source,
@@ -1183,7 +1252,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                 assert.deepEqual(metadata, diagnostic.metadata); assert.equal(metadata.primary_text, "not_included");
                 const batchText = navigationBatch;
                 assert.match(batchText, /Diagnostic metadata only; not primary output/);
-                assert.ok(technical.some(value => value.diagnostic_metadata)); assert.ok(batchText.includes(JSON.stringify(diagnosticReference.path)));
+                assert.ok(technical.some(value => value.diagnostic_metadata)); assert.ok(containsRootedPath(batchText, diagnosticReference.path));
                 if (artifactCount > 0) {
                   const reference = references.find(reference => reference.declarations_total === artifactCount); assert.ok(reference); assert.ok(artifactInventory);
                   assert.deepEqual(reference, { ...artifactInventory.source, bytes_total: artifactInventory.bytes_total, declarations_total: artifactCount });
@@ -1191,7 +1260,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                   assert.equal(inventory.artifacts.length, artifactCount); assert.equal(inventory.contents, "not_read"); assert.equal(inventory.availability, "not_observed");
                   assert.equal(inventory.production_provenance, "not_asserted");
                   assert.equal(Number(primaryRecord.header.artifact_declarations), artifactCount);
-                  assert.ok(technical.some(value => value.artifact_inventory?.scope.startsWith("Metadata only"))); assert.ok(batchText.includes(JSON.stringify(reference.path)));
+                  assert.ok(technical.some(value => value.artifact_inventory?.scope.startsWith("Metadata only"))); assert.ok(containsRootedPath(batchText, reference.path));
                   assert.equal(batchText.includes("never-created-"), false, "No legacy path slice substitutes for the admitted inventory");
                   if (artifactMode) {
                     assert.equal(inventory.run, currentRun.run); assert.equal(inventory.run_instance_id, currentRun.run_instance_id);

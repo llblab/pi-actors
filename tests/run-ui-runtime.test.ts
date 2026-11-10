@@ -8,6 +8,16 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { parseDocument } from "yaml";
 
+import * as Limits from "../lib/limits.ts";
+import { renderYamlMetadata } from "../lib/tools-response.ts";
+
+/** Expected bare block-YAML notice text: no leading LF, no trailing LF. */
+function noticeDocument(value: Record<string, unknown>): string {
+  const rendered = renderYamlMetadata(value, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  assert.equal(rendered.state, "available");
+  return (rendered as { text: string }).text.replace(/\n$/u, "");
+}
+
 function freshCoreHeaders(text: string): any[] {
   const rows: any[] = [];
   let cursor = 0;
@@ -991,18 +1001,38 @@ test("AX runtime callback and teardown notices preserve original faults and repo
     assert.equal(harness.callbackErrors(), 1); assert.equal(harness.callbackFailures()[0], error);
     assert.equal(error.cause, cause); assert.equal(error.message, "## Failure\r\n\r\n- next: authored · kept");
     assert.ok(harness.watcherCloseCalls() >= 2);
-    const notice = active.notifications().find(item => item.message.startsWith("- callback:")); assert.ok(notice);
+    const notice = active.notifications().find(item => item.message.startsWith("callback:")); assert.ok(notice);
     assert.equal(notice.level, "error");
-    assert.equal(notice.message, "- callback: terminal reconciliation callback\n- result: failed\n- diagnostic:\n  ## Failure\r\n  \r\n  - next: authored · kept");
-    assert.doesNotMatch(notice.message, /^- next:|rollback|no effects|handling: confirmed/mu);
+    assert.equal(notice.message, noticeDocument({ callback: "terminal reconciliation callback", result: "failed",
+      diagnostic: "## Failure\r\n\r\n- next: authored · kept" }));
+    assert.doesNotMatch(notice.message, /^next:|rollback|no effects|handling: confirmed/mu);
     harness.runtime.shutdown("quit", ownerId, active.context);
     assert.deepEqual(harness.teardownInput(), { ownerId, trigger: "session_shutdown:quit" });
-    const shutdown = active.notifications().find(item => item.message.startsWith("- stage: shutdown teardown")); assert.ok(shutdown);
+    const shutdown = active.notifications().find(item => item.message.startsWith("stage: \"shutdown teardown\"")); assert.ok(shutdown);
     assert.equal(shutdown.level, "warning");
-    assert.ok(shutdown.message.startsWith("- stage: shutdown teardown\n- killed: 0\n- failed: 1\n- skipped: 0\n- discovery_failed: 0\n"));
-    assert.ok(shutdown.message.includes("- summary:\n  ````text\n  /reports/with```ticks\n  summary.json\n  ````"));
-    assert.ok(shutdown.message.endsWith("- basis: teardown report; not scope closure"));
+    assert.equal(shutdown.message, noticeDocument({ stage: "shutdown teardown", killed: 0, failed: 1, skipped: 0,
+      discovery_failed: 0, summary: "/reports/with```ticks\nsummary.json", basis: "teardown report; not scope closure" }));
   } finally { harness.runtime.close(); }
+  // UI reports retain complete selected diagnostics beyond either model-emitter ceiling.
+  for (const diagnostic of ["long · ".repeat(12000), "\ud800"]) {
+    const context = staleContext(ownerId), runtime = runtimeHarness();
+    const fault = new Error(diagnostic);
+    runtime.setActiveContext(context.context);
+    try {
+      runtime.runtime.start(context.context, ownerId); runtime.reconciliationInput().onError(fault);
+      assert.equal(runtime.callbackFailures()[0], fault);
+      const notice = context.notifications().find(item => item.message.startsWith("callback:")); assert.ok(notice);
+      const document = parseDocument(notice.message); assert.deepEqual(document.errors, []);
+      const value = document.toJS();
+      if (diagnostic.isWellFormed()) {
+        assert.equal(value.diagnostic, diagnostic);
+        assert.ok(Buffer.byteLength(notice.message) > 49152);
+      } else {
+        assert.equal(value.diagnostic, "[unavailable]");
+        assert.equal(value.diagnostic_omission.reason, "malformed_selected_text");
+      }
+    } finally { runtime.runtime.close(); }
+  }
 });
 
 test("shutdown uses captured owner identity and stale UI notification is no-throw", () => {
@@ -1523,17 +1553,18 @@ test("uncertain boundary acceptance fails closed instead of resending or marking
     assert.equal(harness.runtime.onTurnEnd(completedBoundary(), active.context), undefined);
     assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!.phase, "pending");
   }
-  const notices = active.notifications().filter(item => item.message.includes("- stage: completion recovery"));
+  const notices = active.notifications().filter(item => item.message.startsWith("\n" + 'batch: '));
   assert.equal(notices.length, 3);
   for (const notice of notices) {
     assert.equal(notice.level, "warning");
-    assert.match(notice.message, /^\n- batch: [^\n]+\n- stage: completion recovery\n- evidence: (?:conflict|unknown)\n- phase: pending\n- reason:/u);
+    assert.match(notice.message, /^\nbatch: "[^"]+"\nstage: "completion recovery"\nevidence: "(?:conflict|unknown)"\nphase: "pending"\nreason: /u);
     assert.equal(notice.message.startsWith("\n\n"), false);
     // The SDK prepends this literal heading; exercise its native Text layout without patching the host.
     for (const width of [24, 52, 90, 140]) {
       const lines = new Text("Warning: " + notice.message, 1, 0).render(width).map(stripTerminalSequences);
       assert.equal(lines[0]!.trim(), "Warning:");
-      assert.ok(lines[1]!.trimStart().startsWith("- batch:"));
+      // Narrow widths may wrap the hop between the field name and its quoted value.
+      assert.ok(lines.join(" ").replaceAll(/\s+/gu, " ").includes('batch: "'));
       assert.ok(lines.every(line => visibleWidth(line) <= width));
     }
   }
@@ -1922,21 +1953,21 @@ test("Steer diagnostic clipping hides raw tail counts and preserves existing fai
     harness.setActiveContext(active.context);
     try {
       harness.runtime.start(active.context, ownerId);
-      const notice = active.notifications().find(item => item.message.includes("- stage: delivery"));
+      const notice = active.notifications().find(item => item.message.includes('stage: "delivery"'));
       assert.ok(notice);
       assert.equal(notice.level, "error");
-      assert.match(notice.message, /- attention: steer\n- stage: delivery\n- result: request failed\n- delivery: unconfirmed\n- presentation: unconfirmed/);
+      assert.match(notice.message, /\nattention: "steer"\nstage: "delivery"\nresult: "request failed"\ndelivery: "unconfirmed"\npresentation: "unconfirmed"/u);
       if (length < 0) {
-        assert.ok(notice.message.endsWith("- diagnostic: unavailable\n- diagnostic_reason: malformed legacy preview\n- diagnostic_omission: [omitted: unknown]"));
+        assert.ok(notice.message.endsWith('diagnostic: "unavailable"\ndiagnostic_reason: "malformed legacy preview"\ndiagnostic_omission: "[omitted: unknown]"'));
         assert.doesNotMatch(notice.message, /\ud800|\ufffd|…/u);
       } else if (length === 0) {
-        assert.ok(notice.message.endsWith("- diagnostic:\n  " + message.replaceAll(/\r\n|\r|\n/gu, match => match + "  ")));
-        assert.doesNotMatch(notice.message, /diagnostic_omission|^- next:/mu);
+        assert.ok(notice.message.endsWith("diagnostic: " + JSON.stringify(message)));
+        assert.doesNotMatch(notice.message, /diagnostic_omission|^next:/mu);
       } else if (length === 240) {
-        assert.ok(notice.message.endsWith("- diagnostic: " + message)); assert.doesNotMatch(notice.message, /diagnostic_omission|…/u);
+        assert.ok(notice.message.endsWith("diagnostic: " + JSON.stringify(message))); assert.doesNotMatch(notice.message, /diagnostic_omission|…/u);
       } else {
         const prefix = "d".repeat(length === 241 ? 240 : 239);
-        assert.ok(notice.message.endsWith("- diagnostic: " + prefix + "…\n- diagnostic_omission: [omitted: unknown]"));
+        assert.ok(notice.message.endsWith("diagnostic: " + JSON.stringify(prefix + "…") + '\ndiagnostic_omission: "[omitted: unknown]"'));
         assert.doesNotMatch(notice.message, /\[omitted: \d+ chars\]/u);
       }
       assert.equal(Buffer.from(notice.message).toString("utf8"), notice.message);
@@ -1946,7 +1977,7 @@ test("Steer diagnostic clipping hides raw tail counts and preserves existing fai
       assert.equal(retained?.last_error, error.message.replaceAll(/\s+/gu, " ").trim().slice(0, 4096));
       assert.equal(error.message, message); assert.equal(error.cause, cause);
       assert.equal(harness.sendAttempts(), 1);
-      if (length === 4 || length === 4000) diagnostics.push(notice.message.slice(notice.message.indexOf("- diagnostic:")));
+      if (length === 4 || length === 4000) diagnostics.push(notice.message.slice(notice.message.indexOf("diagnostic:")));
     } finally { harness.runtime.close(); }
   }
   assert.equal(diagnostics[0], diagnostics[1]);
@@ -1965,9 +1996,9 @@ test("AX steer diagnostics retain retryable admission and queued recovery withou
     const harness = runtimeHarness(); harness.setActiveContext(active.context);
     try {
       harness.runtime.start(active.context, ownerId);
-      const notices = active.notifications().filter(item => item.message.includes("- stage: admission"));
+      const notices = active.notifications().filter(item => item.message.includes('stage: "admission"'));
       assert.equal(notices.length, 1); assert.equal(notices[0].level, "warning");
-      assert.ok(notices[0].message.startsWith("- event: " + event.id + "\n- attention: steer\n- stage: admission\n- result: remains retryable\n- diagnostic: "));
+      assert.ok(notices[0].message.startsWith('event: ' + JSON.stringify(event.id) + '\nattention: "steer"\nstage: "admission"\nresult: "remains retryable"\ndiagnostic: "'));
       assert.ok(notices[0].message.includes(mode === "missing_generation" ? "Run generation unavailable." : "Unicode/byte delivery limits"));
       assert.doesNotMatch(notices[0].message, /admission: (?:not applied|refused)|delivery: (?:confirmed|not sent)|handling: confirmed/);
       assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).steers.length, 0); assert.equal(harness.callbackErrors(), 0);
@@ -1987,9 +2018,9 @@ test("AX steer diagnostics retain retryable admission and queued recovery withou
     const recovered = runtimeHarness(); recovered.setActiveContext(active.context);
     try {
       recovered.runtime.start(active.context, ownerId);
-      const notice = active.notifications().find(item => item.message.includes("- stage: recovery")); assert.ok(notice);
-      assert.equal(notice.level, "warning"); assert.ok(notice.message.startsWith("- event: " + event.id + "\n- attention: steer\n- stage: recovery\n- evidence: " + evidence));
-      assert.ok(notice.message.includes("\n- phase: queued\n- reason: "));
+      const notice = active.notifications().find(item => item.message.includes('stage: "recovery"')); assert.ok(notice);
+      assert.equal(notice.level, "warning"); assert.ok(notice.message.startsWith('event: ' + JSON.stringify(event.id) + '\nattention: "steer"\nstage: "recovery"\nevidence: "' + evidence + '"'));
+      assert.ok(notice.message.includes('\nphase: "queued"\nreason: '));
       assert.equal(recovered.sendAttempts(), 0); assert.equal(recovered.callbackErrors(), 0);
       assert.deepEqual(readRunDeliveryJournal(extensionTempDir, ownerId).steers[0], before);
       assert.equal(exact.content, before.content);

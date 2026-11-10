@@ -1,6 +1,13 @@
-// Owns: Bounded raw MI wire decoding, query inputs and unadmitted provenance fragments, subordinate to process acquisition.
-// Excludes: Identity construction/digest/comparison, status/liveness/lifecycle/publication/admission,
-// fallback, native invocation and asset loading. Decoded data never admits a representation profile.
+// Owns: Bounded raw MI wire decoding, query inputs, unadmitted provenance fragments, and unrouted
+// helper manifest/asset verification plus a shell-free invocation spec, subordinate to process acquisition.
+// Excludes: Identity construction/digest/comparison, status/liveness/lifecycle/publication/admission, fallback,
+// process spawning and package inventory. No production reader imports this owner; decoded data, verified
+// asset bytes and the invocation spec never admit a representation profile, architecture or activation.
+import { createHash } from 'node:crypto';
+const MANIFEST_MAX_BYTES = 32 * 1024;
+const EXECUTABLE_MAX_BYTES = 8 * 1024 * 1024;
+const HELPER_VERSION = /^(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})$/u;
+const MODULE_FILE = /\/lib\/runs-process-windows-mi\.(?:ts|js)$/u;
 export function queryArguments(profile, pids) {
     if ((profile !== 'scalar' && profile !== 'shared') || !Array.isArray(pids) ||
         pids.length < 1 || pids.length > 64 || (profile === 'scalar' && pids.length !== 1))
@@ -111,4 +118,140 @@ export function decodeResponse(bytes, profile, pids) {
     if (optionalNull)
         return { kind: 'unusable', reason: 'unsupported_optional_fields' };
     return { kind: 'decoded_unadmitted', rows };
+}
+function boundedText(bytes, maximumBytes) {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > maximumBytes)
+        return undefined;
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
+        return undefined;
+    try {
+        return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    }
+    catch {
+        return undefined;
+    }
+}
+function boundedLexemes(value, maximum) {
+    if (!Array.isArray(value) || value.length > maximum)
+        return undefined;
+    const selected = [];
+    for (const item of value) {
+        if (typeof item !== 'string' || item.length === 0 || item.length > 128 || !/^[\x20-\x7e]+$/.test(item) || selected.includes(item))
+            return undefined;
+        selected.push(item);
+    }
+    return selected;
+}
+/** Bounded complete-manifest reader: one strict UTF-8 JSON document with an exact reviewed shape. */
+export function readHelperManifest(bytes) {
+    const invalid = { kind: 'unusable', reason: 'invalid_manifest' };
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > MANIFEST_MAX_BYTES)
+        return { kind: 'unusable', reason: 'oversize_manifest' };
+    const text = boundedText(bytes, MANIFEST_MAX_BYTES);
+    if (text === undefined)
+        return invalid;
+    let value;
+    try {
+        value = JSON.parse(text);
+    }
+    catch {
+        return invalid;
+    }
+    if (!exactKeys(value, ['helper_version', 'architecture', 'protocol', 'profiles', 'native_source_sha256',
+        'executable_bytes', 'executable_sha256', 'toolchain', 'dependencies', 'originating_source_commit', 'originating_build_job']))
+        return invalid;
+    const { helper_version, architecture, protocol, profiles, native_source_sha256, executable_bytes, executable_sha256, toolchain, dependencies, originating_source_commit, originating_build_job } = value;
+    if (typeof helper_version !== 'string' || !HELPER_VERSION.test(helper_version) ||
+        architecture !== 'windows-x64' || protocol !== 'native-mi-v1' ||
+        !Array.isArray(profiles) || profiles.length !== 2 || profiles[0] !== 'scalar' || profiles[1] !== 'shared')
+        return { kind: 'unusable', reason: 'unsupported_manifest' };
+    if (typeof native_source_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(native_source_sha256) ||
+        typeof executable_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(executable_sha256) ||
+        typeof originating_source_commit !== 'string' || !/^[0-9a-f]{40}$/.test(originating_source_commit) ||
+        typeof originating_build_job !== 'string' || !/^[1-9][0-9]*$/.test(originating_build_job) ||
+        typeof executable_bytes !== 'number' || !Number.isSafeInteger(executable_bytes) || executable_bytes <= 0)
+        return invalid;
+    if (executable_bytes > EXECUTABLE_MAX_BYTES)
+        return { kind: 'unusable', reason: 'unsupported_manifest' };
+    if (!exactKeys(toolchain, ['compiler', 'sdk', 'build_arguments']))
+        return invalid;
+    const compiler = boundedLexemes([toolchain.compiler], 1)?.[0];
+    const sdk = boundedLexemes([toolchain.sdk], 1)?.[0];
+    const buildArguments = boundedLexemes(toolchain.build_arguments, 32);
+    const dependencyNames = boundedLexemes(dependencies, 32);
+    if (compiler === undefined || sdk === undefined || buildArguments === undefined || dependencyNames === undefined)
+        return invalid;
+    // Fresh primitive claims only; the caller still owns target/version/source-digest policy.
+    return {
+        kind: 'manifest_unadmitted',
+        manifest: {
+            helper_version, architecture: 'windows-x64', protocol: 'native-mi-v1', profiles: ['scalar', 'shared'],
+            native_source_sha256, executable_bytes, executable_sha256,
+            toolchain: { compiler, sdk, build_arguments: buildArguments }, dependencies: dependencyNames,
+            originating_source_commit, originating_build_job,
+        },
+    };
+}
+/**
+ * Fixed versioned package-relative lookup. Never searches cwd, PATH or caller locations: the only base is
+ * the sibling `native/` directory of this module's own `lib/` (source) or `dist/lib/` (compiled) home.
+ */
+export function resolveHelperAsset(moduleUrl, runtime, helperVersion) {
+    let url;
+    try {
+        url = new URL(String(moduleUrl));
+    }
+    catch {
+        return { kind: 'unusable', reason: 'unsupported_location' };
+    }
+    if (url.protocol !== 'file:' || !MODULE_FILE.test(url.pathname))
+        return { kind: 'unusable', reason: 'unsupported_location' };
+    const target = runtime;
+    if (target?.platform !== 'win32' || target?.arch !== 'x64')
+        return { kind: 'unusable', reason: 'unsupported_target' };
+    if (typeof helperVersion !== 'string' || !HELPER_VERSION.test(helperVersion))
+        return { kind: 'unusable', reason: 'unsupported_version' };
+    const directory = `../native/windows-mi/win32-x64/${helperVersion}/`;
+    return {
+        kind: 'located', helper_version: helperVersion,
+        manifest_url: new URL(`${directory}manifest.json`, url),
+        executable_url: new URL(`${directory}helper.exe`, url),
+    };
+}
+/** Trusted exact-byte selection: bounded manifest read, exact declared size, then exact SHA-256 match. */
+export function loadHelperAsset(location, read) {
+    const manifestBytes = read(location.manifest_url, MANIFEST_MAX_BYTES + 1);
+    if (manifestBytes === undefined)
+        return { kind: 'unusable', reason: 'missing_manifest' };
+    if (manifestBytes.byteLength > MANIFEST_MAX_BYTES)
+        return { kind: 'unusable', reason: 'oversize_manifest' };
+    const reading = readHelperManifest(manifestBytes);
+    if (reading.kind === 'unusable')
+        return { kind: 'unusable', reason: reading.reason };
+    const { manifest } = reading;
+    if (manifest.helper_version !== location.helper_version)
+        return { kind: 'unusable', reason: 'version_mismatch' };
+    // One extra byte detects growth; a shorter read can never satisfy the declared size.
+    const executableBytes = read(location.executable_url, manifest.executable_bytes + 1);
+    if (executableBytes === undefined)
+        return { kind: 'unusable', reason: 'missing_asset' };
+    if (executableBytes.byteLength > manifest.executable_bytes)
+        return { kind: 'unusable', reason: 'oversize_asset' };
+    if (executableBytes.byteLength !== manifest.executable_bytes)
+        return { kind: 'unusable', reason: 'size_mismatch' };
+    const digest = createHash('sha256').update(executableBytes).digest('hex');
+    if (digest !== manifest.executable_sha256)
+        return { kind: 'unusable', reason: 'digest_mismatch' };
+    return { kind: 'asset_verified_unadmitted', manifest, executable_sha256: digest, executable_bytes: executableBytes.byteLength };
+}
+/** Shell-free invocation spec only: no spawn, retry, fallback or execution-policy bypass. */
+export function helperInvocation(executablePath, profile, pids) {
+    if (typeof executablePath !== 'string' || executablePath.length === 0 || executablePath.length > 4096 ||
+        !/^[A-Za-z]:[\\/][^\x00\r\n"]*\.exe$/.test(executablePath))
+        return { kind: 'unusable', reason: 'unsupported_executable' };
+    const query = queryArguments(profile, pids);
+    if (!query)
+        return { kind: 'unusable', reason: 'invalid_query' };
+    return { kind: 'invocation_unadmitted', command: executablePath, args: query,
+        options: { shell: false, windowsHide: true } };
 }

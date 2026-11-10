@@ -32,7 +32,7 @@ import { readRunCompletionTextSource, readRunResultArtifactInventory, readRunRes
 import type { RunPrimaryTextBinding } from "./runs-outcomes.ts";
 import { readJsonlFileResilient } from "./state-readers.ts";
 import { Document } from "yaml";
-import { formatLiteralBlock, formatMarkdownField } from "./tools-response.ts";
+import { formatYamlNotice } from "./tools-response.ts";
 
 export type RunObservedStatus =
   | "running"
@@ -290,13 +290,12 @@ export function createRunStateWatcher(input: {
       code === "rearmed"
         ? "; terminal watch acceleration restored"
         : "; terminal reconciliation remains active and watcher rearm will retry";
+    // Captured detail/recovery strings are reused as-is; only the projection becomes bare block YAML.
     diagnostics.push({
       code,
       id: ++diagnosticId,
-      message: [formatMarkdownField("watcher", code), formatMarkdownField("scope", scope),
-        formatMarkdownField("path", formatLiteralBlock(path)),
-        ...(detail ? [formatMarkdownField("diagnostic", detail.slice(2))] : []),
-        formatMarkdownField("recovery", recovery.slice(2))].join("\n"),
+      message: formatYamlNotice({ watcher: code, scope, path,
+        ...(detail ? { diagnostic: detail.slice(2) } : {}), recovery: recovery.slice(2) }),
       path,
       scope,
       ts: new Date().toISOString(),
@@ -1006,12 +1005,11 @@ export function findRunRetirementCandidates(
 }
 
 function formatRunRetirementNotice(run: string, action: RunRetirementExecution["action"], message = ""): string {
-  const fields = [formatMarkdownField("run", run.startsWith("run:") ? run.slice(4) : run), formatMarkdownField("retirement", action)];
-  if (action === "stop") fields.push(formatMarkdownField("result", "request returned"), formatMarkdownField("reason", "child runs reached terminal state"));
-  else if (action === "cancel") fields.push(formatMarkdownField("result", "cancellation reported"), formatMarkdownField("reason", "stop path failed"));
-  else fields.push(formatMarkdownField("result", action === "skip" ? "skipped" : "failed"), formatMarkdownField("diagnostic", message));
-  fields.push(formatMarkdownField("closure", "unconfirmed"));
-  return fields.join("\n");
+  return formatYamlNotice({ run: run.startsWith("run:") ? run.slice(4) : run, retirement: action,
+    ...(action === "stop" ? { result: "request returned", reason: "child runs reached terminal state" }
+      : action === "cancel" ? { result: "cancellation reported", reason: "stop path failed" }
+        : { result: action === "skip" ? "skipped" : "failed", diagnostic: message }),
+    closure: "unconfirmed" });
 }
 
 export async function executeRunRetirements(

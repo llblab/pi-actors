@@ -14,7 +14,7 @@ import * as Pi from "./pi.ts";
 import * as RunDelivery from "./run-delivery.ts";
 import * as RunDeliveryLineage from "./run-delivery-lineage.ts";
 import * as RunIndex from "./runs-index.ts";
-import { formatLiteralBlock, formatMarkdownField } from "./tools-response.ts";
+import { formatLiteralBlock, formatYamlNotice } from "./tools-response.ts";
 
 export interface RunUiRuntime {
   close(): void;
@@ -48,21 +48,18 @@ export interface RunUiRuntimeDeps {
 }
 
 function formatSteerDiagnosticMessage(eventId: string, stage: "admission" | "delivery", message: string): string {
-  const fields = [formatMarkdownField("event", eventId), formatMarkdownField("attention", "steer"),
-    formatMarkdownField("stage", stage), formatMarkdownField("result", stage === "admission" ? "remains retryable" : "request failed")];
-  if (stage === "delivery") fields.push(formatMarkdownField("delivery", "unconfirmed"), formatMarkdownField("presentation", "unconfirmed"));
   let end = Math.min(message.length, 240);
   const last = message.charCodeAt(end - 1), next = message.charCodeAt(end);
   if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end -= 1;
   const preview = message.slice(0, end), clipped = end < message.length;
-  if (Buffer.from(preview).toString("utf8") !== preview) {
-    fields.push(formatMarkdownField("diagnostic", "unavailable"), formatMarkdownField("diagnostic_reason", "malformed legacy preview"),
-      formatMarkdownField("diagnostic_omission", "[omitted: unknown]"));
-  } else {
-    fields.push(formatMarkdownField("diagnostic", preview + (clipped ? "…" : "")));
-    if (clipped) fields.push(formatMarkdownField("diagnostic_omission", "[omitted: unknown]"));
-  }
-  return fields.join("\n");
+  // The 240-pair-aligned preview and its explicit unknown-loss marker are unchanged; only metadata is YAML.
+  const diagnostic: Record<string, string> = Buffer.from(preview).toString("utf8") !== preview
+    ? { diagnostic: "unavailable", diagnostic_reason: "malformed legacy preview", diagnostic_omission: "[omitted: unknown]" }
+    : { diagnostic: preview + (clipped ? "…" : ""), ...(clipped ? { diagnostic_omission: "[omitted: unknown]" } : {}) };
+  return formatYamlNotice({ event: eventId, attention: "steer", stage,
+    result: stage === "admission" ? "remains retryable" : "request failed",
+    ...(stage === "delivery" ? { delivery: "unconfirmed", presentation: "unconfirmed" } : {}),
+    ...diagnostic });
 }
 
 /** Transcript-only view of the exact delivered content; never re-read a Run or infer body labels. */
@@ -184,8 +181,7 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
     }
     const message = error instanceof Error ? error.message : String(error);
     try {
-      expectedContext.ui.notify([formatMarkdownField("callback", label), formatMarkdownField("result", "failed"),
-        formatMarkdownField("diagnostic", message)].join("\n"), "error");
+      expectedContext.ui.notify(formatYamlNotice({ callback: label, result: "failed", diagnostic: message }), "error");
     } catch {
       /* stale context or unavailable UI */
     }
@@ -369,12 +365,8 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
         const key = `${batch.batch_id}:${evidence.status}:${evidence.reason ?? ""}`;
         if (!completionDiagnostics.has(key)) {
           completionDiagnostics.add(key);
-          ctx.ui.notify(
-            "\n" + [formatMarkdownField("batch", batch.batch_id), formatMarkdownField("stage", "completion recovery"),
-                formatMarkdownField("evidence", evidence.status), formatMarkdownField("phase", "pending"),
-                formatMarkdownField("reason", evidence.reason ?? "conflicting session evidence")].join("\n"),
-            "warning",
-          );
+          ctx.ui.notify("\n" + formatYamlNotice({ batch: batch.batch_id, stage: "completion recovery",
+            evidence: evidence.status, phase: "pending", reason: evidence.reason ?? "conflicting session evidence" }), "warning");
         }
         return true;
       }
@@ -440,12 +432,8 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
           const key = `${steer.steer_id}:${evidence.status}:${evidence.reason ?? ""}`;
           if (!steerDiagnostics.has(key)) {
             steerDiagnostics.add(key);
-            ctx.ui.notify(
-              [formatMarkdownField("event", steer.event_id), formatMarkdownField("attention", "steer"),
-                formatMarkdownField("stage", "recovery"), formatMarkdownField("evidence", evidence.status),
-                formatMarkdownField("phase", "queued"), formatMarkdownField("reason", evidence.reason ?? "conflicting session evidence")].join("\n"),
-              "warning",
-            );
+            ctx.ui.notify(formatYamlNotice({ event: steer.event_id, attention: "steer", stage: "recovery",
+              evidence: evidence.status, phase: "queued", reason: evidence.reason ?? "conflicting session evidence" }), "warning");
           }
           continue;
         }
@@ -714,14 +702,10 @@ export function createRunUiRuntime(deps: RunUiRuntimeDeps): RunUiRuntime {
       );
       if (teardown.failed === 0 || !ctx) return;
       try {
-        ctx.ui.notify(
-          [formatMarkdownField("stage", "shutdown teardown"), formatMarkdownField("killed", String(teardown.killed)),
-            formatMarkdownField("failed", String(teardown.failed)), formatMarkdownField("skipped", String(teardown.skipped)),
-            formatMarkdownField("discovery_failed", String(teardown.discoveryFailed)),
-            formatMarkdownField("summary", teardown.summaryPath == null ? "unavailable" : formatLiteralBlock(teardown.summaryPath)),
-            formatMarkdownField("basis", "teardown report; not scope closure")].join("\n"),
-          "warning",
-        );
+        ctx.ui.notify(formatYamlNotice({ stage: "shutdown teardown", killed: teardown.killed,
+          failed: teardown.failed, skipped: teardown.skipped, discovery_failed: teardown.discoveryFailed,
+          summary: teardown.summaryPath ?? "unavailable",
+          basis: "teardown report; not scope closure" }), "warning");
       } catch {
         /* stale shutdown context */
       }

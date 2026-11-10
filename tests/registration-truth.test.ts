@@ -326,7 +326,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
           setActiveTools: () => undefined,
         },
       ),
-      /missing\/task.*validation failed.*diagnostics_summary: Active Skill Recipe not found: missing\/task.*active_skills_summary: music-player, stale.*instruction: inspect target=recipes view=doctor identity=missing\/task/s,
+      /missing\/task.*validation failed.*diagnostics_summary: "Active Skill Recipe not found: missing\/task.*active_skills_summary: "music-player, stale".*instruction: "inspect target=recipes view=doctor identity=missing\/task/s,
     );
     await assert.rejects(
       readFile(join(recipeRoot, "missing_tool.json"), "utf8"),

@@ -17,6 +17,15 @@ import { join } from "node:path";
 import test from "node:test";
 import { parseDocument } from "yaml";
 
+import { renderYamlMetadata } from "../lib/tools-response.ts";
+
+/** Expected bare block-YAML notice text: no leading LF, no trailing LF. */
+function noticeDocument(value: Record<string, unknown>): string {
+  const rendered = renderYamlMetadata(value, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  assert.equal(rendered.state, "available");
+  return (rendered as { text: string }).text.replace(/\n$/u, "");
+}
+
 function attentionView(text: string): { metadata: any; body?: string } {
   const end = text.startsWith("---\n") ? text.indexOf("\n---\n", 4) : -1;
   assert.ok(!text.startsWith("---\n") || end >= 0);
@@ -1353,21 +1362,38 @@ test("AX watcher diagnostics preserve literal paths, raw signatures, bounded ide
     watchPath: path => { if (path === root && ++attempts <= 2) throw error; const value = new FakeWatcher(); if (path === runDir) runWatcher = value; return value as FSWatcher; } });
   try {
     watcher.refresh(); const [first] = watcher.getDiagnostics(); assert.ok(first);
-    assert.equal(first.message, "- watcher: attach_failed\n- scope: root\n- path:\n  ````text\n  /virtual/with```ticks\n  root\n  ````\n- diagnostic:\n  " + message.replaceAll(/\r\n|\r|\n/gu, match => match + "  ") + "\n- recovery: terminal reconciliation remains active and watcher rearm will retry");
+    assert.equal(first.message, noticeDocument({ watcher: "attach_failed", scope: "root", path: root,
+      diagnostic: message, recovery: "terminal reconciliation remains active and watcher rearm will retry" }));
     assert.equal(first.path, root); assert.equal(first.code, "attach_failed"); assert.equal(first.scope, "root"); assert.equal(first.id, 1);
     assert.equal(Number.isNaN(Date.parse(first.ts)), false); assert.equal(reads, 1);
     watcher.refresh(); assert.equal(reads, 2); assert.deepEqual(watcher.getDiagnostics(), [first], "Same raw signature does not mint another id or timestamp");
     watcher.refresh(); const rearmed = watcher.getDiagnostics().at(-1)!;
-    assert.equal(rearmed.id, 2); assert.equal(rearmed.code, "rearmed"); assert.ok(rearmed.message.endsWith("- recovery: terminal watch acceleration restored"));
+    assert.equal(rearmed.id, 2); assert.equal(rearmed.code, "rearmed"); assert.ok(rearmed.message.endsWith('recovery: "terminal watch acceleration restored"'));
     assert.equal(watcher.getDiagnostics()[0].message, first.message, "Captured diagnostic text is not regenerated on read");
     for (let index = 0; index < 40; index++) { assert.ok(runWatcher); runWatcher.emit("error", new Error("fault-" + index)); watcher.refresh(); }
     const suffix = watcher.getDiagnostics(); assert.equal(suffix.length, 32); assert.ok(suffix[0].id > 1);
     assert.deepEqual(suffix.map(item => item.id), [...suffix.map(item => item.id)].sort((a, b) => a - b));
-    for (const item of suffix) { assert.equal(item.path, runDir); assert.equal(item.scope, "run"); assert.ok(item.message.includes("- path:\n  ````text\n  " + runDir.replaceAll("\n", "\n  ") + "\n  ````")); }
+    for (const item of suffix) { assert.equal(item.path, runDir); assert.equal(item.scope, "run"); assert.ok(item.message.includes("path: " + JSON.stringify(runDir))); }
   } finally { watcher.close(); }
   const primitive = createRunStateWatcher({ exists: () => true, listDirectories: () => [], onChange: () => {}, stateRoot: root,
     watchPath: () => { throw Symbol("NOT_A_NEW_DIAGNOSTIC_SOURCE"); } });
   try { primitive.refresh(); assert.doesNotMatch(primitive.getDiagnostics()[0].message, /diagnostic:|NOT_A_NEW_DIAGNOSTIC_SOURCE/); } finally { primitive.close(); }
+  for (const diagnostic of ["long · ".repeat(12000), "\ud800"]) {
+    let selectedReads = 0;
+    const error = new Error(); Object.defineProperty(error, "message", { get() { selectedReads++; return diagnostic; } });
+    const large = createRunStateWatcher({ exists: () => true, listDirectories: () => [], onChange: () => {}, stateRoot: root,
+      watchPath: () => { throw error; } });
+    try {
+      large.refresh(); assert.equal(selectedReads, 1);
+      const notice = large.getDiagnostics()[0].message, doc = parseDocument(notice); assert.deepEqual(doc.errors, []);
+      const value = doc.toJS(); assert.equal(value.path, root);
+      if (diagnostic.isWellFormed()) {
+        assert.equal(value.diagnostic, diagnostic); assert.ok(Buffer.byteLength(notice) > 49152);
+      } else {
+        assert.equal(value.diagnostic, "[unavailable]"); assert.equal(value.diagnostic_omission.reason, "malformed_selected_text");
+      }
+    } finally { large.close(); }
+  }
 });
 
 test("Run-state watcher records degradation and bounded rearm diagnostics", async () => {
@@ -1695,12 +1721,13 @@ test("AX retirement notices preserve stop cancel skip failure and notifier-effec
     assert.equal(secondaryReads, mode === "failed" ? 1 : 0); assert.equal(noticeReads, mode === "notify_cancel" ? 1 : 0);
     assert.equal(primary.cause, cause); assert.equal(secondary.cause, cause); assert.equal(noticeFailure.cause, cause);
     for (const notice of notices) {
-      assert.ok(notice.message.startsWith("- run: supervisor\n- retirement: "));
-      assert.ok(notice.message.endsWith("- closure: unconfirmed")); assert.doesNotMatch(notice.message, /^- next:|run: run:|graceful stop failed/mu);
+      assert.ok(notice.message.startsWith('run: "supervisor"\nretirement: "'));
+      assert.ok(notice.message.endsWith('closure: "unconfirmed"')); assert.doesNotMatch(notice.message, /^next:|run: run:|graceful stop failed/mu);
     }
-    if (mode === "stop") assert.equal(notices[0].message, "- run: supervisor\n- retirement: stop\n- result: request returned\n- reason: child runs reached terminal state\n- closure: unconfirmed");
-    if (mode === "cancel" || mode === "notify_stop") { assert.equal(notices.at(-1)!.level, "warning"); assert.ok(notices.at(-1)!.message.includes("- result: cancellation reported\n- reason: stop path failed")); }
-    if (mode === "skip") assert.ok(notices[0].message.includes("- diagnostic:\n  ## Stop\r\n  - next: authored · kept 1"));
+    if (mode === "stop") assert.equal(notices[0].message, noticeDocument({ run: "supervisor", retirement: "stop",
+      result: "request returned", reason: "child runs reached terminal state", closure: "unconfirmed" }));
+    if (mode === "cancel" || mode === "notify_stop") { assert.equal(notices.at(-1)!.level, "warning"); assert.ok(notices.at(-1)!.message.includes('result: "cancellation reported"\nreason: "stop path failed"')); }
+    if (mode === "skip") assert.ok(notices[0].message.includes("diagnostic: " + JSON.stringify("## Stop\r\n- next: authored · kept 1")));
     if (mode === "failed" || mode === "notify_cancel") assert.equal(notices.at(-1)!.level, "error");
     const count = notices.length; assert.deepEqual(await executeRunRetirements(summary, options), [{ action: "skip", run, stateDir }]);
     assert.equal(notices.length, count); assert.equal(calls.length, mode === "stop" ? 1 : 2);
@@ -1749,7 +1776,7 @@ test("Run observability executes retirement through graceful stop once", async (
   assert.deepEqual(first, [{ action: "stop", run: "supervisor", stateDir: "/tmp/supervisor" }]);
   assert.deepEqual(second, [{ action: "skip", run: "supervisor", stateDir: "/tmp/supervisor" }]);
   assert.deepEqual(calls, ["supervisor"]);
-  assert.match(notifications[0], /^info:- run: supervisor\n- retirement: stop\n- result: request returned/);
+  assert.match(notifications[0], /^info:run: "supervisor"\nretirement: "stop"\nresult: "request returned"/);
 });
 
 test("Run observability falls back to cancellation when graceful retirement stop fails", async () => {

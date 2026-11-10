@@ -1,6 +1,7 @@
 /** Mirrors lib/tools-local.ts; controlled ports prove error presentation, not native actuation. */
 import assert from "node:assert/strict";
 import test from "node:test";
+import { parseDocument } from "yaml";
 import type { RegisteredTool } from "../lib/config.ts";
 import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 
@@ -50,6 +51,65 @@ test("Runtime validation repair hints stop after the first execution entry, incl
     });
     assert.equal(effects.length, late ? 1 : 0);
   }
+});
+
+test("Runtime usage headers omit unfit argument groups and preserve the complete JSON example", async () => {
+  const args = Array.from({ length: 1600 }, (_, i) => "input_" + i);
+  const definition = createRuntimeToolDefinition({ ...config, args, defaults: {}, template: "check " + args.map(arg => "{" + arg + "}").join(" ") },
+    async () => { throw new Error("Must not enter execution"); });
+  await assert.rejects(definition.execute("usage-large", {}, undefined, undefined, { cwd: "/work" }), (error: Error) => {
+    const end = error.message.indexOf("\n---\n", 5);
+    assert.ok(end > 5);
+    const header = error.message.slice(5, end), doc = parseDocument(header);
+    assert.deepEqual(doc.errors, []);
+    assert.ok(Buffer.byteLength(header) < 16384);
+    assert.deepEqual(doc.toJS(), { tool: "boundary", required: "[omitted]",
+      required_omission: { reason: "response_too_large", shown: 0, omitted: args.length, total: args.length }, optional: [] });
+    const example = Object.fromEntries(args.map(arg => [arg, "<" + arg + ">"]));
+    assert.ok(error.message.endsWith("boundary(" + JSON.stringify(example, null, 2) + ")"));
+    assert.doesNotMatch(error.message, /undefined---/);
+    return true;
+  });
+});
+
+test("Runtime argument repair keeps owned usage facts in a YAML header and the JSON example verbatim", async () => {
+  const checker = () => createRuntimeToolDefinition({
+    argTypes: { mode: { kind: "enum", values: ["check", "fix"] } },
+    args: ["file", "mode"],
+    defaults: { mode: "check" },
+    description: "Run checker",
+    name: "check_tool",
+    template: "check {file} {mode}",
+  }, async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }));
+  await assert.rejects(checker().execute("usage", { file: "README.md", mode: "delete" }, undefined, undefined, { cwd: "/work" }), (error: Error) => {
+    assert.equal(error.message, [
+      "",
+      "---",
+      'tool: "check_tool"',
+      "required:",
+      '  - "file"',
+      "optional:",
+      '  - "mode"',
+      "---",
+      'Invalid arguments for tool "check_tool": Argument mode must be one of: check, fix.',
+      "",
+      "Expected call shape for check_tool:",
+      "check_tool({",
+      '  "file": "<file>",',
+      '  "mode": "check"',
+      "})",
+    ].join("\n"));
+    return true;
+  });
+  // The same owned facts carry the async run_id option; empty required stays a real empty sequence.
+  const asyncTool = createRuntimeToolDefinition({ ...config, recipe: { async: true, template: "check {mode}" } }, async () => {
+    throw new Error("The synchronous executor must not be used");
+  });
+  await assert.rejects(asyncTool.execute("usage-async", { mode: "delete" }, undefined, undefined, { cwd: "/work" }), (error: Error) => {
+    assert.match(error.message, /^\n---\ntool: "boundary"\nrequired:\n  \[\]\noptional:\n  - "mode"\n  - "run_id"\n---\nInvalid arguments for tool "boundary": /u);
+    assert.match(error.message, /\nExpected call shape for boundary:\nboundary\(\{\n  "mode": "check",\n  "run_id": "boundary-1"\n\}\)$/);
+    return true;
+  });
 });
 
 test("Runtime async handoff faults preserve their cause while caller normalization still has useful guidance", async () => {

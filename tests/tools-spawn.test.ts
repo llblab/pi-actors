@@ -4,11 +4,28 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
+import * as Limits from "../lib/limits.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
+import { renderYamlMetadata } from "../lib/tools-response.ts";
 
-const format = "- accepted_format: run:<id>";
-const idRule = "- id_rule: nonempty ASCII letters, digits, underscore, dot or hyphen";
-const stateDirError = "\n- field: state_dir\n- result: unsupported field\n- reason: Run state is runtime-owned; run:<id> remains addressable and retention-safe.";
+const idRuleText = "nonempty ASCII letters, digits, underscore, dot or hyphen";
+/** Bare block-YAML spawn guard text including the public adapter's one leading LF. */
+function spawnDocumentText(value: Record<string, unknown>): string | undefined {
+  const rendered = renderYamlMetadata(value, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+  return rendered.state === "available" ? "\n" + rendered.text : undefined;
+}
+function spawnDocument(value: Record<string, unknown>): string {
+  const text = spawnDocumentText(value);
+  assert.ok(text, "Expected a renderable spawn guard document");
+  return text;
+}
+const stateDirError = spawnDocument({ field: "state_dir", result: "unsupported field",
+  reason: "Run state is runtime-owned; run:<id> remains addressable and retention-safe." });
+const targetDocument = (mode: "namespace" | "id", selected?: Record<string, unknown>) => ({ field: "as", ...(selected ?? {}),
+  result: mode === "namespace" ? "unsupported Run target" : "invalid Run target", accepted_format: "run:<id>",
+  ...(mode === "id" ? { id_rule: idRuleText } : {}) });
+const valueOmission = (reason: string) => ({ value: reason === "response_too_large" ? "[omitted]" : "[unavailable]",
+  value_omission: { reason, shown: 0, omitted: 1, total: 1 } });
 
 // This owner tests only the local guards; existing tools/SDK launch journeys keep their native fixtures.
 test("AX owned spawn guards retain exact selected-value and pre-launch observation boundaries", async () => {
@@ -16,7 +33,7 @@ test("AX owned spawn guards retain exact selected-value and pre-launch observati
   const coreManifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
   const publicEntry = JSON.parse(readFileSync(coreManifest, "utf8")).exports["."].import;
   const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
-  for (const verbose of [false, true]) for (const mode of ["state_dir", "namespace", "id"]) {
+  for (const verbose of [false, true]) for (const mode of ["state_dir", "namespace", "id"] as const) {
     const events: string[] = [];
     const selected = mode === "namespace" ? "runtime" : "run:bad/id";
     const params = {
@@ -29,7 +46,7 @@ test("AX owned spawn guards retain exact selected-value and pre-launch observati
     };
     const ctx = { get cwd(): never { throw Error("No launch context read"); }, get sessionManager(): never { throw Error("No session read"); } };
     const expected = mode === "state_dir" ? stateDirError
-      : `\n- field: as\n- value: ${selected}\n- result: ${mode === "namespace" ? "unsupported Run target" : "invalid Run target"}\n${format}${mode === "id" ? "\n" + idRule : ""}`;
+      : spawnDocument(targetDocument(mode, { value: selected }));
     const tool = createSpawnToolDefinition();
     await assert.rejects(tool.execute("spawn-guard", params, undefined, undefined, ctx), (error: unknown) => {
       assert.ok(error instanceof Error); assert.equal(Object.getPrototypeOf(error), Error.prototype);
@@ -87,7 +104,7 @@ test("AX owned spawn guards retain exact selected-value and pre-launch observati
   };
   await assert.rejects(createSpawnToolDefinition().execute("selected", { get as() { events.push("as"); return ++reads === 1 ? "string gate" : target; } }, undefined, undefined, ctx), (error: unknown) => {
     assert.ok(error instanceof Error);
-    assert.equal(error.message, "\n- field: as\n- value:\n  ## Selected\r\n  - next: authored\r\n  \r\n    · literal\n- result: unsupported Run target\n" + format);
+    assert.equal(error.message, spawnDocument(targetDocument("namespace", { value: "## Selected\r\n- next: authored\r\n\r\n  · literal" })));
     return true;
   });
   assert.deepEqual(events, ["as", "as", "startsWith:run:", "coerce:string"], "Keep original selected target template coercion exactly once");
@@ -105,23 +122,30 @@ test("AX owned spawn guard values fit whole UTF8 boundaries or have explicit fie
     catch (error) { assert.ok(error instanceof Error); assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false); assert.ok(error.message.isWellFormed()); assert.ok(Buffer.byteLength(error.message) <= 16384); return error.message; }
     throw Error("Expected invalid caller selector, never launch");
   };
-  const omission = (reason: string) => `- value: [${reason === "response_too_large" ? "omitted" : "unavailable"}]\n- value_omission:\n  - reason: ${reason}\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
-  for (const kind of ["namespace", "id"]) {
-    const prefix = "\n- field: as\n";
-    const suffix = `\n- result: ${kind === "namespace" ? "unsupported Run target" : "invalid Run target"}\n${format}${kind === "id" ? "\n" + idRule : ""}`;
+  const exactFit = (document: (payload: string) => Record<string, unknown>) => {
+    let low = 0, high = 16384;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      const text = spawnDocumentText(document("r".repeat(middle)));
+      if (text !== undefined && Buffer.byteLength(text) <= 16384) low = middle;
+      else high = middle - 1;
+    }
+    return low;
+  };
+  for (const kind of ["namespace", "id"] as const) {
     const marker = kind === "id" ? "run:/" : "x";
-    const count = 16384 - Buffer.byteLength(prefix + "- value: " + marker + suffix);
+    const count = exactFit(payload => targetDocument(kind, { value: marker + payload }));
     const exact = marker + "r".repeat(count);
-    assert.equal(await capture(exact), prefix + "- value: " + exact + suffix);
+    assert.equal(await capture(exact), spawnDocument(targetDocument(kind, { value: exact })));
     assert.equal(Buffer.byteLength(await capture(exact)), 16384);
-    assert.equal(await capture(exact + "r"), prefix + omission("response_too_large") + suffix);
+    assert.equal(await capture(exact + "r"), spawnDocument(targetDocument(kind, valueOmission("response_too_large"))));
     const malformed = marker + "\ud800";
-    assert.equal(await capture(malformed), prefix + omission("malformed_selected_text") + suffix);
+    assert.equal(await capture(malformed), spawnDocument(targetDocument(kind, valueOmission("malformed_selected_text"))));
     assert.equal(malformed.charCodeAt(malformed.length - 1), 0xd800, "Do not repair the selected source");
     const unit = "界👩‍💻é";
     const unicode = marker + unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "r".repeat(count % Buffer.byteLength(unit));
-    assert.equal(await capture(unicode), prefix + "- value: " + unicode + suffix);
-    assert.equal(await capture(unicode + "界"), prefix + omission("response_too_large") + suffix);
+    assert.equal(await capture(unicode), spawnDocument(targetDocument(kind, { value: unicode })));
+    assert.equal(await capture(unicode + "界"), spawnDocument(targetDocument(kind, valueOmission("response_too_large"))));
   }
-  assert.equal(await capture("run:"), "\n- field: as\n- value: run:\n- result: invalid Run target\n" + format + "\n" + idRule);
+  assert.equal(await capture("run:"), spawnDocument(targetDocument("id", { value: "run:" })));
 });

@@ -20,6 +20,7 @@ Living index of all documentation in the `/docs` directory.
 
 - [windows-process-observation.md](./windows-process-observation.md) — User-approved recovery preparation: passing inert Windows x64 MI child experiment, reviewed unadmitted raw codec and artifact preparation contract; broader profile evidence, unsigned asset distribution and default activation remain separate gates
 - [run-supervision.md](./run-supervision.md) — Accepted future supervision contract and implemented AX/evidence slices, with same-logical-session file research and candidate-bound acceptance; the next selective AX/runtime release does not enable deadlines, independent owner-loss supervision or public completion streams
+- [inactive-foundations-inventory.md](./inactive-foundations-inventory.md) — Reachability and package evidence for packaged-but-unactivated supervision, stream-numbering and native foundations, distinguishing reviewed runtime dependencies from optional ones; no removal decision, nothing activated
 - [composition-transport.md](./composition-transport.md) — Recorded design intake: portable JSONL Recipe bundles and optional host CodeMode orchestration, with launch/outcome separation; bundle grammar and asset scope remain unadopted and outside the current UX/AX release
 
 ## Project Surfaces

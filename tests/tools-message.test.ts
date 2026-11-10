@@ -14,9 +14,50 @@ import { writeJsonAtomic } from "../lib/file-state.ts";
 import { getRunStateRoot } from "../lib/paths.ts";
 import { claimRunStateDirectory } from "../lib/runs-ownership.ts";
 import test from "node:test";
+import { parseDocument } from "yaml";
 
+import * as Limits from "../lib/limits.ts";
 import type { ControlRequest } from "../lib/control.ts";
 import { compactControlResult, createControlToolDefinition } from "../lib/tools-message.ts";
+import { renderYamlMetadata } from "../lib/tools-response.ts";
+
+/** Bare block-YAML Control receipt text including the public adapter's one leading LF. */
+function controlDocumentText(value: Record<string, unknown>): string | undefined {
+  const rendered = renderYamlMetadata(value, Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1);
+  return rendered.state === "available" ? "\n" + rendered.text : undefined;
+}
+function controlDocument(value: Record<string, unknown>): string {
+  const text = controlDocumentText(value);
+  assert.ok(text, "Expected a renderable Control document");
+  return text;
+}
+/** Largest single-byte payload whose complete document still fits the shared bound. */
+function exactFit(document: (payload: string) => Record<string, unknown>): number {
+  let low = 0, high = 16384;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const text = controlDocumentText(document("r".repeat(middle)));
+    if (text !== undefined && Buffer.byteLength(text) <= 16384) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+const omitted = (key: string, reason = "response_too_large", total = 1) => ({
+  [key]: reason === "response_too_large" ? "[omitted]" : "[unavailable]",
+  [key + "_omission"]: { reason, shown: 0, omitted: total, total } });
+
+test("Compact Control receipts omit an unfit typed next as a whole action", () => {
+  for (const size of [17000, 16300]) {
+    const text = compactControlResult({ target: "run:demo", action: "pause" },
+      { delivery: "queued", next_actions: ["inspect target=run:" + "x".repeat(size) + " view=control"] });
+    const doc = parseDocument(text);
+    assert.deepEqual(doc.errors, []); assert.ok(Buffer.byteLength(text) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+    const value = doc.toJS();
+    assert.equal(value.run, "demo"); assert.equal(value.delivery, "queued"); assert.equal(value.handling, "unconfirmed");
+    assert.equal(value.next, "[omitted]");
+    assert.deepEqual(value.next_omission, { reason: "response_too_large", shown: 0, omitted: 1, total: 1 });
+  }
+});
 
 test("AX owned Control guards preserve exact pre-dispatch observations and expose only caller facts and selected options", async () => {
   const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
@@ -40,10 +81,13 @@ test("AX owned Control guards preserve exact pre-dispatch observations and expos
     const runtime = mode.startsWith("runtime");
     const action = mode === "runtime_action" ? "review.nope" : runtime ? "review.retry" : "resume";
     const request = { target: runtime ? "runtime" : "run:caller-owned", action, input: { token: "PRIVATE_INPUT" }, verbose };
-    const expected = mode === "runtime_action" ? "\n- target: runtime\n- action: review.nope\n- result: unsupported runtime Control action\n- supported_actions:\n  - review.retry\n  - review.reset"
-      : mode === "runtime_port" ? "\n- target: runtime\n- action: review.retry\n- result: runtime Control is unavailable"
-      : mode === "generation" ? "\n- run: caller-owned\n- action: resume\n- result: Run generation unavailable"
-      : "\n- run: caller-owned\n- action: resume\n- result: undeclared Run Control action\n- available_actions:\n  - pause\n  - ## Literal\r\n    next: do not execute\r\n    \r\n      - body · stays";
+    const expected = mode === "runtime_action"
+      ? controlDocument({ target: "runtime", action: "review.nope", result: "unsupported runtime Control action",
+          supported_actions: ["review.retry", "review.reset"] })
+      : mode === "runtime_port" ? controlDocument({ target: "runtime", action: "review.retry", result: "runtime Control is unavailable" })
+      : mode === "generation" ? controlDocument({ run: "caller-owned", action: "resume", result: "Run generation unavailable" })
+      : controlDocument({ run: "caller-owned", action: "resume", result: "undeclared Run Control action",
+          available_actions: ["pause", "## Literal\r\nnext: do not execute\r\n\r\n  - body · stays"] });
     await assert.rejects(createControlToolDefinition(deps).execute("owned-guard", request, undefined, undefined, ctx), (error: unknown) => {
       assert.ok(error instanceof Error); assert.equal(Object.getPrototypeOf(error), Error.prototype);
       assert.equal(error.message, expected); assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false);
@@ -104,39 +148,46 @@ test("AX owned Control guard bounds admit whole targets and option sequences or 
     catch (error) { assert.ok(error instanceof Error); assert.deepEqual(Object.keys(error), []); assert.equal(Object.hasOwn(error, "cause"), false); assert.ok(error.message.isWellFormed()); assert.ok(Buffer.byteLength(error.message) <= 16384); return error.message; }
     throw Error("Expected guard refusal, not dispatch");
   };
-  const suffix = "\n- action: pause\n- result: Run generation unavailable";
-  const exact = "r".repeat(16384 - Buffer.byteLength("\n- run: " + suffix));
+  const guardDocument = (run: string) => ({ run, action: "pause", result: "Run generation unavailable" });
+  const exact = "r".repeat(exactFit(guardDocument));
   for (const verbose of [false, true]) {
-    assert.equal(await capture(exact, undefined, undefined, verbose), "\n- run: " + exact + suffix);
+    assert.equal(await capture(exact, undefined, undefined, verbose), controlDocument(guardDocument(exact)));
     assert.equal(Buffer.byteLength(await capture(exact, undefined, undefined, verbose)), 16384);
-    assert.equal(await capture(exact + "r", undefined, undefined, verbose), "\n- run: [omitted]\n- run_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" + suffix);
+    assert.equal(await capture(exact + "r", undefined, undefined, verbose),
+      controlDocument({ ...omitted("run"), action: "pause", result: "Run generation unavailable" }));
   }
-  const header = "\n- run: demo\n- action: pause\n- result: undeclared Run Control action";
+  const declaredDocument = (values: readonly string[]) => ({ run: "demo", action: "pause", result: "undeclared Run Control action",
+    ...(values.length ? { available_actions: [...values] } : { available_actions: "none" }) });
   for (const values of [[], ["stop"], ["none"], [""], ["stop", "stop"], ["界👩‍💻é", "## body\nnext: literal\n\n  - tail · literal"]]) {
     const before = JSON.stringify(values);
-    const expected = values.length ? "\n- available_actions:\n" + values.map(value => "  - " + value.replaceAll(/\r\n|\r|\n/gu, newline => newline + "    ")).join("\n") : "\n- available_actions: none";
-    assert.equal(await capture("demo", values, "G"), header + expected); assert.equal(JSON.stringify(values), before);
+    assert.equal(await capture("demo", values, "G"), controlDocument(declaredDocument(values)));
+    assert.equal(JSON.stringify(values), before);
   }
   for (const values of [["stop".repeat(5000)], ["stop".repeat(5000), "other"]]) {
-    assert.equal(await capture("demo", values, "G"), header + `\n- available_actions: [omitted]\n- available_actions_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: ${values.length}\n  - total: ${values.length}`);
+    assert.equal(await capture("demo", values, "G"), controlDocument({ run: "demo", action: "pause",
+      result: "undeclared Run Control action", ...omitted("available_actions", "response_too_large", values.length) }));
   }
-  const choices = "\n- available_actions:\n  - stop";
-  const shortTail = "\n- action: pause\n- result: undeclared Run Control action" + choices;
-  const tight = "r".repeat(16384 - Buffer.byteLength("\n- run: " + shortTail));
-  assert.equal(await capture(tight, ["stop"], "G"), "\n- run: " + tight + shortTail, "A larger omission scaffold cannot displace a fitting complete singleton");
-  const count = 16384 - Buffer.byteLength(header + "\n- available_actions:\n  - ");
+  // A fitting complete singleton must not be displaced by a larger omission scaffold.
+  const tight = "r".repeat(exactFit(payload => ({ run: payload, action: "pause", result: "undeclared Run Control action", available_actions: ["stop"] })));
+  assert.equal(await capture(tight, ["stop"], "G"), controlDocument({ run: tight, action: "pause",
+    result: "undeclared Run Control action", available_actions: ["stop"] }));
+  const count = exactFit(payload => ({ run: "demo", action: "pause", result: "undeclared Run Control action", available_actions: [payload] }));
   for (const delta of [0, 1]) {
     const output = await capture("demo", ["s".repeat(count + delta)], "G");
-    if (delta === 0) { assert.equal(output, header + "\n- available_actions:\n  - " + "s".repeat(count)); assert.equal(Buffer.byteLength(output), 16384); }
-    else { assert.match(output, /available_actions: \[omitted\]/u); assert.doesNotMatch(output, /s{20}/u); }
+    if (delta === 0) {
+      assert.equal(output, controlDocument({ run: "demo", action: "pause", result: "undeclared Run Control action", available_actions: ["s".repeat(count)] }));
+      assert.equal(Buffer.byteLength(output), 16384);
+    } else { assert.match(output, /available_actions: "\[omitted\]"/u); assert.doesNotMatch(output, /s{20}/u); }
   }
   const unit = "界👩‍💻é";
   const unicode = unit.repeat(Math.floor(count / Buffer.byteLength(unit))) + "s".repeat(count % Buffer.byteLength(unit));
   assert.equal(Buffer.byteLength(unicode), count);
-  assert.equal(await capture("demo", [unicode], "G"), header + "\n- available_actions:\n  - " + unicode);
-  assert.match(await capture("demo", [unicode + "界"], "G"), /available_actions: \[omitted\]/u);
+  assert.equal(await capture("demo", [unicode], "G"), controlDocument({ run: "demo", action: "pause",
+    result: "undeclared Run Control action", available_actions: [unicode] }));
+  assert.match(await capture("demo", [unicode + "界"], "G"), /available_actions: "\[omitted\]"/u);
   const malformed = ["good", "bad\ud800"];
-  assert.equal(await capture("demo", malformed, "G"), header + "\n- available_actions: [unavailable]\n- available_actions_omission:\n  - reason: malformed_selected_text\n  - shown: 0\n  - omitted: 2\n  - total: 2");
+  assert.equal(await capture("demo", malformed, "G"), controlDocument({ run: "demo", action: "pause",
+    result: "undeclared Run Control action", ...omitted("available_actions", "malformed_selected_text", 2) }));
   assert.equal(malformed[1], "bad\ud800", "Malformed selected text is withheld, not repaired");
 });
 
@@ -151,8 +202,7 @@ test("Public message compact refusals explain a completed Run without object coe
     const tool = createControlToolDefinition();
     const ctx = { sessionManager: { getSessionId: () => "session-A" } };
     const response = await tool.execute("completed-kill", { target: `run:${run}`, action: "kill" }, undefined, undefined, ctx);
-    assert.match(response.content[0].text, /- action: kill\n- result: not applied\n- reason: not running/);
-    assert.match(response.content[0].text, /- state: done/);
+    assert.equal(response.content[0].text, controlDocument({ run, action: "kill", result: "not applied", reason: "not running", state: "done" }));
     assert.doesNotMatch(response.content[0].text, /\[object Object\]|next=|inspect/);
     assert.equal(response.details.result.stopped, false);
     assert.equal(response.details.result.killed, false);
@@ -163,22 +213,28 @@ test("Public message compact refusals explain a completed Run without object coe
 });
 
 test("Compact Control progress distinguishes attempts, delivery, completion and refusal without raw dumps", () => {
-  const cases: Array<{ action: string; result: Record<string, unknown>; text: string }> = [
-    { action: "kill", result: { stopped: true, killed: true, scope_closed: true, pid: 321, signal: "SIGKILL" }, text: "- result: kill attempted\n- termination: unconfirmed\n- next:\n  - tool: inspect\n  - target: run:demo\n  - view: trace" },
-    { action: "kill", result: { stopped: false, killed: false, reason: "owner mismatch", status: { status: "running" } }, text: "- result: not applied\n- reason: owner mismatch\n- next:\n  - tool: inspect\n  - target: run:demo\n  - view: trace" },
-    { action: "archive", result: { archived: true, status: "done" }, text: "- result: archived" },
-    { action: "archive", result: { archived: false, reason: "ownership changed" }, text: "- result: not applied\n- reason: ownership changed\n- next:\n  - tool: inspect\n  - target: runtime\n  - view: runs" },
-    { action: "prune", result: { pruned: true }, text: "- result: pruned" },
-    { action: "prune", result: { pruned: false, reason: "run generation changed" }, text: "- result: not applied\n- reason: run generation changed\n- next:\n  - tool: inspect\n  - target: runtime\n  - view: runs" },
-    { action: "pause", result: { delivery: "queued", control_id: "control-A" }, text: "- delivery: queued\n- handling: unconfirmed\n- control_id: control-A\n- next:\n  - tool: inspect\n  - target: run:demo\n  - view: control" },
-    { action: "pause", result: { delivery: "delivered" }, text: "- delivery: delivered\n- handling: unconfirmed\n- next:\n  - tool: inspect\n  - target: run:demo\n  - view: control" },
-    { action: "pause", result: { delivery: "failed" }, text: "- delivery: failed" },
-    { action: "pause", result: { status: "handled" }, text: "- result: handled" },
+  const cases: Array<{ action: string; result: Record<string, unknown>; document: Record<string, unknown> }> = [
+    { action: "kill", result: { stopped: true, killed: true, scope_closed: true, pid: 321, signal: "SIGKILL" },
+      document: { result: "kill attempted", termination: "unconfirmed", next: { tool: "inspect", target: "run:demo", view: "trace" } } },
+    { action: "kill", result: { stopped: false, killed: false, reason: "owner mismatch", status: { status: "running" } },
+      document: { result: "not applied", reason: "owner mismatch", next: { tool: "inspect", target: "run:demo", view: "trace" } } },
+    { action: "archive", result: { archived: true, status: "done" }, document: { result: "archived" } },
+    { action: "archive", result: { archived: false, reason: "ownership changed" },
+      document: { result: "not applied", reason: "ownership changed", next: { tool: "inspect", target: "runtime", view: "runs" } } },
+    { action: "prune", result: { pruned: true }, document: { result: "pruned" } },
+    { action: "prune", result: { pruned: false, reason: "run generation changed" },
+      document: { result: "not applied", reason: "run generation changed", next: { tool: "inspect", target: "runtime", view: "runs" } } },
+    { action: "pause", result: { delivery: "queued", control_id: "control-A" },
+      document: { delivery: "queued", handling: "unconfirmed", control_id: "control-A", next: { tool: "inspect", target: "run:demo", view: "control" } } },
+    { action: "pause", result: { delivery: "delivered" },
+      document: { delivery: "delivered", handling: "unconfirmed", next: { tool: "inspect", target: "run:demo", view: "control" } } },
+    { action: "pause", result: { delivery: "failed" }, document: { delivery: "failed" } },
+    { action: "pause", result: { status: "handled" }, document: { result: "handled" } },
   ];
   for (const value of cases) {
     const request: ControlRequest = { target: "run:demo", action: value.action };
     const result = Object.freeze({ ...value.result, private_payload: "DO_NOT_DUMP", stdout: "DO_NOT_DUMP" });
-    assert.equal(compactControlResult(request, result), `\n- run: demo\n- action: ${value.action}\n${value.text}`);
+    assert.equal(compactControlResult(request, result), controlDocument({ run: "demo", action: value.action, ...value.document }));
   }
 });
 
@@ -186,26 +242,28 @@ test("Compact Control gives one relevant follow-up and never coerces nested stat
   const status = { status: "done", toString() { throw Error("Object coercion is not a summary"); } };
   const request: ControlRequest = { target: "run:demo", action: "kill" };
   assert.equal(compactControlResult(request, { stopped: false, reason: "not running", status }),
-    "\n- run: demo\n- action: kill\n- result: not applied\n- reason: not running\n- state: done");
+    controlDocument({ run: "demo", action: "kill", result: "not applied", reason: "not running", state: "done" }));
   const result = Object.freeze({ stopped: true, next_actions: Object.freeze(["inspect target=run:demo view=trace", "do not repeat the action"]) });
   assert.equal(compactControlResult(request, result),
-    "\n- run: demo\n- action: kill\n- result: kill attempted\n- termination: unconfirmed\n- next:\n  - tool: inspect\n  - target: run:demo\n  - view: trace");
+    controlDocument({ run: "demo", action: "kill", result: "kill attempted", termination: "unconfirmed",
+      next: { tool: "inspect", target: "run:demo", view: "trace" } }));
 });
 
-test("AX Control records stay flat, preserve Markdown values and distinguish next actions from facts", () => {
+test("AX Control records stay bare YAML, keep authored values opaque and distinguish next actions from facts", () => {
   const request: ControlRequest = { target: "run:demo", action: "pause" };
   const delivered = Object.freeze({ delivery: "delivered", control_id: "control-A", private_payload: "PRIVATE_PAYLOAD",
     next_actions: Object.freeze(["inspect target=run:demo view=control", "Do not repeat"]) });
   const before = JSON.stringify(delivered);
   const rendered = compactControlResult(request, delivered);
-  assert.equal(rendered, "\n- run: demo\n- action: pause\n- delivery: delivered\n- handling: unconfirmed\n- control_id: control-A\n- next:\n  - tool: inspect\n  - target: run:demo\n  - view: control");
+  assert.equal(rendered, controlDocument({ run: "demo", action: "pause", delivery: "delivered", handling: "unconfirmed",
+    control_id: "control-A", next: { tool: "inspect", target: "run:demo", view: "control" } }));
   assert.equal(JSON.stringify(delivered), before); assert.doesNotMatch(rendered, /run: run:| · |PRIVATE_PAYLOAD|Do not repeat/);
-  assert.equal(rendered.split("- next:").length, 2, "At most one relevant action, not all saved hints");
+  assert.equal(rendered.split("next:").length, 2, "At most one relevant action, not all saved hints");
   const reason = "## Explanation\r\n- next: authored Markdown\r\n\r\nKeep this · literal value";
   const instruction = "Read the saved note\n- tool: this is only text";
   const runtime = Object.freeze({ status: "handled", reason, next_actions: Object.freeze([instruction]) });
   assert.equal(compactControlResult({ target: "runtime", action: "review.retry" }, runtime),
-    "\n- target: runtime\n- action: review.retry\n- result: handled\n- reason:\n  ## Explanation\r\n  - next: authored Markdown\r\n  \r\n  Keep this · literal value\n- next:\n  - instruction:\n    Read the saved note\n    - tool: this is only text");
+    controlDocument({ target: "runtime", action: "review.retry", result: "handled", reason, next: { instruction } }));
   assert.equal(runtime.reason, reason); assert.equal(runtime.next_actions[0], instruction);
 });
 
@@ -222,7 +280,8 @@ test("Public retirement receipts describe completed operations rather than accep
     try {
       const response = await tool.execute("retire", { target: `run:${run}`, action }, undefined, undefined, ctx);
       if (typeof response.details.result.archive_dir === "string") archiveDir = response.details.result.archive_dir;
-      assert.equal(response.content[0].text, `\n- run: ${run}\n- action: ${action}\n- result: ${action === "archive" ? "archived" : "pruned"}`);
+      assert.equal(response.content[0].text,
+        controlDocument({ run, action, result: action === "archive" ? "archived" : "pruned" }));
       assert.equal(response.details.result[action === "archive" ? "archived" : "pruned"], true);
       assert.doesNotMatch(response.content[0].text, /accepted|inspect|retention_id/);
     } finally {
@@ -236,7 +295,7 @@ test("Raw Control detail remains explicit rather than default context", async ()
   const tool = createControlToolDefinition({ handleRuntimeControl: () => ({ status: "handled", private_payload: "DETAIL_ONLY" }) });
   const params = { target: "runtime", action: "review.retry" };
   const compact = await tool.execute("compact", params, undefined, undefined, {});
-  assert.equal(compact.content[0].text, "\n- target: runtime\n- action: review.retry\n- result: handled");
+  assert.equal(compact.content[0].text, controlDocument({ target: "runtime", action: "review.retry", result: "handled" }));
   assert.doesNotMatch(compact.content[0].text, /DETAIL_ONLY/);
   const verbose = await tool.execute("verbose", { ...params, verbose: true }, undefined, undefined, {});
   assert.equal(JSON.parse(verbose.content[0].text).result.private_payload, "DETAIL_ONLY");
@@ -258,7 +317,9 @@ test("Public identity-change refusals preserve action facts without disclosing r
       const response = await tool.execute("changed", { target: `run:${run}`, action }, undefined, undefined, ctx);
       const receipt = response.details.result;
       assert.match(response.content[0].text, /not applied/);
-      assert.match(response.content[0].text, /- next:\n  - tool: inspect\n  - target: runtime\n  - view: runs$/);
+      assert.equal(response.content[0].text, controlDocument({ run, action, result: "not applied",
+        reason: change === "owner" ? "ownership changed" : "run generation changed",
+        next: { tool: "inspect", target: "runtime", view: "runs" } }));
       assert.equal(Object.hasOwn(receipt, "status"), false, `${action}/${change}: no replacement status`);
       assert.equal(receipt[action === "kill" ? "killed" : action === "archive" ? "archived" : "pruned"], false);
       assert.equal(receipt.reason, change === "owner" ? "ownership changed" : "run generation changed");
@@ -290,13 +351,20 @@ test("Actor-local Control failures stay bounded errors through the actual host t
   });
   syncBuiltinESMExports();
   try {
-    const summary = "- action: pause\n- result: request failed\n- delivery: unconfirmed\n- handling: unconfirmed\n- warning:\n  Effects may already exist.\n  Do not repeat automatically.\n- next:\n  - tool: inspect\n  - target: runtime\n  - view: runs";
-    const exact = "run:" + "r".repeat(16 * 1024 - Buffer.byteLength(summary) - 9);
+    const failureDocument = (run: string) => ({ run, action: "pause", result: "request failed",
+      delivery: "unconfirmed", handling: "unconfirmed",
+      warning: "Effects may already exist.\nDo not repeat automatically.",
+      next: { tool: "inspect", target: "runtime", view: "runs" } });
+    const exact = "run:" + "r".repeat(exactFit(payload => failureDocument(payload)));
     for (failure of [original, undefined, "PRIVATE_PRIMITIVE", opaque]) for (const verbose of [false, true]) for (const target of ["run:bounded-failure", exact, exact + "r"]) {
       const tool = createControlToolDefinition({ getRunStatus: () => ({ control: ["pause"], ownerId: "session-A", run_instance_id: "generation-A" }) });
       const ctx = { sessionManager: { getSessionId: () => "session-A" } };
       const args = { target, action: "pause", input: { token: "CALLER_INPUT" }, verbose };
-      const expected = "\n" + (target === exact + "r" ? "- run: [omitted]\n- run_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1" : "- run: " + target.slice(4)) + "\n" + summary;
+      const expected = target === exact + "r"
+        ? controlDocument({ ...omitted("run"), action: "pause", result: "request failed", delivery: "unconfirmed",
+            handling: "unconfirmed", warning: "Effects may already exist.\nDo not repeat automatically.",
+            next: { tool: "inspect", target: "runtime", view: "runs" } })
+        : controlDocument(failureDocument(target.slice(4)));
       armed = true;
       await assert.rejects(tool.execute("direct-failure", args, undefined, undefined, ctx), (error: unknown) => {
         assert.ok(error instanceof Error);
@@ -355,9 +423,10 @@ test("Actor-local failure projection withholds correlation across awaited contex
       // Attach the assertion before waiting, so a broken admission never becomes an unhandled rejection.
       const assertion = assert.rejects(pending, (error: unknown) => {
         assert.ok(error instanceof Error);
-        assert.match(error.message, /- result: request failed\n- delivery: unconfirmed\n- handling: unconfirmed/);
-        assert.match(error.message, /- warning:\n  Effects may already exist\.\n  Do not repeat automatically\./);
-        assert.match(error.message, /- next:\n  - tool: inspect\n  - target: runtime\n  - view: runs$/);
+        assert.equal(error.message, controlDocument({ run, action: "pause", result: "request failed",
+          delivery: "unconfirmed", handling: "unconfirmed",
+          warning: "Effects may already exist.\nDo not repeat automatically.",
+          next: { tool: "inspect", target: "runtime", view: "runs" } }));
         const kernel = error.cause as Error & { control_id: string; run_instance_id: string };
         assert.equal(kernel.control_id, wire?.id);
         assert.equal(kernel.run_instance_id, "generation-A");
@@ -486,7 +555,7 @@ test("Public message tool routes only allowlisted runtime Controls", async () =>
   assert.deepEqual(calls, [
     { action: "review.retry", input: { scope: "draft" } },
   ]);
-  assert.equal(response.content[0].text, "\n- target: runtime\n- action: review.retry\n- result: handled");
+  assert.equal(response.content[0].text, controlDocument({ target: "runtime", action: "review.retry", result: "handled" }));
   assert.equal(Object.hasOwn(response.details.result, "sent"), false);
   await assert.rejects(
     tool.execute(

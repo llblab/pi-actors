@@ -84,21 +84,28 @@ function writeSpawnDraftRecipe(
 
 /** Compiler-owned pre-launch diagnostics only; selected caller values are not admitted Run ids. */
 function spawnGuardText(kind: "state_dir" | "namespace" | "id", value?: string): string {
-  const field = ToolsResponse.formatMarkdownField;
   const facts = kind === "state_dir"
-    ? [field("result", "unsupported field"), field("reason", "Run state is runtime-owned; run:<id> remains addressable and retention-safe.")]
-    : [field("result", kind === "namespace" ? "unsupported Run target" : "invalid Run target"), field("accepted_format", "run:<id>"),
-      ...(kind === "id" ? [field("id_rule", "nonempty ASCII letters, digits, underscore, dot or hyphen")] : [])];
-  const render = (selected?: string) => ToolsResponse.withLeadingLineBreak(
-    [field("field", kind === "state_dir" ? "state_dir" : "as"), ...(selected === undefined ? [] : [selected]), ...facts].join("\n"));
-  if (value === undefined) return render();
-  const wellFormed = value.isWellFormed();
-  if (wellFormed) {
-    const complete = render(field("value", value));
-    if (Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES) return complete;
+    ? { result: "unsupported field", reason: "Run state is runtime-owned; run:<id> remains addressable and retention-safe." }
+    : { result: kind === "namespace" ? "unsupported Run target" : "invalid Run target", accepted_format: "run:<id>",
+        ...(kind === "id" ? { id_rule: "nonempty ASCII letters, digits, underscore, dot or hyphen" } : {}) };
+  // Measure the shared emitter's own projection: an unfit selected value must become an omission, not a clip.
+  const render = (selected?: Record<string, unknown>): string | undefined => {
+    const rendered = ToolsResponse.renderYamlMetadata({ field: kind === "state_dir" ? "state_dir" : "as", ...(selected ?? {}), ...facts },
+      Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+    return rendered.state === "available"
+      ? ToolsResponse.withLeadingLineBreak(ToolsResponse.frameMetadataDocument(rendered.text))
+      : undefined;
+  };
+  const required = (selected?: Record<string, unknown>) => render(selected) ?? render()!;
+  const wellFormed = value !== undefined && value.isWellFormed();
+  if (value !== undefined && wellFormed) {
+    const complete = render({ value });
+    if (complete !== undefined && Buffer.byteLength(complete) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES) return complete;
   }
+  if (value === undefined) return required();
   const reason = wellFormed ? "response_too_large" : "malformed_selected_text";
-  return render(`- value: [${reason === "response_too_large" ? "omitted" : "unavailable"}]\n- value_omission:\n  - reason: ${reason}\n  - shown: 0\n  - omitted: 1\n  - total: 1`);
+  return required({ value: reason === "response_too_large" ? "[omitted]" : "[unavailable]",
+    value_omission: { reason, shown: 0, omitted: 1, total: 1 } });
 }
 
 function runIdFromTarget(target: string | undefined): string | undefined {

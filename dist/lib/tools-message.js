@@ -14,82 +14,96 @@ function asRecord(value) {
         ? value
         : {};
 }
-const controlField = ToolsResponse.formatMarkdownField;
+const CONTROL_BUDGET = Limits.RUN_DELIVERY_MODEL_MAX_BYTES - 1;
+function controlMetadata(value) {
+    return ToolsResponse.renderYamlMetadata(value, CONTROL_BUDGET).text;
+}
+/** One opaque selected scalar as a whole value or an explicit whole-field omission, never a clip. */
+function controlSelected(key, value) {
+    return ToolsResponse.selectYamlField(key, value, CONTROL_BUDGET);
+}
+/** Compiler-selected option strings stay a native sequence; malformed selections stay unavailable. */
+function controlChoices(options) {
+    const key = options.key, values = options.values;
+    // Values were selected by the original string filter, not a new action grammar.
+    const wellFormed = values.every((value) => typeof value === "string" && value.isWellFormed());
+    const omitted = { [key]: wellFormed ? "[omitted]" : "[unavailable]",
+        [key + "_omission"]: { reason: wellFormed ? "response_too_large" : "malformed_selected_text",
+            shown: 0, omitted: values.length, total: values.length } };
+    const full = !wellFormed ? omitted : values.length ? { [key]: [...values] } : { [key]: "none" };
+    const complete = ToolsResponse.renderYamlMetadata(full, CONTROL_BUDGET);
+    return { full, selected: complete.state === "available" && Buffer.byteLength(complete.text) <= Buffer.byteLength(controlMetadata(omitted)) ? full : omitted };
+}
+/** Grow whole selected fields in priority order while the complete document still fits. */
+function controlDocument(render, order) {
+    return ToolsResponse.growYamlDocument(render, order, CONTROL_BUDGET);
+}
+/** Only producer-known read-only inspect literals become typed next; other advice stays opaque content. */
+function controlNextPart(action) {
+    const inspect = /^inspect target=([^\s]+) view=([^\s]+)$/u.exec(action);
+    if (inspect) {
+        return ToolsResponse.selectYamlNode("next", { tool: "inspect", target: inspect[1], view: inspect[2] }, CONTROL_BUDGET);
+    }
+    const wellFormed = action.isWellFormed();
+    const omitted = { next: { instruction: wellFormed ? "[omitted]" : "[unavailable]",
+            instruction_omission: { reason: wellFormed ? "response_too_large" : "malformed_selected_text", shown: 0, omitted: 1, total: 1 } } };
+    const full = wellFormed ? { next: { instruction: action } } : omitted;
+    const complete = wellFormed ? ToolsResponse.renderYamlMetadata(full, CONTROL_BUDGET) : undefined;
+    const selected = complete?.state === "available" && Buffer.byteLength(complete.text) <= Buffer.byteLength(controlMetadata(omitted))
+        ? full : omitted;
+    return { full, selected };
+}
 /** Only the four compiler-owned guard sites below; never wraps dispatch/dependency errors. */
 function controlGuardText(request, result, options) {
     const key = request.target === "runtime" ? "target" : "run";
-    const identity = controlField(key, request.target === "runtime" ? request.target : request.target.slice(4));
-    const omittedIdentity = `- ${key}: [omitted]\n- ${key}_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1`;
-    const fixed = [controlField("action", request.action), controlField("result", result)];
-    let fullOptions = "", omittedOptions = "";
-    if (options) {
-        const rows = [];
-        let malformed = false;
-        // Values were selected by the original string filter, not by a new action grammar.
-        for (let index = 0; index < options.values.length; index++) {
-            const value = options.values[index];
-            if (!value.isWellFormed()) {
-                malformed = true;
-                break;
-            }
-            rows.push("  - " + value.replaceAll(/\r\n|\r|\n/gu, newline => newline + "    "));
-        }
-        omittedOptions = `- ${options.key}: [${malformed ? "unavailable" : "omitted"}]\n- ${options.key}_omission:\n  - reason: ${malformed ? "malformed_selected_text" : "response_too_large"}\n  - shown: 0\n  - omitted: ${options.values.length}\n  - total: ${options.values.length}`;
-        fullOptions = malformed ? omittedOptions : rows.length ? `- ${options.key}:\n${rows.join("\n")}` : controlField(options.key, "none");
-    }
-    // Start with the shorter complete-or-omitted rendering: adding an omission scaffold must
-    // never manufacture overflow when the complete small field would fit. Then grow only.
-    let selectedIdentity = Buffer.byteLength(identity) <= Buffer.byteLength(omittedIdentity) ? identity : omittedIdentity;
-    let selectedOptions = Buffer.byteLength(fullOptions) <= Buffer.byteLength(omittedOptions) ? fullOptions : omittedOptions;
-    const render = (target, choices) => ToolsResponse.withLeadingLineBreak([target, ...fixed, ...(options ? [choices] : [])].join("\n"));
-    if (Buffer.byteLength(render(identity, selectedOptions)) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES)
-        selectedIdentity = identity;
-    if (options && Buffer.byteLength(render(selectedIdentity, fullOptions)) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES)
-        selectedOptions = fullOptions;
-    return render(selectedIdentity, selectedOptions);
-}
-function controlNext(action) {
-    const inspect = /^inspect target=([^\s]+) view=([^\s]+)$/u.exec(action);
-    return inspect ? ToolsResponse.formatInspectNextAction(inspect[1], inspect[2])
-        : "- next:\n" + controlField("instruction", action, 1);
+    const identity = controlSelected(key, request.target === "runtime" ? request.target : request.target.slice(4));
+    const choices = options ? controlChoices(options) : undefined;
+    const render = () => ({ ...identity.selected, action: request.action, result,
+        ...(choices ? choices.selected : {}) });
+    // Whole identity first, then the complete option sequence: the shorter seed must never manufacture overflow.
+    return ToolsResponse.withLeadingLineBreak(controlDocument(render, choices ? [identity, choices] : [identity]));
 }
 /** Pure first-layer copy; legacy stopped/killed flags are not scope-closure proof. */
 export function compactControlResult(request, result) {
-    const fields = [request.target.startsWith("run:") ? controlField("run", request.target.slice(4)) : controlField("target", request.target),
-        controlField("action", request.action)];
+    const key = request.target.startsWith("run:") ? "run" : "target";
+    const identity = controlSelected(key, key === "run" ? request.target.slice(4) : request.target);
+    const facts = {};
     if (result.stopped === false || result.archived === false || result.pruned === false) {
-        fields.push(controlField("result", "not applied"));
-        if (typeof result.reason === "string")
-            fields.push(controlField("reason", result.reason));
-        const observed = asRecord(result.status);
-        if (result.reason === "not running" && typeof observed.status === "string")
-            fields.push(controlField("state", observed.status));
+        facts.result = "not applied";
     }
     else if (request.action === "kill" && result.stopped === true) {
-        fields.push(controlField("result", "kill attempted"), controlField("termination", "unconfirmed"));
+        facts.result = "kill attempted";
+        facts.termination = "unconfirmed";
     }
     else if (result.archived === true) {
-        fields.push(controlField("result", "archived"));
+        facts.result = "archived";
     }
     else if (result.pruned === true) {
-        fields.push(controlField("result", "pruned"));
+        facts.result = "pruned";
     }
     else if (result.delivery === "queued" || result.delivery === "delivered") {
-        fields.push(controlField("delivery", result.delivery), controlField("handling", "unconfirmed"));
+        facts.delivery = result.delivery;
+        facts.handling = "unconfirmed";
     }
     else {
-        fields.push(controlField(typeof result.delivery === "string" ? "delivery" : "result", typeof result.delivery === "string" ? result.delivery : typeof result.status === "string" ? result.status : "accepted"));
-        if (typeof result.reason === "string")
-            fields.push(controlField("reason", result.reason));
+        facts[typeof result.delivery === "string" ? "delivery" : "result"] =
+            typeof result.delivery === "string" ? result.delivery : typeof result.status === "string" ? result.status : "accepted";
     }
-    if (typeof result.control_id === "string")
-        fields.push(controlField("control_id", result.control_id));
+    const notApplied = result.stopped === false || result.archived === false || result.pruned === false;
+    const reason = typeof result.reason === "string" ? controlSelected("reason", result.reason) : undefined;
+    const observed = asRecord(result.status);
+    const state = notApplied && result.reason === "not running" && typeof observed.status === "string"
+        ? controlSelected("state", observed.status) : undefined;
+    const controlId = typeof result.control_id === "string" ? controlSelected("control_id", result.control_id) : undefined;
     const actions = Array.isArray(result.next_actions) ? result.next_actions
         : request.target.startsWith("run:") ? runNextActions(request.target.slice(4), result) : [];
     const next = actions.find((action) => typeof action === "string" && action.length > 0);
-    if (next)
-        fields.push(controlNext(next));
-    return ToolsResponse.withLeadingLineBreak(fields.join("\n"));
+    const nextPart = next === undefined ? undefined : controlNextPart(next);
+    const parts = [identity, ...(reason ? [reason] : []), ...(state ? [state] : []), ...(controlId ? [controlId] : []), ...(nextPart ? [nextPart] : [])];
+    const render = () => ({ ...identity.selected, action: request.action, ...facts,
+        ...(reason ? reason.selected : {}), ...(state ? state.selected : {}), ...(controlId ? controlId.selected : {}),
+        ...(nextPart ? nextPart.selected : {}) });
+    return ToolsResponse.withLeadingLineBreak(controlDocument(render, parts));
 }
 function runNextActions(run, result) {
     if (result.stopped === true)
@@ -198,16 +212,13 @@ export function createControlToolDefinition(deps = {}) {
                     }
                     catch (cause) {
                         // Admission-era correlation is not current reply-scope proof after an awaited dispatch.
-                        const summary = [controlField("action", request.action), controlField("result", "request failed"),
-                            controlField("delivery", "unconfirmed"), controlField("handling", "unconfirmed"),
-                            controlField("warning", "Effects may already exist.\nDo not repeat automatically."),
-                            controlNext("inspect target=runtime view=runs")].join("\n");
-                        // Reserve both line breaks; display one whole caller-owned id or explicit whole-id omission.
-                        const identity = controlField("run", run);
-                        const target = Buffer.byteLength(identity) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES - Buffer.byteLength(summary) - 2
-                            ? identity
-                            : "- run: [omitted]\n- run_omission:\n  - reason: response_too_large\n  - shown: 0\n  - omitted: 1\n  - total: 1";
-                        throw new Error(ToolsResponse.withLeadingLineBreak(target + "\n" + summary), { cause });
+                        // Display one whole caller-owned id or an explicit whole-id omission; the warning stays literal.
+                        const identity = controlSelected("run", run);
+                        const next = controlNextPart("inspect target=runtime view=runs");
+                        const render = () => ({ ...identity.selected, action: request.action,
+                            result: "request failed", delivery: "unconfirmed", handling: "unconfirmed",
+                            warning: "Effects may already exist.\nDo not repeat automatically.", ...next.selected });
+                        throw new Error(ToolsResponse.withLeadingLineBreak(controlDocument(render, [identity])), { cause });
                     }
                 }
                 // A refused identity change must not publish the replacement's status, even in verbose/details.

@@ -19,6 +19,7 @@ import { parseDocument } from "yaml";
 
 import { deliverRunControl } from "../lib/runs-control-delivery.ts";
 import { splitCommandTemplate } from "../lib/command-templates.ts";
+import { bindFixtureBirth, captureFixtureBirths, joinFixtureRunners, requireFreshFixtureAbsence, throwFixtureErrors } from "./fixtures/runner-completion.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -4906,21 +4907,27 @@ esac
   }
 });
 
-test("installed async-runner avoids importing TypeScript from node_modules", async () => {
+test("installed async-runner avoids importing TypeScript from node_modules", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-installed-runner-"));
+  const capture = captureFixtureBirths(t), errors: unknown[] = [];
+  let dispatched = false, accepted = false;
   try {
     const packageDir = await prepareInstalledPackage(root);
     const stateDir = join(root, "state");
     const { startRun } = await import(
       pathToFileURL(join(packageDir, "dist", "lib", "async-runs.js")).href
     );
+    dispatched = true;
     const meta = startRun({
       run_id: "installed-runner",
       state_dir: stateDir,
       template: `${process.execPath} -e "console.log('installed async ok')"`,
     }, process.cwd());
-    await waitForText(join(stateDir, "result.json"), /"completedAt":/);
-    const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8"));
+    assert.equal(capture.births.length, 1);
+    await joinFixtureRunners([{ birth: bindFixtureBirth(capture.births, meta.pid), path: join(stateDir, "result.json") }]);
+    const text = await readFile(join(stateDir, "result.json"), "utf8");
+    assert.match(text, /"completedAt":/);
+    const result = JSON.parse(text);
     assert.equal(result.code, 0);
     assert.equal(result.run_instance_id, meta.run_instance_id);
     assert.equal(meta.argv.at(-1), stateDir);
@@ -4931,9 +4938,17 @@ test("installed async-runner avoids importing TypeScript from node_modules", asy
     assert.match(await readFile(join(stateDir, "stdout.log"), "utf8"), /installed async ok/);
     assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "async-runner.ts")), "");
     assert.equal(await readTextIfExists(join(stateDir, ".type-strip-lib", "execution.ts")), "");
-  } finally {
-    await rm(root, { recursive: true, force: true });
+    accepted = true;
+  } catch (error) { errors.push(error); }
+  finally {
+    try { capture.restore(); } catch (error) { errors.push(error); }
+    if (errors.length === 0) try {
+      if (accepted) requireFreshFixtureAbsence(capture.births[0]);
+      if (accepted || !dispatched) await rm(root, { recursive: true, force: true });
+    } catch (error) { errors.push(error); }
+    if (errors.length) try { t.diagnostic(`Installed runner fixture retained: ${root}`); } catch (error) { errors.push(error); }
   }
+  throwFixtureErrors(errors);
 });
 
 test("installed validate-recipe avoids importing TypeScript from node_modules", async () => {

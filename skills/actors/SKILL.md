@@ -19,6 +19,9 @@ Make a maintained capability a persistent agent-callable tool
 Keep the same capability but narrow caller defaults
 → use register_tool from=<skill>/<recipe> defaults={...}
 
+Retain a new named capability without exposing a tool
+→ use register_tool expose=false with from or template
+
 Register a trusted command directly
 → use register_tool template="..."
 
@@ -53,6 +56,12 @@ Run Control ≠ actor chat
 ```
 
 A Skill Recipe is a maintained component addressed by `<skill>/<recipe>`. `spawn` creates a Run from a Recipe. `register_tool from=<skill>/<recipe>` persists compact logical delegation and activates from the resolved effective contract without copying, symlinking, or ambient re-resolution. A tool is callable in the current session only when activation evidence says `callable_now: true`.
+
+Sync/async is an execution contract, not a usefulness or tool-exposure rule. A sync tool awaits its result; an async tool returns a Run launch receipt, with the eventual result delivered separately. A subagent-backed tool is a capability launcher, not a persisted live subagent. Register a stable, meaningfully parameterized capability when its name and contract save repeated planning; prefer one-off `spawn` over a redundant generic launcher or a new tool for every mission.
+
+Use `register_tool expose=false` with a new name and one `template` or `from` source to retain a capability without requesting tool activation. Its `kind: retained_recipe`, `activation: not_requested` receipt is deliberate retention, not failed registration; it omits global callability flags because a same-named tool may already exist. Reuse the exact returned Recipe path through `spawn`, or deliberately expose it later with ordinary `register_tool from=<exact path>`. Retained update, delete and draft promotion are unsupported; do not hand-edit the live registry to bypass those guards.
+
+Automatic retained lifecycle is not implemented. Current user-root tool discovery and automatic review actions are unchanged. `inspect target=recipes view=summary` distinguishes retained definitions under `recipes/library` from root tool candidates; verbose detail gives exact paths, resolved mode and invalid/disabled diagnostics. Storage is not proof of review, callability or a running Actor. `expose` is registration input, not a Recipe field or automatic-review action; do not invent retain/defer review commands. See [persistent tools](./references/persistent-tools.md) for current selection and activation proof.
 
 `actors` owns generic Recipe/tool/Run mechanics. The owning capability Skill owns capability-specific selection and constraints. `swarm` owns multi-actor decomposition and integration methodology.
 
@@ -168,7 +177,7 @@ When a pi-actors operation fails:
 3. Report resolver, registry, activation, Run, Trace, or Control truth exactly.
 4. Retry only after the owning state is healthy.
 
-Stop if spawn and registry resolve the same Recipe differently. Stop if registration persists but is not callable. Stop if an operation cannot be proven through pi-actors surfaces.
+Stop if spawn and registry resolve the same Recipe differently. When tool exposure was requested, stop if registration persists but is not callable. A `retained_recipe` receipt with `activation: not_requested` instead permits ordinary Recipe reuse, not a claim of tool invocation. Stop if an operation cannot be proven through pi-actors surfaces.
 
 Never recover by copying maintained Recipe args, defaults, Control, artifacts, or helper commands. Never hard-code a `{skill_dir}` replacement path. Never introduce `bash -lc`, `eval`, direct bundled-helper execution, or shell backgrounding to bypass resolution. Never call `spawn` and claim a tool call. Use [diagnostics](./references/diagnostics.md) for the safe next action.
 

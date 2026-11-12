@@ -107,6 +107,52 @@ async function assertDeterministicContention(
   ]);
 }
 
+test("Exclusive atomic writes publish complete new files without overwriting a competing creator", async () => {
+  const root = fs.mkdtempSync(join(tmpdir(), "pi-actors-exclusive-write-"));
+  const target = join(root, "retained.json");
+  try {
+    writeTextAtomic(target, "complete", { exclusive: true });
+    assert.equal(await readFile(target, "utf8"), "complete");
+    assert.throws(() => writeTextAtomic(target, "replacement", { exclusive: true }), { code: "EEXIST" });
+    assert.equal(await readFile(target, "utf8"), "complete");
+    fs.unlinkSync(target);
+    assert.throws(() => writeTextAtomic(target, "loser", { exclusive: true,
+      onBeforeReplace: () => fs.writeFileSync(target, "competitor", { flag: "wx" }),
+    }), { code: "EEXIST" });
+    assert.equal(await readFile(target, "utf8"), "competitor");
+    assert.deepEqual(await readdir(root), ["retained.json"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Exclusive publication preserves original failures and never rolls back a published target", async t => {
+  for (const stage of ["unsupported", "after_publication"] as const) {
+    const root = fs.mkdtempSync(join(tmpdir(), "pi-actors-exclusive-failure-"));
+    const target = join(root, "retained.json"), original = fs.linkSync;
+    const cause = Object.freeze({ stage });
+    let calls = 0;
+    try {
+      t.mock.method(fs, "linkSync", (...args: Parameters<typeof fs.linkSync>) => {
+        calls++;
+        if (stage === "after_publication") Reflect.apply(original, fs, args);
+        throw cause;
+      });
+      syncBuiltinESMExports();
+      let failure: unknown;
+      try { writeTextAtomic(target, "complete", { exclusive: true }); } catch (error) { failure = error; }
+      assert.equal(failure, cause);
+      assert.equal(calls, 1);
+      if (stage === "after_publication") assert.equal(await readFile(target, "utf8"), "complete");
+      else assert.equal(existsSync(target), false);
+      assert.deepEqual(await readdir(root), stage === "after_publication" ? ["retained.json"] : []);
+    } finally {
+      t.mock.restoreAll(); syncBuiltinESMExports();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("Locked file mutation preserves callback and release failures without replay or rollback", (t) => {
   // Data-only real file-lock interleavings; no worker/native workload or host-exit proof is introduced.
   for (const kind of ["return", "error", "aggregate", "undefined", "primitive", "hostile"] as const)

@@ -6,6 +6,7 @@ Task IDs name bounded work, not execution order. The operator authorizes autonom
 
 ## Next bounded work
 
+- **Capability memory:** P1.3 must admit the evidence contract before P1.2c can change automatic retention/exposure. These future slices are separate from the explicit manual workflow; source/package acceptance does not authorize live migration or reload an already running host.
 - **Separate remaining owners:** F1.7 (one rollout candidate) remains the last open F1 owner; the migrated surfaces do not by themselves prove the loaded rollout or registry notice layout. Registry activation/promotion/deletion notice text stays outside the completed refusal migration. Inspector popup color recognition is verified against current producer results; a later feedback syntax change must update that anchored recognition with it.
 - **Explicit gates:** U1 requires authorized loaded-host observation/reload; N1.2p needs actual Windows profile evidence, N1.3 an asset-distribution decision, and N1.6 separate activation admission. Original-clock/native-scope, macOS research and composition decisions retain their own B/C/T gates. Existing release permission does not adopt them.
 - **Evidence reuse:** Reuse the accepted three-OS SOURCE/PACKED quit witnesses for B2.4; extend only the missing descendants/triggers/same-ID/crash cases. N1.9 stays a gated unresolved risk, not an instruction to repeat the completed ownership inquiry.
@@ -184,6 +185,18 @@ Shared N1 constraints: Retain uncertain roots; fresh ESRCH immediately precedes 
 Exit: Any later cleanup is independently justified and validated against its own tree. The immutable 0.56.0 tag is not a cleanup branch; source/packed presentation and release-narrative acceptance are already covered by the accepted release tree.
 
 - [ ] **R1.2 — Remove temporary diagnostics after native acceptance.** Gate on N1.7; remove only proven temporary/redundant instrumentation, preserve owned regressions, then refresh invalidated focused checks and final candidate-bound packaging/native evidence. A dirty status note or earlier executable result is not final-tarball proof.
+
+## 8. Capability memory separate from tool exposure
+
+Outcome: Implement the [adopted capability-memory direction](docs/capability-memory.md): a reviewed Recipe can be retained without becoming a tool; sync/async remains execution policy. Success means easier, coherent management: one existing Recipe inspection surface distinguishes retained definitions from exposed tool candidates, with exact reuse references and no confusion with running instances. Existing explicit registration remains valid for both modes; no automatic-policy or live portfolio migration is authorized by local implementation alone.
+
+### P1 — Retention, evidence and deliberate exposure
+
+Exit: Retain/defer/expose/withdraw have explicit evidence and replay-safe transitions in existing owners; useful async capabilities remain eligible and unsuitable sync captures are not exposed solely by mode. Current activation, privacy, source identity and lineage contracts survive source/packed acceptance. No second runtime, resolver or tool registry.
+
+- [ ] **P1.2c — Integrate automatic lifecycle transitions.** After P1.3, extend the explicit manual path with CAS/recovery-safe retain/defer/expose/withdraw transitions through existing review transactions, without duplicate capability copies or demotion churn. Specify retention bounds and distinguish evidence deferral from safety rejection and admitted expiry/disposal before enabling automatic retention. Verify: draft/tool transaction, projection and recovery properties.
+- [ ] **P1.3 — Ground automatic exposure in admitted evidence.** Define the privacy/provenance/budget contract for any semantic or accepted-outcome evidence before using it; keep structural-only review honest and non-destructive on uncertainty. Do not infer task success from launches, invent names from opaque shape, weaken confidentiality or permit automatic executable rewrites. Verify: review/projection safety properties and controlled same-shape/different-purpose, failed-launch and insufficient-evidence cases.
+- [ ] **P1.4 — Accept and evaluate the automatic policy.** After P1.2c/P1.3, update owning Skills and current user docs and prove the automatic transitions in isolated source/packed portfolios. Reuse the explicit manual workflow witnesses when their source/activation semantics are unchanged; refresh only affected boundaries. Compare accepted useful reuse and selection cost against baseline, not tool counts. Any live migration requires an exact admitted portfolio plan and applicable operator authority; loaded-host claims require separate observation. Verify: registration-truth, agent journeys, installed-package and controlled policy evaluation.
 
 ## Evidence and scope notes
 

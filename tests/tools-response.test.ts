@@ -80,7 +80,7 @@ test("AX registry records select one read-only hint or opaque instruction withou
     skill_recipe_catalog_partial: true, next_actions: Object.freeze(actions) });
   const before = JSON.stringify(summary), text = compactRecipeRegistry(summary);
   assert.equal(text, [
-    "", 'recipes: "registry"', "active: 2", "drafts: 1", "shadowed: 0", "invalid: 1", "disabled: 0",
+    "", 'recipes: "registry"', "active: 2", "drafts: 1", "retained: 0", "shadowed: 0", "invalid: 1", "disabled: 0",
     "current_policy: 1", "skill_catalog_partial: true", "recommendations: 1", "diagnostics: 1",
     "next:", '  tool: "inspect"', '  target: "recipes"', '  view: "imports"', "  verbose: true",
   ].join("\n"));

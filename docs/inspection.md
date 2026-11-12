@@ -95,11 +95,13 @@ inspect target=recipes view=imports verbose=true
 inspect target=recipes view=reviews verbose=true
 ```
 
-- `status` reports registry/watch state, active/shadowed/invalid/disabled user Recipes, active Skill components, drafts, usage, and diagnostics.
+- `status` reports registry/watch state, active/shadowed/invalid/disabled user Recipes, active Skill components, drafts, retained-library definitions, usage, and diagnostics.
 - `summary` returns the compact discovery-oriented projection of the same current context. `registry` is the same inspection path under a second accepted view name: with identical `verbose` and other inputs it returns identical facts, details and rendering, so only `verbose` selects compact text versus structured output. The compact label stays `recipes: registry` for both names.
 - `doctor` diagnoses one canonical `<skill>/<recipe>` identity when `identity` is provided; without an identity it reports registry remediation evidence.
 - `imports` exposes active Skill namespaces and component import inventory for resolution diagnosis.
 - `reviews` exposes bounded automatic draft/tool review state and recovery guidance.
+
+The compact Recipe catalog adds `retained` as a separate count for direct `.json`/`.md` definitions under `recipes/library`. Details/verbose includes `retained` rows (exact path, source_kind=user_retained_recipe, tool=false, resolved async mode, invalid/disabled state and diagnostics) and `retained_diagnostics`. Both root and library use the active session Skill context. Storage placement does not certify review, current callability or Run state; invalid/disabled definitions remain diagnostic. The missing library is empty, without initialization. Inspection performs no retention write, activation or launch. Valid enabled exact paths remain ordinary explicit-file references for `spawn` or deliberate `register_tool from` specialization. Inspection adds no mutation or logical-reference syntax; use explicit `register_tool expose=false` for supported create-only retention, and see [capability memory](./capability-memory.md#read-only-inventory-checkpoint).
 
 `identity` is accepted only with `view=doctor`. Skill inventory is fail-soft diagnostic evidence; exact launch and registration still resolve against the immutable active-session context.
 

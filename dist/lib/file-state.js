@@ -5,7 +5,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 const FILE_MUTATION_LOCK_TIMEOUT_MS = process.platform === "win32" ? 30000 : 15000;
@@ -312,7 +312,13 @@ export function writeTextAtomic(path, content, options = {}) {
     try {
         writeFileSync(tempPath, content, "utf8");
         options.onBeforeReplace?.();
-        replaceFileWithRetry(tempPath, path);
+        if (options.exclusive === true) {
+            // Publish a complete new file atomically without clobbering an uncooperative creator.
+            linkSync(tempPath, path);
+            unlinkSync(tempPath);
+        }
+        else
+            replaceFileWithRetry(tempPath, path);
     }
     catch (error) {
         try {

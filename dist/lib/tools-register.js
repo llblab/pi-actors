@@ -26,6 +26,7 @@ export function createRegisterToolDefinition(deps) {
             description: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.description),
             defaults: looseObjectSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.defaults),
             draft: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.draft),
+            expose: booleanSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.expose),
             from: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.from),
             name: stringSchema(Prompts.REGISTER_TOOL_PARAM_DESCRIPTIONS.name),
             template: unionSchema([

@@ -3,8 +3,8 @@
  * Zones: registry mutations, persistence, runtime activation
  * Owns register/update/delete validation, persistence, runtime side effects, and result payloads
  */
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import * as CommandTemplates from "./command-templates.js";
 import * as Config from "./config.js";
 import * as ExecutionOutput from "./execution-output.js";
@@ -560,6 +560,14 @@ function executeRegisterToolUnlocked(params, ctx, deps) {
         ? params
         : {};
     assertRegisterToolInputModes(rawInput);
+    if (Object.hasOwn(rawInput, "expose")) {
+        const exposure = rawInput.expose;
+        if (typeof exposure !== "boolean")
+            throw new RetainedRecipeRefusal("expose", "expose must be Boolean.");
+        // Select under the existing name reservation; acquire retention locks only after it releases.
+        if (exposure === false)
+            return () => retainRecipe(rawInput, ctx, deps);
+    }
     let input = rawInput;
     if (!input.name)
         return listTools(deps);
@@ -702,12 +710,196 @@ function executeRegisterToolUnlocked(params, ctx, deps) {
         },
     };
 }
+class RetainedRecipeRefusal extends Error {
+    reason;
+    constructor(field, reason, cause) {
+        super(ExecutionOutput.formatToolText(registryMetadataText({ field, result: reason })), { cause });
+        this.reason = reason;
+    }
+}
+function retainedDirectory(path) {
+    const stat = lstatSync(path, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new RetainedRecipeRefusal("storage", "Retained storage must be a regular non-symlink directory.");
+    }
+    return { path, realpath: realpathSync.native(path), dev: stat.dev, ino: stat.ino };
+}
+function recheckRetainedDirectory(frame) {
+    const current = retainedDirectory(frame.path);
+    if (current.realpath !== frame.realpath || current.dev !== frame.dev || current.ino !== frame.ino) {
+        throw new RetainedRecipeRefusal("storage", "Retained storage identity changed.");
+    }
+}
+function retainedSlotAbsent(path, ownTargetPublished = false) {
+    for (const candidate of ownTargetPublished ? [path.replace(/\.json$/u, ".md")] : [path, path.replace(/\.json$/u, ".md")]) {
+        try {
+            lstatSync(candidate);
+        }
+        catch (error) {
+            let code;
+            try {
+                code = error?.code;
+            }
+            catch (observationError) {
+                throw new AggregateError([error, observationError], "Retained slot observation failed.", { cause: error });
+            }
+            if (code === "ENOENT")
+                continue;
+            throw error;
+        }
+        throw new RetainedRecipeRefusal("name", "Retained Recipe already exists; this path is create-only.");
+    }
+}
+function retainedFile(path) {
+    const stat = lstatSync(path, { bigint: true });
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new RetainedRecipeRefusal("storage", "Retained target must be a regular non-symlink file.");
+    }
+    if (stat.size > BigInt(RecipesReferences.MAX_RECIPE_FILE_BYTES))
+        throw new RetainedRecipeRefusal("storage", "Retained target exceeds the source size limit.");
+    return { dev: stat.dev, ino: stat.ino, size: stat.size, mtime: stat.mtimeNs, ctime: stat.ctimeNs };
+}
+function withinRetainedSource(root, path) {
+    const relation = relative(resolve(root), resolve(path));
+    return relation === "" || (!isAbsolute(relation) && !/^\.\.(?:[\\/]|$)/u.test(relation));
+}
+function assertRetainedSourceLifetime(source, root, field) {
+    const drafts = join(root, "drafts");
+    if (withinRetainedSource(drafts, source) ||
+        (existsSync(drafts) && existsSync(source) && withinRetainedSource(realpathSync.native(drafts), realpathSync.native(source)))) {
+        throw new RetainedRecipeRefusal(field, "Retained creation cannot reference a managed disposable draft.");
+    }
+}
+function assertRetainedTemplateLifetimes(value, path, root, context) {
+    if (typeof value === "string") {
+        const source = RecipesReferences.resolveRecipeReferencePath(value, dirname(path), context.activeSkills);
+        if (source)
+            assertRetainedSourceLifetime(source, root, "template");
+    }
+    else if (Array.isArray(value)) {
+        for (const child of value)
+            assertRetainedTemplateLifetimes(child, path, root, context);
+    }
+    else if (value && typeof value === "object") {
+        const node = value;
+        assertRetainedTemplateLifetimes(node.template, path, root, context);
+        assertRetainedTemplateLifetimes(node.recover, path, root, context);
+    }
+}
+function retainRecipe(input, ctx, deps) {
+    assertRegisterToolInputModes(input);
+    if (typeof input.name !== "string" || !input.name.trim()) {
+        throw new RetainedRecipeRefusal("name", "Retained creation requires a name.");
+    }
+    const name = Identity.normalizeToolName(input.name);
+    if (!name || deps.reservedToolNames.has(name)) {
+        throw new RetainedRecipeRefusal("name", "Invalid or reserved retained Recipe name.");
+    }
+    const blocker = deps.getToolNameBlocker(name);
+    if (blocker)
+        throw new Error(ExecutionOutput.formatToolText(blocker));
+    if (input.update || Object.hasOwn(input, "draft")) {
+        throw new RetainedRecipeRefusal("expose", "Retained creation does not support update or draft promotion.");
+    }
+    const template = getInputTemplate(input.template);
+    if (template === null || template === "") {
+        throw new RetainedRecipeRefusal("template", "Retained deletion is not supported.");
+    }
+    if (template === undefined && !input.from) {
+        throw new RetainedRecipeRefusal("source", "Retained creation requires template or from.");
+    }
+    const root = resolve(getRecipeRoot(deps)), library = join(root, "library"), path = join(library, `${name}.json`);
+    const context = getRegistrationResolutionContext(ctx, deps);
+    const from = input.from === undefined ? undefined : normalizeFromReference(input.from, context);
+    if (from) {
+        const source = from.endsWith(".json") || from.endsWith(".md") ? from
+            : RecipesReferences.resolveRecipeReferencePath(from, context.cwd, context.activeSkills);
+        if (source)
+            assertRetainedSourceLifetime(source, root, "from");
+    }
+    const authored = buildAuthoredRecipe({ ...input, ...(from ? { from } : {}) }, undefined, undefined);
+    if (!from)
+        assertRetainedTemplateLifetimes(authored.template, path, root, context);
+    const bytes = `${JSON.stringify(authored, null, 2)}\n`;
+    if (Buffer.byteLength(bytes) > RecipesReferences.MAX_RECIPE_FILE_BYTES) {
+        throw new RetainedRecipeRefusal("source", "Retained Recipe exceeds the 1 MiB source limit.");
+    }
+    const candidate = RecipesDiscovery.admitUserRecipe(path, context, authored);
+    if (!candidate.validated || !candidate.tool) {
+        throw new RetainedRecipeRefusal("source", "Retained Recipe admission failed; check the source and caller argument contract.", candidate.diagnostics);
+    }
+    let stage = "storage";
+    try {
+        return withFileMutationLock(root, () => {
+            mkdirSync(root, { recursive: true });
+            const rootFrame = retainedDirectory(root);
+            return withFileMutationLock(library, () => {
+                recheckRetainedDirectory(rootFrame);
+                mkdirSync(library, { recursive: true });
+                const libraryFrame = retainedDirectory(library);
+                const relation = relative(rootFrame.realpath, libraryFrame.realpath);
+                if ((process.platform === "win32" ? relation.toLowerCase() : relation) !== "library") {
+                    throw new RetainedRecipeRefusal("storage", "Retained library escapes its Recipe root.");
+                }
+                const recheck = () => { recheckRetainedDirectory(rootFrame); recheckRetainedDirectory(libraryFrame); };
+                return withFileMutationLock(path, () => {
+                    recheck();
+                    retainedSlotAbsent(path);
+                    stage = "persistence";
+                    writeTextAtomic(path, bytes, { exclusive: true, onBeforeReplace: () => { recheck(); retainedSlotAbsent(path); } });
+                    stage = "persisted_admission";
+                    recheck();
+                    retainedSlotAbsent(path, true);
+                    const before = retainedFile(path);
+                    if (readFileSync(path, "utf8") !== bytes)
+                        throw new RetainedRecipeRefusal("storage", "Persisted retained content changed.");
+                    const admitted = RecipesDiscovery.admitUserRecipe(path, context);
+                    if (!admitted.validated || !admitted.tool)
+                        throw new RetainedRecipeRefusal("source", "Persisted retained Recipe admission failed.", admitted.diagnostics);
+                    const after = retainedFile(path);
+                    if (Object.keys(before).some(key => before[key] !== after[key]) ||
+                        readFileSync(path, "utf8") !== bytes)
+                        throw new RetainedRecipeRefusal("storage", "Persisted retained content changed.");
+                    recheck();
+                    retainedSlotAbsent(path, true);
+                    stage = "receipt";
+                    const args = RecipesDiscovery.summarizeRegisteredToolArgs(admitted.tool);
+                    const source = from ? from.endsWith(".json") || from.endsWith(".md") ? `<explicit-file:${basename(from)}>` : from : "template";
+                    const recipe = registrySelected("recipe", path), selectedName = registrySelected("tool", name);
+                    const selectedSource = registrySelected("source", source);
+                    const required = ToolsResponse.selectYamlField("required_args", args.required, REGISTRY_METADATA_BUDGET);
+                    const optional = ToolsResponse.selectYamlField("optional_args", args.optional, REGISTRY_METADATA_BUDGET);
+                    const facts = { kind: "retained_recipe", result: "retained", persisted: true, resolved: true,
+                        validated: true, activation: "not_requested", async: admitted.async };
+                    const text = growRegistryDocument(() => ({ ...selectedName.selected, ...facts, ...recipe.selected, ...selectedSource.selected,
+                        ...required.selected, ...optional.selected, next: { tool: "inspect", target: "recipes", view: "summary", verbose: true } }), [recipe, selectedName, selectedSource, required, optional]);
+                    const result = {
+                        content: [textContent(ExecutionOutput.formatToolText(text))],
+                        details: { ...facts, tool: name, recipe: path, source, required_args: args.required, optional_args: args.optional,
+                            next_actions: ["inspect target=recipes view=summary verbose=true"] },
+                    };
+                    stage = "release";
+                    return result;
+                });
+            });
+        });
+    }
+    catch (error) {
+        const reason = error instanceof RetainedRecipeRefusal ? { reason: error.reason } : {};
+        throw new Error(ExecutionOutput.formatToolText(registryMetadataText({ operation: "retain", stage, result: "unconfirmed",
+            effects: "unknown; inspect retained inventory before retry", ...reason,
+            next: { tool: "inspect", target: "recipes", view: "summary", verbose: true } })), { cause: error });
+    }
+}
 export async function executeRegisterTool(params, ctx, deps) {
     const input = params;
+    let result;
     if (!input.name)
-        return executeRegisterToolUnlocked(params, ctx, deps);
-    const name = Identity.normalizeToolName(input.name);
-    if (!name)
-        return executeRegisterToolUnlocked(params, ctx, deps);
-    return withFileMutationLock(getToolRecipePath(deps, name), () => executeRegisterToolUnlocked(params, ctx, deps));
+        result = executeRegisterToolUnlocked(params, ctx, deps);
+    else {
+        const name = Identity.normalizeToolName(input.name);
+        result = !name ? executeRegisterToolUnlocked(params, ctx, deps)
+            : withFileMutationLock(getToolRecipePath(deps, name), () => executeRegisterToolUnlocked(params, ctx, deps));
+    }
+    return typeof result === "function" ? result() : result;
 }

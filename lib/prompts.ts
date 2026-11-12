@@ -7,15 +7,18 @@
 export const REGISTER_TOOL_DESCRIPTION =
   "Register a persistent custom tool from one maintained Recipe, command template, or captured draft. " +
   "Use from for Recipe specialization, template for trusted commands, or draft for promotion. " +
+  "Set expose=false to retain a new template/from Recipe without tool activation. " +
   "Definitions persist under ~/.pi/agent/recipes; activation is reported separately.";
 
 export const REGISTER_TOOL_PROMPT_SNIPPET =
-  "Register persistent Recipes or command templates as agent-callable tools";
+  "Persist command templates or Recipes with register_tool; use expose=false to retain without tool activation";
 
 export const REGISTER_TOOL_GUIDELINES = [
   "Use register_tool from=<skill>/<recipe> with defaults={...} to specialize a maintained Recipe without copying its contract.",
   "Use register_tool template only for trusted command templates, and use register_tool draft only for captured draft promotion.",
-  "After register_tool succeeds, trust its callable_now and activation result; persistence alone is not callability.",
+  "Use register_tool expose=false to retain a new named template/from Recipe without activation; update, delete and draft promotion are unsupported in this mode.",
+  "A register_tool retained_recipe receipt with activation=not_requested is deliberate retention, not failed activation; reuse its exact Recipe path through spawn.",
+  "When register_tool requests tool exposure, trust callable_now and activation; persistence alone is not callability.",
   'Set template=null or template="" in register_tool to delete a persisted tool.',
   "Set update=true in register_tool to overwrite an existing tool registration.",
 ];
@@ -42,6 +45,8 @@ export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
     "Optional caller-owned defaults. Keys and values must satisfy the effective source or command-template argument contract.",
   draft:
     "Promote a captured draft Recipe path from ~/.pi/agent/recipes/drafts. This is a source mode; do not combine it with from or template.",
+  expose:
+    "Set false to retain a new named template/from Recipe in recipes/library without registering or activating a tool. Default true preserves ordinary tool registration. Retained update, delete and draft promotion are unsupported.",
   async:
     "Set true for a co-located async template recipe. Omit for ordinary command templates or file-backed recipe references.",
   template:

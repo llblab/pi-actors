@@ -16,7 +16,9 @@ import {
   summarizeDiscovery,
 } from "../lib/recipes-discovery.ts";
 import {
+  ensureRecipeLineage,
   getRecipeRevisionSnapshotPath,
+  getRecipeUsageIndexPath,
   moveRecipeUsage,
   readRecipeUsage,
   recordRecipeReview,
@@ -103,6 +105,100 @@ test("Recipe usage launch counter increments lineage metadata", async () => {
     const recipeContent = await readJson(recipe);
     assert.equal(recipeContent.template, "echo ok");
     assert.equal(recipeContent.usage, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Retained and exposed entrypoints share one usage owner without colliding by filename", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-retained-usage-"));
+  const library = join(root, "library");
+  try {
+    await mkdir(library);
+    for (const extension of ["json", "md"]) {
+      const name = `entry_${extension}`;
+      const tool = join(root, `${name}.${extension}`), retained = join(library, `${name}.${extension}`);
+      const content = extension === "json" ? JSON.stringify({ template: "echo same" }) : "```command\necho same\n```\n";
+      await writeFile(tool, content);
+      await writeFile(retained, content);
+      assert.equal(ensureRecipeLineage(retained), true);
+      assert.equal(ensureRecipeLineage(tool), true);
+      assert.equal(readRecipeUsage(retained)?.lifetime_calls, 0);
+      assert.equal(readRecipeUsage(tool)?.lifetime_calls, 0);
+      assert.equal(recordRecipeLaunch(retained, new Date(), "spawn"), true);
+      assert.equal(recordRecipeLaunch(tool, new Date(), "tool"), true);
+      assert.equal(recordRecipeLaunch(retained, new Date(), "spawn", root), true);
+      const saved = readRecipeUsage(retained)!;
+      const exposed = readRecipeUsage(tool)!;
+      assert.equal(saved.lineage_name, `library/${name}`);
+      assert.equal(saved.current_path, `library/${name}.${extension}`);
+      assert.equal(saved.lifetime_calls, 2);
+      assert.equal(saved.spawn_calls, 2);
+      assert.equal(saved.tool_calls ?? 0, 0);
+      assert.equal(exposed.lineage_name, name);
+      assert.equal(exposed.lifetime_calls, 1);
+      assert.equal(exposed.tool_calls, 1);
+      assert.equal(exposed.spawn_calls ?? 0, 0);
+      assert.deepEqual(readRecipeUsage(retained, root), saved);
+      const index = await readJson(getRecipeUsageIndexPath(root));
+      assert.equal((index.paths as Record<string, unknown>)[`library/${name}.${extension}`], `library/${name}`);
+    }
+    await assert.rejects(access(join(library, ".usage")), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Missing entrypoints cannot implicitly transfer usage across retained and tool namespaces", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-retained-no-migration-"));
+  const library = join(root, "library");
+  try {
+    await mkdir(library);
+    for (const retainedFirst of [false, true]) {
+      const name = retainedFirst ? "from_library" : "from_tools";
+      const tool = join(root, `${name}.json`), retained = join(library, `${name}.json`);
+      const first = retainedFirst ? retained : tool, second = retainedFirst ? tool : retained;
+      const content = JSON.stringify({ template: `echo ${name}` });
+      await writeFile(first, content);
+      assert.equal(recordRecipeLaunch(first, new Date(), retainedFirst ? "spawn" : "tool"), true);
+      const before = readRecipeUsage(first)!;
+      await rm(first);
+      await writeFile(second, content);
+      assert.equal(recordRecipeLaunch(second, new Date(), retainedFirst ? "tool" : "spawn"), true);
+      assert.deepEqual(readRecipeUsage(first), before);
+      assert.equal(readRecipeUsage(second)?.lifetime_calls, 1);
+      assert.equal(readRecipeUsage(second)?.lineage_name, retainedFirst ? name : `library/${name}`);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Retained renames and explicit lineage moves preserve history without inferring exposure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-retained-move-"));
+  const library = join(root, "library");
+  const original = join(library, "before.json"), renamed = join(library, "after.json"), tool = join(root, "after.json");
+  try {
+    await mkdir(library);
+    await writeFile(original, JSON.stringify({ template: "echo retained" }));
+    assert.equal(recordRecipeLaunch(original, new Date(), "spawn"), true);
+    await rename(original, renamed);
+    assert.equal(recordRecipeLaunch(renamed, new Date(), "spawn"), true);
+    const retained = readRecipeUsage(renamed)!;
+    assert.equal(retained.lineage_name, "library/after");
+    assert.equal(retained.lifetime_calls, 2);
+    assert.deepEqual(retained.former_names, ["library/before"]);
+    await rename(renamed, tool);
+    assert.equal(moveRecipeUsage(renamed, tool, root), true);
+    const moved = readRecipeUsage(tool)!;
+    assert.equal(moved.lineage_name, "after");
+    assert.equal(moved.lifetime_calls, 2);
+    assert.equal(moved.spawn_calls, 2);
+    assert.equal(moved.tool_calls ?? 0, 0);
+    assert.equal(readRecipeUsage(renamed), undefined);
+    assert.deepEqual(moved.former_names, ["library/before", "library/after"]);
+    assert.equal(moveRecipeUsage(renamed, tool, root), true);
+    assert.deepEqual(readRecipeUsage(tool), moved);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

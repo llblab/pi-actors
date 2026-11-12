@@ -10,6 +10,7 @@ export interface RegisterToolInput {
     name?: string;
     description?: string;
     async?: boolean;
+    expose?: boolean;
     template?: CommandTemplates.CommandTemplateValue | null;
     from?: string;
     defaults?: Record<string, unknown>;
@@ -19,13 +20,16 @@ export interface RegisterToolInput {
 }
 export interface RegisterToolResultDetails {
     active_tool?: boolean;
-    activation?: "current_session" | "unverified";
+    activation?: "current_session" | "unverified" | "not_requested";
     activation_boundary?: string;
     args?: string[];
     async?: boolean;
     callable_now?: boolean;
     defaults?: Record<string, string>;
     host_registered?: boolean;
+    kind?: "retained_recipe";
+    recipe?: string;
+    result?: "retained";
     next_actions?: string[];
     optional_args?: string[];
     persisted?: boolean;

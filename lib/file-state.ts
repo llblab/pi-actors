@@ -6,7 +6,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 
@@ -297,14 +297,18 @@ function replaceFileWithRetry(source: string, target: string): void {
 export function writeTextAtomic(
   path: string,
   content: string,
-  options: { onBeforeReplace?(): void } = {},
+  options: { exclusive?: boolean; onBeforeReplace?(): void } = {},
 ): void {
   mkdirSync(dirname(path), { recursive: true });
   const tempPath = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tempPath, content, "utf8");
     options.onBeforeReplace?.();
-    replaceFileWithRetry(tempPath, path);
+    if (options.exclusive === true) {
+      // Publish a complete new file atomically without clobbering an uncooperative creator.
+      linkSync(tempPath, path);
+      unlinkSync(tempPath);
+    } else replaceFileWithRetry(tempPath, path);
   } catch (error) {
     try {
       unlinkSync(tempPath);

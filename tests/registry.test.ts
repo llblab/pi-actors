@@ -58,12 +58,13 @@ function exactFit(document: (payload: string) => Record<string, unknown>): numbe
 
 import type { RegisteredTool } from "../lib/config.ts";
 import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
-import { createActiveSkillRecipeContext, RUNTIME_OWNED_RECIPE_INPUT_NAMES } from "../lib/recipes-references.ts";
+import { createActiveSkillRecipeContext, readResolvedRecipeConfig, RUNTIME_OWNED_RECIPE_INPUT_NAMES } from "../lib/recipes-references.ts";
 import * as Limits from "../lib/limits.ts";
 import { executeRegisterTool } from "../lib/registry.ts";
 import { createRegisterToolDefinition } from "../lib/tools-register.ts";
 import { createAutoToolsRuntime } from "../lib/runtime.ts";
 import { renderYamlMetadata } from "../lib/tools-response.ts";
+import { mutationLockPath } from "../lib/file-state.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -1724,6 +1725,325 @@ test("AX registration receipt budgets whole argument groups, prioritizes warning
       activation_boundary: "session_activation_unverified", required_args: [], optional_args: [], next: { tool: "inspect", target: "tool:host_receipt", view: "status" } });
     assert.deepEqual(outcome.result.details.required_args, []); assert.deepEqual(outcome.result.details.next_actions, ["inspect target=tool:host_receipt view=status"]);
   } finally { await h.cleanup(); }
+});
+
+test("Retained creation leaves same-named exposed tools and every host port untouched", async () => {
+  for (const async of [false, true]) {
+    const h = await createHarness();
+    try {
+      await executeRegisterTool({ name: "remember", description: "Existing tool", template: "echo exposed" }, {}, h.deps);
+      h.deps.setActiveTools(["read", "remember"]);
+      const existing = h.tools.get("remember"), before = await readFile(join(h.root, "remember.json"), "utf8");
+      const denied = (): never => { throw Error("Retention must not access host or tool-map ports"); };
+      const result = await executeRegisterTool({ name: "remember", description: "Retained capability", template: "echo {text}", async, expose: false }, {}, {
+        ...h.deps, getTools: denied, getActiveTools: denied, setActiveTools: denied, registerRuntimeTool: denied, notify: denied,
+      });
+      const path = join(h.root, "library", "remember.json");
+      assert.equal(result.details.kind, "retained_recipe");
+      assert.equal(result.details.recipe, path);
+      assert.equal(result.details.activation, "not_requested");
+      assert.equal(result.details.persisted, true);
+      assert.equal(result.details.async, async);
+      for (const key of ["callable_now", "active_tool", "host_registered", "registry_active"]) assert.equal(Object.hasOwn(result.details, key), false);
+      assert.deepEqual(result.details.required_args, ["text"]);
+      assert.deepEqual(result.details.optional_args, async ? ["run_id", "transport_context"] : []);
+      assert.deepEqual(result.details.next_actions, ["inspect target=recipes view=summary verbose=true"]);
+      const document = registryYaml(result.content[0].text);
+      assert.equal(document.kind, "retained_recipe");
+      assert.equal(document.result, "retained");
+      assert.equal(document.activation, "not_requested");
+      assert.equal(document.recipe, path);
+      assert.equal(Object.hasOwn(document, "callable_now"), false);
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")), {
+        description: "Retained capability", template: "echo {text}", async,
+      });
+      assert.equal(await readFile(join(h.root, "remember.json"), "utf8"), before);
+      assert.equal(h.tools.get("remember"), existing);
+      assert.deepEqual(h.activeTools(), ["read", "remember"]);
+      assert.equal(existsSync(join(h.root, ".usage")), false);
+    } finally { await h.cleanup(); }
+  }
+});
+
+test("Retained from preserves compact delegation and source-owned origins", async () => {
+  const h = await createHarness();
+  const skill = join(h.root, "..", "sample");
+  try {
+    await mkdir(join(skill, "recipes"), { recursive: true });
+    await writeFile(join(skill, "SKILL.md"), "---\nname: sample\ndescription: Test\n---\n");
+    await writeFile(join(skill, "recipes", "task.json"), JSON.stringify({
+      async: true, description: "Source", args: ["text:string"], template: "echo {text} {recipe_dir} {skill_dir}",
+    }));
+    const context = { recipeResolutionContext: createRecipeResolutionContext("retained", dirname(h.root),
+      createActiveSkillRecipeContext([{ name: "sample", baseDir: skill }])) };
+    const result = await executeRegisterTool({ name: "saved", from: "sample/task", defaults: { text: "value" }, expose: false }, context, h.deps);
+    const path = join(h.root, "library", "saved.json");
+    assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { template: "sample/task", defaults: { text: "value" } });
+    const effective = readResolvedRecipeConfig(path, [], { skillContext: context.recipeResolutionContext.activeSkills })!;
+    assert.equal(effective.async, true);
+    assert.ok(JSON.stringify(effective.template).includes(JSON.stringify(skill).slice(1, -1)));
+    assert.ok(JSON.stringify(effective.template).includes(JSON.stringify(join(skill, "recipes")).slice(1, -1)));
+    assert.equal(result.details.async, true);
+    assert.deepEqual(h.runtimeRegistered, []);
+  } finally { await h.cleanup(); }
+});
+
+test("Retained preflight refuses unsupported modes, invalid input and oversized content before storage", async () => {
+  const cases = [
+    { expose: false, template: "echo", description: "Missing name" },
+    { name: "saved", expose: "false", template: "echo", description: "Wrong type" },
+    { name: "saved", expose: false, update: true, template: "echo", description: "Update" },
+    { name: "saved", expose: false, template: null },
+    { name: "saved", expose: false, template: "" },
+    { name: "saved", expose: false, draft: "/unread/draft.json" },
+    { name: "saved", expose: false, description: "Missing source" },
+    { name: "saved", expose: false, template: "echo" },
+    { name: "saved", expose: false, description: "Too large", template: "echo " + "x".repeat(1024 * 1024) },
+  ];
+  for (const input of cases) {
+    const h = await createHarness();
+    try {
+      await assert.rejects(executeRegisterTool(input, {}, h.deps));
+      assert.equal(existsSync(join(h.root, "library")), false);
+      assert.deepEqual(h.runtimeRegistered, []);
+      assert.deepEqual([...h.tools.keys()], []);
+    } finally { await h.cleanup(); }
+  }
+  const h = await createHarness();
+  try {
+    const draft = join(h.root, "drafts", "source.json");
+    await mkdir(dirname(draft), { recursive: true });
+    await writeFile(draft, JSON.stringify({ template: "echo draft" }));
+    await assert.rejects(executeRegisterTool({ name: "saved", from: draft, expose: false }, {}, h.deps), /disposable draft/);
+    assert.equal(existsSync(join(h.root, "library")), false);
+    assert.equal(await readFile(draft, "utf8"), JSON.stringify({ template: "echo draft" }));
+  } finally { await h.cleanup(); }
+});
+
+test("Retained direct draft delegation is refused in authored template graphs as well as from", async () => {
+  const h = await createHarness();
+  const draft = join(h.root, "drafts", "source.json");
+  try {
+    await mkdir(dirname(draft), { recursive: true });
+    await writeFile(draft, JSON.stringify({ template: "echo draft" }));
+    for (const template of [draft, "../drafts/source.json", [draft], [{ template: draft, timeout: 1000 }]]) {
+      await assert.rejects(executeRegisterTool({ name: "saved", description: "Draft dependency", template, expose: false }, {}, h.deps), /disposable draft/);
+      assert.equal(existsSync(join(h.root, "library")), false);
+    }
+    assert.equal(await readFile(draft, "utf8"), JSON.stringify({ template: "echo draft" }));
+    const stable = join(dirname(h.root), "stable.json");
+    await writeFile(stable, JSON.stringify({ template: "echo stable" }));
+    const saved = await executeRegisterTool({ name: "stable_graph", description: "Stable delegation",
+      template: [stable, { template: "echo final" }], expose: false }, {}, h.deps);
+    assert.equal(saved.details.kind, "retained_recipe");
+    assert.deepEqual(h.runtimeRegistered, []);
+  } finally { await h.cleanup(); }
+});
+
+test("Retained root-release failure reports uncertain effects and preserves the exact published cause", async t => {
+  const h = await createHarness();
+  const path = join(h.root, "library", "saved.json"), rootLock = mutationLockPath(h.root);
+  const original = fs.writeFileSync, cause = Object.freeze({ private: "ROOT_RELEASE_SENTINEL" });
+  let injected = false;
+  try {
+    t.mock.method(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
+      if (String(args[0]).startsWith(rootLock + ".reclaim.") && String(args[0]).endsWith("owner.json") && existsSync(path)) {
+        injected = true; throw cause;
+      }
+      return Reflect.apply(original, fs, args);
+    });
+    syncBuiltinESMExports();
+    let failure: unknown;
+    try { await executeRegisterTool({ name: "saved", description: "Release failure", template: "echo saved", expose: false }, {}, h.deps); }
+    catch (error) { failure = error; }
+    assert.equal(injected, true);
+    assert.ok(failure instanceof Error);
+    assert.equal(failure.cause, cause);
+    assert.match(failure.message, /effects.*unknown/);
+    assert.equal(registryYaml(failure.message).operation, "retain");
+    assert.equal(failure.message.includes("ROOT_RELEASE_SENTINEL"), false);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).template, "echo saved");
+    assert.deepEqual(h.runtimeRegistered, []);
+  } finally {
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    // The intentionally failed original lock release is not repaired or guessed absent by the fixture.
+    t.diagnostic(`Controlled retained root-release fixture retained: ${h.root}; no native closure claim`);
+  }
+});
+
+test("Retained duplicate stems and publication failures preserve existing and published files", async t => {
+  for (const extension of ["json", "md"]) {
+    const h = await createHarness();
+    try {
+      const library = join(h.root, "library");
+      await mkdir(library, { recursive: true });
+      const path = join(library, `saved.${extension}`);
+      await writeFile(path, "existing");
+      await assert.rejects(executeRegisterTool({ name: "saved", template: "echo new", description: "New", expose: false }, {}, h.deps), /already exists/);
+      assert.equal(await readFile(path, "utf8"), "existing");
+      assert.deepEqual(h.runtimeRegistered, []);
+    } finally { await h.cleanup(); }
+  }
+  for (const published of [false, true]) {
+    const h = await createHarness();
+    const original = fs.linkSync, cause = Object.freeze({ published });
+    try {
+      t.mock.method(fs, "linkSync", (...args: Parameters<typeof fs.linkSync>) => {
+        if (published) Reflect.apply(original, fs, args);
+        throw cause;
+      });
+      syncBuiltinESMExports();
+      let failure: unknown;
+      try { await executeRegisterTool({ name: "saved", template: "echo new", description: "New", expose: false }, {}, h.deps); }
+      catch (error) { failure = error; }
+      assert.ok(failure instanceof Error);
+      assert.equal(failure.cause, cause);
+      assert.match(failure.message, /effects.*unknown/);
+      const path = join(h.root, "library", "saved.json");
+      assert.equal(existsSync(path), published);
+      if (published) assert.equal(JSON.parse(await readFile(path, "utf8")).template, "echo new");
+      assert.deepEqual(h.runtimeRegistered, []);
+    } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await h.cleanup(); }
+  }
+});
+
+test("Retained receipts omit whole oversized argument groups and never echo authored defaults", async () => {
+  const h = await createHarness();
+  const names = Array.from({ length: 1000 }, (_, index) => `argument_with_long_name_${index}`);
+  try {
+    const result = await executeRegisterTool({ name: "bounded", description: "Bounded receipt", expose: false,
+      template: "echo {secret_arg} " + names.map(name => `{${name}}`).join(" "),
+      defaults: { secret_arg: "PRIVATE_DEFAULT_SENTINEL" },
+    }, {}, h.deps);
+    const text = result.content[0].text, document = registryYaml(text);
+    assert.ok(Buffer.byteLength(text) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
+    assert.equal(document.required_args, "[omitted]");
+    assert.equal(document.required_args_omission.total, names.length);
+    assert.deepEqual(result.details.required_args, names);
+    assert.deepEqual(result.details.optional_args, ["secret_arg"]);
+    assert.equal(document.recipe, join(h.root, "library", "bounded.json"));
+    assert.equal((text + JSON.stringify(result.details)).includes("PRIVATE_DEFAULT_SENTINEL"), false);
+  } finally { await h.cleanup(); }
+});
+
+test("Retained mode passes through the actual SDK Boolean schema without activating a tool", async () => {
+  const h = await createHarness();
+  try {
+    const definition = createRegisterToolDefinition(h.deps);
+    const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
+    const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import;
+    const { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href);
+    let calls = 0;
+    const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => {
+      calls++; return definition.execute(...args, {});
+    } };
+    const dispatch = (arguments_: Record<string, unknown>) => {
+      const call = { type: "toolCall", id: "retained-sdk", name: "register_tool", arguments: arguments_ };
+      return runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] },
+        assistantMessage: { role: "assistant", content: [call] } });
+    };
+    const accepted = await dispatch({ name: "sdk_retained", expose: false, description: "SDK retained", template: "echo" });
+    assert.equal(accepted.isError, false);
+    assert.equal(accepted.result.details.kind, "retained_recipe");
+    assert.equal(accepted.result.details.activation, "not_requested");
+    assert.equal(calls, 1);
+    for (const expose of ["not-a-boolean", {}]) {
+      const rejected = await dispatch({ name: "sdk_invalid", expose, description: "Invalid", template: "echo" });
+      assert.equal(rejected.isError, true);
+      assert.equal(calls, 1);
+    }
+    assert.deepEqual(h.runtimeRegistered, []);
+    assert.equal(existsSync(join(h.root, "library", "sdk_invalid.json")), false);
+  } finally { await h.cleanup(); }
+});
+
+test("Retained storage refuses symlink roots and leaves foreign content untouched", async () => {
+  for (const slot of ["root", "library", "target"] as const) {
+    const h = await createHarness();
+    const foreign = join(dirname(h.root), "foreign");
+    try {
+      await mkdir(foreign, { recursive: true });
+      await writeFile(join(foreign, "keep.json"), "foreign");
+      if (slot === "root") fs.symlinkSync(foreign, h.root, process.platform === "win32" ? "junction" : "dir");
+      else {
+        await mkdir(h.root);
+        if (slot === "library") fs.symlinkSync(foreign, join(h.root, "library"), process.platform === "win32" ? "junction" : "dir");
+        else {
+          await mkdir(join(h.root, "library"));
+          fs.symlinkSync(foreign, join(h.root, "library", "saved.json"), process.platform === "win32" ? "junction" : "dir");
+        }
+      }
+      await assert.rejects(executeRegisterTool({ name: "saved", description: "New", template: "echo", expose: false }, {}, h.deps));
+      assert.deepEqual(fs.readdirSync(foreign), ["keep.json"]);
+      assert.equal(await readFile(join(foreign, "keep.json"), "utf8"), "foreign");
+      assert.deepEqual(h.runtimeRegistered, []);
+    } finally { await h.cleanup(); }
+  }
+});
+
+test("Retained commit rechecks library identity and cannot clobber a late competing file", async t => {
+  for (const changed of ["directory", "competitor", "markdown"] as const) {
+    const h = await createHarness();
+    const library = join(h.root, "library"), path = join(library, "saved.json");
+    try {
+      let injected = false;
+      if (changed === "directory") {
+        const original = fs.writeFileSync;
+        t.mock.method(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
+          const result = Reflect.apply(original, fs, args);
+          if (!injected && String(args[0]).startsWith(path + ".") && String(args[0]).endsWith(".tmp")) {
+            injected = true; fs.renameSync(library, join(h.root, "original-library")); fs.mkdirSync(library);
+          }
+          return result;
+        });
+      } else {
+        const original = fs.linkSync;
+        t.mock.method(fs, "linkSync", (...args: Parameters<typeof fs.linkSync>) => {
+          if (String(args[1]) === path && !injected) {
+            injected = true; fs.writeFileSync(changed === "markdown" ? path.replace(/\.json$/u, ".md") : path, "competitor", { flag: "wx" });
+          }
+          return Reflect.apply(original, fs, args);
+        });
+      }
+      syncBuiltinESMExports();
+      await assert.rejects(executeRegisterTool({ name: "saved", description: "New", template: "echo new", expose: false }, {}, h.deps), /effects.*unknown/);
+      assert.equal(injected, true);
+      if (changed === "directory") assert.equal(existsSync(path), false);
+      else if (changed === "markdown") {
+        assert.equal(await readFile(path.replace(/\.json$/u, ".md"), "utf8"), "competitor");
+        assert.equal(JSON.parse(await readFile(path, "utf8")).template, "echo new");
+      } else assert.equal(await readFile(path, "utf8"), "competitor");
+      assert.deepEqual(h.runtimeRegistered, []);
+    } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await h.cleanup(); }
+  }
+});
+
+test("Sibling retained creators have one winner without host registration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-retained-process-"));
+  const module = new URL("../lib/registry.ts", import.meta.url).href;
+  const source = (template: string) => `
+    import { join } from "node:path";
+    const { executeRegisterTool } = await import(${JSON.stringify(module)});
+    const root = ${JSON.stringify(root)};
+    const denied = () => { throw Error("No host or tool map"); };
+    const deps = { configPath: join(root, "config.json"), recipeRoot: root,
+      getToolNameBlocker: () => undefined, reservedToolNames: new Set(),
+      getTools: denied, getActiveTools: denied, setActiveTools: denied, notify: denied, registerRuntimeTool: denied };
+    try { await executeRegisterTool(${JSON.stringify({ name: "shared", template, description: "Retained", expose: false })}, {}, deps); console.log("retained"); }
+    catch (error) { console.log("rejected:" + error.message); }
+  `;
+  try {
+    const results = await Promise.all(["echo first", "echo second"].map(template => execFileAsync(process.execPath,
+      ["--experimental-strip-types", "--input-type=module", "-e", source(template)])));
+    const outputs = results.map(result => result.stdout.trim());
+    assert.equal(outputs.filter(value => value === "retained").length, 1);
+    assert.equal(outputs.filter(value => /already exists/.test(value)).length, 1);
+    const saved = JSON.parse(await readFile(join(root, "library", "shared.json"), "utf8"));
+    assert.ok(["echo first", "echo second"].includes(saved.template));
+    assert.equal(existsSync(join(root, "shared.json")), false);
+    assert.equal(existsSync(join(root, ".usage")), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("Registry mutations register template-backed tools", async () => {

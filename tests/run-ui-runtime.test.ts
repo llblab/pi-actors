@@ -337,7 +337,7 @@ test("Candidate epoch property: only pinned lifetimes capture or ACK; saved pack
         }
         const proposal = harness.runtime.onTurnEnd(completedBoundary(), first.context);
         assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_stream, undefined);
-        assert.equal(pending()!.result_layout, "completion_yaml_files_v1");
+        assert.equal(pending()!.result_layout, "completion_yaml_files_v2");
         held();
         if (scenario === "capture-return") {
           assert.equal(proposal, undefined); assert.equal(harness.sendAttempts(), 0);
@@ -397,7 +397,7 @@ test("Candidate generation property: captured data cannot handle a replacement g
   try {
     const entry = harness.runtime.onTurnEnd(completedBoundary(), active.context)!.entries![0] as any;
     const captured = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
-    assert.equal(captured.result_layout, "completion_yaml_files_v1");
+    assert.equal(captured.result_layout, "completion_yaml_files_v2");
     assert.equal(captured.members[0].run_instance_id, oldGeneration);
     await writeTerminalRun(ownerId, run, newGeneration);
     assert.equal(JSON.parse(await readFile(join(directory, "run.json"), "utf8")).run_instance_id, newGeneration);
@@ -508,7 +508,7 @@ test("Candidate composition property: private extension port and passive supervi
     const directory = await writeTerminalRun(ownerId, ownerId, "candidate-extension-generation");
     const entry = extension.onTurnEnd(completedBoundary(), first.context)!.entries![0] as any;
     const pending = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
-    assert.equal(captures, 1); assert.equal(pending.result_layout, "completion_yaml_files_v1");
+    assert.equal(captures, 1); assert.equal(pending.result_layout, "completion_yaml_files_v2");
     await extension.onSessionStart(replacement.context);
     const wrapper = { ...replacement.context, isIdle: () => true };
     const currentObserver = extension.getRunAdmissionObserver(wrapper)!;
@@ -1106,8 +1106,9 @@ test("Core YAML native renderer keeps service-only and explicit body partitions 
   let renderer: any;
   registerRunCompletionRenderer({ registerMessageRenderer: (_type: string, value: unknown) => { renderer = value; } } as never);
   const theme = { fg: (_color: string, text: string) => text };
-  for (const parts of [undefined, [], [{ body: "" }], [{ body: " \n" }], [{ marker: "WARNING_ONLY" }]]) {
-    const encoded = encodeCompletionYamlCarrier({ batchId: "HIDDEN_BATCH_ID", records: parts === undefined ? [] : [{ metadata: { index: 0, run: "r", state: "done" }, parts }], service: { omitted_results: 9, omitted_states: { killed: 2 }, inventory_warning: "NO_INVENTORY" } });
+  for (const header_layout of [undefined, "rooted_files_v1", "rooted_files_v2"]) for (const parts of [undefined, [], [{ body: "" }], [{ body: " \n" }], [{ marker: "WARNING_ONLY" }]]) {
+    const localSingleton = header_layout === "rooted_files_v2";
+    const encoded = encodeCompletionYamlCarrier({ batchId: "HIDDEN_BATCH_ID", records: parts === undefined ? [] : [{ metadata: { ...(localSingleton ? {} : { index: 0 }), run: "r", state: "done" }, parts }], service: { ...(header_layout ? { header_layout } : {}), omitted_results: 9, omitted_states: { killed: 2 }, inventory_warning: "NO_INVENTORY" } });
     assert.equal(encoded.state, "available"); if (encoded.state !== "available") continue;
     const message = { content: encoded.text, details: { pi_actors_presentation: { format: "completion_yaml_core_v1", content_sha256: createHash("sha256").update(encoded.text).digest("hex") } } };
     for (const width of [24, 52, 90, 140]) {
@@ -1115,7 +1116,7 @@ test("Core YAML native renderer keeps service-only and explicit body partitions 
       const lines = component.render(width).map(stripTerminalSequences), text = lines.join("\n");
       assert.ok(lines.every((line: string) => visibleWidth(line) <= width && !/[\r\n]/u.test(line)));
       assert.ok(text.includes("omitted_results: 9")); assert.ok(text.includes("NO_INVENTORY"));
-      assert.equal(text.includes("index:"), parts !== undefined);
+      assert.equal(text.includes("index:"), parts !== undefined && !localSingleton);
       assert.equal(text.includes("---"), !!parts?.length);
       assert.equal(text.includes("WARNING_ONLY"), !!parts?.some(part => "marker" in part));
       assert.doesNotMatch(text, /HIDDEN_BATCH_ID|_completion|Run Batch|Run result/u);
@@ -1325,9 +1326,9 @@ test("Fresh UI completion admissions select AX while all historical formats reco
           const admitted = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
           assert.equal(admitted.presentation_format, "ax_records"); assert.equal(admitted.excerpt_format, undefined);
           assert.equal(admitted.members.length, 1); assert.equal(admitted.members[0].run, freshRun); assert.equal(admitted.members[0].run_instance_id, freshGeneration);
-          assert.equal(admitted.result_layout, "completion_yaml_files_v1"); assert.equal(admitted.single_result, undefined);
+          assert.equal(admitted.result_layout, "completion_yaml_files_v2"); assert.equal(admitted.single_result, undefined);
           const header = freshCoreHeaders(fresh.content)[0];
-          assert.deepEqual([header.index, header.run, header.state], [0, freshRun, "done"]);
+          assert.deepEqual([header.index, header.run, header.state], [undefined, freshRun, "done"]);
           assert.equal(header._completion.codec, "completion_yaml_core_v1"); assert.equal(header._completion.batch_id, admitted.batch_id);
           assert.doesNotMatch(fresh.content, /^- completions:|^- members:|^\s*- #0:/mu);
           assert.equal((harness.runtime.onTurnEnd(completedBoundary(), active.context)!.entries![0] as any).content, fresh.content);
@@ -1552,7 +1553,7 @@ test("uncertain boundary acceptance fails closed instead of resending or marking
     { ...entry, content: `${entry.content}\nconflicting output`, id: "conflict", parentId: null },
     { type: "custom", id: "missing-parent", parentId: "unavailable" },
     { ...entry, details: undefined, content: entry.content + "\ntrailing data", id: "broken-record-marker", parentId: null },
-    { ...entry, details: undefined, content: entry.content.replace(/^index: 0$/mu, "index: 1"), id: "broken-record-heading", parentId: null },
+    { ...entry, details: undefined, content: entry.content.replace(/^run: /mu, "index: 0\nrun: "), id: "broken-record-heading", parentId: null },
     { ...entry, details: undefined, content: entry.content.replace(`  batch_id: ${JSON.stringify(freshCoreHeaders(entry.content)[0]._completion.batch_id)}`, ""), id: "missing-record-marker", parentId: null },
   ]) {
     active.setSessionBranch([sessionEntry]);

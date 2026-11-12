@@ -69,7 +69,7 @@ export interface RunCompletionBatch {
   /** Retained singleton capture; absence preserves older indexed bytes. Never a new-capture selector. */
   readonly single_result?: true;
   /** Captured record-list shape; no public format/version choice or source authority. */
-  readonly result_layout?: "records" | "run_headers" | "headings" | "headings_flat_omissions" | "headings_outcomes" | "headings_shared_results" | "headings_shared_kinds" | "frontmatter_v1" | "frontmatter_v2" | "completion_yaml_core_v1" | "completion_yaml_files_v1";
+  readonly result_layout?: "records" | "run_headers" | "headings" | "headings_flat_omissions" | "headings_outcomes" | "headings_shared_results" | "headings_shared_kinds" | "frontmatter_v1" | "frontmatter_v2" | "completion_yaml_core_v1" | "completion_yaml_files_v1" | "completion_yaml_files_v2";
   /** Immutable scope/order/range data, not a caller-selected format or allocation authority. */
   readonly numbering?: RunCompletionNumbering;
   /** Formatting version/data only; no recipient ownership, read or publication capability. */
@@ -467,8 +467,12 @@ function isFrontmatterCompletionLayout(layout: unknown): boolean {
   return layout === "frontmatter_v1" || layout === "frontmatter_v2";
 }
 
+function isRootedCompletionLayout(layout: unknown): boolean {
+  return layout === "completion_yaml_files_v1" || layout === "completion_yaml_files_v2";
+}
+
 function isYamlCompletionLayout(layout: unknown): boolean {
-  return layout === "completion_yaml_core_v1" || layout === "completion_yaml_files_v1";
+  return layout === "completion_yaml_core_v1" || isRootedCompletionLayout(layout);
 }
 
 function isSharedCompletionLayout(layout: unknown): boolean {
@@ -895,7 +899,7 @@ export function requestRunCompletionStream(input: { tempDir: string; ownerId: st
 }
 
 export function admitRunCompletionBatch(input: AdmitRunCompletionBatchInput): RunCompletionBatch {
-  return captureCompletionBatch(input, false, "completion_yaml_files_v1");
+  return captureCompletionBatch(input, false, "completion_yaml_files_v2");
 }
 
 /** Kernel-only opt-in; ordinary Pi capture stays fenced until session/lifecycle integration is admitted. */
@@ -905,10 +909,10 @@ export function captureRunCompletionStreamBatch(input: AdmitRunCompletionBatchIn
 
 /** Private ordinary candidate composition; stream capture retains its separately gated codec. */
 export function captureRunCompletionYamlCandidateBatch(input: AdmitRunCompletionBatchInput): RunCompletionBatch {
-  return captureCompletionBatch(input, false, "completion_yaml_files_v1");
+  return captureCompletionBatch(input, false, "completion_yaml_files_v2");
 }
 
-function captureCompletionBatch(input: AdmitRunCompletionBatchInput, numbered: boolean, layout: "frontmatter_v2" | "completion_yaml_core_v1" | "completion_yaml_files_v1" = "frontmatter_v2"): RunCompletionBatch {
+function captureCompletionBatch(input: AdmitRunCompletionBatchInput, numbered: boolean, layout: "frontmatter_v2" | "completion_yaml_core_v1" | "completion_yaml_files_v1" | "completion_yaml_files_v2" = "frontmatter_v2"): RunCompletionBatch {
   const now = (input.now ?? new Date()).toISOString();
   if (Object.hasOwn(input, "presentationFormat")) throw new Error("Completion presentation selection is not supported; new batches use AX.");
   if (Object.hasOwn(input, "numbering")) throw new Error("Completion numbering is assigned only by journal capture");
@@ -1869,12 +1873,13 @@ type PreparedCompletionYamlProjection =
 function prepareCompletionYamlProjection(safe: RunCompletionBatch, candidates: readonly { row: CompletionRow; location?: CompletionPiece }[],
   references: ReadonlySet<number>, ordered: readonly RunCompletionBatchMember[]): PreparedCompletionYamlProjection {
   const packet: CompletionYamlPacket = { batchId: safe.batch_id, records: [] };
-  const rooted = safe.result_layout === "completion_yaml_files_v1";
+  const rooted = isRootedCompletionLayout(safe.result_layout);
+  const localSingleton = safe.result_layout === "completion_yaml_files_v2" && !safe.numbering && candidates.length === 1;
   if (!safe.batch_id.isWellFormed()) return { state: "unsupported" };
   for (const [index, { row, location }] of candidates.entries()) {
     const member = ordered[index]!;
     const displayed = safe.numbering ? safe.numbering.kind === "stream" ? safe.numbering.first_index + index : "?" : index;
-    const metadata: Record<string, CompletionYamlData> = { index: displayed };
+    const metadata: Record<string, CompletionYamlData> = localSingleton ? {} : { index: displayed };
     for (const piece of row.pieces) {
       if (piece.block) continue;
       if (!piece.field) return { state: "unsupported" };
@@ -1917,7 +1922,9 @@ function prepareCompletionYamlProjection(safe: RunCompletionBatch, candidates: r
     }
     packet.records.push({ metadata, parts });
   }
-  const service: Record<string, CompletionYamlData> = rooted ? { header_layout: "rooted_files_v1" } : {};
+  const service: Record<string, CompletionYamlData> = rooted ? {
+    header_layout: safe.result_layout === "completion_yaml_files_v2" ? "rooted_files_v2" : "rooted_files_v1",
+  } : {};
   const omitted = safe.members.length - candidates.length;
   if (omitted) {
     service.omitted_results = omitted;
@@ -2349,7 +2356,7 @@ export function readRunCompletionPresentation(content: string, value: unknown): 
         !completionYamlKeys(hint, ["format", "content_sha256"]) || hint.format !== completionYamlCodec ||
         hint.content_sha256 !== createHash("sha256").update(content).digest("hex")) return full;
     const segments: NonNullable<RunCompletionPresentationView["segments"]>[number][] = [];
-    const rooted = core.packet.service?.header_layout === "rooted_files_v1";
+    const rooted = core.packet.service?.header_layout === "rooted_files_v1" || core.packet.service?.header_layout === "rooted_files_v2";
     const facts = Object.fromEntries(Object.entries(core.packet.service ?? {}).filter(([key]) => key !== "header_layout"));
     for (const [index, record] of core.packet.records.entries()) {
       if (index) segments.push({ kind: "separator", text: "\n" });
@@ -2581,6 +2588,8 @@ export function encodeCompletionYamlCarrier(input: unknown): { state: "available
       typeof packet.batchId !== "string" || !packet.batchId.length || !Array.isArray(packet.records) || packet.records.length > 64 ||
       (Object.hasOwn(packet, "service") && (!completionYamlMapping(packet.service) || !Object.keys(packet.service).length)) ||
       (!packet.records.length && !Object.hasOwn(packet, "service"))) return unavailable;
+  const localSingleton = packet.records.length === 1 && completionYamlMapping(packet.service) &&
+    packet.service.header_layout === "rooted_files_v2" && !Object.hasOwn(packet.service, "numbering");
   const rows: string[] = [];
   for (let index = 0; index < Math.max(1, packet.records.length); index++) {
     const row: CompletionYamlData | undefined = packet.records[index];
@@ -2596,13 +2605,15 @@ export function encodeCompletionYamlCarrier(input: unknown): { state: "available
       if (!completionYamlMapping(row) || !completionYamlKeys(row, ["metadata", "parts"]) ||
           !completionYamlMapping(row.metadata) || !Array.isArray(row.parts)) return unavailable;
       const meta = row.metadata;
-      if (!(meta.index === "?" || (typeof meta.index === "number" && Number.isSafeInteger(meta.index) && meta.index >= 0)) ||
+      const validIndex = localSingleton ? !Object.hasOwn(meta, "index")
+        : meta.index === "?" || (typeof meta.index === "number" && Number.isSafeInteger(meta.index) && meta.index >= 0);
+      if (!validIndex ||
           typeof meta.run !== "string" || !meta.run.length || typeof meta.state !== "string" || !meta.state.length ||
           (Object.hasOwn(meta, "kind") && meta.kind !== "primary" && meta.kind !== "diagnostic") ||
           Object.hasOwn(meta, completionYamlServiceKey) ||
           // JS enumerates array-index keys before semantic core fields; do not silently reorder the header.
           Object.keys(meta).some(key => /^(0|[1-9]\d*)$/u.test(key) && Number(key) < 4294967295)) return unavailable;
-      for (const key of ["index", "run", "state", ...(Object.hasOwn(meta, "kind") ? ["kind"] : []),
+      for (const key of [...(localSingleton ? [] : ["index"]), "run", "state", ...(Object.hasOwn(meta, "kind") ? ["kind"] : []),
         ...Object.keys(meta).filter(key => !["index", "run", "state", "kind"].includes(key))]) {
         Object.defineProperty(header, key, { value: meta[key]!, enumerable: true });
       }

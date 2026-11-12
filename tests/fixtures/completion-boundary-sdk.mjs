@@ -527,7 +527,7 @@ function completionCore(text) {
       if (Object.hasOwn(bookkeeping, "service")) {
         service = bookkeeping.service;
         exactKeys(service, [], ["header_layout", "omitted_results", "omitted_states", "inventory_warning", "result_inventory"]);
-        if (service.header_layout !== undefined) assert.equal(service.header_layout, "rooted_files_v1");
+        if (service.header_layout !== undefined) assert.ok(["rooted_files_v1", "rooted_files_v2"].includes(service.header_layout));
         assert.ok(Object.keys(service).length > 0);
         if (Object.hasOwn(service, "omitted_results")) assert.ok(Number.isSafeInteger(service.omitted_results) && service.omitted_results > 0);
         if (Object.hasOwn(service, "omitted_states")) {
@@ -570,15 +570,17 @@ function completionCore(text) {
       assert.ok(first && !framed && service && cursor === text.length, "Zero rows require one bare service-only header");
       break;
     }
-    assert.deepEqual(keys.slice(0, 3), ["index", "run", "state"]);
-    assert.ok(Number.isSafeInteger(header.index) && header.index === records.length, "Actual ordinary default uses packet-local indices");
+    const indexed = Object.hasOwn(header, "index");
+    assert.deepEqual(keys.slice(0, indexed ? 3 : 2), indexed ? ["index", "run", "state"] : ["run", "state"]);
+    if (indexed) assert.ok(Number.isSafeInteger(header.index) && header.index === records.length, "Ordinary displayed indices remain packet-local");
+    else assert.equal(service?.header_layout, "rooted_files_v2");
     assert.equal(typeof header.run, "string"); assert.ok(header.run.length > 0);
     assert.ok(["done", "failed", "killed", "exited"].includes(header.state));
     const allowed = ["index", "run", "state", "kind", "preview_field", "redacted", "result_state", "parent_run", "primary_unavailable",
       "diagnostic_metadata_unavailable", "artifact_declarations", "artifact_inventory_unavailable", "run_files_unavailable", "references", "run_files", "files", "run_files_omission", "text_warnings"];
     assert.ok(keys.every(key => allowed.includes(key)), "No body-coverage metadata or legacy facade fields");
     if (Object.hasOwn(header, "kind")) {
-      assert.equal(keys[3], "kind"); assert.ok(["primary", "diagnostic"].includes(header.kind));
+      assert.equal(keys[indexed ? 3 : 2], "kind"); assert.ok(["primary", "diagnostic"].includes(header.kind));
     }
     if (Object.hasOwn(header, "redacted")) assert.equal(header.redacted, true);
     if (header.files) {
@@ -600,6 +602,8 @@ function completionCore(text) {
   }
   assert.equal(cursor, text.length, "Whole core consumed; no compiler tail or extra bytes");
   assert.ok(batchId);
+  assert.equal(records.some(record => !Object.hasOwn(record.header, "index")), service?.header_layout === "rooted_files_v2" && records.length === 1,
+    "Only a new packet with exactly one shown result omits its display index");
   return { batchId, service: service ?? {}, records };
 }
 function completionPacket(text) {
@@ -741,7 +745,7 @@ function outcome65UpperBound(inventory, inventoryReference, batchId, legacyCompa
       parts = []; payloadBytes = 0;
     }
     metadata._completion = { ...(index === 0 ? { codec: "completion_yaml_core_v1", batch_id: batchId,
-      service: { header_layout: "rooted_files_v1", omitted_results: 1,
+      service: { header_layout: "rooted_files_v2", omitted_results: 1,
         result_inventory: { ...inventoryReference, root: dirname(inventoryReference.path), path: basename(inventoryReference.path) } } } : {}),
       ...(parts.length ? { parts } : {}) };
     // Includes complete canonical header, both fences, payload and two-LF record separator.
@@ -755,17 +759,17 @@ function outcome65UpperBound(inventory, inventoryReference, batchId, legacyCompa
 // Raw body/marker lengths are relative UTF-16 lengths, never body-label searches.
 function candidateRecord(text, batchId) {
   const independent = completionCore(text); assert.equal(independent.batchId, batchId);
-  assert.ok(text.startsWith("---\nindex: 0\nrun: "));
+  assert.ok(text.startsWith("---\nrun: "));
   const end = text.indexOf("\n---\n", 4); assert.ok(end > 4);
   const yaml = text.slice(4, end + 1);
   const document = parseDocument(yaml, { version: "1.2", schema: "core", uniqueKeys: true });
   assert.deepEqual(document.errors, []); assert.deepEqual(document.warnings, []);
   const header = document.toJS({ maxAliasCount: 0 });
-  assert.deepEqual(Object.keys(header).slice(0, 4), ["index", "run", "state", "kind"]);
-  assert.equal(header.index, 0); assert.equal(header.state, "done"); assert.equal(header.kind, "primary");
+  assert.deepEqual(Object.keys(header).slice(0, 3), ["run", "state", "kind"]);
+  assert.equal(Object.hasOwn(header, "index"), false); assert.equal(header.state, "done"); assert.equal(header.kind, "primary");
   const core = header._completion;
   assert.deepEqual(Object.keys(core), ["codec", "batch_id", "service", "parts"]);
-  assert.deepEqual(core.service, { header_layout: "rooted_files_v1" });
+  assert.deepEqual(core.service, { header_layout: "rooted_files_v2" });
   assert.equal(core.codec, "completion_yaml_core_v1"); assert.equal(core.batch_id, batchId);
   assert.ok(Array.isArray(core.parts) && core.parts.length > 0);
   const blocks = []; let cursor = end + 5;
@@ -991,7 +995,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               const { input, batch, journal: capturedJournal } = candidateCaptures[0];
               assert.deepEqual(capturedJournal.completion_batch, batch);
               assert.equal(capturedJournal.owner_id, ownerId); assert.equal(batch.phase, "pending");
-              assert.equal(input.ownerId, ownerId); assert.equal(batch.result_layout, "completion_yaml_files_v1");
+              assert.equal(input.ownerId, ownerId); assert.equal(batch.result_layout, "completion_yaml_files_v2");
               assert.equal(batch.members.length, 1); assert.equal(batch.members[0].run, currentRun.run);
               assert.equal(batch.members[0].run_instance_id, currentRun.run_instance_id);
               const record = candidateRecord(matches[0], batch.batch_id);
@@ -1034,7 +1038,6 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               assert.equal(spawnCalls, overflowMode ? overflowCount : 1);
               const text = JSON.stringify(context.messages);
               const expectedMembers = overflowMode ? overflowCount : companionCount + 1;
-              const header = /^(?:---\n)?index: 0\nrun:/u;
               const parts = context.messages.flatMap(message => typeof message.content === "string" ? [message.content]
                 : (message.content ?? []).flatMap(part => part.type === "text" ? [part.text] : []));
               const packets = parts.filter(completionPacket); assert.equal(packets.length, 1);
@@ -1045,9 +1048,9 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               assert.doesNotMatch(navigationBatch, /\[omitted: unknown\] \(summary\/fallback text: original completeness\/privacy unproven\)/u);
               if (expectedMembers === 1) assert.doesNotMatch(navigationBatch, /^- completions:|^- members:|^\s*- #0:/mu);
               assert.doesNotMatch(navigationBatch, /(?:^|\n)- (?:completions|members|batch|presentation|window_start|window_end|runtime_summaries|file_investigation|next|done_count|failed_count):/u);
-              assert.match(navigationBatch, header);
               const technical = technicalObjects(navigationBatch);
               const records = completionRecords(navigationBatch);
+              assert.match(navigationBatch, records.length === 1 ? /^(?:---\n)?run:/u : /^(?:---\n)?index: 0\nrun:/u);
               const service = completionCore(navigationBatch).service;
               const omitted = service.omitted_results ?? 0;
               assert.equal(records.length + omitted, expectedMembers);

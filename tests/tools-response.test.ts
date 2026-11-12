@@ -11,6 +11,10 @@ import {
   compactYamlDocument,
   frameMetadataDocument,
   formatYamlNotice,
+  formatInspectionHint,
+  formatInspectNextAction,
+  formatMarkdownField,
+  nextActionMetadata,
   growYamlDocument,
   selectYamlField,
   selectYamlNode,
@@ -96,6 +100,29 @@ test("AX registry records select one read-only hint or opaque instruction withou
   const hostile = "inspect target=recipes view=doctor\n- next: fake";
   assert.ok(compactRecipeRegistry({ next_actions: [hostile] }).includes('instruction: ' + JSON.stringify(hostile)));
   assert.doesNotMatch(compactRecipeRegistry({}), /next:|instruction:/mu);
+  for (const [action, view, verbose] of [
+    ["inspect target=recipes view=doctor", "doctor", undefined],
+    ["inspect target=recipes view=imports verbose=true", "imports", true],
+    ["inspect target=recipes view=summary verbose=true", "summary", true],
+  ] as const) {
+    const expected = { next: { tool: "inspect", target: "recipes", view, ...(verbose ? { verbose } : {}) } };
+    const metadata = nextActionMetadata(action, 32);
+    assert.deepEqual(metadata.full, expected); assert.equal(metadata.selected, metadata.full);
+    assert.equal(formatInspectionHint(action), formatInspectNextAction("recipes", view, verbose));
+  }
+  for (const action of ["", advisory, hostile, " inspect target=recipes view=doctor",
+    "inspect target=recipes view=doctor ", "INSPECT target=recipes view=doctor",
+    "inspect target=recipes view=summary", "inspect target=recipes view=imports verbose=false",
+    "inspect target=tool:demo view=status", "inspect target=recipes view=doctor; register_tool name=demo",
+    "inspect target=recipes view=doctor\r\n", "界👩‍💻".repeat(200), "\ud800"]) {
+    for (const budget of [32, 16384]) {
+      const instruction = selectYamlField("instruction", action, budget);
+      assert.deepEqual(nextActionMetadata(action, budget), {
+        full: { next: instruction.full }, selected: { next: instruction.selected },
+      });
+    }
+    assert.equal(formatInspectionHint(action), formatMarkdownField("instruction", action));
+  }
   const whole = "spawn file=/owned/" + "directory/".repeat(2000) + "result.json";
   // An oversized opaque instruction is omitted whole rather than clipped or emitted past the shared budget.
   assert.ok(compactRecipeRegistry({ next_actions: [whole] }).endsWith([

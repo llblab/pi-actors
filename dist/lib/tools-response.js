@@ -529,16 +529,20 @@ export function compactYamlDocument(value) {
     const text = growYamlDocument(() => value, [], Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
     return `\n${text.replace(/\n$/u, "")}`;
 }
+function recipeInspectionHint(action) {
+    if (action === "inspect target=recipes view=doctor")
+        return { view: "doctor" };
+    if (action === "inspect target=recipes view=imports verbose=true")
+        return { view: "imports", verbose: true };
+    if (action === "inspect target=recipes view=summary verbose=true")
+        return { view: "summary", verbose: true };
+    return undefined;
+}
 /** Only the closed read-only Recipe inspect literals become typed next; other advice stays opaque content. */
 export function nextActionMetadata(action, byteBudget) {
-    const recognized = [
-        ["inspect target=recipes view=doctor", "doctor", false],
-        ["inspect target=recipes view=imports verbose=true", "imports", true],
-        ["inspect target=recipes view=summary verbose=true", "summary", true],
-    ];
-    const match = recognized.find(([literal]) => literal === action);
-    if (match) {
-        const typed = { next: { tool: "inspect", target: "recipes", view: match[1], ...(match[2] ? { verbose: true } : {}) } };
+    const hint = recipeInspectionHint(action);
+    if (hint) {
+        const typed = { next: { tool: "inspect", target: "recipes", ...hint } };
         return { full: typed, selected: typed };
     }
     const instruction = selectYamlField("instruction", action, byteBudget);
@@ -546,13 +550,8 @@ export function nextActionMetadata(action, byteBudget) {
 }
 /** Only these existing read-only inspection hints become action nodes; other advice stays content. */
 export function formatInspectionHint(action) {
-    if (action === "inspect target=recipes view=doctor")
-        return formatInspectNextAction("recipes", "doctor");
-    if (action === "inspect target=recipes view=imports verbose=true")
-        return formatInspectNextAction("recipes", "imports", true);
-    if (action === "inspect target=recipes view=summary verbose=true")
-        return formatInspectNextAction("recipes", "summary", true);
-    return formatMarkdownField("instruction", action);
+    const hint = recipeInspectionHint(action);
+    return hint ? formatInspectNextAction("recipes", hint.view, hint.verbose) : formatMarkdownField("instruction", action);
 }
 export function compactRecipeRegistry(summary) {
     const count = (key, source) => Array.isArray(source) ? source.length : 0;

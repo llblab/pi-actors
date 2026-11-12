@@ -15,7 +15,7 @@ The adopted CI layout has three isolated test jobs on each supported OS: `instal
 
 Each job uses a separate checkout and test-agent state, Node24 and the existing single-worker/preload flags. Package validation (types, Recipe QA, committed build parity and extension import) plus dry-pack runs once per OS on `installed`, not on every shard. Local `npm test` and `npm run validate` remain complete unsharded entrypoints. The reusable workflow must wait for all nine test jobs and the single dependency audit before release publication; one successful shard never substitutes for the full gate. This layout reduces aggregate critical-path pressure, not the cost or correctness obligations of an individual native test.
 
-Simple tools/registration fixtures bind original runner births and actual `close`, then validate canonical success and fresh ESRCH again at deletion. Their joint acceptance phase has one10-second watchdog, replacing the old approximately2-second result/exit polling assumption; this is a fixture allowance, not a product/SDK/workload deadline. Missing post-close results fail promptly; uncertainty retains roots without signals or automatic wait inflation.
+Simple tools/registration and installed-runner fixtures bind original runner births and actual `close`, then validate canonical success and fresh ESRCH again at deletion. Their joint acceptance phase has one10-second watchdog, replacing the old short result/exit polling assumptions; this is a fixture allowance, not a product/SDK/workload deadline. Missing post-close results fail promptly; uncertainty retains roots without signals or automatic wait inflation.
 
 Implementation and native CI acceptance are tracked in BACKLOG until the complete sharded candidate passes.
 

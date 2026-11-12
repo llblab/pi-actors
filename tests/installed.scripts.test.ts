@@ -5056,9 +5056,9 @@ test("packed extension presents explicit steer before its exact completion epoch
          if (completion.details.pi_actors_presentation.format !== "completion_yaml_core_v1") throw Error("fresh packed packet did not use canonical YAML core AX");
          const compact = pi.batchRenderer(completion, { expanded: false, outputPad: 0 }, context.ui.theme).render(90);
          const runLine = compact.findIndex(line => line.startsWith("run: "));
-         const indexLine = compact.findIndex(line => line.trim() === "index: 0");
+         const indexLine = compact.findIndex(line => /^index:/u.test(line.trim()));
          const compactRun = parseDocument(compact[runLine] ?? "", yamlOptions);
-         if (compactRun.errors.length || compactRun.warnings.length || compactRun.get("run") !== "packed-run" || indexLine < 0 || runLine <= indexLine) throw Error("packed singleton is not an index-first YAML record");
+         if (compactRun.errors.length || compactRun.warnings.length || compactRun.get("run") !== "packed-run" || runLine < 0 || indexLine !== -1) throw Error("packed singleton is not an unindexed YAML record");
          if (compact.some(line => /^\\s*- (?:members|#0|completions):/u.test(line)) || compact.some(line => line.trim() === "Run Batch")) throw Error("packed singleton retained a Batch wrapper");
          const id = completion.details.pi_actors_delivery.batch_id;
          if (compact.join("\\n").includes(id)) throw Error("compact TUI leaked routine batch metadata");

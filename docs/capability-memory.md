@@ -18,74 +18,29 @@ The product goal is useful procedural memory with a selective tool interface, no
 
 ## Current Baseline and Its Limits
 
-- `lib/tools-local.ts` awaits synchronous Recipe execution, but an async tool calls `startRun` and returns launch metadata. The eventual Actor result is separate; tool registration does not itself launch an Actor.
-- `lib/async-runs.ts` also permits ordinary non-singleton Recipes without `async: true` through the public `spawn` path. The flag does not divide all capabilities into foreground-only and background-only classes.
-- `lib/tools-spawn.ts` captures inline-template launches as drafts with `async: true`. It does not capture maintained/file Recipe launches through that draft path. Filtering automatic tool promotion to sync alone would exclude this existing capture stream; ordinary foreground commands are not automatically captured by that mechanism.
-- `lib/runtime.ts` discovers the user Recipe root with `defaultTool: true`; `lib/recipes-discovery.ts` exposes valid enabled entries by location, not by sync/async. Active Skill components already demonstrate reusable Recipes without automatic tool exposure.
-- `lib/draft-review.ts` admits only promote/discard decisions. `lib/draft-sleep.ts` derives promotion from unchanged immutable captured Recipe content. Review does not generalize a hard-coded mission into a new parameterized capability.
-- `lib/review-projection.ts` gives automatic reviewers value-free contract shape, risk labels, usage counts, and batch-local content-equality groups. It excludes commands, descriptions, argument names/values, canonical names, and paths. Those observations cannot by themselves establish a capability's purpose, a meaningful semantic name, or future task usefulness.
-- `lib/recipes-usage.ts` records launches and lineage, not successful task completion or the coordinator's acceptance of a useful result. A launch count is not outcome evidence; a command exit code alone would not prove task success either.
+Current user-root discovery exposes valid enabled direct Recipes by location, while active Skill components already provide reusable capabilities without automatic tool exposure. Ordinary registration supports both execution modes, and public `spawn` accepts ordinary non-singleton Recipes without `async: true`; the flag is not a foreground-only restriction. Inline-template `spawn` capture produces async drafts rather than capturing maintained/file Recipe launches, so a sync-only promotion rule would exclude that capture stream.
 
-These are limits on the conclusions the current mechanism supports, not permission to bypass its confidentiality projection or discard its transaction protections.
+Automatic review sees value-free shape, risk labels, launch counts and batch-local content-equality groups, not commands, descriptions, argument names/values, canonical names/paths or accepted outcomes. Its current promote/discard executor preserves captured executable content rather than generalizing a mission. Usage records launches and lineage, not successful task completion. These limits neither authorize bypassing confidentiality nor justify discarding a capability whose usefulness remains unknown.
 
 ## Read-Only Inventory Checkpoint
 
-Retained definitions belong under `~/.pi/agent/recipes/library`; the tool root remains its existing direct `.json`/`.md` files. This separation also fails safely on older hosts whose nonrecursive tool discovery ignores the library directory, unlike an unknown opt-out field that an older host could ignore. No new Recipe field or logical-reference namespace is introduced.
+The retained library stays outside nonrecursive tool-root discovery, including on older hosts. Directory separation fails safely where an unknown Recipe opt-out field could be ignored. No new Recipe field or logical-reference namespace is introduced.
 
-Use the same management surface:
-
-```text
-inspect target=recipes view=summary
-inspect target=recipes view=summary verbose=true
-```
-
-Compact output adds `retained` separately from root `active` candidates and drafts. Verbose/details contains `retained` rows with exact file paths, execution mode when the definition resolves, invalid/disabled state and diagnostics, plus `retained_diagnostics`. Root and retained definitions resolve in the same active Skill context. This read does not create directories, mutate Recipes/usage, register tools, or launch Actors. A stored row is not evidence of review, a callable tool, or a running Actor. Empty/missing library is an empty inventory, not an instruction to initialize one.
-
-A valid enabled row's exact file path can be reused through existing `spawn recipe=<path>` with its required caller values, or explicitly specialized through existing `register_tool from=<path>`. Invalid/disabled entries remain visible for diagnosis, not recommended for execution. Running instances remain under `inspect target=runtime view=runs` and `run:<id>`; tool activation/schema remains under `tool:<name>`. The inventory is not an alternate Run or activation registry.
-
-Use the explicit retention operation below rather than hand-populating the live registry or moving existing tools. Source/packed acceptance is separate from reloading an already running host; a loaded older tool schema does not acquire the new input automatically.
+Use `inspect target=recipes view=summary` and `verbose=true` for retained paths and diagnostics. The [inspection contract](./inspection.md) owns views and coverage; the [tool registry](./tool-registry.md#retain-a-new-capability-without-tool-exposure) owns the current save/discover/reuse workflow. Inventory is storage evidence, not review, callability or a running Actor, and never initializes an absent library.
 
 ## Explicit Persistence Contract
 
-Status: Implemented for explicit create-only retention; automatic lifecycle remains separate.
+The implemented create-only operation is `register_tool expose=false` with a new name and one template/from source. Omitted/true keeps ordinary registration. The [tool registry](./tool-registry.md#retain-a-new-capability-without-tool-exposure) owns supported inputs, source preservation, conflicts, mutation fences and withdrawal limits; this design does not define a second persistence path.
 
-The existing `register_tool` persistence owner accepts an optional Boolean **input** `expose`. This is not a Recipe field or a new tool/registry. `kind: retained_recipe` and `activation: not_requested` distinguish successful retention from failed tool activation.
-
-- **Omitted or true:** Preserve current tool-root persistence, source modes, update/delete behavior, activation and callability proof.
-- **False:** Save a new named definition under `recipes/library/<name>.json` without requesting host registration, changing the active-tool set, or launching work. A name and exactly one `template` or `from` source are required. Apply existing name/reserved-name and effective typed-argument/default admission; sync/async is not a selection filter.
-- **References, not relocation:** `from` persists the existing compact logical/file delegation, retaining the source's origins, imports, async, artifacts and Control. A retained wrapper is not a self-contained backup of its source. Reject direct references whose selected source is in managed disposable drafts rather than create an entry knowingly dependent on draft disposal. Apply the same owning resolver/lifetime check to Recipe-valued leaves in authored template graphs, not just the `from` spelling. This is not a transitive lifetime guarantee for arbitrary external files or their dependencies. `template` authors new content at its final library location. No existing Recipe is moved, rewritten or generalized.
-- **Create-only first slice:** Retained `update=true`, null/empty-template deletion, and `draft` source mode fail before persistence. They need explicit source-preservation, CAS/recovery and dependency contracts before becoming supported; do not fall back to active-tool mutation. A duplicate retained stem in either JSON or Markdown is a conflict, not permission to shadow or overwrite it. A tool-root entry with the same stem remains a distinct entrypoint and is not modified.
-
-Explicit flow (supply the capability's required caller values):
-
-```text
-register_tool name=changes_review from=swarm/lens-review expose=false
-inspect target=recipes view=summary verbose=true
-spawn recipe=<exact retained path> values=<caller-owned inputs>
-register_tool name=changes_review from=<exact retained path>
-```
-
-The last step deliberately creates a compact wrapper in the ordinary tool root. It does not copy the executable graph or move the retained definition. `callable_now` and actual tool invocation still need the existing proof. Removing an admitted exposed wrapper through the existing deletion path leaves the retained source intact; this does not turn deletion of an old standalone tool into safe retention. Active Runs retain their original execution contract and are not stopped by wrapper withdrawal.
+The management path is **save deliberately → find through Recipe inspection → reuse the exact Recipe reference → expose explicitly when useful → withdraw only the wrapper when appropriate**. Moving executable sources, converting existing tools/drafts, retained updates/deletion and automatic transitions require separately admitted contracts. Source/package acceptance does not reload an older host or authorize live portfolio changes.
 
 ### Receipt and Failure Truth
 
-A successful retain receipt must distinguish **retention** from failed activation: `kind: retained_recipe`, `result: retained`, `persisted: true`, `resolved: true`, `validated: true`, and `activation: not_requested`, plus the exact retained Recipe path and effective required/optional argument names. It must not claim a global `callable_now: false` or `active_tool: false`: a separately exposed tool with the same name may already be callable. The retained branch never calls the host registration/activation ports, and the receipt's next action is read-only Recipe inspection rather than repair/reload advice. This is an extension of the receipt contract, not reconstruction of missing host state.
-
-Exact paths and selected metadata must use the existing whole-value YAML/omission budget, with full structured details preserved. No executable body, secret-bearing defaults, source installation root or invented semantic assessment is added to the receipt. Storage/validation do not prove review or useful task completion.
-
-Preflight validates mode/type/source/size and resolves the effective contract before creating library state. The serialized candidate obeys the existing 1 MiB per-Recipe bound even when admission uses an in-memory authored candidate. Operation selection preserves the existing name/source guard order and releases its tool-name reservation before retention locks are acquired. Persistence uses the existing canonical mutation-lock/atomic-write owner, with root → library → target ordering, regular non-symlink files, root identity/containment rechecks and JSON/Markdown conflict detection at the commit boundary. Exclusive publication links complete staged bytes without overwriting a competing creator; an unsupported filesystem refuses without a replacement fallback. Do not infer filesystem sandboxing or hostile-writer exclusion from cooperative locks.
-
-The first slice has no prior retained bytes to overwrite. It must preserve any competing/pre-existing entry and re-admit its own exact persisted candidate before returning success. Rollback may remove only its own proven unchanged candidate under the original root/target fences; an uncertain replacement, release or notification failure preserves effect uncertainty and original causes rather than blindly deleting or replaying. The retained failure boundary encloses the whole root-lock operation, including post-publication release; exact original or aggregate rejections remain its private cause. Ordinary registration keeps its existing rollback and callback behavior; the retained branch is not a reason to restyle or reorder unrelated guards.
-
-Retention itself records no launch, success, review or fabricated usage. There is no automatic expiry, background retention loop or live portfolio migration in this slice. Aggregate retention bounds and expiry/disposal remain required before future automatic retention, not a reason to impose an arbitrary new tool-count quota now.
+Retention must be distinguishable from failed activation: `kind: retained_recipe`, `activation: not_requested`, and an exact reusable Recipe path, without global callability claims about a same-named tool. The [current receipt and storage contract](./tool-registry.md#retention-safety-and-accounting) owns fields, budgets, original causes and partial-effect handling. Unknown effects require inspection, not automatic retry or deletion.
 
 ### One Usage Owner, Distinct Entrypoints
 
-Library launches use the existing `.usage` owner under the parent Recipe root, not a second ledger root inside `library`. Private ledger identity is `library/<stem>` for retained entries and the existing stem for tool-root entries; this is not a new Recipe name or public `<skill>/<recipe>` reference. A root wrapper and retained definition may share a filename without merging their launch counters or rewriting each other's revision history. JSON/Markdown representations follow the same rule. Neither creating a definition nor exposing its wrapper is a launch.
-
-Automatic same-source rename inference stays within the retained namespace or within the existing root/draft namespace; disappearance plus matching content cannot silently transfer lineage across the new boundary. Any future deliberate transition must use the existing explicit lineage move/transaction owner. Do not migrate pre-existing nested/legacy ledgers by guessing their ownership or manufacture missing counts; preserve them for separately admitted diagnosis/migration.
-
-The management result is one coherent path: **save deliberately → find through existing Recipe inspection → reuse the exact Recipe reference → expose explicitly when useful → withdraw only the wrapper when appropriate**. This first contract does not adopt automatic retention/exposure, semantic review, retained updates/deletion, or conversion of existing tools/drafts.
+Reuse the parent's existing usage owner rather than create a library ledger system. Retention, exposure and withdrawal must preserve distinct entrypoint history without inventing accepted outcomes; the [usage/lineage contract](./tool-registry.md#usage-and-lineage) owns the implemented namespace and move rules. Aggregate retention bounds, expiry/disposal and semantic evidence remain prerequisites for future automatic retention, not new tool-count quotas for the manual slice.
 
 ## Adopted Lifecycle Direction
 

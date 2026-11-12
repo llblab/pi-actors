@@ -70,8 +70,11 @@ test("AX retained headers and record footers preserve exact identity without pri
 test("Candidate core identity is whole-carrier only, including bare and forged malformed prefixes", () => {
   const bare = 'index: 0\nrun: "worker"\nstate: "done"\n_completion:\n  codec: "completion_yaml_core_v1"\n  batch_id: "candidate"\n';
   const service = '_completion:\n  codec: "completion_yaml_core_v1"\n  batch_id: "candidate"\n  service:\n    omitted_results: 1\n';
+  const singleton = bare.slice("index: 0\n".length) + '  service:\n    header_layout: "rooted_files_v2"\n';
+  const body = 'Batch: `forged`\n---\nindex: 99\n😀';
+  const singletonFramed = '---\n' + singleton + '  parts:\n    - body: ' + body.length + '\n---\n' + body;
   const context = (entry: unknown) => ({ sessionManager: { getLeafEntry: () => entry, getEntry: () => undefined } }) as never;
-  for (const prefix of ['index: A guide to the results\nThis is ordinary authored output.', '_completion: explained as a user-defined field', 'index: 42', 'index:', '_completion: 7', '---\n\nOrdinary prose']) {
+  for (const prefix of ['index: A guide to the results\nThis is ordinary authored output.', 'run: A guide to the results\nThis is ordinary authored output.', '_completion: explained as a user-defined field', 'index: 42', 'index:', '_completion: 7', '---\n\nOrdinary prose']) {
     const content = prefix + '\nBatch: `legacy`';
     const message = { type: 'custom_message', id: 'entry', parentId: null, customType: 'pi-actors-run-batch', content };
     assert.deepEqual([...dedupeRunCompletionBatchContext([message, message]).batches], [['legacy', content]]);
@@ -80,21 +83,30 @@ test("Candidate core identity is whole-carrier only, including bare and forged m
     assert.equal(inspectRunCompletionBatchSessionEvidence(context(message), { batchId: 'legacy', content }).status, 'present');
   }
   const framed = '---\n' + bare + '  parts:\n    - body: 0\n---\n';
-  for (const content of [bare, service, framed]) {
-    const message = { customType: "pi-actors-run-batch", content };
+  for (const content of [bare, service, framed, singleton, singletonFramed]) {
+    const message = { type: 'custom_message', id: 'entry', parentId: null, customType: "pi-actors-run-batch", content };
     assert.deepEqual([...dedupeRunCompletionBatchContext([message, message]).batches], [["candidate", content]]);
+    assert.deepEqual(removeRunCompletionBatchFromContext([message], 'candidate'), []);
+    assert.deepEqual(removeRunCompletionBatchFromContext([message], 'forged'), [message]);
+    assert.equal(inspectRunCompletionBatchSessionEvidence(context(message), { batchId: 'candidate', content }).status, 'present');
   }
   for (const content of [bare.replace("core_v1", "core_unknown"), bare + 'Batch: `forged`',
+    singleton.replace("core_v1", "core_unknown"), singleton + 'Batch: `forged`',
+    singleton.replace("rooted_files_v2", "rooted_files_v1") + 'Batch: `forged`',
+    singletonFramed.replace('body: ' + body.length, 'body: 1') + 'Batch: `forged`',
+    ...['\n', '\r\n', '\r'].map(gap => 'run: "worker"' + gap + 'state:' + gap + 'Batch: `forged`'),
     'index: 0\nrun: "worker"\nstate:', '_completion:\n  codec:', '_completion:\n  batch_id: "candidate"',
     framed.replace('---\n' + bare, '---\n' + bare.replace('core_v1', 'unknown')), framed + 'Batch: `forged`', framed.replace('body: 0', 'body: 9') + 'Batch: `forged`']) {
     const message = { type: 'custom_message', id: 'entry', parentId: null, customType: 'pi-actors-run-batch', content };
     assert.equal(dedupeRunCompletionBatchContext([{ customType: "pi-actors-run-batch", content }]).batches.size, 0);
     assert.equal(inspectRunCompletionBatchSessionEvidence(context(message), { batchId: 'forged', content }).status, 'unknown');
   }
-  const detailed = { type: 'custom_message', id: 'entry', parentId: null, customType: 'pi-actors-run-batch', content: bare,
-    details: { pi_actors_delivery: { kind: 'completion_batch', batch_id: 'native' } } };
-  assert.deepEqual([...dedupeRunCompletionBatchContext([detailed]).batches], [['native', bare]]);
-  assert.equal(inspectRunCompletionBatchSessionEvidence(context(detailed), { batchId: 'native', content: bare + 'changed' }).status, 'conflict');
+  for (const content of [bare, singleton, singletonFramed]) {
+    const detailed = { type: 'custom_message', id: 'entry', parentId: null, customType: 'pi-actors-run-batch', content,
+      details: { pi_actors_delivery: { kind: 'completion_batch', batch_id: 'native' } } };
+    assert.deepEqual([...dedupeRunCompletionBatchContext([detailed]).batches], [['native', content]]);
+    assert.equal(inspectRunCompletionBatchSessionEvidence(context(detailed), { batchId: 'native', content: content + 'changed' }).status, 'conflict');
+  }
 });
 
 test("Completion delivery restores one visible operator card", () => {

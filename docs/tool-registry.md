@@ -47,11 +47,28 @@ register_tool name=repo_check expose=false template="make check" description="Ru
 register_tool name=review_changes expose=false from=swarm/lens-review
 ```
 
-This create-only mode writes `recipes/library/<name>.json`, not a tool-root entry. It accepts a new name and one template/from source; retained update, null/empty deletion, draft promotion and direct references to managed disposable drafts (including Recipe-valued template leaves) are rejected. JSON/Markdown stem conflicts, invalid source/defaults, oversized candidates and unsafe storage fail without activating a tool. Existing tools with the same name are untouched. Publication is a complete atomic no-overwrite file link; unsupported filesystems refuse rather than falling back to replacement.
+This create-only mode writes `recipes/library/<name>.json`, not a tool-root entry. The optional Boolean `expose` is registration input, not a Recipe field; omitted/true preserves ordinary registration. A new name and exactly one template/from source are required. Retained update, null/empty deletion, draft promotion and direct managed disposable-draft dependencies, including Recipe-valued template leaves, are rejected. JSON/Markdown stem conflicts, invalid source/defaults, oversized candidates and unsafe storage fail without activating a tool; a same-named exposed tool is untouched. Retaining never calls host registration/activation ports, mutates the active-tool set or launches work.
 
-A `kind: retained_recipe`, `activation: not_requested` receipt confirms admission/persistence and returns the exact Recipe path with required/optional argument names. It omits global callability flags and defaults: a separately exposed same-named tool might already be callable. The next hint is read-only Recipe inspection, not activation repair. Reuse the exact retained file with `spawn recipe=<path>`, or expose a compact wrapper deliberately with ordinary `register_tool name=<tool> from=<path>`. Deleting an admitted wrapper through the existing deletion path does not delete its retained source or stop active Runs. No automatic retention, review decision, source relocation or live migration is added.
+Retained `from` stores compact logical/file delegation and inherits the effective source contract, origins, imports, async, artifacts and Control without copying or moving its executable graph. It is an external dependency, not a self-contained backup or transitive lifetime guarantee. Newly authored template references resolve from their final library location.
 
-A post-persistence admission, storage, publication-cleanup or lock-release failure can leave committed bytes; original causes are retained and uncertain files are not blindly deleted. Inspect the inventory before considering any retry. Ordinary tool registration keeps its existing rollback and activation contract.
+Use the existing surfaces, supplying required caller values:
+
+```text
+register_tool name=changes_review from=swarm/lens-review expose=false
+inspect target=recipes view=summary verbose=true
+spawn recipe=<exact retained path> values=<caller-owned inputs>
+register_tool name=changes_review from=<exact retained path>
+```
+
+Inspection distinguishes retained rows from tool-root candidates and drafts, using the same active Skill context. Compact output gives a retained count; verbose detail gives exact paths, resolved execution mode, invalid/disabled state and diagnostics. Reads create no directories, usage, tools or Runs; an absent library is empty. Reuse only valid enabled definitions. The final step deliberately exposes a wrapper; verify `callable_now` and actual tool invocation separately. Deleting an admitted wrapper preserves its retained source and does not stop active Runs or turn deletion of an old standalone tool into safe retention. No automatic retention, review decision, source relocation or live migration is added. See [Management Inspection](./inspection.md) for views and coverage.
+
+### Retention Safety and Accounting
+
+Preflight preserves existing name/source guard order and validates the effective typed-argument/default contract and complete serialized candidate before library writes, including the existing 1 MiB Recipe limit. The tool-name reservation releases before root → library → target mutation locks. Regular non-symlink directory/file identity and containment frames, JSON/Markdown conflict checks and exact persisted-content re-admission fence publication and success. Complete staged bytes publish through an atomic no-overwrite hard link; unsupported filesystems refuse without a replacement fallback. These cooperative guards are not a filesystem sandbox or hostile-writer exclusion.
+
+Success reports `kind: retained_recipe`, `result: retained`, `persisted: true`, `resolved: true`, `validated: true`, `activation: not_requested`, effective async mode, the exact Recipe path and required/optional argument names. It omits global `callable_now`/`active_tool` flags because a same-named tool may already exist. Metadata follows the existing whole-value YAML/omission budget with complete structured details; no executable body, secret-bearing defaults, source installation root or semantic usefulness claim is added. Its next hint is read-only Recipe inspection, not activation repair. Storage alone proves neither review, callability nor task success.
+
+Post-publication admission, cleanup or lock-release faults can leave committed bytes. The failure boundary includes release of the outer root lock and preserves the exact original or aggregate cause privately; public effects remain unconfirmed. Rollback may remove only its own proven unchanged candidate under the original root/target fences. Do not blindly delete an uncertain candidate or replay the operation: inspect retained inventory first. Ordinary registration keeps its existing rollback and activation contract. Retention itself records no launch, success or review, and introduces no automatic expiry or migration; usage accounting remains with the existing owner below.
 
 ## Resolution
 
@@ -81,9 +98,7 @@ These parameters are not Recipe-authored args. Singleton tools do not expose `ru
 
 ## Retention Versus Exposure — Adopted Direction
 
-The [capability-memory design](./capability-memory.md) separates preserving a reviewed reusable Recipe from offering it as a named tool. Either sync or async execution can qualify; a subagent-backed tool launches a capability, not a persisted live subagent. Async calls return a launch receipt, not the eventual work result.
-
-The explicit create-only slice is implemented; the automatic lifecycle remains a target. The user root still exposes valid enabled Recipes by location, automatic draft review still chooses promote/discard, and ordinary `register_tool` remains available for both modes. `expose=false` explicitly retains new template/from definitions without activation. Read-only `inspect target=recipes view=summary` lists library definitions separately from tool candidates; verbose detail provides exact paths, mode and invalid/disabled diagnostics. No Recipe exposure field or retain/defer review action is added. A library row is storage intent, not proof of review, callability or a running Actor. Structural review and launch counts alone cannot prove semantic usefulness or accepted successful reuse. Remaining integration belongs to [BACKLOG.md](../BACKLOG.md).
+The [capability-memory design](./capability-memory.md) owns the separation, future lifecycle and evidence gates; [BACKLOG.md](../BACKLOG.md) owns remaining work. Sync/async is execution policy, not a retention/usefulness rule: a subagent-backed tool launches a capability, and its async receipt is not the eventual result. Explicit create-only retention is implemented above; automatic retain/defer/expose transitions are not. Existing automatic promote/discard review and live portfolios remain unchanged.
 
 ## Automatic Review
 
@@ -110,6 +125,8 @@ Set `PI_ACTORS_AUTOMATIC_REVIEW=off` to disable scheduling and safe-boundary act
 ## Usage and Lineage
 
 Usage and lineage live in locked metadata ledgers rather than authored Recipe files. Launch accounting briefly shares the portfolio transaction fence so quarantine cannot invalidate an already-authorized launch. Revision snapshots, rollback, demotion, rename, and identical-source deduplication retain CAS/hash evidence.
+
+Retained launches use the parent Recipe root's existing `.usage` owner, not a second ledger under `library`. Private `library/<stem>` identity keeps them separate from same-stem tool-root entrypoints for JSON and Markdown alike; it is not a public Recipe reference. Retaining or exposing a definition is not a launch. Automatic missing-source/content-equality rename inference stays within the library namespace or within the existing root/draft namespace. Deliberate moves use the existing explicit lineage transaction owner; do not guess migrations or missing counts from legacy nested ledgers. Launch history does not establish useful accepted outcomes.
 
 ## Specializing Existing Recipes
 

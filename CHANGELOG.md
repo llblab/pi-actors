@@ -2,7 +2,11 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
-## Unreleased
+## 0.58.1: Singleton Completion Indices
+
+- `Singleton Completion Index`: New completion packets omit the packet-local display index when exactly one result is shown, including with omitted results. Multiple shown results retain indices; omission/inventory facts, internal identity/correlation, numbered-stream behavior and historical replay remain unchanged.
+- `Inspection Hint Ownership`: YAML and legacy Recipe inspection hints share one exact three-literal classifier. Existing output bytes, verbose omission, budgets and opaque fallback remain unchanged; prefix, whitespace and authored-action lookalikes gain no typed authority.
+- `Capability Contract Docs`: Tool Registry owns the current retention, receipt, storage and usage contract; Capability Memory keeps architectural rationale and future evidence/lifecycle gates. Existing design anchors and safety constraints remain, without a second copy of the operating contract.
 
 ## 0.58.0: Explicit Capability Retention
 

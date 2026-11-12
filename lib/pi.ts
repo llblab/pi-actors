@@ -123,7 +123,7 @@ function unheaderedCompletionId(content: string): string | { malformed: true } |
     const core = RunDelivery.readCompletionYamlCarrier(content);
     if (core.state === "available") return core.packet.batchId;
     // Initial compiler headers only: never recover identity by scanning authored bodies.
-    if (/^(?:index: (?:\d+|"\?")\nrun: [^\n]*\nstate:|_completion:\n  (?:codec|batch_id):)/u.test(content)) return { malformed: true };
+    if (/^(?:index: (?:\d+|"\?")\nrun: [^\n]*\nstate:|run:[^\r\n]*(?:\r\n|\r|\n)state:|_completion:\n  (?:codec|batch_id):)/u.test(content)) return { malformed: true };
   }
   if (typeof content === "string" && (hasCompletionFrontmatterPrefix(content) || /^(?:#|Run #|— Новый поток|- run:|- #0:\n|- result: omitted \(model byte limit\)\n|- omitted_results:)/u.test(content))) {
     return RunDelivery.readRunCompletionRecordMarker(content)?.batchId ?? { malformed: true };

@@ -278,8 +278,11 @@ function parseInventorySource(value, batch) {
 function isFrontmatterCompletionLayout(layout) {
     return layout === "frontmatter_v1" || layout === "frontmatter_v2";
 }
+function isRootedCompletionLayout(layout) {
+    return layout === "completion_yaml_files_v1" || layout === "completion_yaml_files_v2";
+}
 function isYamlCompletionLayout(layout) {
-    return layout === "completion_yaml_core_v1" || layout === "completion_yaml_files_v1";
+    return layout === "completion_yaml_core_v1" || isRootedCompletionLayout(layout);
 }
 function isSharedCompletionLayout(layout) {
     return layout === "headings_shared_results" || layout === "headings_shared_kinds" || isYamlCompletionLayout(layout) || isFrontmatterCompletionLayout(layout);
@@ -688,7 +691,7 @@ export function requestRunCompletionStream(input) {
     });
 }
 export function admitRunCompletionBatch(input) {
-    return captureCompletionBatch(input, false, "completion_yaml_files_v1");
+    return captureCompletionBatch(input, false, "completion_yaml_files_v2");
 }
 /** Kernel-only opt-in; ordinary Pi capture stays fenced until session/lifecycle integration is admitted. */
 export function captureRunCompletionStreamBatch(input) {
@@ -696,7 +699,7 @@ export function captureRunCompletionStreamBatch(input) {
 }
 /** Private ordinary candidate composition; stream capture retains its separately gated codec. */
 export function captureRunCompletionYamlCandidateBatch(input) {
-    return captureCompletionBatch(input, false, "completion_yaml_files_v1");
+    return captureCompletionBatch(input, false, "completion_yaml_files_v2");
 }
 function captureCompletionBatch(input, numbered, layout = "frontmatter_v2") {
     const now = (input.now ?? new Date()).toISOString();
@@ -1697,13 +1700,14 @@ function completionRootedFiles(row, member, locations) {
 }
 function prepareCompletionYamlProjection(safe, candidates, references, ordered) {
     const packet = { batchId: safe.batch_id, records: [] };
-    const rooted = safe.result_layout === "completion_yaml_files_v1";
+    const rooted = isRootedCompletionLayout(safe.result_layout);
+    const localSingleton = safe.result_layout === "completion_yaml_files_v2" && !safe.numbering && candidates.length === 1;
     if (!safe.batch_id.isWellFormed())
         return { state: "unsupported" };
     for (const [index, { row, location }] of candidates.entries()) {
         const member = ordered[index];
         const displayed = safe.numbering ? safe.numbering.kind === "stream" ? safe.numbering.first_index + index : "?" : index;
-        const metadata = { index: displayed };
+        const metadata = localSingleton ? {} : { index: displayed };
         for (const piece of row.pieces) {
             if (piece.block)
                 continue;
@@ -1763,7 +1767,9 @@ function prepareCompletionYamlProjection(safe, candidates, references, ordered) 
         }
         packet.records.push({ metadata, parts });
     }
-    const service = rooted ? { header_layout: "rooted_files_v1" } : {};
+    const service = rooted ? {
+        header_layout: safe.result_layout === "completion_yaml_files_v2" ? "rooted_files_v2" : "rooted_files_v1",
+    } : {};
     const omitted = safe.members.length - candidates.length;
     if (omitted) {
         service.omitted_results = omitted;
@@ -2302,7 +2308,7 @@ export function readRunCompletionPresentation(content, value) {
             hint.content_sha256 !== createHash("sha256").update(content).digest("hex"))
             return full;
         const segments = [];
-        const rooted = core.packet.service?.header_layout === "rooted_files_v1";
+        const rooted = core.packet.service?.header_layout === "rooted_files_v1" || core.packet.service?.header_layout === "rooted_files_v2";
         const facts = Object.fromEntries(Object.entries(core.packet.service ?? {}).filter(([key]) => key !== "header_layout"));
         for (const [index, record] of core.packet.records.entries()) {
             if (index)
@@ -2551,6 +2557,8 @@ export function encodeCompletionYamlCarrier(input) {
         (Object.hasOwn(packet, "service") && (!completionYamlMapping(packet.service) || !Object.keys(packet.service).length)) ||
         (!packet.records.length && !Object.hasOwn(packet, "service")))
         return unavailable;
+    const localSingleton = packet.records.length === 1 && completionYamlMapping(packet.service) &&
+        packet.service.header_layout === "rooted_files_v2" && !Object.hasOwn(packet.service, "numbering");
     const rows = [];
     for (let index = 0; index < Math.max(1, packet.records.length); index++) {
         const row = packet.records[index];
@@ -2568,14 +2576,16 @@ export function encodeCompletionYamlCarrier(input) {
                 !completionYamlMapping(row.metadata) || !Array.isArray(row.parts))
                 return unavailable;
             const meta = row.metadata;
-            if (!(meta.index === "?" || (typeof meta.index === "number" && Number.isSafeInteger(meta.index) && meta.index >= 0)) ||
+            const validIndex = localSingleton ? !Object.hasOwn(meta, "index")
+                : meta.index === "?" || (typeof meta.index === "number" && Number.isSafeInteger(meta.index) && meta.index >= 0);
+            if (!validIndex ||
                 typeof meta.run !== "string" || !meta.run.length || typeof meta.state !== "string" || !meta.state.length ||
                 (Object.hasOwn(meta, "kind") && meta.kind !== "primary" && meta.kind !== "diagnostic") ||
                 Object.hasOwn(meta, completionYamlServiceKey) ||
                 // JS enumerates array-index keys before semantic core fields; do not silently reorder the header.
                 Object.keys(meta).some(key => /^(0|[1-9]\d*)$/u.test(key) && Number(key) < 4294967295))
                 return unavailable;
-            for (const key of ["index", "run", "state", ...(Object.hasOwn(meta, "kind") ? ["kind"] : []),
+            for (const key of [...(localSingleton ? [] : ["index"]), "run", "state", ...(Object.hasOwn(meta, "kind") ? ["kind"] : []),
                 ...Object.keys(meta).filter(key => !["index", "run", "state", "kind"].includes(key))]) {
                 Object.defineProperty(header, key, { value: meta[key], enumerable: true });
             }

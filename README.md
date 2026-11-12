@@ -25,6 +25,12 @@ This topology does not require every task to become a subagent. Short work with 
 
 Design notes for [portable Recipe composition bundles and CodeMode interoperability](docs/composition-transport.md) are recorded separately. JSONL bundle loading is not implemented or included in the current UX/AX release; host CodeMode, when available, calls existing tools rather than replacing the Run kernel.
 
+## Capability Memory Direction
+
+A reusable Recipe does not have to become a named tool. The [adopted capability-memory direction](docs/capability-memory.md) separates retention from tool exposure: sync/async determines execution, not usefulness, and a subagent-backed tool is a capability launcher rather than a saved live Actor. The aim is useful procedural memory with a selective tool interface, not more registered names.
+
+Use `register_tool expose=false` with a new name and a template/from source to save a capability in `recipes/library` without activating a tool. Its retained_recipe/not_requested receipt returns the exact Recipe path for `spawn` or later deliberate `register_tool from` exposure. Creation is exclusive; retained update, delete and draft promotion are not supported. `inspect target=recipes view=summary` distinguishes retained definitions, with exact paths, modes and diagnostics in verbose detail. Automatic retained lifecycle is not implemented. Current tool-root discovery, automatic review and ordinary registration remain unchanged; structural review and launch counts alone do not prove useful successful reuse. [BACKLOG.md](BACKLOG.md) owns implementation and evidence gates; adopting the direction neither migrates existing tools nor reloads a running host.
+
 ## Install
 
 Requires Node.js 22.19.0 or newer and Pi 1.0.0 or newer.
@@ -103,7 +109,7 @@ A Run exposes exactly `recipe`, `trace`, and `control` views. Run-specific `insp
 
 ### `register_tool`
 
-Persist a maintained Recipe with `register_tool name=<tool> from=<skill>/<recipe> defaults={...}`, or register a trusted command through the separate `template` mode. Definitions live under `~/.pi/agent/recipes`. Treat a tool as callable in the current session only when the result reports `callable_now: true`; persistence, Recipe spawning, and registered-tool invocation are distinct states.
+Persist a maintained Recipe with `register_tool name=<tool> from=<skill>/<recipe> defaults={...}`, or register a trusted command through the separate `template` mode. Definitions live under `~/.pi/agent/recipes`. With `expose=false`, a new template/from definition is retained under `recipes/library` instead; its not_requested receipt makes no tool-callability claim. Treat an exposed tool as callable in the current session only when the result reports `callable_now: true`; persistence, Recipe spawning, and registered-tool invocation are distinct states.
 
 ## Recipe
 

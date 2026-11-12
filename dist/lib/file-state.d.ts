@@ -13,6 +13,7 @@ export interface FileMutationLockOptions {
 export declare function acquireFileMutationLock(path: string, options?: FileMutationLockOptions): () => void;
 export declare function withFileMutationLock<T>(path: string, mutate: () => T, options?: FileMutationLockOptions): T;
 export declare function writeTextAtomic(path: string, content: string, options?: {
+    exclusive?: boolean;
     onBeforeReplace?(): void;
 }): void;
 export declare function writeJsonAtomic(path: string, value: unknown): void;

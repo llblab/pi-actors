@@ -756,6 +756,32 @@ function templatePreview(value: unknown): string | undefined {
     : rendered;
 }
 
+export function inventoryRetainedRecipes(
+  recipeRoot: string,
+  resolutionContext?: RecipeResolutionContext,
+): { recipes: Array<Record<string, unknown>>; diagnostics: string[] } {
+  const discovery = discoverRecipeSources([
+    { root: join(recipeRoot, "library"), resolutionContext },
+  ]);
+  return {
+    recipes: [...discovery.active.values()]
+      .map((entry) => ({
+        id: entry.id,
+        path: entry.path,
+        source_kind: "user_retained_recipe",
+        tool: false,
+        invalid: entry.invalid,
+        disabled: entry.disabled,
+        ...(entry.config ? { async: entry.config.async === true } : {}),
+        ...(entry.config?.description ? { description: entry.config.description } : {}),
+        ...(entry.diagnostics.length ? { diagnostics: entry.diagnostics } : {}),
+        ...(entry.riskLabels.length ? { risk_labels: entry.riskLabels } : {}),
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    diagnostics: discovery.diagnostics,
+  };
+}
+
 export function listDraftRecipes(root: string): Array<Record<string, unknown>> {
   return listRecipeFiles(root).map((path) => {
     for (let attempt = 0; attempt < 3; attempt += 1) {

@@ -512,6 +512,10 @@ export function recipeRegistryNextActions(summary, view) {
     if (summary.skill_recipe_catalog_partial === true) {
         actions.push("inspect target=recipes view=imports verbose=true");
     }
+    if ((Array.isArray(summary.retained) && summary.retained.length > 0) ||
+        (Array.isArray(summary.retained_diagnostics) && summary.retained_diagnostics.length > 0)) {
+        actions.push("inspect target=recipes view=summary verbose=true");
+    }
     if (drafts.length > 0) {
         actions.push("inspect target=recipes view=summary verbose=true");
         const firstPath = typeof drafts[0]?.path === "string" ? drafts[0].path : undefined;
@@ -555,6 +559,7 @@ export function compactRecipeRegistry(summary) {
     const active = count("active", summary.active), shadowed = count("shadowed", summary.shadowed);
     const invalid = count("invalid", summary.invalid), disabled = count("disabled", summary.disabled);
     const diagnostics = count("diagnostics", summary.diagnostics), drafts = count("drafts", summary.drafts);
+    const retained = count("retained", summary.retained);
     const recommendations = count("recommendations", summary.recommendations);
     const skillCatalogPartial = summary.skill_recipe_catalog_partial === true;
     const currentPolicy = Array.isArray(summary.active)
@@ -564,7 +569,7 @@ export function compactRecipeRegistry(summary) {
         ? summary.next_actions
         : [];
     const hint = nextActions.length ? nextActionMetadata(nextActions[0], Limits.RUN_DELIVERY_MODEL_MAX_BYTES) : undefined;
-    const render = () => ({ recipes: "registry", active, drafts, shadowed, invalid, disabled,
+    const render = () => ({ recipes: "registry", active, drafts, retained, shadowed, invalid, disabled,
         current_policy: currentPolicy, skill_catalog_partial: skillCatalogPartial, recommendations, diagnostics,
         ...(hint ? hint.selected : {}) });
     return hint

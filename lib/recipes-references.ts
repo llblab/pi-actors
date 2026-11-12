@@ -16,7 +16,7 @@ import * as Paths from "./paths.ts";
 import * as RecipeControl from "./recipe-control.ts";
 import * as Schema from "./schema.ts";
 
-const MAX_RECIPE_FILE_BYTES = 1024 * 1024;
+export const MAX_RECIPE_FILE_BYTES = 1024 * 1024;
 const MAX_RECIPE_IMPORT_DEPTH = 32;
 
 export interface TemplateRecipeImportBinding {

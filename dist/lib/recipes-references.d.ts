@@ -5,6 +5,7 @@
  */
 import type { CommandTemplateValue } from "./command-templates.ts";
 import * as CommandTemplates from "./command-templates.ts";
+export declare const MAX_RECIPE_FILE_BYTES: number;
 export interface TemplateRecipeImportBinding {
     from?: string;
     defaults?: Record<string, unknown>;

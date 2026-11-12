@@ -497,7 +497,7 @@ test("Inspect treats recipes registry and summary as one inspection path", async
     );
     assert.match(
       compact.content[0].text,
-      /^\nrecipes: "registry"\nactive: [1-9]\d*\ndrafts: 1\nshadowed: 0\ninvalid: 1\n/u,
+      /^\nrecipes: "registry"\nactive: [1-9]\d*\ndrafts: 1\nretained: 0\nshadowed: 0\ninvalid: 1\n/u,
     );
     await assert.rejects(
       tool.execute(
@@ -511,6 +511,48 @@ test("Inspect treats recipes registry and summary as one inspection path", async
     );
   } finally {
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Recipe inspection inventories retained capabilities in the active Skill context without activation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-inspect-retained-"));
+  const recipeRoot = join(root, "recipes"), library = join(recipeRoot, "library");
+  const skill = join(root, "sample");
+  try {
+    await mkdir(library, { recursive: true });
+    await mkdir(join(skill, "recipes"), { recursive: true });
+    await writeFile(join(skill, "SKILL.md"), "---\nname: sample\ndescription: Test capability\n---\n");
+    await writeFile(join(skill, "recipes", "task.json"), JSON.stringify({ template: "echo context" }));
+    const source = JSON.stringify({ template: "sample/task" });
+    const retainedPath = join(library, "task.json");
+    await writeFile(retainedPath, source);
+    await writeFile(join(recipeRoot, "exposed.json"), source);
+    await writeFile(join(library, "async.json"), JSON.stringify({ async: true, template: "echo async" }));
+    const context = { recipeResolutionContext: createRecipeResolutionContext("retained-inspect", root,
+      createActiveSkillRecipeContext([{ name: "sample", baseDir: skill }])) };
+    const inspect = createInspectToolDefinition({ recipeRoot });
+    const compact = await inspect.execute("retained-compact", { target: "recipes", view: "summary" }, undefined, undefined, context);
+    assert.match(compact.content[0].text, /\nretained: 2\n/u);
+    assert.deepEqual(compact.details.next_actions, ["inspect target=recipes view=summary verbose=true"]);
+    assert.equal(compact.details.active.length, 1);
+    assert.equal(compact.details.active[0].invalid, false);
+    assert.equal(compact.details.active[0].tool, true);
+    assert.deepEqual(compact.details.retained_diagnostics, []);
+    const retained = compact.details.retained.find((row: Record<string, unknown>) => row.id === "task");
+    assert.equal(retained.path, retainedPath);
+    assert.equal(retained.invalid, false);
+    assert.equal(retained.tool, false);
+    assert.equal(retained.async, false);
+    assert.equal(retained.source_kind, "user_retained_recipe");
+    assert.equal(Object.hasOwn(retained, "callable_now"), false);
+    const verbose = await inspect.execute("retained-verbose", { target: "recipes", view: "summary", verbose: true }, undefined, undefined, context);
+    assert.deepEqual(verbose.details, compact.details);
+    assert.equal((await readFile(retainedPath, "utf8")), source);
+    const inactive = await inspect.execute("retained-inactive", { target: "recipes", view: "summary" }, undefined, undefined, {});
+    assert.equal(inactive.details.retained.find((row: Record<string, unknown>) => row.id === "task").invalid, true);
+    assert.ok(inactive.details.retained_diagnostics.length > 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

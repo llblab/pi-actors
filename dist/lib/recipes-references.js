@@ -9,7 +9,7 @@ import * as CommandTemplates from "./command-templates.js";
 import * as Paths from "./paths.js";
 import * as RecipeControl from "./recipe-control.js";
 import * as Schema from "./schema.js";
-const MAX_RECIPE_FILE_BYTES = 1024 * 1024;
+export const MAX_RECIPE_FILE_BYTES = 1024 * 1024;
 const MAX_RECIPE_IMPORT_DEPTH = 32;
 const RESERVED_AUTHORED_RECIPE_VALUE_NAMES = new Set([
     "recipe_dir",

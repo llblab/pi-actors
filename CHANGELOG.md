@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+## 0.58.0: Explicit Capability Retention
+
+- `Capability Retention`: `register_tool expose=false` saves new template/from Recipes under `recipes/library` without activating tools or counting launches. Receipts return exact reusable paths and `activation: not_requested`, not failed activation. Both sync and async capabilities can be retained, spawned or deliberately exposed later; deleting an exposed wrapper preserves its retained source.
+- `Retained Discovery and Usage`: Recipe inspection distinguishes retained definitions from tool candidates and drafts, with exact verbose paths, execution modes and invalid/disabled diagnostics. Inspection is read-only. Retained launches share the existing usage owner while keeping same-named tool history separate; matching content cannot silently transfer lineage across that boundary.
+- `Safe Create-only Storage`: Retention validates sources and size, rejects direct disposable-draft dependencies and preserves name conflicts through atomic no-overwrite publication. Filesystems without hard-link support refuse rather than replace. Partial-effect failures preserve committed bytes and original causes; inspect before retrying. Retained update, delete and draft promotion remain unsupported.
+- `Compatibility and Guidance`: Existing registration, tool discovery, automatic review and live portfolios remain unchanged; no migration or default policy is enabled. Updated Skills distinguish execution mode, retention and tool exposure. Delegated sources remain external dependencies, not self-contained backups; structural review and launch counts do not prove usefulness or accepted success.
+
 ## 0.57.1: Rooted Completion Headers
 
 - `Completion Headers`: New captures keep all runtime metadata above the Actor Markdown, with no service/file footer. File references share literal roots with relative entries, English purposes and a read-first pointer. External roots and unresolved bases stay explicit; declarations do not prove production. Known cut counts remain at the cut. Original Markdown, source/generation/privacy fences, shared budgets and exact historical replay are preserved.

@@ -18,6 +18,7 @@ Living index of all documentation in the `/docs` directory.
 
 ## Planned Contracts
 
+- [capability-memory.md](./capability-memory.md) — Adopted separation of retained Recipes and deliberate tool exposure, with implemented read-only library inventory and isolated usage identity; explicit create-only persistence is implemented without tool activation, while retained update/delete and automatic lifecycle/migration remain separate
 - [windows-process-observation.md](./windows-process-observation.md) — User-approved recovery preparation: passing inert Windows x64 MI child experiment, reviewed unadmitted raw codec and artifact preparation contract; broader profile evidence, unsigned asset distribution and default activation remain separate gates
 - [run-supervision.md](./run-supervision.md) — Accepted future supervision contract and implemented AX/evidence slices, with same-logical-session file research and candidate-bound acceptance; the next selective AX/runtime release does not enable deadlines, independent owner-loss supervision or public completion streams
 - [inactive-foundations-inventory.md](./inactive-foundations-inventory.md) — Reachability and package evidence for packaged-but-unactivated supervision, stream-numbering and native foundations, distinguishing reviewed runtime dependencies from optional ones; no removal decision, nothing activated

@@ -19,6 +19,10 @@ Simple tools/registration fixtures bind original runner births and actual `close
 
 Implementation and native CI acceptance are tracked in BACKLOG until the complete sharded candidate passes.
 
+## Local Validation
+
+Run `npm run validate` and `npm run audit:dependencies` with Node24 selected, including after any login-shell setup. When launching validation from an Actor, clear `PI_ACTORS_DELIVERY_OWNER_ID`, `PI_ACTORS_DELIVERY_PARENT_RUN`, `PI_ACTORS_DELIVERY_PARENT_INSTANCE` and `PI_ACTORS_DELIVERY_PARENT_STATE_DIR` only in the test workload's environment. Otherwise independent SDK fixture coordinators may inherit the validation Actor's completion lineage and wait for the wrong coordinator. Keep the launcher's own lineage intact; this isolation changes neither product defaults nor test cases, the standard agent-directory preload or watchdogs.
+
 ## One-time npm Trusted Publisher setup
 
 Configure the existing public package `@llblab/pi-actors` on npmjs.com with a GitHub Actions Trusted Publisher using these exact values:

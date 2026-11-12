@@ -5,12 +5,12 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, hasBroadWindowsWriteAcl, listDraftRecipes, summarizeDiscovery, toRegisteredTool } from "../lib/recipes-discovery.ts";
+import { createRecipeIntegrityManifest, discoverRecipeSources, discoverRecipes, getShadowedLaunchDiagnostic, hasBroadWindowsWriteAcl, inventoryRetainedRecipes, listDraftRecipes, summarizeDiscovery, toRegisteredTool } from "../lib/recipes-discovery.ts";
 
 async function writeRecipe(root: string, name: string, body: Record<string, unknown>) {
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
@@ -437,6 +437,49 @@ test("Recipe discovery exposes quiet launch diagnostics only for broken shadowin
       hint: "inspect_recipes_doctor",
       reason: "shadowed_invalid",
     });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Retained inventory distinguishes execution and validity without exposing tools or mutating files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-retained-inventory-"));
+  const library = join(root, "library");
+  try {
+    assert.deepEqual(inventoryRetainedRecipes(root), { recipes: [], diagnostics: [] });
+    assert.deepEqual(await readdir(root), []);
+    await mkdir(library);
+    await writeRecipe(root, "sync", { template: "echo exposed" });
+    const definitions = {
+      sync: { async: false, template: "echo retained" },
+      async: { async: true, template: "echo detached" },
+      disabled: { disabled: true, template: "echo disabled" },
+      broken: { description: "Missing template" },
+    };
+    for (const [name, recipe] of Object.entries(definitions)) await writeRecipe(library, name, recipe);
+    const before = await Promise.all(Object.keys(definitions).map(name => readFile(join(library, name + ".json"), "utf8")));
+    const inventory = inventoryRetainedRecipes(root);
+    assert.equal(inventory.recipes.length, 4);
+    for (const row of inventory.recipes) {
+      assert.equal(row.tool, false);
+      assert.equal(row.source_kind, "user_retained_recipe");
+      assert.equal(Object.hasOwn(row, "callable_now"), false);
+      assert.equal(Object.hasOwn(row, "reviewed"), false);
+      assert.equal(row.path, join(library, String(row.id) + ".json"));
+    }
+    const rows = new Map(inventory.recipes.map(row => [row.id, row]));
+    assert.equal(rows.get("sync")?.async, false);
+    assert.equal(rows.get("async")?.async, true);
+    assert.equal(rows.get("disabled")?.disabled, true);
+    assert.equal(rows.get("broken")?.invalid, true);
+    assert.equal(Object.hasOwn(rows.get("broken")!, "async"), false);
+    assert.ok(inventory.diagnostics.length > 0);
+    const tools = discoverRecipeSources([{ root, defaultTool: true }]);
+    assert.deepEqual([...tools.active.keys()], ["sync"]);
+    assert.equal(toRegisteredTool(tools.active.get("sync")!)?.name, "sync");
+    assert.deepEqual(await Promise.all(Object.keys(definitions).map(name => readFile(join(library, name + ".json"), "utf8"))), before);
+    assert.deepEqual((await readdir(root)).sort(), ["library", "sync.json"]);
+    assert.deepEqual((await readdir(library)).sort(), Object.keys(definitions).map(name => name + ".json").sort());
   } finally {
     await rm(root, { recursive: true, force: true });
   }

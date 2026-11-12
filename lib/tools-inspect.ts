@@ -448,9 +448,6 @@ function inspectRecipes(
   if (view === "reviews") {
     return ReviewDiagnostics.readAutomaticReviewDiagnostics({ recipeRoot });
   }
-  const discovered = RecipesDiscovery.discoverRecipeSources([
-    { root: recipeRoot, defaultTool: true, mutableUsage: true },
-  ]);
   const resolutionContext =
     context && typeof context === "object" && "recipeResolutionContext" in context
       ? (context as {
@@ -506,7 +503,11 @@ function inspectRecipes(
       ...(diagnostic.stem ? { stem: diagnostic.stem } : {}),
     }),
   );
+  const discovered = RecipesDiscovery.discoverRecipeSources([
+    { root: recipeRoot, defaultTool: true, mutableUsage: true, resolutionContext },
+  ]);
   const discoverySummary = RecipesDiscovery.summarizeDiscovery(discovered);
+  const retained = RecipesDiscovery.inventoryRetainedRecipes(recipeRoot, resolutionContext);
   const summary = {
     ...discoverySummary,
     ...(registryStatus
@@ -532,6 +533,8 @@ function inspectRecipes(
         error: `Ambiguous active Skill Recipe namespace ${name}`,
       })),
     drafts: RecipesDiscovery.listDraftRecipes(join(recipeRoot, "drafts")),
+    retained: retained.recipes,
+    retained_diagnostics: retained.diagnostics,
   };
   return {
     ...summary,

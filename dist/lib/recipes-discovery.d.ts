@@ -67,6 +67,10 @@ export declare function discoverRecipeSources(sources: RecipesDiscoverySource[])
 export declare function discoverRecipes(roots: string[]): RecipesDiscoveryResult;
 export declare function createRecipeIntegrityManifest(result: RecipesDiscoveryResult): RecipeIntegrityManifestEntry[];
 export declare function getShadowedLaunchDiagnostic(result: RecipesDiscoveryResult, id: string): Record<string, unknown> | undefined;
+export declare function inventoryRetainedRecipes(recipeRoot: string, resolutionContext?: RecipeResolutionContext): {
+    recipes: Array<Record<string, unknown>>;
+    diagnostics: string[];
+};
 export declare function listDraftRecipes(root: string): Array<Record<string, unknown>>;
 export declare function summarizeDiscovery(result: RecipesDiscoveryResult): Record<string, unknown>;
 export declare function summarizeRegisteredToolArgs(tool: RegisteredTool): {

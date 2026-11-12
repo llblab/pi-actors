@@ -101,7 +101,7 @@ function readRecipeSource(path: string): { fingerprint: string } | undefined {
 
 function inferRecipeRoot(path: string): string {
   const parent = dirname(resolve(path));
-  return basename(parent) === "drafts" ? dirname(parent) : parent;
+  return ["drafts", "library"].includes(basename(parent)) ? dirname(parent) : parent;
 }
 
 function pathKey(path: string, recipeRoot: string): string {
@@ -112,8 +112,9 @@ function pathKey(path: string, recipeRoot: string): string {
   return relation.replaceAll("\\", "/");
 }
 
-function recipeName(path: string): string {
-  return basename(path).replace(/\.(?:json|md)$/u, "");
+function recipeName(path: string, recipeRoot: string): string {
+  const name = basename(path).replace(/\.(?:json|md)$/u, "");
+  return dirname(resolve(path)) === resolve(recipeRoot, "library") ? `library/${name}` : name;
 }
 
 function lineageFilename(lineageName: string): string {
@@ -232,8 +233,10 @@ function findRelocatedRecipe(
   index: RecipeUsageIndex,
   fingerprint: string,
   recipeRoot: string,
+  newPath: string,
 ): { indexedName: string; path: string; record: RecipeUsageRecord } | undefined {
   const candidates = Object.entries(index.paths).flatMap(([oldPath, indexedName]) => {
+    if (oldPath.startsWith("library/") !== newPath.startsWith("library/")) return [];
     if (existsSync(join(recipeRoot, oldPath))) return [];
     const found = readIndexedLedger(indexedName, recipeRoot);
     return found?.record.fingerprint === fingerprint
@@ -288,7 +291,7 @@ export function ensureRecipeLineage(
       const source = readRecipeSource(path);
       if (!source) return false;
       const key = pathKey(path, recipeRoot);
-      const name = recipeName(path);
+      const name = recipeName(path, recipeRoot);
       const index = readIndex(recipeRoot);
       const indexedName = index.paths[key];
       if (indexedName) {
@@ -392,11 +395,11 @@ export function recordRecipeLaunch(
       if (!source) return false;
       const { fingerprint } = source;
       const key = pathKey(path, recipeRoot);
-      const desiredName = recipeName(path);
+      const desiredName = recipeName(path, recipeRoot);
       const index = readIndex(recipeRoot);
       const relocated = index.paths[key]
         ? undefined
-        : findRelocatedRecipe(index, fingerprint, recipeRoot);
+        : findRelocatedRecipe(index, fingerprint, recipeRoot, key);
       const indexedName = index.paths[key] ?? relocated?.indexedName;
       const found = indexedName
         ? readIndexedLedger(indexedName, recipeRoot)
@@ -436,7 +439,7 @@ export function recordRecipeLaunch(
           former_names: renamed
             ? appendBounded(stored?.former_names ?? [], stored!.lineage_name)
             : relocated
-              ? appendBounded(stored?.former_names ?? [], recipeName(relocated.path))
+              ? appendBounded(stored?.former_names ?? [], recipeName(join(recipeRoot, relocated.path), recipeRoot))
               : stored?.former_names ?? [],
           former_paths: relocated
             ? appendBounded(stored?.former_paths ?? [], relocated.path)
@@ -591,7 +594,7 @@ export function moveRecipeUsage(
       const toKey = pathKey(toPath, recipeRoot);
       const index = readIndex(recipeRoot);
       const oldName = index.paths[fromKey];
-      const newName = recipeName(toPath);
+      const newName = recipeName(toPath, recipeRoot);
       if (!oldName) {
         return index.paths[toKey] === newName && Boolean(readLedger(newName, recipeRoot));
       }

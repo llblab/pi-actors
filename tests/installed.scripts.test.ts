@@ -3427,6 +3427,10 @@ test("packed artifact first session preserves agent-native Skill and tool parity
   try {
     const packageDir = await preparePackedPackage(root);
     const pkg = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"));
+    assert.equal(
+      await readFile(join(packageDir, "docs", "capability-memory.md"), "utf8"),
+      await readFile("docs/capability-memory.md", "utf8"),
+    );
     const agentDir = join(root, "agent");
     const homeDir = join(root, "home");
     const staleSkillDir = join(root, "stale-skill");
@@ -3434,6 +3438,11 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     await mkdir(agentDir, { recursive: true });
     await mkdir(homeDir, { recursive: true });
     assert.deepEqual(await readdir(agentDir), []);
+    const retainedRoot = join(agentDir, "recipes", "library");
+    await mkdir(retainedRoot, { recursive: true });
+    for (const [name, async] of [["retained_sync", false], ["retained_async", true]] as const) {
+      await writeFile(join(retainedRoot, name + ".json"), JSON.stringify({ async, template: "printf retained-pong" }));
+    }
     await mkdir(join(staleSkillDir, "recipes"), { recursive: true });
     await mkdir(sourceDir, { recursive: true });
     await writeFile(join(sourceDir, "track.wav"), "audio fixture");
@@ -3519,6 +3528,26 @@ test("packed artifact first session preserves agent-native Skill and tool parity
            undefined,
            context,
          );
+         const retainedReceipts = [];
+         for (const [name, async] of [["packed_retained_sync", false], ["packed_retained_async", true]]) {
+           const saved = await register.execute("packed-retain", {
+             name, async, expose: false, description: "Packed retained capability",
+             template: JSON.stringify(process.execPath) + ' -p 42',
+           }, undefined, undefined, context);
+           if (definitions.has(name)) throw new Error("Retained creation exposed a host tool");
+           retainedReceipts.push(saved.details);
+         }
+         const retainedPath = retainedReceipts[0].recipe;
+         const retainedBefore = readFileSync(retainedPath, "utf8");
+         const retainedExposure = await register.execute("packed-retained-expose", {
+           name: "packed_retained_sync", from: retainedPath,
+         }, undefined, undefined, context);
+         const retainedCall = await definitions.get("packed_retained_sync").execute("packed-retained-call", {}, undefined, undefined, context);
+         await register.execute("packed-retained-withdraw", { name: "packed_retained_sync", template: null }, undefined, undefined, context);
+         const retained = { receipts: retainedReceipts, exposure: retainedExposure.details,
+           launchKind: retainedCall.details.launch_kind, output: retainedCall.content[0].text,
+           sourceIntact: readFileSync(retainedPath, "utf8") === retainedBefore,
+           activeAfterWithdrawal: activeTools.includes("packed_retained_sync") };
          const spawn = definitions.get("spawn");
          const inspect = definitions.get("inspect");
          const message = definitions.get("message");
@@ -3657,6 +3686,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
            },
            registration: registration.details,
            invocation: invocation.content[0].text,
+           retained,
            music: {
              actorActions: musicControl.details.actor_actions,
              authoredWrapper,
@@ -3734,6 +3764,17 @@ test("packed artifact first session preserves agent-native Skill and tool parity
       },
     );
     assert.match(loaded.invocation, /packed-pong/);
+    for (const receipt of loaded.retained.receipts) {
+      assert.equal(receipt.kind, "retained_recipe");
+      assert.equal(receipt.activation, "not_requested");
+      assert.equal(receipt.persisted, true);
+      assert.equal(Object.hasOwn(receipt, "callable_now"), false);
+    }
+    assert.equal(loaded.retained.exposure.callable_now, true);
+    assert.equal(loaded.retained.launchKind, "tool");
+    assert.match(loaded.retained.output, /42/);
+    assert.equal(loaded.retained.sourceIntact, true);
+    assert.equal(loaded.retained.activeAfterWithdrawal, false);
     assert.deepEqual(
       {
         active_tool: loaded.music.registration.active_tool,
@@ -3808,6 +3849,15 @@ test("packed artifact first session preserves agent-native Skill and tool parity
       "register_tool name=<tool-name> from=music-player/playback",
     ]);
     assert.equal(loaded.recipeCatalog.registry_generation, 1);
+    assert.deepEqual(loaded.recipeCatalog.retained.map((row: Record<string, unknown>) => ({
+      id: row.id, path: row.path, async: row.async, tool: row.tool, invalid: row.invalid, disabled: row.disabled,
+    })), [
+      { id: "packed_retained_async", path: join(retainedRoot, "packed_retained_async.json"), async: true, tool: false, invalid: false, disabled: false },
+      { id: "packed_retained_sync", path: join(retainedRoot, "packed_retained_sync.json"), async: false, tool: false, invalid: false, disabled: false },
+      { id: "retained_async", path: join(retainedRoot, "retained_async.json"), async: true, tool: false, invalid: false, disabled: false },
+      { id: "retained_sync", path: join(retainedRoot, "retained_sync.json"), async: false, tool: false, invalid: false, disabled: false },
+    ]);
+    assert.deepEqual(loaded.recipeCatalog.retained_diagnostics, []);
     assert.equal(loaded.recipeCatalog.skill_recipe_catalog_partial, true);
     assert.equal(
       loaded.recipeCatalog.skill_recipe_components.some(
@@ -3839,13 +3889,15 @@ test("packed artifact first session preserves agent-native Skill and tool parity
       "message",
       "inspect",
       "packed_ping",
+      "packed_retained_sync",
       "music_player",
     ]);
     assert.deepEqual(loaded.tools.map((tool: any) => tool.properties), [
-      ["args", "async", "defaults", "description", "draft", "from", "name", "template", "update"],
+      ["args", "async", "defaults", "description", "draft", "expose", "from", "name", "template", "update"],
       ["artifacts", "as", "file", "recipe", "template", "transport_context", "values", "verbose"],
       ["action", "input", "target", "verbose"],
       ["identity", "lines", "source", "status", "target", "verbose", "view"],
+      [],
       [],
       ["loop", "player", "source", "transport_context", "volume"],
     ]);
@@ -3861,6 +3913,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
       const body = await readFile(join(packageDir, "dist", "skills", skill, "SKILL.md"), "utf8");
       assert.match(body, new RegExp(`^---\\r?\\nname: ${skill}\\r?$`, "m"));
       assert.equal(body.match(/^description:\s*(.+)$/m)?.[1], description);
+      assert.equal(body, await readFile(join("skills", skill, "SKILL.md"), "utf8"));
     }
     for (const reference of [
       "actors/references/diagnostics.md",
@@ -3870,7 +3923,10 @@ test("packed artifact first session preserves agent-native Skill and tool parity
       "swarm/references/development-swarm.md",
       "swarm/references/review-swarms.md",
     ]) {
-      await access(join(packageDir, "dist", "skills", reference));
+      assert.equal(
+        await readFile(join(packageDir, "dist", "skills", reference), "utf8"),
+        await readFile(join("skills", reference), "utf8"),
+      );
     }
     await assert.rejects(access(join(packageDir, ".agents")));
     const sourcePlayer = JSON.parse(
@@ -4023,10 +4079,10 @@ test("installed dist enforces the same bounded Trace, Control, and inspect contr
       ["tools-message", ".*", process.platform === "linux" ? 17 : 16],
       ["tools-spawn", ".*", 2],
       ["tools-local", ".*", 5],
-      ["registry", ".*", 55],
+      ["registry", ".*", 66],
       ["runtime", ".*", process.platform === "win32" || process.platform === "darwin" ? 12 : 13],
       ["tools-response", ".*", 28],
-      ["tools-inspect", ".*", 23],
+      ["tools-inspect", ".*", 24],
       ["run-delivery", ".*", 95],
       ["execution", "^Final response selection", 1],
       ["recipes-context", "^Pi response selection|^Pi Node CLI", 2],

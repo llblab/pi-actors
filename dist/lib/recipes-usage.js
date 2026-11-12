@@ -44,7 +44,7 @@ function readRecipeSource(path) {
 }
 function inferRecipeRoot(path) {
     const parent = dirname(resolve(path));
-    return basename(parent) === "drafts" ? dirname(parent) : parent;
+    return ["drafts", "library"].includes(basename(parent)) ? dirname(parent) : parent;
 }
 function pathKey(path, recipeRoot) {
     const relation = relative(resolve(recipeRoot), resolve(path));
@@ -53,8 +53,9 @@ function pathKey(path, recipeRoot) {
     }
     return relation.replaceAll("\\", "/");
 }
-function recipeName(path) {
-    return basename(path).replace(/\.(?:json|md)$/u, "");
+function recipeName(path, recipeRoot) {
+    const name = basename(path).replace(/\.(?:json|md)$/u, "");
+    return dirname(resolve(path)) === resolve(recipeRoot, "library") ? `library/${name}` : name;
 }
 function lineageFilename(lineageName) {
     if (!lineageName || lineageName === "." || lineageName === "..") {
@@ -117,8 +118,10 @@ function readIndexedLedger(indexedName, recipeRoot) {
     const current = readLedger(indexedName, recipeRoot);
     return current ? { record: current } : undefined;
 }
-function findRelocatedRecipe(index, fingerprint, recipeRoot) {
+function findRelocatedRecipe(index, fingerprint, recipeRoot, newPath) {
     const candidates = Object.entries(index.paths).flatMap(([oldPath, indexedName]) => {
+        if (oldPath.startsWith("library/") !== newPath.startsWith("library/"))
+            return [];
         if (existsSync(join(recipeRoot, oldPath)))
             return [];
         const found = readIndexedLedger(indexedName, recipeRoot);
@@ -157,7 +160,7 @@ export function ensureRecipeLineage(path, now = new Date(), recipeRoot = inferRe
             if (!source)
                 return false;
             const key = pathKey(path, recipeRoot);
-            const name = recipeName(path);
+            const name = recipeName(path, recipeRoot);
             const index = readIndex(recipeRoot);
             const indexedName = index.paths[key];
             if (indexedName) {
@@ -253,11 +256,11 @@ export function recordRecipeLaunch(path, now = new Date(), kind = "direct", reci
                     return false;
                 const { fingerprint } = source;
                 const key = pathKey(path, recipeRoot);
-                const desiredName = recipeName(path);
+                const desiredName = recipeName(path, recipeRoot);
                 const index = readIndex(recipeRoot);
                 const relocated = index.paths[key]
                     ? undefined
-                    : findRelocatedRecipe(index, fingerprint, recipeRoot);
+                    : findRelocatedRecipe(index, fingerprint, recipeRoot, key);
                 const indexedName = index.paths[key] ?? relocated?.indexedName;
                 const found = indexedName
                     ? readIndexedLedger(indexedName, recipeRoot)
@@ -298,7 +301,7 @@ export function recordRecipeLaunch(path, now = new Date(), kind = "direct", reci
                         former_names: renamed
                             ? appendBounded(stored?.former_names ?? [], stored.lineage_name)
                             : relocated
-                                ? appendBounded(stored?.former_names ?? [], recipeName(relocated.path))
+                                ? appendBounded(stored?.former_names ?? [], recipeName(join(recipeRoot, relocated.path), recipeRoot))
                                 : stored?.former_names ?? [],
                         former_paths: relocated
                             ? appendBounded(stored?.former_paths ?? [], relocated.path)
@@ -444,7 +447,7 @@ export function moveRecipeUsage(fromPath, toPath, recipeRoot = inferRecipeRoot(f
             const toKey = pathKey(toPath, recipeRoot);
             const index = readIndex(recipeRoot);
             const oldName = index.paths[fromKey];
-            const newName = recipeName(toPath);
+            const newName = recipeName(toPath, recipeRoot);
             if (!oldName) {
                 return index.paths[toKey] === newName && Boolean(readLedger(newName, recipeRoot));
             }

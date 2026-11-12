@@ -7,6 +7,12 @@ description: Use only for internal automatic Recipe-memory review, diagnosis, or
 
 Use this Skill only when automatic draft-memory or active-tool review needs diagnosis or bounded recovery. Normal agents must not spawn, register, specialize, or invoke `recipe-memory/draft-review` or `recipe-memory/tool-review`; they are package-owned internal reviewer components.
 
+## Evidence limits
+
+Automatic reviewers receive value-free contract shape, risk labels, usage counts, and batch-local equality groups, not executable content, descriptions, paths, or canonical names. Structural evidence and launch counts alone do not establish semantic purpose, good tool names, successful reuse, or accepted outcomes. Promotion preserves unchanged captured executable content; it does not generalize a one-off mission.
+
+Explicit create-only retention is owned by `actors` through `register_tool expose=false`, not by these internal reviewers. Automatic retained lifecycle is not implemented. Current draft promote/discard and tool-review behavior are unchanged. Missing evidence is unknown; this guidance adds no retain/defer action, retry permission, automatic rewrite, or live migration. Do not bypass confidentiality or edit review state to simulate the future policy.
+
 ## Diagnose first
 
 ```text

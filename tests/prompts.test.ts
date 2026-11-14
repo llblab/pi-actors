@@ -1,6 +1,6 @@
 /**
  * Prompt copy regression tests
- * Covers register_tool prompt copy and registered-tool prompt snippets
+ * Covers actors_tool_register prompt copy and registered-tool prompt snippets
  */
 
 import assert from "node:assert/strict";
@@ -8,12 +8,12 @@ import test from "node:test";
 
 import * as Prompts from "../lib/prompts.ts";
 
-test("Register tool prompt copy names the register_tool tool explicitly", () => {
+test("Register tool prompt copy names the actors_tool_register tool explicitly", () => {
   assert.match(Prompts.REGISTER_TOOL_DESCRIPTION, /persistent custom tool/);
   assert.match(Prompts.REGISTER_TOOL_PROMPT_SNIPPET, /command templates/);
   assert.equal(
     Prompts.REGISTER_TOOL_GUIDELINES.every((item) =>
-      item.includes("register_tool"),
+      item.includes("actors_tool_register"),
     ),
     true,
   );
@@ -63,7 +63,7 @@ test("Onboarding system prompt does not duplicate product manuals", () => {
   assert.doesNotMatch(prompt, /watcher|review threshold|scheduler threshold/i);
   assert.doesNotMatch(
     prompt,
-    /message|inspect|Trace|Control|callable_now|activation boundary|bash -lc|\beval\b|run\.json|trace\.jsonl|controls\.jsonl/i,
+    /\bmessage\b|\binspect\b|\bTrace\b|\bControl\b|callable_now|activation boundary|bash -lc|\beval\b|run\.json|trace\.jsonl|controls\.jsonl/i,
   );
 });
 

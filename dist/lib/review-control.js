@@ -90,7 +90,7 @@ export function controlAutomaticReview(action, scope, options = {}) {
     });
     if (result.changed === true)
         schedule(scope, options);
-    const nextActions = ["inspect target=recipes view=reviews"];
+    const nextActions = ["actors_inspect target=recipes view=reviews"];
     if (action === "review.retry" &&
         scope === "tool" &&
         (result.phase === "approved" || result.phase === "lineage_pending"))

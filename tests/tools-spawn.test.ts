@@ -60,11 +60,11 @@ test("AX owned spawn guards retain exact selected-value and pre-launch observati
     const hostTool = { ...tool, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => { hostExecutions++; return tool.execute(...values, ctx); } };
     // The host clones public arguments before execute; facade accessor probes stay direct.
     const hostRequest = { ...(mode === "state_dir" ? { state_dir: "CALLER_STATE_PATH" } : { as: selected }), verbose };
-    const call = { type: "toolCall", id: "host-spawn-guard", name: "spawn", arguments: hostRequest };
+    const call = { type: "toolCall", id: "host-spawn-guard", name: "actors_run_spawn", arguments: hostRequest };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(outcome.isError, true); assert.deepEqual(outcome.result.details, {});
     if (mode === "state_dir") {
-      assert.match(outcome.result.content[0].text, /^Validation failed for tool "spawn":/u);
+      assert.match(outcome.result.content[0].text, /^Validation failed for tool "actors_run_spawn":/u);
       assert.match(outcome.result.content[0].text, /state_dir: schema is false/u);
       assert.equal(hostExecutions, 0, "Original host schema rejects this unsupported field before the facade; do not bypass it");
     } else {

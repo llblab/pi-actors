@@ -55,7 +55,7 @@ export function sessionMismatchError(input: {
     ),
     {
       current_session: input.currentSession,
-      hint: "inspect target=runtime view=runs",
+      hint: "actors_inspect target=runtime view=runs",
       owner_session: input.expectedSession,
       reason: "session_mismatch",
       run: input.run,

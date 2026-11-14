@@ -5,6 +5,7 @@
  */
 import { existsSync, watch } from "node:fs";
 import { basename, dirname } from "node:path";
+import * as Identity from "./identity.js";
 import * as Paths from "./paths.js";
 import * as RecipesDiscovery from "./recipes-discovery.js";
 import * as RecipesReferences from "./recipes-references.js";
@@ -15,6 +16,8 @@ export function createAutoToolsRuntime(deps) {
     const tools = new Map();
     const runtimeToolFingerprints = new Map();
     const runtimeTools = new Set();
+    // Host declarations survive deactivation; retain their observed provenance separately.
+    const runtimeToolSources = new Map();
     const recipeRoot = deps.recipeRoot ?? Paths.getRecipeRoot();
     const status = {
         active_tool_count: 0,
@@ -28,9 +31,13 @@ export function createAutoToolsRuntime(deps) {
             ctx.ui.notify(message, type);
     }
     function getToolNameBlocker(name) {
-        return deps.reservedToolNames.has(name)
-            ? `Reserved tool name: ${name}`
-            : undefined;
+        const normalized = Identity.normalizeToolName(name);
+        if ([...deps.reservedToolNames].some((reserved) => Identity.normalizeToolName(reserved) === normalized))
+            return `Reserved tool name: ${name}`;
+        const foreign = deps.getAllTools?.().find((tool) => Identity.normalizeToolName(tool.name) === normalized &&
+            !(tool.name === name && runtimeToolSources.has(name) &&
+                tool.sourceInfo?.path === runtimeToolSources.get(name)));
+        return foreign ? `Host tool name collision: ${name} conflicts with ${foreign.name}` : undefined;
     }
     function getToolFingerprint(cfg) {
         return JSON.stringify({
@@ -61,13 +68,15 @@ export function createAutoToolsRuntime(deps) {
         const stale = [...runtimeTools].filter((name) => !activeNames.has(name));
         if (stale.length === 0)
             return;
+        const hostTools = deps.getAllTools?.();
+        const staleOwned = stale.filter((name) => !hostTools || hostTools.some((tool) => tool.name === name && tool.sourceInfo?.path === runtimeToolSources.get(name)));
         for (const name of stale) {
             runtimeTools.delete(name);
             runtimeToolFingerprints.delete(name);
         }
         if (!deps.getActiveTools || !deps.setActiveTools)
             return;
-        const staleSet = new Set(stale);
+        const staleSet = new Set(staleOwned);
         deps.setActiveTools(deps.getActiveTools().filter((name) => !staleSet.has(name)));
     }
     function activationFor(name) {
@@ -81,10 +90,14 @@ export function createAutoToolsRuntime(deps) {
         };
     }
     function registerRuntimeTool(cfg) {
+        const blocker = getToolNameBlocker(cfg.name);
+        if (blocker)
+            throw new Error(blocker);
         const fingerprint = getToolFingerprint(cfg);
         if (runtimeToolFingerprints.get(cfg.name) !== fingerprint) {
             deps.registerTool(ToolsLocal.createRuntimeToolDefinition(cfg, deps.exec));
             runtimeTools.add(cfg.name);
+            runtimeToolSources.set(cfg.name, deps.getAllTools?.().find((tool) => tool.name === cfg.name)?.sourceInfo?.path);
             runtimeToolFingerprints.set(cfg.name, fingerprint);
         }
         if (deps.getActiveTools && deps.setActiveTools) {
@@ -129,7 +142,7 @@ export function createAutoToolsRuntime(deps) {
             lines.push(...other.map((warning) => `• ${warning}`));
             groups[groups.length] = ["other_diagnostics", start, lines.length];
         }
-        lines.push("Next: inspect target=recipes view=doctor");
+        lines.push("Next: actors_inspect target=recipes view=doctor");
         // Preserve the original layout join/coercion and its faults before projecting owned warning slots.
         void `${lines.join("\n")}\n`;
         let text = ToolsResponse.formatMarkdownField("report", "pi-actors recipe registry warning");
@@ -141,7 +154,7 @@ export function createAutoToolsRuntime(deps) {
                     : "  - warning:\n    - result: unavailable\n    - reason: malformed_selected_text");
             }
         }
-        return text + "\n" + ToolsResponse.formatMarkdownField("instruction", "Next: inspect target=recipes view=doctor") + "\n";
+        return text + "\n" + ToolsResponse.formatMarkdownField("instruction", "Next: actors_inspect target=recipes view=doctor") + "\n";
     }
     function loadTools(ctx, resolutionContext) {
         const warnings = [];
@@ -170,6 +183,7 @@ export function createAutoToolsRuntime(deps) {
             const blocker = getToolNameBlocker(cfg.name);
             if (blocker) {
                 warnings.push(blocker);
+                tools.delete(cfg.name);
                 continue;
             }
             registerRuntimeTool(cfg);
@@ -195,7 +209,7 @@ export function createAutoToolsRuntime(deps) {
         }),
         getToolStatus: (name) => {
             const cfg = tools.get(name);
-            if (!cfg)
+            if (!cfg || getToolNameBlocker(name))
                 return undefined;
             const usage = cfg.sourcePath
                 ? RecipesUsage.readRecipeUsage(cfg.sourcePath)
@@ -217,8 +231,8 @@ export function createAutoToolsRuntime(deps) {
                 next_actions: activation.callable_now
                     ? [`call tool ${name}`]
                     : [
-                        `register_tool name=${name} update=true`,
-                        `inspect target=tool:${name} view=status`,
+                        `actors_tool_register name=${name} update=true`,
+                        `actors_inspect target=tool:${name} view=status`,
                     ],
                 ...(usage?.launch_kind ? { launch_kind: usage.launch_kind } : {}),
                 spawn_calls: Number(usage?.spawn_calls ?? 0),
@@ -271,7 +285,7 @@ export function createRecipeToolReloadWatcher(runtime, deps = {}) {
         failureNotified = true;
         setWatchStatus("failed");
         try {
-            ctx.ui.notify("- report: Recipe live reload watcher failed\n- instruction: restart the session or use register_tool again to refresh recipe tools.", "warning");
+            ctx.ui.notify("- report: Recipe live reload watcher failed\n- instruction: restart the session or use actors_tool_register again to refresh recipe tools.", "warning");
         }
         catch (error) {
             reportCallbackError(error);

@@ -86,7 +86,7 @@ async function createHarness() {
       registerRuntimeTool: (cfg: RegisteredTool) => {
         runtimeRegistered.push(cfg.name);
       },
-      reservedToolNames: new Set(["bash", "register_tool"]),
+      reservedToolNames: new Set(["bash", "actors_tool_register"]),
       setActiveTools: (toolNames: string[]) => {
         activeTools = toolNames;
       },
@@ -145,7 +145,7 @@ for (const kind of ["activated", "promoted", "deleted"] as const) test(`AX regis
     const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")), manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
     const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href); let calls = 0;
     const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, ctx); } };
-    const call = { type: "toolCall", id: "host-registry-notice", name: "register_tool", arguments: params };
+    const call = { type: "toolCall", id: "host-registry-notice", name: "actors_tool_register", arguments: params };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(calls, 1); assert.equal(outcome.isError, false); assert.deepEqual(messages, [registryNoticeExpected(kind, "notice")]); assert.equal(outcome.result.details.tool, "notice");
   } finally { await h.cleanup(); }
@@ -249,7 +249,7 @@ test("AX transaction failure text preserves real stage effects, restoration and 
     const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href);
     const definition = createRegisterToolDefinition({ ...h.deps, getRecipeResolutionContext: () => context, registerRuntimeTool(): never { throw new Error("SDK_ACTIVATION"); } }); let calls = 0;
     const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-    const call = { type: "toolCall", id: "host-transaction", name: "register_tool", arguments: { name: "host_transaction", description: "Description", template: "echo" } };
+    const call = { type: "toolCall", id: "host-transaction", name: "actors_tool_register", arguments: { name: "host_transaction", description: "Description", template: "echo" } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, transactionMessage("runtime_activation", context.generation, "<none>", "SDK_ACTIVATION")); assert.deepEqual(outcome.result.details, {});
     assert.equal(existsSync(join(h.root, "host_transaction.json")), false); assert.deepEqual(h.notifications, []);
@@ -377,7 +377,7 @@ test("AX draft raw refusal preserves two reads, reason presence and raw faults",
     const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href);
     const definition = createRegisterToolDefinition(h.deps); let calls = 0;
     const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-    const call = { type: "toolCall", id: "host-raw-draft", name: "register_tool", arguments: { name: "host_raw", draft } };
+    const call = { type: "toolCall", id: "host-raw-draft", name: "actors_tool_register", arguments: { name: "host_raw", draft } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftInvalid("reason", "JSON recipe must be an object")); assert.deepEqual(outcome.result.details, {});
     assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
@@ -401,14 +401,14 @@ test("AX draft candidate refusal preserves real admission join after Error looku
     const sdkRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")), manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json");
     const entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import, { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href); let calls = 0;
     const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-    const call = { type: "toolCall", id: "host-draft-admission", name: "register_tool", arguments: { name: "host_candidate", draft } };
+    const call = { type: "toolCall", id: "host-draft-admission", name: "actors_tool_register", arguments: { name: "host_candidate", draft } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftInvalid("diagnostics_summary", marker)); assert.deepEqual(outcome.result.details, {});
     assert.equal(existsSync(join(h.root, "candidate_error.json")), false); assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
   } finally { await h.cleanup(); }
 });
 
-const candidateMessage = (diagnostics: string, source?: string, summary = "<none>", instruction = "inspect target=recipes view=doctor identity=alpha/task") =>
+const candidateMessage = (diagnostics: string, source?: string, summary = "<none>", instruction = "actors_inspect target=recipes view=doctor identity=alpha/task") =>
   registryDocument({ field: "recipe", ...(source === undefined ? {} : { source }),
     result: source === undefined ? "Tool recipe validation failed." : "Recipe source validation failed.",
     diagnostics_summary: diagnostics, ...(source === undefined ? {} : { active_skills_summary: summary, instruction }) });
@@ -427,7 +427,7 @@ for (const branch of ["source", "recipe"] as const) test(`AX candidate admission
     const manifest = sdkRequire.resolve("@earendil-works/pi-agent-core/package.json"), entry = JSON.parse(readFileSync(manifest, "utf8")).exports["."].import;
     const { runToolCall } = await import(new URL(entry, pathToFileURL(manifest)).href);
     let calls = 0; const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-    const call = { type: "toolCall", id: "host-candidate", name: "register_tool", arguments: branch === "source" ? { name: "host_candidate", from: "alpha/task" } : { name: "host_candidate", description: "Description", template: "echo" } };
+    const call = { type: "toolCall", id: "host-candidate", name: "actors_tool_register", arguments: branch === "source" ? { name: "host_candidate", from: "alpha/task" } : { name: "host_candidate", description: "Description", template: "echo" } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, candidateMessage(marker, branch === "source" ? "alpha/task" : undefined)); assert.deepEqual(outcome.result.details, {});
     assert.equal(h.tools.size, 0); assert.deepEqual(h.activeTools(), ["read", "smoke"]); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
@@ -439,13 +439,13 @@ test("AX candidate refusal preserves pre-Error join, branch and secondary fault 
   const order = ["admission", "Error_lookup", "source", "join_get", "join", "diagnostics", "summary", "doctor_test", "doctor_identity", "Error_lookup"];
   try {
     const source = await captureCandidateRefusal(h, "source", "shown", "ADMISSION_MARKER", [], "other/task");
-    assert.deepEqual(source.events, order); assert.ok(source.error instanceof Error); assert.equal(source.error.message, candidateMessage("ADMISSION_MARKER", "shown", "<none>", "inspect target=recipes view=doctor identity=other/task"));
+    assert.deepEqual(source.events, order); assert.ok(source.error instanceof Error); assert.equal(source.error.message, candidateMessage("ADMISSION_MARKER", "shown", "<none>", "actors_inspect target=recipes view=doctor identity=other/task"));
     for (const branch of ["recipe", "falsy_from"] as const) {
       const result = await captureCandidateRefusal(h, branch); assert.deepEqual(result.events, ["admission", "Error_lookup", "join_get", "join", "diagnostics", "Error_lookup"]);
       assert.ok(result.error instanceof Error); assert.equal(result.error.message, candidateMessage("ADMISSION_MARKER")); assert.equal(result.activeReads, 1);
     }
     const emptyDisplay = await captureCandidateRefusal(h, "source", "", "ADMISSION_MARKER", [], "invalid");
-    assert.ok(emptyDisplay.error instanceof Error); assert.equal(emptyDisplay.error.message, candidateMessage("ADMISSION_MARKER", "", "<none>", "inspect target=recipes view=doctor"));
+    assert.ok(emptyDisplay.error instanceof Error); assert.equal(emptyDisplay.error.message, candidateMessage("ADMISSION_MARKER", "", "<none>", "actors_inspect target=recipes view=doctor"));
     for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["source", "join_get", "join", "diagnostics", "summary", "doctor_test", "doctor_identity"]) {
       const result = await captureCandidateRefusal(h, "source", "shown", "ADMISSION_MARKER", [], "other/task", stage, cause);
       assert.equal(result.error, cause); assert.deepEqual(result.events, order.slice(0, order.indexOf(stage) + 1));
@@ -466,7 +466,7 @@ test("AX candidate refusal preserves legacy diagnostic cap and whole-field respo
     const malformed = "x".repeat(4094) + "😀tail";
     const unavailable = await read("alpha/task", malformed, "<none>", "invalid", "recipe");
     assert.equal(unavailable.bounded.isWellFormed(), false); assert.match(unavailable.text, /\ndiagnostics_summary: "\[unavailable\]"\ndiagnostics_summary_omission:\n  reason: "malformed_selected_text"/u);
-    const hint = "inspect target=recipes view=doctor";
+    const hint = "actors_inspect target=recipes view=doctor";
     for (const key of ["source", "active_skills_summary"]) {
       const base = candidateMessage("ADMISSION_MARKER", key === "source" ? "x" : "short", key === "active_skills_summary" ? "x" : "<none>", hint);
       const width = 16384 - Buffer.byteLength(base) + 1;
@@ -477,7 +477,7 @@ test("AX candidate refusal preserves legacy diagnostic cap and whole-field respo
       assert.equal(Buffer.byteLength((await read(key === "source" ? unicode : source, "ADMISSION_MARKER", key === "active_skills_summary" ? unicode : summary)).text), 16384);
       assert.match((await read(key === "source" ? "bad\ud800" : "short", "ADMISSION_MARKER", key === "active_skills_summary" ? "bad\ud800" : "<none>")).text, new RegExp("\\n" + key + ': "\\[unavailable\\]"'));
     }
-    const doctorPrefix = "inspect target=recipes view=doctor identity=";
+    const doctorPrefix = "actors_inspect target=recipes view=doctor identity=";
     const base = candidateMessage("ADMISSION_MARKER", "short", "<none>", doctorPrefix + "a/b");
     const width = 16384 - Buffer.byteLength(base) + 1, doctor = "a/" + "b".repeat(width);
     assert.equal(Buffer.byteLength((await read("short", "ADMISSION_MARKER", "<none>", doctor)).text), 16384);
@@ -519,9 +519,9 @@ test("AX public source normalization preserves owned reasons, legacy summary and
     const context = createRecipeResolutionContext("source-test", h.root, createActiveSkillRecipeContext(names.map(name => ({ name, baseDir: join(h.root, "unused") }))));
     const summary = [...names].sort().slice(0, 20).join(", ");
     const cases = [
-      ["std:old", "std: Recipe references were removed; use <skill>/<recipe> or an explicit .json/.md file path.", "inspect target=recipes view=doctor"],
-      ["skill:alpha/task", "skill: Recipe references were removed; use alpha/task without a prefix.", "inspect target=recipes view=doctor identity=alpha/task"],
-      ["invalid", "Tool from must use <skill>/<recipe> or an explicit .json/.md file path.", "inspect target=recipes view=doctor"],
+      ["std:old", "std: Recipe references were removed; use <skill>/<recipe> or an explicit .json/.md file path.", "actors_inspect target=recipes view=doctor"],
+      ["skill:alpha/task", "skill: Recipe references were removed; use alpha/task without a prefix.", "actors_inspect target=recipes view=doctor identity=alpha/task"],
+      ["invalid", "Tool from must use <skill>/<recipe> or an explicit .json/.md file path.", "actors_inspect target=recipes view=doctor"],
     ];
     const deps = { ...h.deps, getRecipeResolutionContext: () => context };
     for (const [source, reason, hint] of cases) await assert.rejects(executeRegisterTool({ name: "bad_source", from: source }, {}, deps), (error: unknown) => {
@@ -535,7 +535,7 @@ test("AX public source normalization preserves owned reasons, legacy summary and
     const definition = createRegisterToolDefinition(deps);
     for (const [source, reason, hint] of cases.slice(0, 2)) {
       let calls = 0; const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-      const call = { type: "toolCall", id: "host-source-normalization", name: "register_tool", arguments: { name: "host_source", from: source } };
+      const call = { type: "toolCall", id: "host-source-normalization", name: "actors_tool_register", arguments: { name: "host_source", from: source } };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, sourceFailureMessage(source, reason, summary, hint)); assert.deepEqual(outcome.result.details, {});
     }
@@ -548,7 +548,7 @@ test("AX source normalization keeps catch extent and original template and summa
   const order = ["spread", "message", "trim", "startsWith", "source", "reason", "skills", "doctor_test", "doctor_identity"];
   try {
     const captured = await captureSourceNormalization(h, "displayed", "why", ["zeta", "alpha, beta"], "other/task");
-    assert.ok(captured.error instanceof Error); assert.equal(captured.error.message, sourceFailureMessage("displayed", "why", "alpha, beta, zeta", "inspect target=recipes view=doctor identity=other/task"));
+    assert.ok(captured.error instanceof Error); assert.equal(captured.error.message, sourceFailureMessage("displayed", "why", "alpha, beta, zeta", "actors_inspect target=recipes view=doctor identity=other/task"));
     assert.deepEqual(captured.events, order, "Display source and diagnostic hint may disagree; preserve old observations rather than repairing identity");
     for (const cause of [undefined, "PRIVATE_PRIMITIVE", token]) for (const stage of ["message", "trim", "source", "reason", "skills", "doctor_test", "doctor_identity"]) {
       const result = await captureSourceNormalization(h, "displayed", "why", [], "alpha/task", stage, cause);
@@ -562,7 +562,7 @@ test("AX source normalization keeps catch extent and original template and summa
     }
     for (const thrown of [undefined, "primitive", Symbol("selected")]) {
       await assert.rejects(executeRegisterTool({ name: "spread_failure", from: "alpha/task", get description(): never { throw thrown; } }, {}, h.deps), (error: unknown) => {
-        assert.ok(error instanceof Error); assert.equal(error.message, sourceFailureMessage("alpha/task", String(thrown), "<none>", "inspect target=recipes view=doctor identity=alpha/task")); return true;
+        assert.ok(error instanceof Error); assert.equal(error.message, sourceFailureMessage("alpha/task", String(thrown), "<none>", "actors_inspect target=recipes view=doctor identity=alpha/task")); return true;
       });
     }
     let rejected = false;
@@ -570,7 +570,7 @@ test("AX source normalization keeps catch extent and original template and summa
     catch (error) { rejected = true; assert.equal(error, token); } assert.equal(rejected, true);
     let fromReads = 0;
     await assert.rejects(executeRegisterTool({ name: "missing_display", get from() { return ++fromReads === 3 ? undefined : "alpha/task"; }, get description(): never { throw "why"; } }, {}, h.deps), (error: unknown) => {
-      assert.ok(error instanceof Error); assert.equal(error.message, sourceFailureMessage("undefined", "why", "<none>", "inspect target=recipes view=doctor")); return true;
+      assert.ok(error instanceof Error); assert.equal(error.message, sourceFailureMessage("undefined", "why", "<none>", "actors_inspect target=recipes view=doctor")); return true;
     }); assert.equal(fromReads, 5);
     assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
   } finally { await h.cleanup(); }
@@ -579,7 +579,7 @@ test("AX source normalization keeps catch extent and original template and summa
 test("AX source normalization fits whole selected fields with truthful omissions and opaque Markdown", async () => {
   const h = await createHarness();
   try {
-    const normalHint = "inspect target=recipes view=doctor";
+    const normalHint = "actors_inspect target=recipes view=doctor";
     const get = async (source: string, reason: string, summary: string, doctor = "invalid") => {
       const result = await captureSourceNormalization(h, source, reason, summary === "<none>" ? [] : [summary], doctor);
       assert.ok(result.error instanceof Error); const text = result.error.message;
@@ -599,7 +599,7 @@ test("AX source normalization fits whole selected fields with truthful omissions
       const unit = "界👩‍💻é", unicode = [...args]; unicode[slot] = unit.repeat(Math.floor(size / Buffer.byteLength(unit))) + "x".repeat(size % Buffer.byteLength(unit));
       assert.equal(Buffer.byteLength(await get(unicode[0], unicode[1], unicode[2])), 16384);
     }
-    const doctorPrefix = "inspect target=recipes view=doctor identity=";
+    const doctorPrefix = "actors_inspect target=recipes view=doctor identity=";
     const base = sourceFailureMessage("short", "why", "<none>", doctorPrefix + "a/b");
     const width = 16384 - Buffer.byteLength(base) + 1;
     const exactDoctor = "a/" + "b".repeat(width);
@@ -617,7 +617,7 @@ test("AX source normalization fits whole selected fields with truthful omissions
 });
 
 const draftPathFields = (kind: "root" | "missing") => kind === "root"
-  ? { result: "Draft must be under the allowed root.", instruction: "Use inspect target=recipes view=summary to list drafts." }
+  ? { result: "Draft must be under the allowed root.", instruction: "Use actors_inspect target=recipes view=summary to list drafts." }
   : { result: "Draft not found." };
 const draftPathMessage = (kind: "root" | "missing", key: string, reference: string) =>
   registryDocument({ field: "draft", [key]: reference, ...draftPathFields(kind) });
@@ -701,7 +701,7 @@ test("AX draft path refusals preserve root and draft observations, raw faults an
     for (const [draft, kind, key, reference] of [[outside, "root", "allowed_root", resolve(h.root, "drafts")], [missing, "missing", "path", resolve(missing)]] as const) {
       let calls = 0;
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-      const call = { type: "toolCall", id: "host-draft-path", name: "register_tool", arguments: { name: "host_path", draft } };
+      const call = { type: "toolCall", id: "host-draft-path", name: "actors_tool_register", arguments: { name: "host_path", draft } };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, draftPathMessage(kind, key, reference)); assert.deepEqual(outcome.result.details, {});
     }
@@ -710,7 +710,7 @@ test("AX draft path refusals preserve root and draft observations, raw faults an
 });
 
 const runtimeDefaultText = (key: string) => registryDocument({ field: "defaults", key,
-  result: "Tool defaults cannot set runtime-owned input.", instruction: "remove that default and retry register_tool; the runtime supplies it." });
+  result: "Tool defaults cannot set runtime-owned input.", instruction: "remove that default and retry actors_tool_register; the runtime supplies it." });
 
 test("AX runtime-owned default refusal preserves finite first-key selection and copy order without values", async () => {
   const h = await createHarness(), draft = join(h.root, "drafts", "runtime-key.json");
@@ -781,7 +781,7 @@ test("AX runtime-owned default guard keeps late-copy faults, delegation conditio
     for (const keys of [["state_dir", "owner_id"], ["owner_id", "state_dir"]]) {
       const defaults = Object.fromEntries(keys.map(key => [key, "PRIVATE_VALUE"])); const original = JSON.stringify(defaults); let calls = 0;
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-      const call = { type: "toolCall", id: "host-runtime-key", name: "register_tool", arguments: { name: "host_key", from: "private-owner/reference", defaults } };
+      const call = { type: "toolCall", id: "host-runtime-key", name: "actors_tool_register", arguments: { name: "host_key", from: "private-owner/reference", defaults } };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, runtimeDefaultText(keys[0])); assert.deepEqual(outcome.result.details, {}); assert.equal(JSON.stringify(defaults), original);
     }
@@ -866,12 +866,12 @@ test("AX authored constants preserve Schema and observation faults plus SDK phas
     const definition = createRegisterToolDefinition(h.deps);
     for (const [params, isError, expectedCalls, pattern] of [
       [{ name: "host_author", template: "echo", description: "" }, true, 1, /\nfield: "description"\nresult: "Tool description is required/u],
-      [{ name: "host_author", template: "echo", description: "Description", defaults: false }, true, 0, /Validation failed for tool "register_tool":/u],
+      [{ name: "host_author", template: "echo", description: "Description", defaults: false }, true, 0, /Validation failed for tool "actors_tool_register":/u],
       [{ name: "host_author", template: null }, false, 1, /result: "not found"/u],
     ] as const) {
       let calls = 0;
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-      const call = { type: "toolCall", id: "host-authored", name: "register_tool", arguments: params };
+      const call = { type: "toolCall", id: "host-authored", name: "actors_tool_register", arguments: params };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(calls, expectedCalls); assert.equal(outcome.isError, isError); assert.match(outcome.result.content[0].text, pattern);
       assert.deepEqual(outcome.result.details, isError ? {} : { tool: "host_author" });
@@ -881,7 +881,7 @@ test("AX authored constants preserve Schema and observation faults plus SDK phas
 });
 
 const templateShapeText = {
-  nested: registryDocument({ field: "template", result: "Nested Recipe-shaped templates are not a register_tool source mode.",
+  nested: registryDocument({ field: "template", result: "Nested Recipe-shaped templates are not a actors_tool_register source mode.",
     instruction: "retry with from=<skill>/<recipe> and defaults={...}." }),
   empty: registryDocument({ field: "template", result: "Tool template sequence is empty." }),
   type: registryDocument({ field: "template", result: "unsupported template type", supported_types: ["string", "object", "sequence"] }),
@@ -974,7 +974,7 @@ test("AX template shape guards preserve accessor and expansion faults, special v
     for (const [value, expected] of [[{ template: "PRIVATE_NAMESPACE/ref" }, templateShapeText.nested], [[], templateShapeText.empty], [7, "\nHOST_BLOCKER"]] as const) {
       let calls = 0, received: unknown;
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; received = (args[1] as { template: unknown }).template; return definition.execute(...args, {}); } };
-      const call = { type: "toolCall", id: "host-shape", name: "register_tool", arguments: { name: "host_shape", template: value } };
+      const call = { type: "toolCall", id: "host-shape", name: "actors_tool_register", arguments: { name: "host_shape", template: value } };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, expected); assert.deepEqual(outcome.result.details, {});
       if (typeof value === "number") { assert.equal(received, "7"); assert.equal(value, 7); }
@@ -1063,7 +1063,7 @@ async function checkDuplicateRegistrationGuard(kind: "ordinary" | "draft") {
     const { runToolCall } = await import(new URL(entry, pathToFileURL(coreManifest)).href);
     const definition = createRegisterToolDefinition(h.deps); let calls = 0;
     const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; return definition.execute(...args, {}); } };
-    const call = { type: "toolCall", id: "host-duplicate", name: "register_tool", arguments: { name: "SMOKE", ...(kind === "draft" ? { draft } : {}) } };
+    const call = { type: "toolCall", id: "host-duplicate", name: "actors_tool_register", arguments: { name: "SMOKE", ...(kind === "draft" ? { draft } : {}) } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(calls, 1); assert.equal(outcome.isError, true); assert.equal(outcome.result.content[0].text, expected); assert.deepEqual(outcome.result.details, {});
     assert.equal(await readFile(target, "utf8"), before); if (kind === "draft") assert.equal(await readFile(draft, "utf8"), draftBytes);
@@ -1092,7 +1092,7 @@ test("AX ordinary registration name and missing-source guards preserve stage obs
       });
       const expected = mode === "invalid" ? registryDocument({ field: "name", result: "Invalid tool name." })
         : mode === "reserved" ? registryDocument({ field: "name", value: "bash", result: "Reserved tool name." })
-        : registryDocument({ result: "New registration requires exactly one source mode.", source_modes: ["from", "template", "draft"], instruction: "retry register_tool with one source field." });
+        : registryDocument({ result: "New registration requires exactly one source mode.", source_modes: ["from", "template", "draft"], instruction: "retry actors_tool_register with one source field." });
       await assert.rejects(executeRegisterTool(params, {}, {
         ...h.deps,
         reservedToolNames: new Reserved(["bash"]),
@@ -1115,7 +1115,7 @@ test("AX ordinary registration name and missing-source guards preserve stage obs
       assert.equal(existsSync(join(h.root, "fresh.json")), false);
     }
     const listed = await executeRegisterTool({ name: "" }, {}, h.deps);
-    assert.deepEqual(registryYaml(listed.content[0].text).registered_tools, []); assert.deepEqual(listed.details, { tool: "register_tool" });
+    assert.deepEqual(registryYaml(listed.content[0].text).registered_tools, []); assert.deepEqual(listed.details, { tool: "actors_tool_register" });
     await executeRegisterTool({ name: "existing", description: "Old", template: "echo retained" }, {}, h.deps);
     const updated = await executeRegisterTool({ name: "existing", description: "New", update: true }, {}, h.deps);
     assert.equal(updated.details.persisted, true); assert.equal(h.tools.get("existing")?.description, "New");
@@ -1176,14 +1176,14 @@ test("AX ordinary registration guard projection preserves unowned faults, scalar
       [{ name: "host_fresh" }, true, 1, /\nresult: "New registration requires exactly one source mode."/u],
       [{ name: "" }, false, 1, /registered_tools:\n  \[\]/u],
       [{ name: 7 }, true, 1, /\nresult: "New registration requires exactly one source mode."/u],
-      [{ name: {} }, true, 0, /Validation failed for tool "register_tool":/u],
+      [{ name: {} }, true, 0, /Validation failed for tool "actors_tool_register":/u],
     ] as const) {
       let calls = 0, receivedName: unknown;
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; receivedName = (args[1] as { name?: unknown }).name; return definition.execute(...args, {}); } };
-      const call = { type: "toolCall", id: "host-name-source", name: "register_tool", arguments: params };
+      const call = { type: "toolCall", id: "host-name-source", name: "actors_tool_register", arguments: params };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(outcome.isError, isError); assert.equal(calls, callsExpected); assert.match(outcome.result.content[0].text, pattern);
-      assert.deepEqual(outcome.result.details, isError ? {} : { tool: "register_tool" });
+      assert.deepEqual(outcome.result.details, isError ? {} : { tool: "actors_tool_register" });
       if (typeof params.name === "number") { assert.equal(receivedName, "7"); assert.equal(params.name, 7); }
     }
     assert.equal(h.tools.size, 0); assert.deepEqual(h.runtimeRegistered, []); assert.deepEqual(h.notifications, []);
@@ -1193,15 +1193,15 @@ test("AX ordinary registration guard projection preserves unowned faults, scalar
 test("AX registry source-mode guard constants preserve descriptor and getter order without source echo", async () => {
   const h = await createHarness();
   const expected = {
-    values: registryDocument({ field: "values", result: "register_tool values was removed.", replacement_fields: ["defaults", "from"],
-      instruction: "retry register_tool with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition." }),
+    values: registryDocument({ field: "values", result: "actors_tool_register values was removed.", replacement_fields: ["defaults", "from"],
+      instruction: "retry actors_tool_register with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition." }),
     from: registryDocument({ field: "from", result: "Tool from must be a non-empty Recipe reference.",
       reference_forms: ["<skill>/<recipe>", "explicit .json path", "explicit .md path"],
-      instruction: "retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path." }),
-    mixed: registryDocument({ result: "Use exactly one register_tool source mode.", source_modes: ["from", "template", "draft"],
-      instruction: "remove the extra source fields and retry register_tool." }),
-    inherited: registryDocument({ field: "from", result: "register_tool from inherits args and async behavior.", inherited_fields: ["args", "async"],
-      instruction: "retry register_tool with from and optional defaults only; omit args and async." }),
+      instruction: "retry actors_tool_register with from=<skill>/<recipe> or an explicit .json/.md path." }),
+    mixed: registryDocument({ result: "Use exactly one actors_tool_register source mode.", source_modes: ["from", "template", "draft"],
+      instruction: "remove the extra source fields and retry actors_tool_register." }),
+    inherited: registryDocument({ field: "from", result: "actors_tool_register from inherits args and async behavior.", inherited_fields: ["args", "async"],
+      instruction: "retry actors_tool_register with from and optional defaults only; omit args and async." }),
   };
   try {
     for (const named of [false, true]) for (const mode of ["values", "from", "from_empty", "mixed", "args", "async", "both"] as const) {
@@ -1259,20 +1259,20 @@ test("AX registry source-mode refusals keep unowned observation faults and host 
     const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
     const definition = createRegisterToolDefinition(h.deps);
     for (const [params, isError, reachesFacade, pattern] of [
-      [{ values: { caller: "data" } }, true, false, /Validation failed for tool "register_tool":/u],
-      [{ from: {} }, true, false, /Validation failed for tool "register_tool":/u],
+      [{ values: { caller: "data" } }, true, false, /Validation failed for tool "actors_tool_register":/u],
+      [{ from: {} }, true, false, /Validation failed for tool "actors_tool_register":/u],
       [{ from: 7 }, false, true, /registered_tools:\n  \[\]/u],
       [{ from: "" }, true, true, /\nfield: "from"\nresult: "Tool from must be a non-empty Recipe reference."/u],
-      [{ from: "PRIVATE_SOURCE", template: "echo" }, true, true, /\nresult: "Use exactly one register_tool source mode."/u],
+      [{ from: "PRIVATE_SOURCE", template: "echo" }, true, true, /\nresult: "Use exactly one actors_tool_register source mode."/u],
       [{ from: "PRIVATE_SOURCE", args: "x" }, true, true, /inherited_fields:\n  - "args"\n  - "async"/u],
       [{ from: "PRIVATE_SOURCE", async: true }, true, true, /inherited_fields:\n  - "args"\n  - "async"/u],
     ] as const) {
       let calls = 0, receivedFrom: unknown;
       const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => { calls++; receivedFrom = (args[1] as { from?: unknown }).from; return definition.execute(...args, {}); } };
-      const call = { type: "toolCall", id: "host-mode-guard", name: "register_tool", arguments: params };
+      const call = { type: "toolCall", id: "host-mode-guard", name: "actors_tool_register", arguments: params };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(outcome.isError, isError, JSON.stringify({ params, calls, result: outcome.result })); assert.match(outcome.result.content[0].text, pattern);
-      assert.equal(calls, reachesFacade ? 1 : 0); assert.deepEqual(outcome.result.details, isError ? {} : { tool: "register_tool" });
+      assert.equal(calls, reachesFacade ? 1 : 0); assert.deepEqual(outcome.result.details, isError ? {} : { tool: "actors_tool_register" });
       if ("from" in params && typeof params.from === "number") { assert.equal(receivedFrom, "7"); assert.equal(params.from, 7, "Host clones/coerces before execute; caller input stays numeric"); }
       if (reachesFacade) assert.doesNotMatch(outcome.result.content[0].text, /PRIVATE_SOURCE|- next:/u);
     }
@@ -1318,10 +1318,10 @@ test("AX draft promotion receipt preserves selected flag text and original activ
       assert.equal(result.details.activation_boundary, mode === "void" ? "session_activation_unverified" : mode === "false" ? "host_registration" : ["zero", "toggle"].includes(mode) ? "callability_verification" : "current_session");
       assert.deepEqual(result.details.required_args, ["file"]); assert.deepEqual(result.details.optional_args, ["lang"]);
       const invocation = ["true", "toggle", "opaque"].includes(mode);
-      assert.deepEqual(result.details.next_actions, invocation ? ["call tool promoted", "inspect target=tool:promoted view=status"] : ["inspect target=tool:promoted view=status"]);
+      assert.deepEqual(result.details.next_actions, invocation ? ["call tool promoted", "actors_inspect target=tool:promoted view=status"] : ["actors_inspect target=tool:promoted view=status"]);
       const flag = mode === "opaque" ? opaqueText : mode === "zero" ? "0" : mode === "true" || mode === "toggle" ? "true" : "false";
       assert.deepEqual(registryYaml(result.content[0].text), { tool: "promoted", result: update ? "updated" : "registered", source: "draft", callable_now: flag,
-        ...(invocation ? { instruction: "call tool promoted" } : { next: { tool: "inspect", target: "tool:promoted", view: "status" } }) });
+        ...(invocation ? { instruction: "call tool promoted" } : { next: { tool: "actors_inspect", target: "tool:promoted", view: "status" } }) });
       assert.doesNotMatch(result.content[0].text, /PRIVATE_|activation_boundary:|required_args:|optional_args:|defaults:|persisted:|host_registered:|warnings:/u);
       assert.equal(await readFile(draft, "utf8"), source);
       assert.equal(JSON.parse(await readFile(join(h.root, "promoted.json"), "utf8")).template, "echo {file} {lang}");
@@ -1398,10 +1398,10 @@ test("AX draft promotion receipt bounds the exact selected display without addin
     const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
     const definition = createRegisterToolDefinition(h.deps);
     const hostTool = { ...definition, execute: (...args: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...args, {}) };
-    const call = { type: "toolCall", id: "host-promotion", name: "register_tool", arguments: { name: "host_promoted", draft } };
+    const call = { type: "toolCall", id: "host-promotion", name: "actors_tool_register", arguments: { name: "host_promoted", draft } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(outcome.isError, false); assert.equal(outcome.result.details.promoted, true); assert.equal(outcome.result.details.callable_now, false);
-    assert.deepEqual(registryYaml(outcome.result.content[0].text), { tool: "host_promoted", result: "registered", source: "draft", callable_now: "false", next: { tool: "inspect", target: "tool:host_promoted", view: "status" } });
+    assert.deepEqual(registryYaml(outcome.result.content[0].text), { tool: "host_promoted", result: "registered", source: "draft", callable_now: "false", next: { tool: "actors_inspect", target: "tool:host_promoted", view: "status" } });
   } finally { await h.cleanup(); }
 });
 
@@ -1421,7 +1421,7 @@ test("AX registry list preserves selected names, order and coercion with whole-g
       get recipeRoot(): never { throw Error("No filesystem path lookup"); },
     });
     assert.deepEqual(events, ["getTools", "keys"]);
-    assert.deepEqual(result.details, { tool: "register_tool" });
+    assert.deepEqual(result.details, { tool: "actors_tool_register" });
     assert.deepEqual([...map.keys()], values, "Sorting/projecting does not reorder or mutate the registry");
     assert.ok(Buffer.byteLength(result.content[0].text) <= 16384); assert.ok(result.content[0].text.isWellFormed());
     return result.content[0].text;
@@ -1466,10 +1466,10 @@ test("AX registry list preserves selected names, order and coercion with whole-g
     const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
     const definition = createRegisterToolDefinition(h.deps);
     const hostTool = { ...definition, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...values, {}) };
-    const call = { type: "toolCall", id: "host-list", name: "register_tool", arguments: {} };
+    const call = { type: "toolCall", id: "host-list", name: "actors_tool_register", arguments: {} };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(outcome.isError, false); assert.deepEqual(registryYaml(outcome.result.content[0].text), expectedList([]));
-    assert.deepEqual(outcome.result.details, { tool: "register_tool" });
+    assert.deepEqual(outcome.result.details, { tool: "actors_tool_register" });
   } finally { await h.cleanup(); }
 });
 
@@ -1537,7 +1537,7 @@ test("AX registry deletion preserves lookup and partial effects while keeping re
     const hostTool = { ...definition, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...values, {}) };
     for (const found of [false, true]) {
       if (found) boundHarness.tools.set("smoke", { name: "smoke", args: [], defaults: {}, description: "Fixture", template: "echo" });
-      const call = { type: "toolCall", id: "host-delete", name: "register_tool", arguments: { name: "smoke", template: null } };
+      const call = { type: "toolCall", id: "host-delete", name: "actors_tool_register", arguments: { name: "smoke", template: null } };
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
       assert.equal(outcome.isError, false, "Absent tool remains a returned result, not a new Error");
       assert.deepEqual(registryYaml(outcome.result.content[0].text), { tool: "smoke", result: found ? "deleted" : "not found", ...(found ? { instruction: "Reload to remove it from the complete registry." } : {}) });
@@ -1609,7 +1609,7 @@ test("AX registration receipt preserves activation observations, opaque warnings
       assert.equal(result.details.callable_now, callable);
       assert.equal(result.details.activation_boundary, mode === "unverified" ? "session_activation_unverified" : mode === "toggle" ? "callability_verification" : "current_session");
       assert.deepEqual(result.details.required_args, ["file"]); assert.deepEqual(result.details.optional_args, ["lang"]);
-      assert.deepEqual(result.details.next_actions, callable ? ["call tool receipt", "inspect target=tool:receipt view=status"] : ["inspect target=tool:receipt view=status"]);
+      assert.deepEqual(result.details.next_actions, callable ? ["call tool receipt", "actors_inspect target=tool:receipt view=status"] : ["actors_inspect target=tool:receipt view=status"]);
       assert.equal(result.details.persisted, true); assert.equal(result.details.registry_active, true); assert.equal(result.details.source, "template");
       const warnings = result.details.templateWarnings!;
       assert.equal(warnings.length, 1); assert.ok(warnings[0].startsWith(label + ": invokes bash;"));
@@ -1617,7 +1617,7 @@ test("AX registration receipt preserves activation observations, opaque warnings
         tool: "receipt", result: callable ? update ? "updated" : "registered" : "persisted", source: "template", callable_now: callable,
         ...(callable ? {} : { activation_boundary: mode === "toggle" ? "current_session" : "session_activation_unverified" }),
         required_args: ["file"], optional_args: ["lang"], warnings: [warnings[0]],
-        ...(callable ? { instruction: "call tool receipt" } : { next: { tool: "inspect", target: "tool:receipt", view: "status" } }),
+        ...(callable ? { instruction: "call tool receipt" } : { next: { tool: "actors_inspect", target: "tool:receipt", view: "status" } }),
       });
       assert.doesNotMatch(result.content[0].text, /PRIVATE_DESCRIPTION|defaults:|host_registered:|registry_active:|validated:|not sandboxed by.*- next:/u);
       const stored = JSON.parse(await readFile(join(h.root, "receipt.json"), "utf8"));
@@ -1718,12 +1718,12 @@ test("AX registration receipt budgets whole argument groups, prioritizes warning
     const { runToolCall } = await import(new URL(publicEntry, pathToFileURL(coreManifest)).href);
     const definition = createRegisterToolDefinition(h.deps);
     const hostTool = { ...definition, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => definition.execute(...values, {}) };
-    const call = { type: "toolCall", id: "host-registration", name: "register_tool", arguments: { name: "host_receipt", description: "Host", template: "echo" } };
+    const call = { type: "toolCall", id: "host-registration", name: "actors_tool_register", arguments: { name: "host_receipt", description: "Host", template: "echo" } };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(outcome.isError, false); assert.equal(outcome.result.details.persisted, true); assert.equal(outcome.result.details.callable_now, false);
     assert.deepEqual(registryYaml(outcome.result.content[0].text), { tool: "host_receipt", result: "persisted", source: "template", callable_now: false,
-      activation_boundary: "session_activation_unverified", required_args: [], optional_args: [], next: { tool: "inspect", target: "tool:host_receipt", view: "status" } });
-    assert.deepEqual(outcome.result.details.required_args, []); assert.deepEqual(outcome.result.details.next_actions, ["inspect target=tool:host_receipt view=status"]);
+      activation_boundary: "session_activation_unverified", required_args: [], optional_args: [], next: { tool: "actors_inspect", target: "tool:host_receipt", view: "status" } });
+    assert.deepEqual(outcome.result.details.required_args, []); assert.deepEqual(outcome.result.details.next_actions, ["actors_inspect target=tool:host_receipt view=status"]);
   } finally { await h.cleanup(); }
 });
 
@@ -1747,7 +1747,7 @@ test("Retained creation leaves same-named exposed tools and every host port unto
       for (const key of ["callable_now", "active_tool", "host_registered", "registry_active"]) assert.equal(Object.hasOwn(result.details, key), false);
       assert.deepEqual(result.details.required_args, ["text"]);
       assert.deepEqual(result.details.optional_args, async ? ["run_id", "transport_context"] : []);
-      assert.deepEqual(result.details.next_actions, ["inspect target=recipes view=summary verbose=true"]);
+      assert.deepEqual(result.details.next_actions, ["actors_inspect target=recipes view=summary verbose=true"]);
       const document = registryYaml(result.content[0].text);
       assert.equal(document.kind, "retained_recipe");
       assert.equal(document.result, "retained");
@@ -1939,7 +1939,7 @@ test("Retained mode passes through the actual SDK Boolean schema without activat
       calls++; return definition.execute(...args, {});
     } };
     const dispatch = (arguments_: Record<string, unknown>) => {
-      const call = { type: "toolCall", id: "retained-sdk", name: "register_tool", arguments: arguments_ };
+      const call = { type: "toolCall", id: "retained-sdk", name: "actors_tool_register", arguments: arguments_ };
       return runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] },
         assistantMessage: { role: "assistant", content: [call] } });
     };
@@ -2078,7 +2078,7 @@ test("Registry mutations register template-backed tools", async () => {
     assert.equal(result.details.source, "template");
     assert.equal(result.details.activation_boundary, "session_activation_unverified");
     assert.deepEqual(result.details.next_actions, [
-      "inspect target=tool:transcribe view=status",
+      "actors_inspect target=tool:transcribe view=status",
     ]);
     assert.equal("config" in result.details, false);
     assert.equal("template" in result.details, false);
@@ -2276,7 +2276,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /music-player\/playback.*validation failed.*volume.*integer.*instruction: "inspect target=recipes view=doctor identity=music-player\/playback/is,
+      /music-player\/playback.*validation failed.*volume.*integer.*instruction: "actors_inspect target=recipes view=doctor identity=music-player\/playback/is,
     );
     await assert.rejects(
       executeRegisterTool(
@@ -2288,7 +2288,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /music-player\/playback.*validation failed.*Unknown delegated Recipe default argument: unknown.*instruction: "inspect target=recipes view=doctor identity=music-player\/playback/is,
+      /music-player\/playback.*validation failed.*Unknown delegated Recipe default argument: unknown.*instruction: "actors_inspect target=recipes view=doctor identity=music-player\/playback/is,
     );
     await assert.rejects(
       executeRegisterTool(
@@ -2300,7 +2300,7 @@ test("Registry mutations specialize active-Skill Recipes through from", async ()
         { recipeResolutionContext },
         harness.deps,
       ),
-      /key: "state_dir".*runtime-owned.*instruction: "remove that default and retry register_tool/is,
+      /key: "state_dir".*runtime-owned.*instruction: "remove that default and retry actors_tool_register/is,
     );
     await assert.rejects(readFile(join(harness.root, "bad_volume.json"), "utf8"));
     await assert.rejects(readFile(join(harness.root, "bad_default.json"), "utf8"));
@@ -2316,27 +2316,27 @@ test("Registry mutations reject ambiguous or copied Recipe source modes", async 
     for (const [params, pattern] of [
       [
         { description: "Mixed", from: "music-player/playback", name: "mixed", template: "echo" },
-        /exactly one register_tool source mode.*instruction: \"remove the extra source fields and retry register_tool/s,
+        /exactly one actors_tool_register source mode.*instruction: \"remove the extra source fields and retry actors_tool_register/s,
       ],
       [
         { args: "source:path", from: "music-player/playback", name: "copied_args" },
-        /from inherits args and async behavior.*instruction: \"retry register_tool with from and optional defaults only/s,
+        /from inherits args and async behavior.*instruction: \"retry actors_tool_register with from and optional defaults only/s,
       ],
       [
         { name: "missing_source" },
-        /requires exactly one source mode.*instruction: \"retry register_tool with one source field/s,
+        /requires exactly one source mode.*instruction: \"retry actors_tool_register with one source field/s,
       ],
       [
         { from: "", name: "empty_from" },
-        /non-empty Recipe reference.*instruction: \"retry register_tool with from=<skill>\/<recipe>/s,
+        /non-empty Recipe reference.*instruction: \"retry actors_tool_register with from=<skill>\/<recipe>/s,
       ],
       [
         { from: "skill:music-player/playback", name: "prefixed_from" },
-        /skill: Recipe references were removed.*instruction: "inspect target=recipes view=doctor identity=music-player\/playback/s,
+        /skill: Recipe references were removed.*instruction: "actors_inspect target=recipes view=doctor identity=music-player\/playback/s,
       ],
       [
         { from: "std:player", name: "std_from" },
-        /std: Recipe references were removed.*instruction: "inspect target=recipes view=doctor/s,
+        /std: Recipe references were removed.*instruction: "actors_inspect target=recipes view=doctor/s,
       ],
       [
         { description: "Nested", name: "nested", template: { template: "music-player/playback" } },
@@ -2344,7 +2344,7 @@ test("Registry mutations reject ambiguous or copied Recipe source modes", async 
       ],
       [
         { description: "Legacy values", name: "legacy_values", template: "echo", values: { x: 1 } },
-        /values was removed.*instruction: \"retry register_tool with defaults/is,
+        /values was removed.*instruction: \"retry actors_tool_register with defaults/is,
       ],
     ] as const) {
       await assert.rejects(executeRegisterTool(params, {}, harness.deps), pattern);
@@ -2611,7 +2611,7 @@ test("Registry activation failure restores prior bytes state and active tools", 
         {},
         failingDeps,
       ),
-      /Tool \\\"working_tool\\\" activation failed at active_tool_set.*callable_now=false.*Registration was rolled back.*Next: inspect target=runtime view=status; do not use spawn as proof/s,
+      /Tool \\\"working_tool\\\" activation failed at active_tool_set.*callable_now=false.*Registration was rolled back.*Next: actors_inspect target=runtime view=status; do not use spawn as proof/s,
     );
     assert.equal(await readFile(path, "utf8"), priorBytes);
     assert.equal(harness.tools.get("working_tool")?.description, "Working tool");
@@ -2634,7 +2634,7 @@ test("Registry activation failure restores prior bytes state and active tools", 
           }),
         },
       ),
-      /Tool \\"broken_new\\\" activation failed at host_registration.*callable_now=false.*Registration was rolled back.*Next: inspect target=runtime view=status; do not use spawn as proof/s,
+      /Tool \\"broken_new\\\" activation failed at host_registration.*callable_now=false.*Registration was rolled back.*Next: actors_inspect target=runtime view=status; do not use spawn as proof/s,
     );
     await assert.rejects(readFile(join(harness.root, "broken_new.json"), "utf8"));
     assert.equal(harness.tools.has("broken_new"), false);

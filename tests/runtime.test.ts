@@ -38,7 +38,7 @@ async function writeRecipe(
   await writeFile(join(root, `${name}.json`), JSON.stringify(body));
 }
 
-const watcherFailureNotice = "- report: Recipe live reload watcher failed\n- instruction: restart the session or use register_tool again to refresh recipe tools.";
+const watcherFailureNotice = "- report: Recipe live reload watcher failed\n- instruction: restart the session or use actors_tool_register again to refresh recipe tools.";
 const watcherRefreshNotice = "- report: Recipe tools refreshed from ~/.pi/agent/recipes";
 
 class NoticeWatcher extends EventEmitter {
@@ -162,7 +162,7 @@ test("AX Recipe watcher refresh preserves pending-change/load order, old root re
 
 const skippedStartupWarning = "Recipe conflict could not be exposed as a tool: Command template repeat must be a positive integer or {array.length} with an array argument/default.";
 const startupReport = "- report: pi-actors recipe registry warning\n";
-const startupInstruction = "- instruction: Next: inspect target=recipes view=doctor\n";
+const startupInstruction = "- instruction: Next: actors_inspect target=recipes view=doctor\n";
 const conflictStartupRecipe = { description: "Conflict", args: ["items:string"], template: { repeat: "{items.length}", template: "echo" } };
 
 async function createStartupWarningProbe(files: Record<string, unknown>) {
@@ -208,7 +208,7 @@ test("AX startup warning projection preserves legacy classification/join observa
   const originalJoin = Object.getOwnPropertyDescriptor(Array.prototype, "join")!, nativeSlice = Array.prototype.slice;
   const originalIncludes = Object.getOwnPropertyDescriptor(String.prototype, "includes")!;
   const opaque = Object.freeze({ toString(): never { throw Error("Do not coerce primary"); } });
-  const legacyLines = ["pi-actors recipe registry warning", "Recipes skipped from tool exposure:", "• " + skippedStartupWarning, "Next: inspect target=recipes view=doctor"];
+  const legacyLines = ["pi-actors recipe registry warning", "Recipes skipped from tool exposure:", "• " + skippedStartupWarning, "Next: actors_inspect target=recipes view=doctor"];
   for (const visible of [false, true]) {
     const h = await createStartupWarningProbe({ conflict: conflictStartupRecipe }), observed: unknown[][] = [], includes: unknown[] = [];
     try {
@@ -299,7 +299,7 @@ test("Runtime skips invalid user recipes without aborting load", async () => {
     );
     assert.match(
       notifications.join("\n"),
-      /Next: inspect target=recipes view=doctor/,
+      /Next: actors_inspect target=recipes view=doctor/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -494,7 +494,7 @@ test("Runtime keeps reserved tool names protected during recipe loading", async 
     assert.match(notifications.join("\n"), /Reserved tool name: read/);
     assert.match(
       notifications.join("\n"),
-      /Next: inspect target=recipes view=doctor/,
+      /Next: actors_inspect target=recipes view=doctor/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -264,7 +264,7 @@ export function applyApprovedToolReviewAtSessionBoundary(options = {}) {
                 ...state,
                 failedStage: "approval_state",
                 lastError: "approved review path is unavailable",
-                nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
+                nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"tool\"}",
                 phase: "processing_failed",
                 updatedAt: (options.now ?? (() => new Date()))().toISOString(),
             };
@@ -287,7 +287,7 @@ export function applyApprovedToolReviewAtSessionBoundary(options = {}) {
                     ...state,
                     failedStage: "transaction",
                     lastError: `tool review transaction remained ${transaction.phase}`,
-                    nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
+                    nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"tool\"}",
                     phase: "processing_failed",
                     updatedAt: (options.now ?? (() => new Date()))().toISOString(),
                 };
@@ -316,7 +316,7 @@ export function applyApprovedToolReviewAtSessionBoundary(options = {}) {
                     ...pending,
                     failedStage: "lineage",
                     lastError: error instanceof Error ? error.message : String(error),
-                    nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
+                    nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"tool\"}",
                 };
                 writeJsonAtomic(statePath, failedPending);
                 return { outcome: "lineage_pending", state: failedPending };
@@ -337,7 +337,7 @@ export function applyApprovedToolReviewAtSessionBoundary(options = {}) {
                 ...state,
                 failedStage: "transaction",
                 lastError: error instanceof Error ? error.message : String(error),
-                nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
+                nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"tool\"}",
                 phase: "processing_failed",
                 updatedAt: (options.now ?? (() => new Date()))().toISOString(),
             };
@@ -401,7 +401,7 @@ export function createToolReviewScheduler(deps) {
                             ...existing,
                             failedStage: processed.stage ?? "review_result",
                             lastError: processed.error ?? "automatic tool reviewer failed",
-                            nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
+                            nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"tool\"}",
                             phase: processed.outcome === "processing_failed"
                                 ? "processing_failed"
                                 : "failed",
@@ -437,7 +437,7 @@ export function createToolReviewScheduler(deps) {
                                 attempts: existing.attempts + 1,
                                 failedStage: "review_launch",
                                 lastError: error instanceof Error ? error.message : String(error),
-                                nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
+                                nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"tool\"}",
                                 phase: "failed",
                                 updatedAt: now().toISOString(),
                             });
@@ -471,7 +471,7 @@ export function createToolReviewScheduler(deps) {
                             failedStage: "review_launch",
                             inputPath: batch.inputPath,
                             lastError: error instanceof Error ? error.message : String(error),
-                            nextAction: "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
+                            nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"tool\"}",
                             phase: "failed",
                             reviewerInputPath: batch.reviewerInputPath,
                             reviewId: batch.reviewId,

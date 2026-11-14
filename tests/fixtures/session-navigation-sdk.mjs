@@ -78,7 +78,7 @@ const scopes = [];
 let currentSpec, providerError;
 function hasInheritedNavigation(messages) {
   const expected = input.frames.find(frame => frame.run === input.registeredRun);
-  return messages.some(message => message?.role === "toolResult" && message.toolName === "inspect" &&
+  return messages.some(message => message?.role === "toolResult" && ["inspect", "actors_inspect"].includes(message.toolName) &&
     (Array.isArray(message.content) ? message.content : []).some(block => {
       if (block.type !== "text") return false;
       try { return JSON.parse(block.text).navigation?.items?.some(item => item.directory === expected.state_dir && item.run_instance_id === expected.run_instance_id) === true; }
@@ -243,10 +243,10 @@ const factory = async ({ cwd, sessionManager, sessionStartEvent }) => {
                   assert.equal(input.frames.find(row => row.run === scope.launchSelection.run).ownerId, spec.owner);
                   scope.launchSelection.owner = sessionManager.getSessionId(); scope.launchSelection.session_file = sessionManager.getSessionFile();
                   call = { name: "read", arguments: { path: scope.launchSelection.path, offset: 1, limit: 2000 } };
-                } else call = { name: "inspect", arguments: { target: "runtime", view: "runs", verbose: true,
+                } else call = { name: "actors_inspect", arguments: { target: "runtime", view: "runs", verbose: true,
                   status: inventoryStatus } };
               } else if (step === 3) {
-                assert.equal(latest.toolName, "inspect");
+                assert.equal(latest.toolName, "actors_inspect");
                 const content = latest.content.filter(block => block.type === "text").map(block => block.text).join("\n");
                 const reply = JSON.parse(content.trim());
                 if (spec.controlledPriority) {
@@ -428,11 +428,11 @@ const factory = async ({ cwd, sessionManager, sessionStartEvent }) => {
     const witness = { owner: sessionManager.getSessionId(), session_file: sessionManager.getSessionFile(), loaded_path: entry?.path ?? null,
       resolved_path: entry?.resolvedPath ?? null, registered_tools: entry ? [...entry.tools.keys()].sort() : [],
       handlers: entry ? [...entry.handlers.keys()].sort() : [],
-      other_inspect_providers: loaded.extensions.filter(extension => extension !== entry && extension.tools.has("inspect")).map(extension => extension.path), shutdowns: [] };
+      other_inspect_providers: loaded.extensions.filter(extension => extension !== entry && extension.tools.has("actors_inspect")).map(extension => extension.path), shutdowns: [] };
     scope.entrypointWitness = witness;
     manifest.entrypoint_journeys.push(witness); persist(); // SDK-observed loaded metadata, not merely the input path/intent.
     assert.deepEqual(loaded.errors, []); assert.ok(entry); assert.deepEqual(witness.other_inspect_providers, []);
-    assert.ok(entry.tools.has("inspect"));
+    assert.ok(entry.tools.has("actors_inspect"));
     for (const event of ["session_start", "session_shutdown", "before_agent_start", "context", "turn_end", "agent_settled"]) assert.ok(entry.handlers.has(event));
   }
   assert.ok(services.resourceLoader.getSkills().skills.some(skill => skill.filePath === actorsSkill), "The operating Skill must be active");
@@ -448,7 +448,7 @@ async function research(runtime, scope, spec) {
       }
     });
   try {
-    runtime.session.setActiveToolsByName(["inspect", "read"]);
+    runtime.session.setActiveToolsByName(["actors_inspect", "read"]);
     await runtime.session.prompt("Inspect the owned Run file map, read its first result, then selectively read a recorded command capture when available.");
     if (providerError) throw providerError;
     assert.deepEqual(scope.errors, []); assert.deepEqual(scope.contexts, spec.entrypoint ? [] : [scope.spec.owner]);

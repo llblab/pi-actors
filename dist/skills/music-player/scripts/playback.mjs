@@ -112,7 +112,7 @@ function usage() {
 Runs a foreground music player so pi-actors can own it as a controlled Run.
 Actor-owned controls use canonical records in <state-dir>/controls.jsonl.
 Standalone controls use the generation-fenced playback service endpoint.
-Prefer message target=run:<run> action=<command> for Actors; external adapters use control <state-dir> <action>.
+Prefer actors_control_apply target=run:<run> action=<command> for Actors; external adapters use control <state-dir> <action>.
 Supported players: auto, mpv, afplay, ffplay, cvlc, play, wmp.
 `);
 }

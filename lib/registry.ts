@@ -124,7 +124,7 @@ function listTools<TContext>(
         ),
       ),
     ],
-    details: { tool: "register_tool" },
+    details: { tool: "actors_tool_register" },
   };
 }
 
@@ -153,8 +153,8 @@ function activationBoundary(
 
 function recipeDoctorAction(source: string): string {
   return /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(source)
-    ? `inspect target=recipes view=doctor identity=${source}`
-    : "inspect target=recipes view=doctor";
+    ? `actors_inspect target=recipes view=doctor identity=${source}`
+    : "actors_inspect target=recipes view=doctor";
 }
 
 function registrationNextActions(
@@ -165,11 +165,11 @@ function registrationNextActions(
   if (callableNow) {
     return [
       `call tool ${tool}`,
-      `inspect target=tool:${tool} view=status`,
+      `actors_inspect target=tool:${tool} view=status`,
     ];
   }
   return [
-    `inspect target=tool:${tool} view=status`,
+    `actors_inspect target=tool:${tool} view=status`,
     ...(source === "template" || source === "draft"
       ? []
       : [recipeDoctorAction(source)]),
@@ -236,7 +236,7 @@ function registrationReceiptText(data: {
   const omittedNext = omission("next_action", 1, !nextWellFormed);
   // This producer knows only its existing status hint; invocation advice stays opaque.
   const next = part(nextWellFormed
-    ? data.callable ? { instruction: data.next } : { next: { tool: "inspect", target: `tool:${data.tool}`, view: "status" } }
+    ? data.callable ? { instruction: data.next } : { next: { tool: "actors_inspect", target: `tool:${data.tool}`, view: "status" } }
     : omittedNext, omittedNext);
   const render = () => renderPart({ ...tool.selected, result: data.result, ...source.selected, callable_now: data.callable,
     ...(data.boundary === undefined ? {} : { activation_boundary: data.boundary }), ...required.selected, ...optional.selected,
@@ -307,7 +307,7 @@ function draftPathFailureText(kind: "root" | "missing", reference: string): stri
   const selected = registrySelected(kind === "root" ? "allowed_root" : "path", reference);
   const render = (): RegistryMetadata => ({ field: "draft", ...selected.selected,
     result: kind === "root" ? "Draft must be under the allowed root." : "Draft not found.",
-    ...(kind === "root" ? { instruction: "Use inspect target=recipes view=summary to list drafts." } : {}) });
+    ...(kind === "root" ? { instruction: "Use actors_inspect target=recipes view=summary to list drafts." } : {}) });
   return growRegistryDocument(render, [selected]);
 }
 
@@ -349,8 +349,8 @@ function draftReceiptText(result: "updated" | "registered", tool: string, callab
   const identity = part("tool", tool, { tool });
   const flag = part("callable_now", callable, { callable_now: callable });
   // Only this producer's exact canonical read-only status hint is typed, never body advice.
-  const status = /^inspect target=(tool:[a-z][a-z0-9_]{0,63}) view=status$/u.exec(next);
-  const hint = part("next_action", next, status ? { next: { tool: "inspect", target: status[1], view: "status" } } : { instruction: next });
+  const status = /^actors_inspect target=(tool:[a-z][a-z0-9_]{0,63}) view=status$/u.exec(next);
+  const hint = part("next_action", next, status ? { next: { tool: "actors_inspect", target: status[1], view: "status" } } : { instruction: next });
   const render = () => renderPart({ ...identity.selected, result, source: "draft", ...flag.selected, ...hint.selected });
   for (const current of [identity, flag, hint]) {
     if (current.selected === current.full) continue;
@@ -508,6 +508,8 @@ function deleteTool<TContext>(
       details: { tool: name },
     };
   }
+  const blocker = deps.getToolNameBlocker(name);
+  if (blocker) throw new Error(ExecutionOutput.formatToolText(blocker));
   const recipePath = getToolRecipePath(deps, name);
   if (existsSync(recipePath)) unlinkSync(recipePath);
   tools.delete(name);
@@ -580,7 +582,7 @@ function assertTemplateIsNotNestedRecipe(value: unknown): void {
   ) {
     throw new Error(
       ExecutionOutput.formatToolText(registryMetadataText({ field: "template",
-        result: "Nested Recipe-shaped templates are not a register_tool source mode.",
+        result: "Nested Recipe-shaped templates are not a actors_tool_register source mode.",
         instruction: "retry with from=<skill>/<recipe> and defaults={...}." })),
     );
   }
@@ -650,7 +652,7 @@ function normalizeFromReference(
   if (!trimmed) {
     throw new Error(
       ExecutionOutput.formatToolText(
-        "Tool from must be a non-empty Recipe reference. Next: retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path.",
+        "Tool from must be a non-empty Recipe reference. Next: retry actors_tool_register with from=<skill>/<recipe> or an explicit .json/.md path.",
       ),
     );
   }
@@ -710,7 +712,7 @@ function buildAuthoredRecipe(
         ExecutionOutput.formatToolText(registryMetadataText({ field: "defaults",
           ...registrySelected("key", runtimeOwnedDefault).selected,
           result: "Tool defaults cannot set runtime-owned input.",
-          instruction: "remove that default and retry register_tool; the runtime supplies it." })),
+          instruction: "remove that default and retry actors_tool_register; the runtime supplies it." })),
       );
     }
     const authored: Record<string, unknown> = {
@@ -763,9 +765,9 @@ function assertRegisterToolInputModes(input: RegisterToolInput): void {
   const record = input as RegisterToolInput & Record<string, unknown>;
   if (Object.hasOwn(record, "values")) {
     throw new Error(
-      ExecutionOutput.formatToolText(registryMetadataText({ field: "values", result: "register_tool values was removed.",
+      ExecutionOutput.formatToolText(registryMetadataText({ field: "values", result: "actors_tool_register values was removed.",
         replacement_fields: ["defaults", "from"],
-        instruction: "retry register_tool with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition." })),
+        instruction: "retry actors_tool_register with defaults for caller inputs, or use from=<skill>/<recipe> for maintained composition." })),
     );
   }
   const fromProvided = Object.hasOwn(record, "from");
@@ -777,7 +779,7 @@ function assertRegisterToolInputModes(input: RegisterToolInput): void {
       ExecutionOutput.formatToolText(registryMetadataText({ field: "from",
         result: "Tool from must be a non-empty Recipe reference.",
         reference_forms: ["<skill>/<recipe>", "explicit .json path", "explicit .md path"],
-        instruction: "retry register_tool with from=<skill>/<recipe> or an explicit .json/.md path." })),
+        instruction: "retry actors_tool_register with from=<skill>/<recipe> or an explicit .json/.md path." })),
     );
   }
   const draftProvided =
@@ -787,9 +789,9 @@ function assertRegisterToolInputModes(input: RegisterToolInput): void {
     Number(fromProvided) + Number(draftProvided) + Number(templateProvided);
   if (modeCount > 1) {
     throw new Error(
-      ExecutionOutput.formatToolText(registryMetadataText({ result: "Use exactly one register_tool source mode.",
+      ExecutionOutput.formatToolText(registryMetadataText({ result: "Use exactly one actors_tool_register source mode.",
         source_modes: ["from", "template", "draft"],
-        instruction: "remove the extra source fields and retry register_tool." })),
+        instruction: "remove the extra source fields and retry actors_tool_register." })),
     );
   }
   if (
@@ -798,9 +800,9 @@ function assertRegisterToolInputModes(input: RegisterToolInput): void {
   ) {
     throw new Error(
       ExecutionOutput.formatToolText(registryMetadataText({ field: "from",
-        result: "register_tool from inherits args and async behavior.",
+        result: "actors_tool_register from inherits args and async behavior.",
         inherited_fields: ["args", "async"],
-        instruction: "retry register_tool with from and optional defaults only; omit args and async." })),
+        instruction: "retry actors_tool_register with from and optional defaults only; omit args and async." })),
     );
   }
 }
@@ -881,7 +883,7 @@ function executeRegisterToolUnlocked<TContext>(
     throw new Error(
       ExecutionOutput.formatToolText(registryMetadataText({ result: "New registration requires exactly one source mode.",
         source_modes: ["from", "template", "draft"],
-        instruction: "retry register_tool with one source field." })),
+        instruction: "retry actors_tool_register with one source field." })),
     );
   }
   const recipePath = getToolRecipePath(deps, name);
@@ -930,7 +932,7 @@ function executeRegisterToolUnlocked<TContext>(
         !activation.callable_now)
     ) {
       throw new Error(
-        `Tool "${name}" activation failed at ${activationBoundary(activation)}; host_registered=${activation.host_registered}, active_tool=${activation.active_tool}, callable_now=${activation.callable_now}. Registration was rolled back. Next: inspect target=runtime view=status; do not use spawn as proof of tool invocation.`,
+        `Tool "${name}" activation failed at ${activationBoundary(activation)}; host_registered=${activation.host_registered}, active_tool=${activation.active_tool}, callable_now=${activation.callable_now}. Registration was rolled back. Next: actors_inspect target=runtime view=status; do not use spawn as proof of tool invocation.`,
       );
     }
   } catch (error) {
@@ -1158,12 +1160,12 @@ function retainRecipe<TContext>(
           const facts = { kind: "retained_recipe" as const, result: "retained" as const, persisted: true, resolved: true,
             validated: true, activation: "not_requested" as const, async: admitted.async };
           const text = growRegistryDocument(() => ({ ...selectedName.selected, ...facts, ...recipe.selected, ...selectedSource.selected,
-            ...required.selected, ...optional.selected, next: { tool: "inspect", target: "recipes", view: "summary", verbose: true } }),
+            ...required.selected, ...optional.selected, next: { tool: "actors_inspect", target: "recipes", view: "summary", verbose: true } }),
             [recipe, selectedName, selectedSource, required, optional]);
           const result = {
             content: [textContent(ExecutionOutput.formatToolText(text))],
             details: { ...facts, tool: name, recipe: path, source, required_args: args.required, optional_args: args.optional,
-              next_actions: ["inspect target=recipes view=summary verbose=true"] },
+              next_actions: ["actors_inspect target=recipes view=summary verbose=true"] },
           };
           stage = "release";
           return result;
@@ -1174,7 +1176,7 @@ function retainRecipe<TContext>(
     const reason = error instanceof RetainedRecipeRefusal ? { reason: error.reason } : {};
     throw new Error(ExecutionOutput.formatToolText(registryMetadataText({ operation: "retain", stage, result: "unconfirmed",
       effects: "unknown; inspect retained inventory before retry", ...reason,
-      next: { tool: "inspect", target: "recipes", view: "summary", verbose: true } })), { cause: error });
+      next: { tool: "actors_inspect", target: "recipes", view: "summary", verbose: true } })), { cause: error });
   }
 }
 

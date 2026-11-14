@@ -2275,6 +2275,26 @@ async function preparePackedPackage(root: string): Promise<string> {
   return packageDir;
 }
 
+test("source and packed default SDK advertise canonical tools and preserve explicit legacy dispatch with foreign collision refusal", async () => {
+  for (const layout of ["source", "packed"] as const) {
+    const root = await mkdtemp(join(tmpdir(), "pi-actors-tool-names-sdk-"));
+    try {
+      const packageDir = layout === "source" ? process.cwd() : await preparePackedPackage(root);
+      const agentDir = join(root, "agent"); await mkdir(agentDir);
+      const { stdout, stderr } = await execFileAsync(process.execPath, [
+        "--import", pathToFileURL(join(process.cwd(), "tests/test-environment.mjs")).href,
+        "--experimental-strip-types", join(process.cwd(), "tests/fixtures/tool-names-sdk.mjs"), packageDir, agentDir, layout,
+      ], { env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_ACTORS_AUTOMATIC_REVIEW: "off" }, timeout: 30_000 });
+      const result = JSON.parse(stdout.trim());
+      assert.equal(result.schema, "tool-names-sdk-v1"); assert.equal(result.layout, layout);
+      assert.equal(result.results.length, 7); assert.equal(result.declaredRequests, 9);
+      assert.deepEqual(result.lifecycle, ["delete", "recreate", "restore-remove", "restore-disable", "restore-invalidate", "foreign-after-loss"]);
+      assert.equal(result.workloads, 0); assert.equal(result.saved_calls, "preserved");
+      assert.doesNotMatch(stderr, /ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/);
+    } finally { await rm(root, { recursive: true, force: true }); } // Data-only SDK; no Actor/native workload starts.
+  }
+});
+
 test("macOS SPI pilot A authoring contracts (synthetic only, no native execution)", async (t) => {
   const pilot = await import(new URL("./fixtures/macos-spi-pilot.mjs", import.meta.url).href);
   // These DTOs exercise protocol consistency, never provide a native witness.
@@ -3515,7 +3535,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
              ],
            },
          }, context);
-         const register = definitions.get("register_tool");
+         const register = definitions.get("actors_tool_register");
          const registration = await register.execute("packed-register", {
            name: "packed_ping",
            description: "Return a packed integration marker.",
@@ -3807,7 +3827,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     ]);
     assert.deepEqual(loaded.music.registration.next_actions, [
       "call tool music_player",
-      "inspect target=tool:music_player view=status",
+      "actors_inspect target=tool:music_player view=status",
     ]);
     assert.equal("config" in loaded.music.registration, false);
     assert.equal("template" in loaded.music.registration, false);
@@ -3846,8 +3866,8 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     assert.equal(loaded.focusedDoctor.source_location, "<active-skill:music-player>/playback.json");
     assert.equal(typeof loaded.focusedDoctor.resolution_generation, "string");
     assert.deepEqual(loaded.focusedDoctor.next_actions, [
-      "spawn recipe=music-player/playback",
-      "register_tool name=<tool-name> from=music-player/playback",
+      "actors_run_spawn recipe=music-player/playback",
+      "actors_tool_register name=<tool-name> from=music-player/playback",
     ]);
     assert.equal(loaded.recipeCatalog.registry_generation, 1);
     assert.deepEqual(loaded.recipeCatalog.retained.map((row: Record<string, unknown>) => ({
@@ -3885,6 +3905,10 @@ test("packed artifact first session preserves agent-native Skill and tool parity
     assert.equal(loaded.resources, null);
     assert.equal(loaded.lifecycleEvents.includes("resources_discover"), false);
     assert.deepEqual(loaded.tools.map((tool: any) => tool.name), [
+      "actors_tool_register",
+      "actors_run_spawn",
+      "actors_control_apply",
+      "actors_inspect",
       "register_tool",
       "spawn",
       "message",
@@ -3894,6 +3918,10 @@ test("packed artifact first session preserves agent-native Skill and tool parity
       "music_player",
     ]);
     assert.deepEqual(loaded.tools.map((tool: any) => tool.properties), [
+      ["args", "async", "defaults", "description", "draft", "expose", "from", "name", "template", "update"],
+      ["artifacts", "as", "file", "recipe", "template", "transport_context", "values", "verbose"],
+      ["action", "input", "target", "verbose"],
+      ["identity", "lines", "source", "status", "target", "verbose", "view"],
       ["args", "async", "defaults", "description", "draft", "expose", "from", "name", "template", "update"],
       ["artifacts", "as", "file", "recipe", "template", "transport_context", "values", "verbose"],
       ["action", "input", "target", "verbose"],
@@ -4181,7 +4209,7 @@ test("packed Run retirement shares the compiled owner without treating retained 
     const retention = await import(pathToFileURL(join(packageDir, "dist/lib/runs-retention.js")).href);
     const message = await import(pathToFileURL(join(packageDir, "dist/lib/tools-message.js")).href);
     assert.equal(message.compactControlResult({ target: "run:demo", action: "kill" }, { stopped: true, killed: true }),
-      '\nrun: "demo"\naction: "kill"\nresult: "kill attempted"\ntermination: "unconfirmed"\nnext:\n  tool: "inspect"\n  target: "run:demo"\n  view: "trace"\n');
+      '\nrun: "demo"\naction: "kill"\nresult: "kill attempted"\ntermination: "unconfirmed"\nnext:\n  tool: "actors_inspect"\n  target: "run:demo"\n  view: "trace"\n');
     const publicControl = message.createControlToolDefinition({ handleRuntimeControl: () => ({ status: "handled", private_payload: "DETAIL_ONLY" }) });
     const compactControl = await publicControl.execute("packed-control-copy", { target: "runtime", action: "review.retry" }, undefined, undefined, {});
     assert.equal(compactControl.content[0].text, '\ntarget: "runtime"\naction: "review.retry"\nresult: "handled"\n');
@@ -5907,7 +5935,7 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
         const copiedEntries = (await readFile(copy.session_file, "utf8")).trim().split("\n").map((line: string) => JSON.parse(line));
         const header = copiedEntries[0];
         assert.equal(header.id, copy.session_id); assert.equal(header.parentSession, sessionFile);
-        const inspections = copiedEntries.filter((entry: any) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "inspect")
+        const inspections = copiedEntries.filter((entry: any) => entry.type === "message" && entry.message.role === "toolResult" && ["inspect", "actors_inspect"].includes(entry.message.toolName))
           .flatMap((entry: any) => entry.message.content.filter((block: any) => block.type === "text").map((block: any) => ({ entry, view: JSON.parse(block.text) })));
         const inherited = inspections.find((item: any) => item.view.owner_session === ownerSession && item.view.navigation.items.some((row: any) => row.directory === rows.find((entry: { run: string }) => entry.run === input.registeredRun).state_dir));
         assert.ok(inherited, "Accepted source navigation must survive as history, not be erased to obtain isolation");

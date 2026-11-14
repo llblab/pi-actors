@@ -11,13 +11,13 @@ Use this Skill only when automatic draft-memory or active-tool review needs diag
 
 Automatic reviewers receive value-free contract shape, risk labels, usage counts, and batch-local equality groups, not executable content, descriptions, paths, or canonical names. Structural evidence and launch counts alone do not establish semantic purpose, good tool names, successful reuse, or accepted outcomes. Promotion preserves unchanged captured executable content; it does not generalize a one-off mission.
 
-Explicit create-only retention is owned by `actors` through `register_tool expose=false`, not by these internal reviewers. Automatic retained lifecycle is not implemented. Current draft promote/discard and tool-review behavior are unchanged. Missing evidence is unknown; this guidance adds no retain/defer action, retry permission, automatic rewrite, or live migration. Do not bypass confidentiality or edit review state to simulate the future policy.
+Explicit create-only retention is owned by `actors` through `actors_tool_register expose=false`, not by these internal reviewers. Automatic retained lifecycle is not implemented. Current draft promote/discard and tool-review behavior are unchanged. Missing evidence is unknown; this guidance adds no retain/defer action, retry permission, automatic rewrite, or live migration. Do not bypass confidentiality or edit review state to simulate the future policy.
 
 ## Diagnose first
 
 ```text
-inspect target=recipes view=reviews
-inspect target=runtime view=triage
+actors_inspect target=recipes view=reviews
+actors_inspect target=runtime view=triage
 ```
 
 Use the review view to distinguish `draft` and `tool` scope, current phase, failed stage, bounded error, preserved transaction evidence, and the recorded next action. Use runtime triage only when the reviewer Run itself needs Run-level diagnosis. Follow `actors` for generic Inspect, Run, and Control semantics.
@@ -27,10 +27,10 @@ Use the review view to distinguish `draft` and `tool` scope, current phase, fail
 Use runtime Controls only when the review evidence names the matching recovery action:
 
 ```text
-message target=runtime action=review.retry input={"scope":"draft"}
-message target=runtime action=review.retry input={"scope":"tool"}
-message target=runtime action=review.reset input={"scope":"draft"}
-message target=runtime action=review.reset input={"scope":"tool"}
+actors_control_apply target=runtime action=review.retry input={"scope":"draft"}
+actors_control_apply target=runtime action=review.retry input={"scope":"tool"}
+actors_control_apply target=runtime action=review.reset input={"scope":"draft"}
+actors_control_apply target=runtime action=review.reset input={"scope":"tool"}
 ```
 
 - `review.retry` resumes the selected failed review scope while preserving authenticated transaction recovery.

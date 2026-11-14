@@ -33,7 +33,7 @@ export function sessionMismatchError(input) {
     const actor = input.run ? `run:${input.run}` : (input.target ?? "session");
     return Object.assign(new Error(`${actor} reason=session_mismatch owner_session=${ownerSession} current_session=${currentSession} hint=inspect_runtime_runs`), {
         current_session: input.currentSession,
-        hint: "inspect target=runtime view=runs",
+        hint: "actors_inspect target=runtime view=runs",
         owner_session: input.expectedSession,
         reason: "session_mismatch",
         run: input.run,

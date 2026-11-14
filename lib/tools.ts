@@ -54,11 +54,39 @@ export const RESERVED_TOOL_NAMES = new Set([
   "find",
   "grep",
   "ls",
+  "actors_tool_register",
+  "actors_run_spawn",
+  "actors_control_apply",
+  "actors_inspect",
   "register_tool",
   "message",
   "spawn",
   "inspect",
 ]);
+
+// Compatibility dispatch is registered but omitted from model declarations and normal
+// callable listings. Active legacy names still execute saved native tool calls.
+export const LEGACY_TOOL_NAMES = {
+  register_tool: "actors_tool_register",
+  spawn: "actors_run_spawn",
+  message: "actors_control_apply",
+  inspect: "actors_inspect",
+} as const;
+
+export function createLegacyActorToolDefinitions(
+  definitions: ActorToolDefinition[],
+): ActorToolDefinition[] {
+  return Object.entries(LEGACY_TOOL_NAMES).map(([name, canonical]) => {
+    const definition = definitions.find((tool) => tool.name === canonical);
+    if (!definition) throw new Error(`Missing canonical actor tool: ${canonical}`);
+    return {
+      ...definition, name, exposure: "deferred",
+      description: `Compatibility dispatch for ${canonical}; use the canonical tool for new calls.`,
+      promptSnippet: undefined, promptGuidelines: undefined,
+      prepareLoadout: () => ({ hiddenDeclarations: Object.keys(LEGACY_TOOL_NAMES) }),
+    };
+  });
+}
 
 export function createCoreActorToolDefinitions<
   TContext extends RuntimeToolContext,

@@ -1326,7 +1326,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
             return {
               role: "assistant", api: model.api, provider: model.provider, model: model.id,
               content: tools ? [
-                { type: "toolCall", id: `fixture-spawn-${request}`, name: "spawn", arguments: spawnArgs(request - 1) },
+                { type: "toolCall", id: `fixture-spawn-${request}`, name: "actors_run_spawn", arguments: spawnArgs(request - 1) },
                 ...(!candidate && mode === "tools" ? [{ type: "toolCall", id: "fixture-call-1", name: "finish_fixture", arguments: { index: 1 } }] : []),
               ] : readTerminal ? [{ type: "toolCall", id: "fixture-terminal-read", name: "read", arguments: { path: terminalSelection.path, offset: 1, limit: 2000 } }]
                 : restore ? [{ type: "toolCall", id: "fixture-restore-sources", name: "restore_fixture_sources", arguments: {} }]
@@ -1361,7 +1361,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
       pi.on("turn_end", event => ({ entries: [...event.entries, { type: "custom", customType: "fixture-before-actors" }] }));
       (candidate ? ports => candidateActors(ports, candidateCaptures) : actors)({ ...pi,
         registerTool: definition => {
-          if (definition.name !== "spawn") return pi.registerTool(definition);
+          if (definition.name !== "actors_run_spawn") return pi.registerTool(definition);
           const spawnTool = { ...definition, execute: async (...args) => {
             assert.equal(launching, false, "This fixture issues one public launch per model request, never overlapping captures");
             launching = true; await persistCapture();
@@ -1386,8 +1386,8 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
             const index = overflowMode ? spawnCalls : 0;
             markTiming("spawn_return");
             stateDirs[index] = run.state_dir; generations[index] = run.run_instance_id; spawnCalls++;
-            const expertActions = ["recipe", "trace", "control"].map(view => `inspect target=run:${run.run} view=${view}`);
-            assert.deepEqual(reply.details.next_actions, [...expertActions, "inspect target=runtime view=runs verbose=true"], "Expert actions remain alongside optional fresh-session navigation");
+            const expertActions = ["recipe", "trace", "control"].map(view => `actors_inspect target=run:${run.run} view=${view}`);
+            assert.deepEqual(reply.details.next_actions, [...expertActions, "actors_inspect target=runtime view=runs verbose=true"], "Expert actions remain alongside optional fresh-session navigation");
             const receipt = reply.content.filter(part => part.type === "text").map(part => part.text).join("\n");
             assert.ok(receipt.startsWith("\n")); assert.equal(receipt.startsWith("\n\n"), false);
             const launchDocument = mode === "final" ? undefined : parseDocument(receipt, { version: "1.2", schema: "core", uniqueKeys: true });
@@ -1416,7 +1416,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               const directLocationsShown = navigation.state === "available" && launchMetadata.run_files?.state === "available";
               if (directLocationsShown) assert.equal(Object.hasOwn(launchMetadata, "next"), false,
                 "Complete direct launch locations replace the redundant map hint");
-              else assert.deepEqual(launchMetadata.next, { tool: "inspect", target: "runtime", view: "runs", verbose: true },
+              else assert.deepEqual(launchMetadata.next, { tool: "actors_inspect", target: "runtime", view: "runs", verbose: true },
                 "Absent/unavailable/omitted rows retain exactly one native fallback node");
             } else {
               // Fresh full success is native block YAML, never legacy JSON or an unavailable projection.
@@ -1472,7 +1472,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
   });
   try {
     await session.bindExtensions({ onError: error => errors.push(error.error) });
-    session.setActiveToolsByName(["spawn", "finish_fixture", ...(mode === "tools" ? ["read"] : []), ...(lossMode ? ["restore_fixture_sources"] : [])]);
+    session.setActiveToolsByName(["actors_run_spawn", "finish_fixture", ...(mode === "tools" ? ["read"] : []), ...(lossMode ? ["restore_fixture_sources"] : [])]);
     markTiming("prompt");
     try {
       await session.prompt(mode === "tools" ? "Launch the completion-boundary fixture, then investigate its result once using a delivered terminal location. Do not poll or inspect status."

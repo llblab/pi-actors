@@ -24,7 +24,7 @@ test("Automatic review diagnostics expose bounded failure remediation", () => {
       attempts: 3,
       failedStage: "result_validation",
       lastError: "x".repeat(700),
-      nextAction: "message target=runtime action=review.retry input={\"scope\":\"draft\"}",
+      nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"draft\"}",
       phase: "processing_failed",
       processingAttempts: 3,
     });
@@ -34,7 +34,7 @@ test("Automatic review diagnostics expose bounded failure remediation", () => {
     assert.equal(String(draft.last_error).length <= 500, true);
     assert.equal(
       draft.next_action,
-      "message target=runtime action=review.retry input={\"scope\":\"draft\"}",
+      "actors_control_apply target=runtime action=review.retry input={\"scope\":\"draft\"}",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

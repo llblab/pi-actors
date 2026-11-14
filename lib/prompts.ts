@@ -11,20 +11,21 @@ export const REGISTER_TOOL_DESCRIPTION =
   "Definitions persist under ~/.pi/agent/recipes; activation is reported separately.";
 
 export const REGISTER_TOOL_PROMPT_SNIPPET =
-  "Persist command templates or Recipes with register_tool; use expose=false to retain without tool activation";
+  "Persist command templates or Recipes with actors_tool_register; use expose=false to retain without tool activation";
 
 export const REGISTER_TOOL_GUIDELINES = [
-  "Use register_tool from=<skill>/<recipe> with defaults={...} to specialize a maintained Recipe without copying its contract.",
-  "Use register_tool template only for trusted command templates, and use register_tool draft only for captured draft promotion.",
-  "Use register_tool expose=false to retain a new named template/from Recipe without activation; update, delete and draft promotion are unsupported in this mode.",
-  "A register_tool retained_recipe receipt with activation=not_requested is deliberate retention, not failed activation; reuse its exact Recipe path through spawn.",
-  "When register_tool requests tool exposure, trust callable_now and activation; persistence alone is not callability.",
-  'Set template=null or template="" in register_tool to delete a persisted tool.',
-  "Set update=true in register_tool to overwrite an existing tool registration.",
+  "Use actors_tool_register from=<skill>/<recipe> with defaults={...} to specialize a maintained Recipe without copying its contract.",
+  "Use actors_tool_register template only for trusted command templates, and use actors_tool_register draft only for captured draft promotion.",
+  "Use actors_tool_register expose=false to retain a new named template/from Recipe without activation; update, delete and draft promotion are unsupported in this mode.",
+  "A actors_tool_register retained_recipe receipt with activation=not_requested is deliberate retention, not failed activation; reuse its exact Recipe path through actors_run_spawn.",
+  "When actors_tool_register requests tool exposure, trust callable_now and activation; persistence alone is not callability.",
+  'Set template=null or template="" in actors_tool_register to delete a persisted tool.',
+  "Set update=true in actors_tool_register to overwrite an existing tool registration.",
 ];
 
 export const ONBOARDING_SYSTEM_PROMPT = `pi-actors Skill routing:
 - Treat active bundled Skills as the operating authority.
+- Route actors_tool_register, actors_run_spawn, actors_control_apply, and actors_inspect to the actors Skill; use canonical tool names for new calls.
 - For non-trivial pi-actors operation, diagnosis, or development, load and read the actors Skill before acting.
 - For work requiring multiple actors or subagents, additionally load and read the swarm Skill.
 - For capability-specific selection or constraints, load the owning capability Skill; actors owns generic mechanics and swarm owns multi-actor methodology.
@@ -36,7 +37,7 @@ export const ONBOARDING_SYSTEM_PROMPT = `pi-actors Skill routing:
 - AGENTS, source, and tests are implementation protocol and evidence; use them when changing or debugging the extension, not as substitutes for operating Skills.`;
 
 export const REGISTER_TOOL_PARAM_DESCRIPTIONS = {
-  name: "Tool name in snake_case (e.g., 'transcribe')",
+  name: "Tool name in snake_case under its functional owner's namespace (e.g., 'audio_transcribe' or 'music_player'); keep existing persisted names when updating",
   description:
     "Describe what the tool does for the LLM. Required unless deleting; omitted updates keep the old description.",
   from:

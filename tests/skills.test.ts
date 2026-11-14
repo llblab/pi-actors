@@ -292,12 +292,12 @@ test("Packaged capability Skills route outcomes without duplicating actors mecha
   assert.match(guides["project-work"], /does not send Control or mutate Runs/);
   assert.match(guides["project-work"], /persistent-capability workflow in `actors`/);
 
-  assert.match(guides["recipe-memory"], /inspect target=recipes view=reviews/);
-  assert.match(guides["recipe-memory"], /inspect target=runtime view=triage/);
-  assert.match(guides["recipe-memory"], /message target=runtime action=review\.retry/);
-  assert.match(guides["recipe-memory"], /message target=runtime action=review\.reset/);
+  assert.match(guides["recipe-memory"], /actors_inspect target=recipes view=reviews/);
+  assert.match(guides["recipe-memory"], /actors_inspect target=runtime view=triage/);
+  assert.match(guides["recipe-memory"], /actors_control_apply target=runtime action=review\.retry/);
+  assert.match(guides["recipe-memory"], /actors_control_apply target=runtime action=review\.reset/);
   assert.match(guides["recipe-memory"], /package-owned internal reviewer components/);
-  assert.doesNotMatch(guides["recipe-memory"], /spawn recipe=recipe-memory|register_tool.*recipe-memory/);
+  assert.doesNotMatch(guides["recipe-memory"], /actors_run_spawn recipe=recipe-memory|actors_tool_register.*recipe-memory/);
 });
 
 test("Packaged skill frontmatter scalar lines avoid extra colons", () => {
@@ -365,7 +365,7 @@ test("Packaged swarm composes with actors as methodology only", () => {
   assert.match(swarm, /references\/development-swarm\.md/);
   assert.doesNotMatch(
     swarm,
-    /Recipe files have no|Async Run Adapter|## Run Adapter|## Tool Contracts|register_tool|spawn recipe|~\/\.pi|Maintain this skill|After changing Swarm|host package/i,
+    /Recipe files have no|Async Run Adapter|## Run Adapter|## Tool Contracts|actors_tool_register|spawn recipe|~\/\.pi|Maintain this skill|After changing Swarm|host package/i,
   );
 
   assert.match(review, /## Lens selection/);
@@ -472,8 +472,8 @@ test("Packaged actors skill is the decision-first operating protocol", () => {
     const stem = file.replace(/\.(json|md)$/, "");
     assert.ok(capabilityMap.includes(`\`${stem}\``), `${stem} must route through actors`);
   }
-  assert.match(actorSkill, /spawn recipe=<skill>\/<recipe>/);
-  assert.match(actorSkill, /register_tool from=<skill>\/<recipe>/);
+  assert.match(actorSkill, /actors_run_spawn recipe=<skill>\/<recipe>/);
+  assert.match(actorSkill, /actors_tool_register from=<skill>\/<recipe>/);
   assert.match(actorSkill, /Skill Recipe ≠ registered tool/);
   assert.match(actorSkill, /spawn ≠ registered-tool invocation/);
   assert.match(actorSkill, /persisted ≠ callable/);
@@ -497,10 +497,10 @@ test("Packaged actors references own operation detail without human-doc fallback
       readFileSync(`skills/actors/references/${name}.md`, "utf8"),
     )
     .join("\n");
-  assert.match(combined, /register_tool from=music-player\/playback/);
+  assert.match(combined, /actors_tool_register from=music-player\/playback/);
   assert.match(combined, /Named import composition/);
-  assert.match(combined, /inspect target=tool:<name> view=status/);
-  assert.match(combined, /inspect target=recipes view=doctor/);
+  assert.match(combined, /actors_inspect target=tool:<name> view=status/);
+  assert.match(combined, /actors_inspect target=recipes view=doctor/);
   assert.match(combined, /Control is not actor chat/);
   assert.match(combined, /Never recover by copying maintained contracts/);
   assert.doesNotMatch(combined, /README|docs\//);

@@ -171,13 +171,13 @@ function runtimeTriage(
     trace_diagnostic_count: traceDiagnostics.length, trace_diagnostics: traceDiagnostics.slice(0, 40),
     attention_events: attentionEvents.slice(-40).reverse(),
     next_actions: [
-      ...(failed.length ? ["inspect target=runtime view=runs status=failed"] : []),
+      ...(failed.length ? ["actors_inspect target=runtime view=runs status=failed"] : []),
       ...new Set([...staleControls, ...backpressuredRuns].slice(0, 3).map((entry) =>
-        `inspect target=run:${entry.run} view=control`,
+        `actors_inspect target=run:${entry.run} view=control`,
       )),
       ...(attentionEvents.length
         ? attentionEvents.slice(-3).map((entry) =>
-            `inspect target=run:${String(entry.run)} view=trace source=runtime`,
+            `actors_inspect target=run:${String(entry.run)} view=trace source=runtime`,
           )
         : []),
     ],
@@ -247,7 +247,7 @@ function formatInspectFailure(
     return { omittable, full, selected };
   });
   // Only producer-known read-only inspect literals become a typed next, never a parsed action.
-  const typedNext = next ? { next: { tool: "inspect", target: next[0], view: next[1] } } : undefined;
+  const typedNext = next ? { next: { tool: "actors_inspect", target: next[0], view: next[1] } } : undefined;
   const nextFallback = { next_action: omitted };
   const document = () => ({ ...Object.assign({}, ...parts.map((part) => part.selected)),
     ...(typedNext ?? nextFallback) });
@@ -412,15 +412,15 @@ function inspectRecipeIdentity(
     ...(rejectedReason ? { rejected_reason: rejectedReason } : {}),
     next_actions: resolvable
       ? [
-          `spawn recipe=${identity}`,
-          `register_tool name=<tool-name> from=${identity}`,
+          `actors_run_spawn recipe=${identity}`,
+          `actors_tool_register name=<tool-name> from=${identity}`,
         ]
       : roots.length === 0 && skill
         ? [
             `activate Skill ${skill}`,
-            `inspect target=recipes view=doctor identity=${identity}`,
+            `actors_inspect target=recipes view=doctor identity=${identity}`,
           ]
-        : ["inspect target=recipes view=imports verbose=true"],
+        : ["actors_inspect target=recipes view=imports verbose=true"],
   };
 }
 
@@ -707,7 +707,7 @@ function compactResult(target: string, view: string, details: Record<string, unk
       ? String(details.next_actions[0])
       : details.callable_now === true
         ? `call tool ${name}`
-        : `register_tool name=${name} update=true`;
+        : `actors_tool_register name=${name} update=true`;
     const hint = ToolsResponse.nextActionMetadata(next, Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
     const required = compactArguments("required_args", details.required_args);
     const optional = compactArguments("optional_args", details.optional_args);
@@ -727,7 +727,7 @@ export function createInspectToolDefinition<TContext = unknown>(
   deps: InspectToolDeps<TContext> = {},
 ): any {
   return {
-    name: "inspect",
+    name: "actors_inspect",
     label: "Inspect",
     description:
       "Inspect a Run's Recipe, Trace, or Control evidence, or runtime/recipe/tool diagnostics.",

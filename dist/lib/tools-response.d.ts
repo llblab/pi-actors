@@ -28,7 +28,7 @@ export declare function formatYamlNotice(value: Record<string, string | number |
 /** Close one rendered YAML header; a separate opaque body gets exactly one delimiter pair. */
 export declare function frameMetadataDocument(header: string, body?: string): string;
 export declare function formatMarkdownField(key: string, value: string, depth?: number): string;
-export declare function formatInspectNextAction(target: string, view: string, verbose?: boolean): string;
+export declare function formatInspectNextAction(target: string, view: string, verbose?: boolean, tool?: string): string;
 export declare function formatLiteralBlock(value: string): string;
 export type RunSnapshotRendering = {
     readonly state: "available";

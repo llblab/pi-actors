@@ -6,20 +6,28 @@
 ~/.pi/agent/recipes/*.json
 ```
 
-Each valid Recipe admitted against the current session context can become an agent-callable tool. `register_tool` creates, updates, promotes, or deletes these files through fenced mutation paths and reports the resulting activation state.
+Each valid Recipe admitted against the current session context can become an agent-callable tool. `actors_tool_register` creates, updates, promotes, or deletes these files through fenced mutation paths and reports the resulting activation state.
+
+## Public names and compatible dispatch
+
+The advertised tools are `actors_tool_register`, `actors_run_spawn`, `actors_control_apply`, and `actors_inspect`. Explicit old `register_tool` / `spawn` / `message` / `inspect` calls dispatch through the same schemas and executors. Legacy entries are deferred and active for saved native calls, with their declarations hidden through Pi's loadout hook; normal callable listings omit deferred entries, while explicit search and host registered/active inventories can still expose compatibility metadata. A deliberately restricted host loadout/permission policy remains authoritative. No saved definition, call, Recipe filename/logical reference, launch kind or completion packet is rewritten. An already loaded host is not automatically reloaded.
+
+New configurable tools use their functional owner's namespace in snake_case, for example `audio_transcribe`, `music_player`, or `repo_check`. This agent-facing naming guidance is not runtime ownership inference and does not impose a new Recipe field or reject/migrate legacy unprefixed names. Runtime admission refuses normalized collisions against all foreign host tools, including inactive tools; `update=true` does not override foreign ownership. Discovery leaves a colliding persisted Recipe intact but does not admit its exposure or report the foreign tool as that Recipe's callable activation.
+
+Control applies Run/runtime actions, not agent chat. All existing envelopes, activation proof and Run semantics remain unchanged.
 
 ## Registration
 
 Register a command template:
 
 ```text
-register_tool name=repo_check template="make check" description="Run repository checks"
+actors_tool_register name=repo_check template="make check" description="Run repository checks"
 ```
 
 Specialize a maintained Recipe without copying its contract:
 
 ```text
-register_tool name=music_player from=music-player/playback defaults={"source":"~/Music/1MIX"}
+actors_tool_register name=music_player from=music-player/playback defaults={"source":"~/Music/1MIX"}
 ```
 
 `from`, `template`, and `draft` are distinct source modes. `from` accepts exact `<skill>/<recipe>` identity or an explicit `.json` / `.md` path and inherits async behavior, args/types, source defaults, artifacts, Control, and runtime-owned origins. `defaults` may set only effective caller-owned args and must satisfy their types. `template` is only for trusted command definitions; specialization accepts caller `defaults`, while authored composition values belong in a Recipe file.
@@ -27,24 +35,24 @@ register_tool name=music_player from=music-player/playback defaults={"source":"~
 Promote an immutable captured draft only with its draft path and explicit target name:
 
 ```text
-register_tool name=repo_check draft=~/.pi/agent/recipes/drafts/<captured-recipe>.json
+actors_tool_register name=repo_check draft=~/.pi/agent/recipes/drafts/<captured-recipe>.json
 ```
 
 Delete a persisted definition through the same fenced mutation path:
 
 ```text
-register_tool name=repo_check template=null
+actors_tool_register name=repo_check template=null
 ```
 
-An empty `template` string is the equivalent deletion form. Do not delete registry files manually. Host-visible dynamic definitions may remain visible until reload because Pi cannot unregister them, but extension-local lookup rejects the deleted definition immediately. Name collisions for creation or replacement require `update=true`. Invalid content fails before active mutation.
+An empty `template` string is the equivalent deletion form. Do not delete registry files manually. Host-visible dynamic definitions may remain visible until reload because Pi cannot unregister them, but extension-local lookup rejects the deleted definition immediately. The runtime retains its observed host-declaration name/source-path provenance separately from active Recipe membership, allowing same-name recreation or restoration after temporary discovery loss. A different source-path replacement or normalized foreign name still blocks exposure, even inactive; namespacing is not ownership proof. This host metadata check cannot distinguish replacements with identical name/source metadata. `update=true` permits replacing an existing Recipe, never a foreign host tool. Invalid content fails before active mutation.
 
-Ordinary tool registration resolves the effective delegated contract before persistence, then reports logical `source`, effective `required_args` / `optional_args`, and distinct `persisted`, `registry_active`, `host_registered`, `active_tool`, and `callable_now` states. A callable result points to the actual generated tool as the next action. An uncallable result names its `activation_boundary` and status/doctor action without suggesting spawn as a substitute. Diagnose one maintained source with `inspect target=recipes view=doctor identity=<skill>/<recipe>`; diagnose final activation, source, schema summary, and separate spawn/tool usage with `inspect target=tool:<name> view=status`. Treat the tool as callable in the current session only when `callable_now` is true; persistence alone is not activation proof. Ordinary tool-registration results omit raw persisted paths and executable template/config payloads; retained receipts deliberately return the reusable file path, never an executable body.
+Ordinary tool registration resolves the effective delegated contract before persistence, then reports logical `source`, effective `required_args` / `optional_args`, and distinct `persisted`, `registry_active`, `host_registered`, `active_tool`, and `callable_now` states. A callable result points to the actual generated tool as the next action. An uncallable result names its `activation_boundary` and status/doctor action without suggesting spawn as a substitute. Diagnose one maintained source with `actors_inspect target=recipes view=doctor identity=<skill>/<recipe>`; diagnose final activation, source, schema summary, and separate spawn/tool usage with `actors_inspect target=tool:<name> view=status`. Treat the tool as callable in the current session only when `callable_now` is true; persistence alone is not activation proof. Ordinary tool-registration results omit raw persisted paths and executable template/config payloads; retained receipts deliberately return the reusable file path, never an executable body.
 
 ## Retain a New Capability Without Tool Exposure
 
 ```text
-register_tool name=repo_check expose=false template="make check" description="Run repository checks"
-register_tool name=review_changes expose=false from=swarm/lens-review
+actors_tool_register name=repo_check expose=false template="make check" description="Run repository checks"
+actors_tool_register name=review_changes expose=false from=swarm/lens-review
 ```
 
 This create-only mode writes `recipes/library/<name>.json`, not a tool-root entry. The optional Boolean `expose` is registration input, not a Recipe field; omitted/true preserves ordinary registration. A new name and exactly one template/from source are required. Retained update, null/empty deletion, draft promotion and direct managed disposable-draft dependencies, including Recipe-valued template leaves, are rejected. JSON/Markdown stem conflicts, invalid source/defaults, oversized candidates and unsafe storage fail without activating a tool; a same-named exposed tool is untouched. Retaining never calls host registration/activation ports, mutates the active-tool set or launches work.
@@ -54,10 +62,10 @@ Retained `from` stores compact logical/file delegation and inherits the effectiv
 Use the existing surfaces, supplying required caller values:
 
 ```text
-register_tool name=changes_review from=swarm/lens-review expose=false
-inspect target=recipes view=summary verbose=true
-spawn recipe=<exact retained path> values=<caller-owned inputs>
-register_tool name=changes_review from=<exact retained path>
+actors_tool_register name=changes_review from=swarm/lens-review expose=false
+actors_inspect target=recipes view=summary verbose=true
+actors_run_spawn recipe=<exact retained path> values=<caller-owned inputs>
+actors_tool_register name=changes_review from=<exact retained path>
 ```
 
 Inspection distinguishes retained rows from tool-root candidates and drafts, using the same active Skill context. Compact output gives a retained count; verbose detail gives exact paths, resolved execution mode, invalid/disabled state and diagnostics. Reads create no directories, usage, tools or Runs; an absent library is empty. Reuse only valid enabled definitions. The final step deliberately exposes a wrapper; verify `callable_now` and actual tool invocation separately. Deleting an admitted wrapper preserves its retained source and does not stop active Runs or turn deletion of an old standalone tool into safe retention. No automatic retention, review decision, source relocation or live migration is added. See [Management Inspection](./inspection.md) for views and coverage.
@@ -79,13 +87,13 @@ Skill component inventory is diagnostic and fail-soft: valid components remain l
 Inspect registry state with:
 
 ```text
-inspect target=recipes view=status
-inspect target=tool:<name> view=status
+actors_inspect target=recipes view=status
+actors_inspect target=tool:<name> view=status
 ```
 
 Recipe inspection reports generation, scan/watch state, active, shadowed, invalid, disabled, component rejection, diagnostic, risk, usage, and review evidence. Tool status reports current activation plus separate `tool_calls` and `spawn_calls`; tool schema reports the caller-owned capability contract. Inspect the complete target/view contract in [Management Inspection](./inspection.md). A registered tool is not a running actor.
 
-`spawn recipe=<name>` executes a Recipe and reports `launch_kind: "spawn"`; it does not prove that a registered tool was exposed or invoked. Registered-tool execution reports `launch_kind: "tool"`.
+`actors_run_spawn recipe=<name>` executes a Recipe and reports `launch_kind: "spawn"`; it does not prove that a registered tool was exposed or invoked. Registered-tool execution reports `launch_kind: "tool"`.
 
 Async registered tools add runtime-owned optional invocation parameters after resolving the Recipe contract:
 
@@ -114,8 +122,8 @@ Automatic draft/tool review remains silent and mechanically fenced:
 Reserved recovery uses runtime Controls:
 
 ```text
-message target=runtime action=review.retry input={"scope":"draft"}
-message target=runtime action=review.reset input={"scope":"tool"}
+actors_control_apply target=runtime action=review.retry input={"scope":"draft"}
+actors_control_apply target=runtime action=review.reset input={"scope":"tool"}
 ```
 
 Retry preserves authenticated transaction recovery. Reset rejects evidence that requires roll-forward.
@@ -130,7 +138,7 @@ Retained launches use the parent Recipe root's existing `.usage` owner, not a se
 
 ## Specializing Existing Recipes
 
-Use `register_tool from=<skill>/<recipe> defaults={...}` for one maintained capability under a persistent name or narrower defaults. Pi supplies one authoritative active-session Skill snapshot across global, project, package, settings, CLI, and extension-contributed locations. Registration resolves the source from that snapshot, stores only the logical direct-delegation reference plus caller specialization, and activates the tool from the already-resolved effective contract without ambient re-resolution. It does not copy async, args/types, Control, artifacts, helpers, or runtime-owned `{recipe_dir}`/`{skill_dir}`; symlinks and absolute helper paths are not substitutes. Named imports remain for multi-node Recipe composition, not one-source specialization. Skill Recipes remain components and are never exposed merely because their Skill is active. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
+Use `actors_tool_register from=<skill>/<recipe> defaults={...}` for one maintained capability under a persistent name or narrower defaults. Pi supplies one authoritative active-session Skill snapshot across global, project, package, settings, CLI, and extension-contributed locations. Registration resolves the source from that snapshot, stores only the logical direct-delegation reference plus caller specialization, and activates the tool from the already-resolved effective contract without ambient re-resolution. It does not copy async, args/types, Control, artifacts, helpers, or runtime-owned `{recipe_dir}`/`{skill_dir}`; symlinks and absolute helper paths are not substitutes. Named imports remain for multi-node Recipe composition, not one-source specialization. Skill Recipes remain components and are never exposed merely because their Skill is active. Install only specific capabilities; internal automatic-review Recipes must not become user-callable tools.
 
 ## Safety
 

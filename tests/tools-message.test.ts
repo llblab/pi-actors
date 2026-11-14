@@ -49,7 +49,7 @@ const omitted = (key: string, reason = "response_too_large", total = 1) => ({
 test("Compact Control receipts omit an unfit typed next as a whole action", () => {
   for (const size of [17000, 16300]) {
     const text = compactControlResult({ target: "run:demo", action: "pause" },
-      { delivery: "queued", next_actions: ["inspect target=run:" + "x".repeat(size) + " view=control"] });
+      { delivery: "queued", next_actions: ["actors_inspect target=run:" + "x".repeat(size) + " view=control"] });
     const doc = parseDocument(text);
     assert.deepEqual(doc.errors, []); assert.ok(Buffer.byteLength(text) <= Limits.RUN_DELIVERY_MODEL_MAX_BYTES);
     const value = doc.toJS();
@@ -100,7 +100,7 @@ test("AX owned Control guards preserve exact pre-dispatch observations and expos
     events.length = 0;
     const tool = createControlToolDefinition(deps);
     const hostTool = { ...tool, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => tool.execute(...values, ctx) };
-    const call = { type: "toolCall", id: "host-guard", name: "message", arguments: request };
+    const call = { type: "toolCall", id: "host-guard", name: "actors_control_apply", arguments: request };
     const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] }, assistantMessage: { role: "assistant", content: [call] } });
     assert.equal(outcome.isError, true);
     assert.deepEqual(outcome.result.content, [{ type: "text", text: expected }]);
@@ -215,19 +215,19 @@ test("Public message compact refusals explain a completed Run without object coe
 test("Compact Control progress distinguishes attempts, delivery, completion and refusal without raw dumps", () => {
   const cases: Array<{ action: string; result: Record<string, unknown>; document: Record<string, unknown> }> = [
     { action: "kill", result: { stopped: true, killed: true, scope_closed: true, pid: 321, signal: "SIGKILL" },
-      document: { result: "kill attempted", termination: "unconfirmed", next: { tool: "inspect", target: "run:demo", view: "trace" } } },
+      document: { result: "kill attempted", termination: "unconfirmed", next: { tool: "actors_inspect", target: "run:demo", view: "trace" } } },
     { action: "kill", result: { stopped: false, killed: false, reason: "owner mismatch", status: { status: "running" } },
-      document: { result: "not applied", reason: "owner mismatch", next: { tool: "inspect", target: "run:demo", view: "trace" } } },
+      document: { result: "not applied", reason: "owner mismatch", next: { tool: "actors_inspect", target: "run:demo", view: "trace" } } },
     { action: "archive", result: { archived: true, status: "done" }, document: { result: "archived" } },
     { action: "archive", result: { archived: false, reason: "ownership changed" },
-      document: { result: "not applied", reason: "ownership changed", next: { tool: "inspect", target: "runtime", view: "runs" } } },
+      document: { result: "not applied", reason: "ownership changed", next: { tool: "actors_inspect", target: "runtime", view: "runs" } } },
     { action: "prune", result: { pruned: true }, document: { result: "pruned" } },
     { action: "prune", result: { pruned: false, reason: "run generation changed" },
-      document: { result: "not applied", reason: "run generation changed", next: { tool: "inspect", target: "runtime", view: "runs" } } },
+      document: { result: "not applied", reason: "run generation changed", next: { tool: "actors_inspect", target: "runtime", view: "runs" } } },
     { action: "pause", result: { delivery: "queued", control_id: "control-A" },
-      document: { delivery: "queued", handling: "unconfirmed", control_id: "control-A", next: { tool: "inspect", target: "run:demo", view: "control" } } },
+      document: { delivery: "queued", handling: "unconfirmed", control_id: "control-A", next: { tool: "actors_inspect", target: "run:demo", view: "control" } } },
     { action: "pause", result: { delivery: "delivered" },
-      document: { delivery: "delivered", handling: "unconfirmed", next: { tool: "inspect", target: "run:demo", view: "control" } } },
+      document: { delivery: "delivered", handling: "unconfirmed", next: { tool: "actors_inspect", target: "run:demo", view: "control" } } },
     { action: "pause", result: { delivery: "failed" }, document: { delivery: "failed" } },
     { action: "pause", result: { status: "handled" }, document: { result: "handled" } },
   ];
@@ -243,20 +243,20 @@ test("Compact Control gives one relevant follow-up and never coerces nested stat
   const request: ControlRequest = { target: "run:demo", action: "kill" };
   assert.equal(compactControlResult(request, { stopped: false, reason: "not running", status }),
     controlDocument({ run: "demo", action: "kill", result: "not applied", reason: "not running", state: "done" }));
-  const result = Object.freeze({ stopped: true, next_actions: Object.freeze(["inspect target=run:demo view=trace", "do not repeat the action"]) });
+  const result = Object.freeze({ stopped: true, next_actions: Object.freeze(["actors_inspect target=run:demo view=trace", "do not repeat the action"]) });
   assert.equal(compactControlResult(request, result),
     controlDocument({ run: "demo", action: "kill", result: "kill attempted", termination: "unconfirmed",
-      next: { tool: "inspect", target: "run:demo", view: "trace" } }));
+      next: { tool: "actors_inspect", target: "run:demo", view: "trace" } }));
 });
 
 test("AX Control records stay bare YAML, keep authored values opaque and distinguish next actions from facts", () => {
   const request: ControlRequest = { target: "run:demo", action: "pause" };
   const delivered = Object.freeze({ delivery: "delivered", control_id: "control-A", private_payload: "PRIVATE_PAYLOAD",
-    next_actions: Object.freeze(["inspect target=run:demo view=control", "Do not repeat"]) });
+    next_actions: Object.freeze(["actors_inspect target=run:demo view=control", "Do not repeat"]) });
   const before = JSON.stringify(delivered);
   const rendered = compactControlResult(request, delivered);
   assert.equal(rendered, controlDocument({ run: "demo", action: "pause", delivery: "delivered", handling: "unconfirmed",
-    control_id: "control-A", next: { tool: "inspect", target: "run:demo", view: "control" } }));
+    control_id: "control-A", next: { tool: "actors_inspect", target: "run:demo", view: "control" } }));
   assert.equal(JSON.stringify(delivered), before); assert.doesNotMatch(rendered, /run: run:| · |PRIVATE_PAYLOAD|Do not repeat/);
   assert.equal(rendered.split("next:").length, 2, "At most one relevant action, not all saved hints");
   const reason = "## Explanation\r\n- next: authored Markdown\r\n\r\nKeep this · literal value";
@@ -319,11 +319,11 @@ test("Public identity-change refusals preserve action facts without disclosing r
       assert.match(response.content[0].text, /not applied/);
       assert.equal(response.content[0].text, controlDocument({ run, action, result: "not applied",
         reason: change === "owner" ? "ownership changed" : "run generation changed",
-        next: { tool: "inspect", target: "runtime", view: "runs" } }));
+        next: { tool: "actors_inspect", target: "runtime", view: "runs" } }));
       assert.equal(Object.hasOwn(receipt, "status"), false, `${action}/${change}: no replacement status`);
       assert.equal(receipt[action === "kill" ? "killed" : action === "archive" ? "archived" : "pruned"], false);
       assert.equal(receipt.reason, change === "owner" ? "ownership changed" : "run generation changed");
-      assert.deepEqual(receipt.next_actions, ["inspect target=runtime view=runs"]);
+      assert.deepEqual(receipt.next_actions, ["actors_inspect target=runtime view=runs"]);
       const verbose = await tool.execute("changed-verbose", { target: `run:${run}`, action, verbose: true }, undefined, undefined, ctx);
       assert.deepEqual(JSON.parse(verbose.content[0].text).result, receipt);
       for (const value of [response, verbose]) {
@@ -354,7 +354,7 @@ test("Actor-local Control failures stay bounded errors through the actual host t
     const failureDocument = (run: string) => ({ run, action: "pause", result: "request failed",
       delivery: "unconfirmed", handling: "unconfirmed",
       warning: "Effects may already exist.\nDo not repeat automatically.",
-      next: { tool: "inspect", target: "runtime", view: "runs" } });
+      next: { tool: "actors_inspect", target: "runtime", view: "runs" } });
     const exact = "run:" + "r".repeat(exactFit(payload => failureDocument(payload)));
     for (failure of [original, undefined, "PRIVATE_PRIMITIVE", opaque]) for (const verbose of [false, true]) for (const target of ["run:bounded-failure", exact, exact + "r"]) {
       const tool = createControlToolDefinition({ getRunStatus: () => ({ control: ["pause"], ownerId: "session-A", run_instance_id: "generation-A" }) });
@@ -363,7 +363,7 @@ test("Actor-local Control failures stay bounded errors through the actual host t
       const expected = target === exact + "r"
         ? controlDocument({ ...omitted("run"), action: "pause", result: "request failed", delivery: "unconfirmed",
             handling: "unconfirmed", warning: "Effects may already exist.\nDo not repeat automatically.",
-            next: { tool: "inspect", target: "runtime", view: "runs" } })
+            next: { tool: "actors_inspect", target: "runtime", view: "runs" } })
         : controlDocument(failureDocument(target.slice(4)));
       armed = true;
       await assert.rejects(tool.execute("direct-failure", args, undefined, undefined, ctx), (error: unknown) => {
@@ -375,7 +375,7 @@ test("Actor-local Control failures stay bounded errors through the actual host t
         return true;
       });
       const hostTool = { ...tool, execute: (...values: [string, unknown, AbortSignal | undefined, unknown]) => tool.execute(...values, ctx) };
-      const call = { type: "toolCall", id: "host-failure", name: "message", arguments: args };
+      const call = { type: "toolCall", id: "host-failure", name: "actors_control_apply", arguments: args };
       armed = true;
       const outcome = await runToolCall(call, { tools: [hostTool], context: { systemPrompt: "", messages: [], tools: [hostTool] },
         assistantMessage: { role: "assistant", content: [call] } });
@@ -426,7 +426,7 @@ test("Actor-local failure projection withholds correlation across awaited contex
         assert.equal(error.message, controlDocument({ run, action: "pause", result: "request failed",
           delivery: "unconfirmed", handling: "unconfirmed",
           warning: "Effects may already exist.\nDo not repeat automatically.",
-          next: { tool: "inspect", target: "runtime", view: "runs" } }));
+          next: { tool: "actors_inspect", target: "runtime", view: "runs" } }));
         const kernel = error.cause as Error & { control_id: string; run_instance_id: string };
         assert.equal(kernel.control_id, wire?.id);
         assert.equal(kernel.run_instance_id, "generation-A");
@@ -526,7 +526,7 @@ test("SDK context guards do not grant an atomic recipient lease for Control erro
 
 test("Public message tool exposes only the exact Control schema", () => {
   const tool = createControlToolDefinition();
-  assert.equal(tool.name, "message");
+  assert.equal(tool.name, "actors_control_apply");
   assert.equal(tool.label, "Control");
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
     "action",

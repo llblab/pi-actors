@@ -208,8 +208,8 @@ test("Control admission accepts valid capacity and rejects saturation before adm
     oldest_pending_at: new Date(0).toISOString(),
     run_instance_id: GENERATION,
     next_actions: [
-      "inspect target=run:<id> view=control",
-      "inspect target=runtime view=triage",
+      "actors_inspect target=run:<id> view=control",
+      "actors_inspect target=runtime view=triage",
     ],
   });
 });

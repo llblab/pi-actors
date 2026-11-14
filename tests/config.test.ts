@@ -17,7 +17,7 @@ import {
   type RegisteredTool,
 } from "../lib/config.ts";
 
-const reserved = new Set(["bash", "register_tool"]);
+const reserved = new Set(["bash", "actors_tool_register"]);
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 const agentDir = await mkdtemp(join(tmpdir(), "pi-actors-config-agent-"));
 await mkdir(join(agentDir, "recipes"), { recursive: true });

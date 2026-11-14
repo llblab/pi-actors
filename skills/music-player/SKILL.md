@@ -16,10 +16,10 @@ When a Telegram-originated turn or explicit Telegram-control question makes repe
 `music-player/playback` is a singleton async controlled service with the canonical address `run:music-player`. The Recipe is the sole lifecycle owner: it starts the service, supervises it, and stops playback when the Run closes. The service owns queue, backend, checkpoint, and playback state. `scripts/playback.mjs` owns both foreground playback and the bounded control CLI. Its `control <state-dir> <action> [percent]` entrypoint observes or controls an existing owner without starting, adopting, or supervising it. Explicit foreground `serve` supports a caller-owned standalone host without importing the Actor runtime; Actor and standalone ownership of one state directory are mutually exclusive.
 
 ```text
-spawn recipe=music-player/playback values={"source":"~/Music","player":"auto"}
-message target=run:music-player action=pause
-message target=run:music-player action=next
-inspect target=run:music-player view=control
+actors_run_spawn recipe=music-player/playback values={"source":"~/Music","player":"auto"}
+actors_control_apply target=run:music-player action=pause
+actors_control_apply target=run:music-player action=next
+actors_inspect target=run:music-player view=control
 ```
 
 A repeated compatible spawn returns the healthy active singleton instead of launching a second player. A terminal or dead singleton restarts under the same Run id with a fresh fenced generation and restores its validated playback checkpoint when the source and configuration still match.

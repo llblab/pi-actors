@@ -154,8 +154,8 @@ export function formatMarkdownField(key: string, value: string, depth = 0): stri
     : `${indent}- ${key}: ${value}`;
 }
 
-export function formatInspectNextAction(target: string, view: string, verbose?: boolean): string {
-  return ["- next:", formatMarkdownField("tool", "inspect", 1), formatMarkdownField("target", target, 1),
+export function formatInspectNextAction(target: string, view: string, verbose?: boolean, tool = "inspect"): string {
+  return ["- next:", formatMarkdownField("tool", tool, 1), formatMarkdownField("target", target, 1),
     formatMarkdownField("view", view, 1), ...(verbose === undefined ? [] : [formatMarkdownField("verbose", String(verbose), 1)])].join("\n");
 }
 
@@ -289,20 +289,20 @@ function launchModelPolicy(value: unknown): Record<string, unknown> {
   return fields;
 }
 
-const RUN_FILE_INVESTIGATION_COMMAND = "inspect target=runtime view=runs verbose=true";
+const RUN_FILE_INVESTIGATION_COMMAND = "actors_inspect target=runtime view=runs verbose=true";
 
 /** Frozen older completion-format text: new launch layout must not change this shared packet helper. */
 export function formatRunFileNavigationHandoff(): string {
-  return `Files (optional; current session):\n\`${RUN_FILE_INVESTIGATION_COMMAND}\``;
+  return "Files (optional; current session):\n`inspect target=runtime view=runs verbose=true`";
 }
 
 export function runNextActions(run: unknown): string[] {
   const id = String(run ?? "").trim();
   if (!id) return [];
   return [
-    `inspect target=run:${id} view=recipe`,
-    `inspect target=run:${id} view=trace`,
-    `inspect target=run:${id} view=control`,
+    `actors_inspect target=run:${id} view=recipe`,
+    `actors_inspect target=run:${id} view=trace`,
+    `actors_inspect target=run:${id} view=control`,
     RUN_FILE_INVESTIGATION_COMMAND,
   ];
 }
@@ -329,7 +329,7 @@ export function compactAsyncRunStatus(value: unknown): string {
   }
   if (result.killed === true) fields.killed = true;
   if (status.draft_recipe) fields.draft_recipe = String(status.draft_recipe);
-  const hint = { file_investigation: "optional; current session", next: { tool: "inspect", target: "runtime", view: "runs", verbose: true } };
+  const hint = { file_investigation: "optional; current session", next: { tool: "actors_inspect", target: "runtime", view: "runs", verbose: true } };
   const hasNavigation = Object.hasOwn(status, "file_navigation");
   let navigation: unknown;
   if (hasNavigation) {
@@ -509,25 +509,25 @@ export function recipeRegistryNextActions(
     : 0;
   const topAction = asRecord(summary.top_action);
   if (view !== "doctor" && (invalid > 0 || diagnostics > 0)) {
-    actions.push("inspect target=recipes view=doctor");
+    actions.push("actors_inspect target=recipes view=doctor");
   }
   if (view === "doctor" && typeof topAction.action === "string") {
     actions.push(String(topAction.action));
   }
   if (summary.skill_recipe_catalog_partial === true) {
-    actions.push("inspect target=recipes view=imports verbose=true");
+    actions.push("actors_inspect target=recipes view=imports verbose=true");
   }
   if (
     (Array.isArray(summary.retained) && summary.retained.length > 0) ||
     (Array.isArray(summary.retained_diagnostics) && summary.retained_diagnostics.length > 0)
   ) {
-    actions.push("inspect target=recipes view=summary verbose=true");
+    actions.push("actors_inspect target=recipes view=summary verbose=true");
   }
   if (drafts.length > 0) {
-    actions.push("inspect target=recipes view=summary verbose=true");
+    actions.push("actors_inspect target=recipes view=summary verbose=true");
     const firstPath =
       typeof drafts[0]?.path === "string" ? drafts[0].path : undefined;
-    if (firstPath) actions.push(`spawn file=${firstPath}`);
+    if (firstPath) actions.push(`actors_run_spawn file=${firstPath}`);
   }
   return [...new Set(actions)].slice(0, 4);
 }
@@ -539,9 +539,9 @@ export function compactYamlDocument(value: Record<string, unknown>): string {
 }
 
 function recipeInspectionHint(action: string): { view: "doctor" | "imports" | "summary"; verbose?: true } | undefined {
-  if (action === "inspect target=recipes view=doctor") return { view: "doctor" };
-  if (action === "inspect target=recipes view=imports verbose=true") return { view: "imports", verbose: true };
-  if (action === "inspect target=recipes view=summary verbose=true") return { view: "summary", verbose: true };
+  if (action === "actors_inspect target=recipes view=doctor") return { view: "doctor" };
+  if (action === "actors_inspect target=recipes view=imports verbose=true") return { view: "imports", verbose: true };
+  if (action === "actors_inspect target=recipes view=summary verbose=true") return { view: "summary", verbose: true };
   return undefined;
 }
 
@@ -549,7 +549,7 @@ function recipeInspectionHint(action: string): { view: "doctor" | "imports" | "s
 export function nextActionMetadata(action: string, byteBudget: number): YamlPart {
   const hint = recipeInspectionHint(action);
   if (hint) {
-    const typed = { next: { tool: "inspect", target: "recipes", ...hint } };
+    const typed = { next: { tool: "actors_inspect", target: "recipes", ...hint } };
     return { full: typed, selected: typed };
   }
   const instruction = selectYamlField("instruction", action, byteBudget);
@@ -559,7 +559,7 @@ export function nextActionMetadata(action: string, byteBudget: number): YamlPart
 /** Only these existing read-only inspection hints become action nodes; other advice stays content. */
 export function formatInspectionHint(action: string): string {
   const hint = recipeInspectionHint(action);
-  return hint ? formatInspectNextAction("recipes", hint.view, hint.verbose) : formatMarkdownField("instruction", action);
+  return hint ? formatInspectNextAction("recipes", hint.view, hint.verbose, "actors_inspect") : formatMarkdownField("instruction", action);
 }
 
 export function compactRecipeRegistry(

@@ -12,9 +12,34 @@ import type { RegisteredTool } from "../lib/config.ts";
 import { getRunStateRoot } from "../lib/paths.ts";
 import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
 import { createRegisterToolDefinition } from "../lib/tools-register.ts";
+import { createCoreActorToolDefinitions, createLegacyActorToolDefinitions, LEGACY_TOOL_NAMES, RESERVED_TOOL_NAMES } from "../lib/tools.ts";
 import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
 import { createActiveSkillRecipeContext } from "../lib/recipes-references.ts";
+
+test("Canonical actor tools have one explicit compatible dispatch map and unchanged contracts", () => {
+  const registry = createRegistryDeps();
+  const definitions = createCoreActorToolDefinitions({
+    ...registry, getRecipeResolutionContext: () => undefined,
+    getRuntimeTool: () => undefined, getRuntimeToolStatus: () => undefined,
+    registryRuntime: { ...registry, getStatus: () => ({ active_tool_count: 0,
+      last_scan_counts: { active: 0, rejected: 0, scanned: 0 }, registry_generation: 0,
+      watch_status: "closed", watched_root: "fixture" }) },
+  });
+  assert.deepEqual(definitions.map(tool => tool.name), Object.values(LEGACY_TOOL_NAMES));
+  const legacy = createLegacyActorToolDefinitions(definitions);
+  for (const tool of legacy) {
+    const canonical = definitions.find(item => item.name === LEGACY_TOOL_NAMES[tool.name as keyof typeof LEGACY_TOOL_NAMES])!;
+    assert.equal(tool.parameters, canonical.parameters);
+    assert.equal(tool.execute, canonical.execute);
+    assert.equal(tool.exposure, "deferred");
+    assert.equal(tool.promptSnippet, undefined); assert.equal(tool.promptGuidelines, undefined);
+    assert.deepEqual((tool.prepareLoadout as () => unknown)(), { hiddenDeclarations: Object.keys(LEGACY_TOOL_NAMES) });
+    assert.ok(RESERVED_TOOL_NAMES.has(tool.name)); assert.ok(RESERVED_TOOL_NAMES.has(canonical.name));
+  }
+  assert.match(String(definitions[2].description), /Run\/runtime.*not chat/);
+  assert.throws(() => createLegacyActorToolDefinitions([]), /Missing canonical/);
+});
 
 function createRegistryDeps() {
   return {
@@ -89,7 +114,7 @@ test("Synthetic runner completion gates require original close, canonical zero a
 
 test("Register tool definition exposes an optional exact schema", () => {
   const definition = createRegisterToolDefinition(createRegistryDeps());
-  assert.equal(definition.name, "register_tool");
+  assert.equal(definition.name, "actors_tool_register");
   assert.deepEqual(definition.parameters.required, []);
   const properties = definition.parameters.properties as Record<string, { type?: string }>;
   assert.equal(properties.name.type, "string");
@@ -103,7 +128,7 @@ test("Register tool definition exposes an optional exact schema", () => {
 test("Spawn tool definition exposes Run creation without communication fields", () => {
   const definition = createSpawnToolDefinition();
   const properties = definition.parameters.properties as Record<string, unknown>;
-  assert.equal(definition.name, "spawn");
+  assert.equal(definition.name, "actors_run_spawn");
   assert.deepEqual(definition.parameters.required, []);
   assert.deepEqual(properties.verbose, { type: "boolean", description: "Return full YAML instead of compact text." });
   assert.ok(properties.recipe);

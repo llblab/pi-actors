@@ -186,7 +186,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
         undefined,
         { cwd: fixture.root, recipeResolutionContext: inactive },
       ),
-      /Owning Skill "music-player" is not active.*Next: activate Skill music-player.*inspect target=recipes view=doctor identity=music-player\/playback/s,
+      /Owning Skill "music-player" is not active.*Next: activate Skill music-player.*actors_inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
     await assert.rejects(
       executeRegisterTool(
@@ -206,7 +206,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
           },
         },
       ),
-      /music-player\/playback.*validation failed.*Owning Skill \\"music-player\\" is not active.*instruction: "inspect target=recipes view=doctor identity=music-player\/playback/s,
+      /music-player\/playback.*validation failed.*Owning Skill \\"music-player\\" is not active.*instruction: "actors_inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
     assert.equal(existsSync(join(fixture.recipeRoot, "inactive_playback.json")), false);
   } finally {
@@ -296,9 +296,9 @@ test("Capability memory guidance separates execution, retention and exposure wit
   assert.match(persistent, /do not invent review actions or bypass unsupported retained mutations/);
   assert.match(persistent, /`kind: retained_recipe`, `activation: not_requested` receipt/);
   assert.match(actors, /When tool exposure was requested, stop if registration persists but is not callable/);
-  assert.match(persistent, /Read-only `inspect target=recipes view=summary` reports retained counts/);
+  assert.match(persistent, /Read-only `actors_inspect target=recipes view=summary` reports retained counts/);
   assert.match(persistent, /A stored definition is not review, activation or Run evidence/);
-  assert.match(persistent, /Existing explicit `register_tool` works for both modes/);
+  assert.match(persistent, /Existing explicit `actors_tool_register` works for both modes/);
   assert.match(memory, /Structural evidence and launch counts alone do not establish semantic purpose/);
   assert.match(memory, /Current draft promote\/discard and tool-review behavior are unchanged/);
   assert.match(memory, /Do not bypass confidentiality or edit review state/);

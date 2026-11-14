@@ -18,7 +18,7 @@ The product goal is useful procedural memory with a selective tool interface, no
 
 ## Current Baseline and Its Limits
 
-Current user-root discovery exposes valid enabled direct Recipes by location, while active Skill components already provide reusable capabilities without automatic tool exposure. Ordinary registration supports both execution modes, and public `spawn` accepts ordinary non-singleton Recipes without `async: true`; the flag is not a foreground-only restriction. Inline-template `spawn` capture produces async drafts rather than capturing maintained/file Recipe launches, so a sync-only promotion rule would exclude that capture stream.
+Current user-root discovery exposes valid enabled direct Recipes by location, while active Skill components already provide reusable capabilities without automatic tool exposure. Ordinary registration supports both execution modes, and public `actors_run_spawn` accepts ordinary non-singleton Recipes without `async: true`; the flag is not a foreground-only restriction. Inline-template `actors_run_spawn` capture produces async drafts rather than capturing maintained/file Recipe launches, so a sync-only promotion rule would exclude that capture stream.
 
 Automatic review sees value-free shape, risk labels, launch counts and batch-local content-equality groups, not commands, descriptions, argument names/values, canonical names/paths or accepted outcomes. Its current promote/discard executor preserves captured executable content rather than generalizing a mission. Usage records launches and lineage, not successful task completion. These limits neither authorize bypassing confidentiality nor justify discarding a capability whose usefulness remains unknown.
 
@@ -26,11 +26,11 @@ Automatic review sees value-free shape, risk labels, launch counts and batch-loc
 
 The retained library stays outside nonrecursive tool-root discovery, including on older hosts. Directory separation fails safely where an unknown Recipe opt-out field could be ignored. No new Recipe field or logical-reference namespace is introduced.
 
-Use `inspect target=recipes view=summary` and `verbose=true` for retained paths and diagnostics. The [inspection contract](./inspection.md) owns views and coverage; the [tool registry](./tool-registry.md#retain-a-new-capability-without-tool-exposure) owns the current save/discover/reuse workflow. Inventory is storage evidence, not review, callability or a running Actor, and never initializes an absent library.
+Use `actors_inspect target=recipes view=summary` and `verbose=true` for retained paths and diagnostics. The [inspection contract](./inspection.md) owns views and coverage; the [tool registry](./tool-registry.md#retain-a-new-capability-without-tool-exposure) owns the current save/discover/reuse workflow. Inventory is storage evidence, not review, callability or a running Actor, and never initializes an absent library.
 
 ## Explicit Persistence Contract
 
-The implemented create-only operation is `register_tool expose=false` with a new name and one template/from source. Omitted/true keeps ordinary registration. The [tool registry](./tool-registry.md#retain-a-new-capability-without-tool-exposure) owns supported inputs, source preservation, conflicts, mutation fences and withdrawal limits; this design does not define a second persistence path.
+The implemented create-only operation is `actors_tool_register expose=false` with a new name and one template/from source. Omitted/true keeps ordinary registration. The [tool registry](./tool-registry.md#retain-a-new-capability-without-tool-exposure) owns supported inputs, source preservation, conflicts, mutation fences and withdrawal limits; this design does not define a second persistence path.
 
 The management path is **save deliberately → find through Recipe inspection → reuse the exact Recipe reference → expose explicitly when useful → withdraw only the wrapper when appropriate**. Moving executable sources, converting existing tools/drafts, retained updates/deletion and automatic transitions require separately admitted contracts. Source/package acceptance does not reload an older host or authorize live portfolio changes.
 
@@ -70,7 +70,7 @@ Tool exposure is justified by a stable agent-facing contract, not workload durat
 - **Inputs:** Caller-owned typed arguments and useful parameterization; no accidental commitment to a single captured prompt, temporary file, credential, installation path, or operator-specific mission.
 - **Result:** A clear deliverable and acceptance boundary. For async tools, explicitly distinguish the launch receipt from terminal completion and the requested result.
 - **Effects:** Understandable filesystem/network/service effects, authority requirements, and failure or cancellation limits. Registration does not grant new permissions; launch failure may leave effects, and a stop request is not proof of scope closure.
-- **Leverage:** Meaningful reduction in repeated planning or orchestration compared with existing tools and ordinary Recipe spawning. A generic arbitrary-prompt launcher that merely aliases `spawn` usually adds little.
+- **Leverage:** Meaningful reduction in repeated planning or orchestration compared with existing tools and ordinary Recipe spawning. A generic arbitrary-prompt launcher that merely aliases `actors_run_spawn` usually adds little.
 - **Evidence:** Available validation, actual reuse, outcome acceptance, and uncertainty appropriate to the capability. Do not invent a universal call-count threshold or equate repeated launch attempts with successful reuse.
 
 Examples are illustrative, not new registered tools:
@@ -95,7 +95,7 @@ Evaluate memory quality by useful accepted reuse and reduced reconstruction cost
 Extend existing owners instead of creating a second execution kernel, tool registry, Recipe resolver, or parallel task list:
 
 - **Recipe resolution/discovery:** Preserve exact Skill/file identity, imports, runtime-owned origins, validation, and the distinction between retained definitions and tool candidates. A non-tool library must remain reachable through an admitted existing Recipe execution path.
-- **Registry/runtime:** Own explicit exposure, host activation, withdrawal limitations, and `callable_now` evidence. Existing explicit `register_tool` intent remains valid for sync and async Recipes; the target policy does not silently prohibit either.
+- **Registry/runtime:** Own explicit exposure, host activation, withdrawal limitations, and `callable_now` evidence. Existing explicit `actors_tool_register` intent remains valid for sync and async Recipes; the target policy does not silently prohibit either.
 - **Draft/tool review and transactions:** Own evidence-limited recommendations, immutable captures, CAS, quarantine, journals, recovery, and admission of unchanged content. Retain/defer and withdrawal need explicit replay-safe transitions before changing automatic policy.
 - **Usage/lineage:** Preserve revision and lifetime evidence across retention, exposure, withdrawal, and rollback without counting a migration as a launch or inventing successful outcomes.
 - **Owning Skills:** Explain only implemented operations and approved selection guidance. Do not tell an agent to use a future library path, metadata flag, review action, or public command.
@@ -109,7 +109,7 @@ Existing user tools must not be silently demoted, deleted, renamed, generalized,
 - **Orthogonality:** A useful async capability can be exposed; an unsuitable sync capture is not automatically exposed. Either mode can be retained without becoming a tool.
 - **Evidence limits:** Structurally similar but semantically different Recipes cannot acquire an asserted purpose/usefulness solely from the same review shape. Unavailable semantic evidence stays explicit and can defer a decision without destructive loss.
 - **Identity and replay:** Retain/expose/withdraw/recover preserve source and lineage, reject stale/conflicting plans, and do not create promotion/demotion churn or duplicate executable copies as new capabilities.
-- **Invocation truth:** Explicit sync and async registration still works. Actual tool calls remain distinct from `spawn`; launch, eventual result, singleton attachment, and current callability retain their original meanings.
+- **Invocation truth:** Explicit sync and async registration still works. Actual tool calls remain distinct from `actors_run_spawn`; launch, eventual result, singleton attachment, and current callability retain their original meanings.
 - **Compatibility:** Source and packed-package journeys preserve existing safety and explicit-registration behavior before any automatic-policy migration. No test writes into the operator's registry.
 - **Product evidence:** Controlled evaluation must distinguish accepted useful reuse and selection cost from mere growth in Recipe/tool counts. Until measured, improved "muscle memory" remains a design hypothesis, not a shipped performance claim.
 

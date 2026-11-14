@@ -155,7 +155,7 @@ test("Entrypoint delegates tool and runtime composition", () => {
   assert.match(indexSource, /runtime\.registerCoreTools\(\)/);
   assert.match(extensionRuntimeSource, /Tools\.createCoreActorToolDefinitions/);
   assert.match(toolsSource, /createRegisterToolDefinition/);
-  assert.equal(indexSource.includes('name: "register_tool"'), false);
+  assert.equal(indexSource.includes('name: "actors_tool_register"'), false);
 });
 
 test("Runtime reports recipe watcher failures", () => {
@@ -259,8 +259,8 @@ test("Recipe installation guidance excludes internal reviewers from bulk install
 
 test("README first-run actor uses a shell-free command template", () => {
   const readme = readFileSync("README.md", "utf8");
-  assert.match(readme, /spawn template="sleep 30" as=run:demo/);
-  assert.doesNotMatch(readme, /spawn template="[^"]*(?:&&|\|\||[|<>])[^"]*" as=run:demo/);
+  assert.match(readme, /actors_run_spawn template="sleep 30" as=run:demo/);
+  assert.doesNotMatch(readme, /actors_run_spawn template="[^"]*(?:&&|\|\||[|<>])[^"]*" as=run:demo/);
 });
 
 test("Public guidance preserves monotonic Run completion projection", () => {

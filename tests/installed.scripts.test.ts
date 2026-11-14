@@ -2221,10 +2221,10 @@ function assertFreshFixtureRunnerAbsence(captured: readonly { pid: number }[], r
     `Captured fixture runner exit remains unproven; retaining state: ${root}`);
 }
 
-async function prepareInstalledPackage(root: string): Promise<string> {
+async function prepareInstalledPackage(root: string, withPiPeers = true): Promise<string> {
   const packageDir = join(root, "node_modules", "@llblab", "pi-actors");
   await mkdir(packageDir, { recursive: true });
-  await linkPiPeers(root);
+  if (withPiPeers) await linkPiPeers(root);
   await cp(join(process.cwd(), "package.json"), join(packageDir, "package.json"));
   // This copy fixture reuses installed dependencies just as it reuses the Pi peers.
   // The packed fixture independently installs its real tarball and dependencies.
@@ -2241,7 +2241,7 @@ async function prepareInstalledPackage(root: string): Promise<string> {
   return packageDir;
 }
 
-async function preparePackedPackage(root: string): Promise<string> {
+async function preparePackedPackage(root: string, withPiPeers = true): Promise<string> {
   const packDir = join(root, "pack");
   await mkdir(packDir, { recursive: true });
   await writeFile(join(root, "package.json"), `${JSON.stringify({ private: true })}\n`);
@@ -2266,7 +2266,7 @@ async function preparePackedPackage(root: string): Promise<string> {
     "--no-save",
     join(packDir, tarballs[0]),
   ], { cwd: root });
-  await linkPiPeers(root);
+  if (withPiPeers) await linkPiPeers(root);
   const packageDir = join(root, "node_modules", "@llblab", "pi-actors");
   const manifest = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"));
   assert.match(manifest.pi.image, /^https:\/\//u);
@@ -4277,6 +4277,69 @@ test("packed Run retirement shares the compiled owner without treating retained 
     t.mock.restoreAll();
     if (verified) await rm(root, { recursive: true, force: true });
     else console.error(`Packed retirement fixture failed; retaining state: ${root}`);
+  }
+});
+
+test("standalone and kit-pointer packages load with host-provided SDK and no local Pi peers", async () => {
+  const sdkEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
+  for (const packed of [false, true]) for (const kit of [false, true]) {
+    const root = await mkdtemp(join(tmpdir(), "pi-actors-host-sdk-"));
+    let verified = false, capturedPid: number | undefined;
+    try {
+      const packageRoot = kit ? join(root, "node_modules", "@llblab", "pi-kit") : root;
+      const packageDir = packed ? await preparePackedPackage(packageRoot, false) : await prepareInstalledPackage(packageRoot, false);
+      const manifest = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"));
+      let entry = join(packageDir, manifest.pi.extensions[0]);
+      if (kit) {
+        entry = join(packageRoot, "extensions", "pi-actors", "index.js");
+        await mkdir(dirname(entry), { recursive: true });
+        await writeFile(join(packageRoot, "package.json"), JSON.stringify({ type: "module" }));
+        await writeFile(entry, 'export { default } from "../../node_modules/@llblab/pi-actors/dist/pi-actors/index.js";\n');
+      }
+      const agentDir = join(root, "agent"); await mkdir(agentDir);
+      const execution = execFileAsync(process.execPath, ["--input-type=module", "-e", `
+        import assert from "node:assert/strict";
+        import { createRequire } from "node:module";
+        import { pathToFileURL } from "node:url";
+        import { join } from "node:path";
+        const [packageDir, entry, sdkEntry] = process.argv.slice(1);
+        const contextUrl = pathToFileURL(join(packageDir, "dist/lib/recipes-context.js"));
+        assert.throws(() => createRequire(contextUrl).resolve("@earendil-works/pi-coding-agent"),
+          { code: "MODULE_NOT_FOUND" }, "Fixture must not resolve a local SDK through any parent");
+        const context = await import(contextUrl.href);
+        assert.equal(context.piPrintResponseMode("pi", ["-p", "answer"]), "text");
+        assert.equal(context.piPrintResponseMode(process.execPath, [join(packageDir, "cli.js"), "-p", "answer"]), undefined);
+        assert.deepEqual(context.attachPiSessionDir(process.execPath, ["unrelated.js", "-p", "answer"], "/sessions").args,
+          ["unrelated.js", "-p", "answer"]);
+        const { DefaultResourceLoader, SettingsManager } = await import(sdkEntry);
+        const loader = new DefaultResourceLoader({ cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR,
+          settingsManager: SettingsManager.inMemory(), noExtensions: true, additionalExtensionPaths: [entry],
+          noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
+        await loader.reload();
+        const loaded = loader.getExtensions();
+        assert.deepEqual(loaded.errors, []);
+        assert.equal(loaded.extensions.length, 1);
+        const names = [...loaded.extensions[0].tools.keys()];
+        for (const name of ["actors_tool_register", "actors_run_spawn", "actors_control_apply", "actors_inspect"])
+          assert.ok(names.includes(name), "Missing registered tool: " + name);
+        console.log(JSON.stringify({ loaded: true, names }));
+      `, packageDir, entry, sdkEntry], {
+        cwd: root,
+        env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_ACTORS_AUTOMATIC_REVIEW: "off" },
+        timeout: 30_000,
+      });
+      capturedPid = execution.child.pid;
+      const { stdout, stderr } = await execution;
+      assert.ok(capturedPid && Number.isSafeInteger(capturedPid) && capturedPid > 0, "Original fixture child PID is required");
+      assert.equal(stderr, "");
+      assert.equal(JSON.parse(stdout).loaded, true);
+      verified = true;
+    } finally {
+      if (verified) {
+        assertFreshFixtureRunnerAbsence([{ pid: capturedPid! }], root);
+        await rm(root, { recursive: true, force: true });
+      } else console.error(`Host SDK fixture failed; retaining state: ${root}`);
+    }
   }
 });
 

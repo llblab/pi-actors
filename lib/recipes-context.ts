@@ -65,12 +65,20 @@ function commandName(command: string): string {
   return basename(command).toLowerCase();
 }
 
-const PI_NODE_CLI_PATHS = new Set(["./bundle/cli.js", "./cli.js"].map(path =>
-  fileURLToPath(new URL(path, import.meta.resolve("@earendil-works/pi-coding-agent")))));
-
 function isPiCommand(command: string, args: string[]): boolean {
   const name = commandName(command);
-  return name === "pi" || ((name === "node" || name === "node.exe") && PI_NODE_CLI_PATHS.has(args[0]));
+  if (name === "pi") return true;
+  if (name !== "node" && name !== "node.exe") return false;
+  let sdkEntry: string;
+  try {
+    // Host-provided SDK imports need not have a filesystem package beside the extension.
+    sdkEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") return false;
+    throw error;
+  }
+  return ["./bundle/cli.js", "./cli.js"].some(path => fileURLToPath(new URL(path, sdkEntry)) === args[0]);
 }
 
 const PI_PRINT_FLAGS = new Set(["-p", "--print"]);

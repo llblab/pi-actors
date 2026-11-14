@@ -925,7 +925,7 @@ test("Opt-in real coordinator retains original wrapped spawn/async-tool admissio
       let definition = h.definitions.get("spawn"); let args: Record<string, unknown> = { as: `run:${runId}`, template: f.params.template, max_runtime: "1ms",
         artifacts: { declared_only: join(f.root, "not-produced.txt") }, values: { onSupervisionClockCaptured: "ACTOR_DATA_NOT_A_HOOK" } };
       if (route === "async_tool") {
-        await h.definitions.get("register_tool").execute("register-private-async", { name: "coordinator_async", description: "Isolated finite gated coordinator fixture.", template: f.params.template, async: true }, undefined, undefined, active.ctx);
+        await h.definitions.get("actors_tool_register").execute("register-private-async", { name: "coordinator_async", description: "Isolated finite gated coordinator fixture.", template: f.params.template, async: true }, undefined, undefined, active.ctx);
         definition = h.definitions.get("coordinator_async"); assert.ok(definition);
         args = { run_id: runId, onSupervisionClockCaptured: "ACTOR_DATA_NOT_A_HOOK" };
       }

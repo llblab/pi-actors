@@ -11,8 +11,8 @@ Living index of all documentation in the `/docs` directory.
 - [async-runs.md](./async-runs.md) — Run lifecycle, state, Control, Trace, cancellation, and terminal reconciliation
 - [coordinator-delivery.md](./coordinator-delivery.md) — Active model-step completion overlays, idle batching, durable acceptance, explicit urgent Pi steering, and the adopted completion-stream contract under implementation (not enabled)
 - [actor-inspector.md](./actor-inspector.md) — Owner-filtered actor-instance navigation through Recipe, Trace, and Control
-- [inspection.md](./inspection.md) — Complete `inspect` target/view matrix, authorization boundaries, and diagnostic routes
-- [tool-registry.md](./tool-registry.md) — Local `pi-actors` registry storage and `register_tool` adaptation
+- [inspection.md](./inspection.md) — Complete `actors_inspect` target/view matrix, authorization boundaries, and diagnostic routes
+- [tool-registry.md](./tool-registry.md) — Local `pi-actors` registry storage and `actors_tool_register` adaptation
 - [recipe-library.md](./recipe-library.md) — Packaged standard recipe library such as async subagents, coordinator pipelines, utilities, and music playback
 - [releasing.md](./releasing.md) — Guarded tag validation, npm Trusted Publisher setup, registry verification, and GitHub Release convergence
 

@@ -238,11 +238,11 @@ test("Skill and file Recipe references resolve without ambient fallback", async 
     );
     assert.throws(
       () => resolveRecipeReferencePath("std:task"),
-      /std: Recipe references were removed in pi-actors 0\.46\..*Next: inspect target=recipes view=status/,
+      /std: Recipe references were removed in pi-actors 0\.46\..*Next: actors_inspect target=recipes view=status/,
     );
     assert.throws(
       () => resolveRecipeReferencePath("skill:sample/task"),
-      /skill: Recipe references were removed in pi-actors 0\.46\..*Next: inspect target=recipes view=doctor identity=sample\/task/,
+      /skill: Recipe references were removed in pi-actors 0\.46\..*Next: actors_inspect target=recipes view=doctor identity=sample\/task/,
     );
     assert.throws(
       () => readResolvedRecipeConfig(parent),
@@ -330,7 +330,7 @@ test("Active-Skill inventory quarantines invalid components while exact resoluti
     );
     assert.throws(
       () => resolveRecipeReferencePath("valid/missing", root, context),
-      /Skill Recipe component not found: valid\/missing; owning Skill "valid" is active.*Next: inspect target=recipes view=doctor identity=valid\/missing/,
+      /Skill Recipe component not found: valid\/missing; owning Skill "valid" is active.*Next: actors_inspect target=recipes view=doctor identity=valid\/missing/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -358,7 +358,7 @@ test("Duplicate active Skill names fail with deterministic ambiguity", async () 
         assert.ok(error instanceof Error);
         assert.match(
           error.message,
-          /Duplicate active Skill identity duplicate \(2 active definitions\).*Next: inspect target=recipes view=doctor identity=duplicate\/task/,
+          /Duplicate active Skill identity duplicate \(2 active definitions\).*Next: actors_inspect target=recipes view=doctor identity=duplicate\/task/,
         );
         assert.doesNotMatch(error.message, new RegExp(root));
         return true;
@@ -798,7 +798,7 @@ test("Template recipes derive recipe identity from filename", async () => {
 
 test("JSON and Markdown Recipes reject a declared top-level name", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-name-"));
-  const guidance = /Recipe\.name was removed in pi-actors 0\.46\..*Next: remove the name field.*inspect target=recipes view=doctor/;
+  const guidance = /Recipe\.name was removed in pi-actors 0\.46\..*Next: remove the name field.*actors_inspect target=recipes view=doctor/;
   try {
     const json = join(root, "named.json");
     const markdown = join(root, "named.md");

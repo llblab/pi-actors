@@ -9,7 +9,7 @@ Recipe --spawn--> Run
 Run = Recipe + Trace + Control
 ```
 
-An **actor** is any runnable local capability: a script, tool, service, pipeline, or subagent. A **Recipe** is its reusable executable definition. `spawn` creates a **Run**—one concrete actor instance—which captures its Recipe, appends observable **Trace**, and may consume actor-local **Control**.
+An **actor** is any runnable local capability: a script, tool, service, pipeline, or subagent. A **Recipe** is its reusable executable definition. `actors_run_spawn` creates a **Run**—one concrete actor instance—which captures its Recipe, appends observable **Trace**, and may consume actor-local **Control**.
 
 ## Agent Experience (AX)
 
@@ -29,7 +29,7 @@ Design notes for [portable Recipe composition bundles and CodeMode interoperabil
 
 A reusable Recipe does not have to become a named tool. The [adopted capability-memory direction](docs/capability-memory.md) separates retention from tool exposure: sync/async determines execution, not usefulness, and a subagent-backed tool is a capability launcher rather than a saved live Actor. The aim is useful procedural memory with a selective tool interface, not more registered names.
 
-Use `register_tool expose=false` with a new name and a template/from source to save a capability in `recipes/library` without activating a tool. Its retained_recipe/not_requested receipt returns the exact Recipe path for `spawn` or later deliberate `register_tool from` exposure. Creation is exclusive; retained update, delete and draft promotion are not supported. `inspect target=recipes view=summary` distinguishes retained definitions, with exact paths, modes and diagnostics in verbose detail. Automatic retained lifecycle is not implemented. Current tool-root discovery, automatic review and ordinary registration remain unchanged; structural review and launch counts alone do not prove useful successful reuse. [BACKLOG.md](BACKLOG.md) owns implementation and evidence gates; adopting the direction neither migrates existing tools nor reloads a running host.
+Use `actors_tool_register expose=false` with a new name and a template/from source to save a capability in `recipes/library` without activating a tool. Its retained_recipe/not_requested receipt returns the exact Recipe path for `actors_run_spawn` or later deliberate `actors_tool_register from` exposure. Creation is exclusive; retained update, delete and draft promotion are not supported. `actors_inspect target=recipes view=summary` distinguishes retained definitions, with exact paths, modes and diagnostics in verbose detail. Automatic retained lifecycle is not implemented. Current tool-root discovery, automatic review and ordinary registration remain unchanged; structural review and launch counts alone do not prove useful successful reuse. [BACKLOG.md](BACKLOG.md) owns implementation and evidence gates; adopting the direction neither migrates existing tools nor reloads a running host.
 
 ## Install
 
@@ -49,20 +49,22 @@ The package contributes the extension and six capability-owning Skills for actor
 
 ## Public Tools
 
-### `spawn`
+Only `actors_tool_register`, `actors_run_spawn`, `actors_control_apply`, and `actors_inspect` are advertised for new calls. Explicit legacy `register_tool`, `spawn`, `message`, and `inspect` dispatch remains compatible with saved calls through the same schemas and executors. Saved Recipe identities and completion text are not migrated. Control applies Run/runtime actions, not chat. See [Tool Registry](docs/tool-registry.md#public-names-and-compatible-dispatch) for compatibility visibility, namespace and collision rules; this change does not reload an already running host.
+
+### `actors_run_spawn`
 
 Create a Run from an active-Skill Recipe, an explicit Recipe file, or an inline command template:
 
 ```text
-spawn template="sleep 30" as=run:demo
-spawn recipe=project-work/repo-health values={"repo":"/work/project","model":"provider/model"}
-spawn recipe=music-player/playback values={"source":"/music"}
-spawn template="make test" as=run:test
+actors_run_spawn template="sleep 30" as=run:demo
+actors_run_spawn recipe=project-work/repo-health values={"repo":"/work/project","model":"provider/model"}
+actors_run_spawn recipe=music-player/playback values={"source":"/music"}
+actors_run_spawn template="make test" as=run:test
 ```
 
 Use a Run when work may outlive the current turn, needs steering, fans out, produces artifacts, or must remain inspectable. Short foreground commands can remain ordinary tools.
 
-### `message`
+### `actors_control_apply`
 
 Send one exact Control:
 
@@ -78,38 +80,38 @@ Send one exact Control:
 Run targets accept Recipe-declared actor-local actions plus runtime-owned `kill`, `archive`, and `prune`, subject to Run state. Runtime targets accept only reserved review actions:
 
 ```text
-message target=runtime action=review.retry input={"scope":"draft"}
-message target=runtime action=review.retry input={"scope":"tool"}
-message target=runtime action=review.reset input={"scope":"draft"}
-message target=runtime action=review.reset input={"scope":"tool"}
+actors_control_apply target=runtime action=review.retry input={"scope":"draft"}
+actors_control_apply target=runtime action=review.retry input={"scope":"tool"}
+actors_control_apply target=runtime action=review.reset input={"scope":"draft"}
+actors_control_apply target=runtime action=review.reset input={"scope":"tool"}
 ```
 
 Lifecycle `kill` remains runtime-owned rather than Recipe-declared.
 
-### `inspect`
+### `actors_inspect`
 
 Inspect one exact management target:
 
 ```text
-inspect target=run:test view=recipe
-inspect target=run:test view=trace source=lifecycle lines=40
-inspect target=run:test view=control
-inspect target=runtime view=status
-inspect target=runtime view=runs status=failed
-inspect target=runtime view=triage
-inspect target=recipes view=status
-inspect target=recipes view=summary
-inspect target=recipes view=doctor identity=music-player/playback
-inspect target=tool:my_tool view=status
+actors_inspect target=run:test view=recipe
+actors_inspect target=run:test view=trace source=lifecycle lines=40
+actors_inspect target=run:test view=control
+actors_inspect target=runtime view=status
+actors_inspect target=runtime view=runs status=failed
+actors_inspect target=runtime view=triage
+actors_inspect target=recipes view=status
+actors_inspect target=recipes view=summary
+actors_inspect target=recipes view=doctor identity=music-player/playback
+actors_inspect target=tool:my_tool view=status
 ```
 
-Recipe `summary` and `registry` are the same inspection path; only `verbose` selects compact text versus structured details. Recipe and tool views are listed above; `inspect` parameter help and unsupported-view refusals name the actual accepted view sequences.
+Recipe `summary` and `registry` are the same inspection path; only `verbose` selects compact text versus structured details. Recipe and tool views are listed above; `actors_inspect` parameter help and unsupported-view refusals name the actual accepted view sequences.
 
-A Run exposes exactly `recipe`, `trace`, and `control` views. Run-specific `inspect` and `message` require a current coordinator session whose id exactly matches the persisted non-empty Run owner; possessing `run:<id>` alone is not authorization. Missing-session, ownerless, and cross-owner access fails closed. Use `inspect target=runtime view=runs` for the current session's exact-owner inventory. See the complete [management inspection matrix](./docs/inspection.md).
+A Run exposes exactly `recipe`, `trace`, and `control` views. Run-specific `actors_inspect` and `actors_control_apply` require a current coordinator session whose id exactly matches the persisted non-empty Run owner; possessing `run:<id>` alone is not authorization. Missing-session, ownerless, and cross-owner access fails closed. Use `actors_inspect target=runtime view=runs` for the current session's exact-owner inventory. See the complete [management inspection matrix](./docs/inspection.md).
 
-### `register_tool`
+### `actors_tool_register`
 
-Persist a maintained Recipe with `register_tool name=<tool> from=<skill>/<recipe> defaults={...}`, or register a trusted command through the separate `template` mode. Definitions live under `~/.pi/agent/recipes`. With `expose=false`, a new template/from definition is retained under `recipes/library` instead; its not_requested receipt makes no tool-callability claim. Treat an exposed tool as callable in the current session only when the result reports `callable_now: true`; persistence, Recipe spawning, and registered-tool invocation are distinct states.
+Persist a maintained Recipe with `actors_tool_register name=<tool> from=<skill>/<recipe> defaults={...}`, or register a trusted command through the separate `template` mode. Definitions live under `~/.pi/agent/recipes`. With `expose=false`, a new template/from definition is retained under `recipes/library` instead; its not_requested receipt makes no tool-callability claim. Treat an exposed tool as callable in the current session only when the result reports `callable_now: true`; persistence, Recipe spawning, and registered-tool invocation are distinct states.
 
 ## Recipe
 
@@ -166,7 +168,7 @@ String command-template leaves execute directly without shell interpretation. Us
 }
 ```
 
-Trace fields are exact: `id`, `ts`, `kind`, and optional `summary`, `data`, `level`, `attention`. Address, sender, recipient, reply, and routing fields fail validation. Trace is a bounded retained suffix, not an audit archive: the canonical authority appends within 2,048 events and 4 MiB or atomically keeps the newest suffix plus one warning-only `runtime.trace_compacted` marker. That marker means older history was discarded; `result.json`, `execution.json`, terminal state, and declared artifacts retain their own authority. `inspect view=trace` reports whether retained history is complete. Reads are newline-safe and deterministic; first-party scripts never write this file directly.
+Trace fields are exact: `id`, `ts`, `kind`, and optional `summary`, `data`, `level`, `attention`. Address, sender, recipient, reply, and routing fields fail validation. Trace is a bounded retained suffix, not an audit archive: the canonical authority appends within 2,048 events and 4 MiB or atomically keeps the newest suffix plus one warning-only `runtime.trace_compacted` marker. That marker means older history was discarded; `result.json`, `execution.json`, terminal state, and declared artifacts retain their own authority. `actors_inspect view=trace` reports whether retained history is complete. Reads are newline-safe and deterministic; first-party scripts never write this file directly.
 
 Generic command lifecycle is Trace-only: runner-owned `command.done` records preserve completion and execution evidence but never request or project attention, including malformed legacy records carrying `steer`. There is no Recipe-level command-completion delivery switch. Semantic attention is explicit: `notify` shows visible status without a model turn, `followup` supplies ordinary checkpoint context, and `steer` requests urgent delivery at Pi's next safe assistant/tool boundary. `notify` and `followup` remain retained wake hints that may compact away, so persist recovery state or an artifact first. `steer` is admitted to the bounded owner delivery journal before `deliverAs: "steer"`, acknowledged only in exact model-bound context, and never suppresses the eventual root-terminal batch. Store large evidence in artifacts or bounded execution captures. New urgent steers keep the canonical checkpoint and whole optional references within 16 KiB, explicitly counting omitted paths instead of cutting a path; saved envelopes retain their original text. Essential text that cannot fit remains retryable before admission, not partially delivered. Ordinary notify/followup shares exact reference spelling and explicit eight-slot coverage; its wake policy is unchanged. Legacy body and steer-diagnostic clipping explicitly marks unknown omission counts when no retained privacy context admits safe numbers; it is not a new privacy or completeness guarantee.
 
@@ -174,9 +176,9 @@ Ordinary finite Runs project terminal results through one root-coordinator compl
 
 Implemented UX/AX subset: completions share48KiB UTF-8 including service fields, divided equally between up to64 candidate results: nearly48KiB for one,24KiB each for two,16KiB each for three. Whole admitted text fitting its share is result; otherwise preview carries the safe prefix and exact omitted count, without a fixed16KiB result/2KiB preview cap. Completions show admitted work output or the bounded executor-selected final Actor response, never command metadata. Saved packets keep their original budget/text; source-backed prefix selection occurs only at fresh admission, not replay/render. Direct Pi text-print answers and successful composition/retry responses use the original producer privacy; observed upstream clipping stays explicit and is not confused with preview loss. Ordinary completions can carry retained primary-text, artifact-declaration inventory and diagnostic-metadata references. Follow the exact reference for clipped or omitted evidence; it records capture-time identity/hash/counts, not perpetual readability. Artifact inventories list declarations only, not proof that target files exist or were produced, and do not grant body-read permission. Diagnostic excerpts identify the selected field with literal UTF-8/Unicode counts; their source contains recorded command/error/failure-reason metadata, not complete primary output. Source loss is explicit and never replaced by guessed legacy bodies or paths. See [Run supervision](docs/run-supervision.md) for implemented boundaries and remaining acceptance gates.
 
-Implemented A2 subset: `inspect target=runtime view=runs verbose=true` now adds a bounded [root-first file map](docs/run-supervision.md#same-session-file-investigation) for the actual session's already cataloged directories. Follow selected locations with ordinary tools, without an original producer key. Source/npm-packed SDK fixtures resume the same saved session in a new process after real Run producers and their coordinator host have exited, then read the actual result and select recorded stdout via the mapped execution manifest with ordinary tools; another session gets no inherited branch. The read-only map exposes canonical starting-location coverage and expected format hints, not a full file inventory or format/completeness validation. Its published_sessions link locates the fixed role catalog physically under the owned Run root, even without a semantic index or producer key; this does not certify its body or historical publication. SDK checks select one controlled partial preview and also read an actual private-writer preview after its holder exits and the same saved session opens in another process. Exact tool-read paths and final byte/absence snapshots are checked, including selected-preview loss errors without cached/raw fallback; the private publisher uses controlled recorded-session sources, not genuine Actor conversations. A finite public spawn and later same-saved-session research also pass through real source/npm entrypoints, without replacement tools or copied lifecycle wiring. Corrupt catalogs stay unavailable without repair. Inventory filters observe current Run status, not the registration-time cache. Ordinary maps retain root-group recency with known failed children first; add status=failed to the verbose request for observed failed-subtree-first ordering across roots without filtering the full owned map or adding reads. Priority is partial observed data, not terminal authority. Launches and compatible singleton attachments now register after lifecycle release; catalog failure returns `catalog=unavailable` without failing or retrying the launched work. SDK fork/clone preserves inherited history but gives the new logical session no fresh map branch. Compact launch receipts now include exact-generation current-session starting locations without evidence-body or catalog reads, or explicit unavailability/whole-row omission. New completion batches freeze bounded same-session location rows at admission and render them after outcomes within the shared budget, alongside the optional current-session map command. Legacy absent/request-only packets retain their text; source/npm SDK verifies an explicitly requested result read from a terminal row. This closes representative navigation acceptance, not the release. Neither captured locations nor the request execute inspection automatically or grant copied/forked history fresh ownership. Legacy batches keep their original text; no full map is embedded into immutable outcomes. Compact/default inspection, curated previews and timing/work/native authority are unchanged.
+Implemented A2 subset: `actors_inspect target=runtime view=runs verbose=true` now adds a bounded [root-first file map](docs/run-supervision.md#same-session-file-investigation) for the actual session's already cataloged directories. Follow selected locations with ordinary tools, without an original producer key. Source/npm-packed SDK fixtures resume the same saved session in a new process after real Run producers and their coordinator host have exited, then read the actual result and select recorded stdout via the mapped execution manifest with ordinary tools; another session gets no inherited branch. The read-only map exposes canonical starting-location coverage and expected format hints, not a full file inventory or format/completeness validation. Its published_sessions link locates the fixed role catalog physically under the owned Run root, even without a semantic index or producer key; this does not certify its body or historical publication. SDK checks select one controlled partial preview and also read an actual private-writer preview after its holder exits and the same saved session opens in another process. Exact tool-read paths and final byte/absence snapshots are checked, including selected-preview loss errors without cached/raw fallback; the private publisher uses controlled recorded-session sources, not genuine Actor conversations. A finite public spawn and later same-saved-session research also pass through real source/npm entrypoints, without replacement tools or copied lifecycle wiring. Corrupt catalogs stay unavailable without repair. Inventory filters observe current Run status, not the registration-time cache. Ordinary maps retain root-group recency with known failed children first; add status=failed to the verbose request for observed failed-subtree-first ordering across roots without filtering the full owned map or adding reads. Priority is partial observed data, not terminal authority. Launches and compatible singleton attachments now register after lifecycle release; catalog failure returns `catalog=unavailable` without failing or retrying the launched work. SDK fork/clone preserves inherited history but gives the new logical session no fresh map branch. Compact launch receipts now include exact-generation current-session starting locations without evidence-body or catalog reads, or explicit unavailability/whole-row omission. New completion batches freeze bounded same-session location rows at admission and render them after outcomes within the shared budget, alongside the optional current-session map command. Legacy absent/request-only packets retain their text; source/npm SDK verifies an explicitly requested result read from a terminal row. This closes representative navigation acceptance, not the release. Neither captured locations nor the request execute inspection automatically or grant copied/forked history fresh ownership. Legacy batches keep their original text; no full map is embedded into immutable outcomes. Compact/default inspection, curated previews and timing/work/native authority are unchanged.
 
-Compact spawn/asynchronous-tool launch receipts use bare block YAML with nested file-location data and identify an existing Run reuse instead of implying another launch. Full `spawn verbose=true` metadata remains JSON during the staged rollout; private details and input schemas keep their machine formats. When a complete direct file-location row is shown, it replaces the redundant session-wide map hint; missing, unavailable or omitted rows retain that optional investigation command. Exact references, expert details, shared bounds and saved completion-packet text are preserved.
+Compact spawn/asynchronous-tool launch receipts use bare block YAML with nested file-location data and identify an existing Run reuse instead of implying another launch. Full `actors_run_spawn verbose=true` metadata remains JSON during the staged rollout; private details and input schemas keep their machine formats. When a complete direct file-location row is shown, it replaces the redundant session-wide map hint; missing, unavailable or omitted rows retain that optional investigation command. Exact references, expert details, shared bounds and saved completion-packet text are preserved.
 
 New automatic completion packets show direct `omitted:N chars` fields for positive tracked primary/diagnostic loss, counted in Unicode code points after privacy projection. Full retained references and older saved packet text stay unchanged. This does not yet cover every legacy summary/body or attention clipping path, nor grant broader output publication.
 
@@ -186,14 +188,14 @@ Runtime argument guidance stops at the execution handoff. Failures after an exec
 
 An exception does not guarantee an unapplied action: actor-local delivery can fail after handling is recorded, and retirement can fail after data has moved or been removed. Use existing owned evidence rather than replaying the action. The [partial-failure evidence map](docs/run-supervision.md#control-partial-failure-evidence-existing-facts-not-a-new-receipt-contract) distinguishes these paths from still-gated native stop receipts.
 
-Controls persist to `controls.jsonl` before transport. One token-owned lock rejects a 65th pending Control or 1 MiB rewrite before admission, fails closed on malformed or stale-generation evidence, and atomically admits one record. Canonical transitions retain a 128-terminal tail, expected-state fencing, and 4 KiB errors. Admitted nonterminal Controls never expire automatically. Every record carries immutable `run_instance_id`. `inspect view=control` reports pending capacity, saturation, stale work, journal bytes, and bounded diagnostics.
+Controls persist to `controls.jsonl` before transport. One token-owned lock rejects a 65th pending Control or 1 MiB rewrite before admission, fails closed on malformed or stale-generation evidence, and atomically admits one record. Canonical transitions retain a 128-terminal tail, expected-state fencing, and 4 KiB errors. Admitted nonterminal Controls never expire automatically. Every record carries immutable `run_instance_id`. `actors_inspect view=control` reports pending capacity, saturation, stale work, journal bytes, and bounded diagnostics.
 
-Runtime-owned lifecycle and retention actions use the same `message` tool:
+Runtime-owned lifecycle and retention actions use the same `actors_control_apply` tool:
 
 ```text
-message target=run:<id> action=kill
-message target=run:<id> action=archive
-message target=run:<id> action=prune input={"preserve_artifacts":true}
+actors_control_apply target=run:<id> action=kill
+actors_control_apply target=run:<id> action=archive
+actors_control_apply target=run:<id> action=prune input={"preserve_artifacts":true}
 ```
 
 Compact Control replies report an understandable action stage instead of dumping status objects: queued/delivered is not handled; archive/prune success is complete; a kill attempt leaves full termination explicitly unconfirmed. Only a relevant evidence hint is shown (Control for actor delivery, Trace for a stop attempt, owned inventory after identity replacement); already-terminal refusal needs no routine follow-up. Use `verbose: true` on the original request for full JSON, not a repeated destructive action. Changed-owner/generation refusals also omit the replacement status from full/verbose replies; verbosity grants no extra scope. Same-identity receipt detail remains available. Actor-local dispatch exceptions still fail, conservatively leaving delivery, handling and effects unconfirmed; do not repeat automatically. Their optional follow-up starts at fresh owned inventory, not a copied stale Control id/generation. Raw causes remain Kernel-local even with verbose; oversized request targets are wholly omitted with explicit coverage under 16 KiB. This presentation/curation does not change the legacy stop engine or prove closure.

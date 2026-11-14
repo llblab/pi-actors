@@ -5,7 +5,7 @@ Use a Run when execution may outlive the current turn, needs declared Control, p
 ## Launch
 
 ```text
-spawn recipe=<skill>/<recipe> values={...} as=run:<id>
+actors_run_spawn recipe=<skill>/<recipe> values={...} as=run:<id>
 ```
 
 Use the owning capability Skill to choose the Recipe and capability-specific values. Retain the returned Run id. A spawn result reports `launch_kind: "spawn"`; it is never evidence of registered-tool invocation.
@@ -19,9 +19,9 @@ Compact spawn/async-tool receipts use flat Markdown-list fields: run, state, lau
 Normally wait for the completion batch: ready trees reach an active root coordinator at the next safe model-step boundary after the full tool batch, or wake an already-idle coordinator through a debounced follow-up. Inspect only when requested, when meaningful attention arrives, or when the Run is overdue or blocked:
 
 ```text
-inspect target=run:<id> view=recipe
-inspect target=run:<id> view=trace
-inspect target=run:<id> view=control
+actors_inspect target=run:<id> view=recipe
+actors_inspect target=run:<id> view=trace
+actors_inspect target=run:<id> view=control
 ```
 
 Fresh root completions use YAML frontmatter (run, state, admitted kind), followed by raw left-edge Markdown. Prepend the packet-local index only when two or more results are shown. Exactly one shown result omits its index even with omitted results; preserve omission/inventory metadata, internal member/generation/correlation and every saved message. This rule does not apply to numbered streams. New source captures put all runtime metadata above that body, with no service/file footer. files.groups gives one literal root plus relative entry paths; files.read_first names zero-based group/entry indices for the first useful source, not an automatic read. role/purpose guidance is English; Actor Markdown and path/name bytes are unchanged. External paths use separate roots; unknown bases remain explicit rather than guessed from cwd or Run id. Known cut counts alone may follow the cut body; unknown-loss warnings and packet omission/inventory facts stay in the header. Retained captures preserve their old bytes and presentation. No external #N heading, result:/preview: wrapper, list nesting, whole-body fence, Batch caption, members wrapper or routine outer counter is added. Primary/final Actor response uses kind:primary; explicit error/failure diagnostic text uses kind:diagnostic, never a launch command. Untracked fallback has no kind and keeps unknown original completeness/privacy explicit outside YAML. Known cut loss is [N characters omitted] at the cut, with no extra ellipsis or body clipping counters/flags in metadata. Unknown upstream loss remains separately unknown and does not assert a known positive omission. Exact source/generation/parent/location references remain in complete model content, with whole references or explicit omission, captured inventory recovery and non-done omitted states. The compact TUI independently renders literal headers/markers and native Markdown bodies from validated content-bound blocks; only whole header reference/location rows and framing are hidden. Expansion and invalid/missing hints reveal original text. Hashes/layout/markers establish consistency/correlation only, never authentication, read/action permission, acceptance or native truth. Authored YAML/next/tool/batch/omission lookalikes stay body content. Fresh packets share48KiB UTF-8 including service data, equally between up to64candidate rows, with256captured members and no redistribution of unused shares or fixed16KiB/2KiB text cap. Full admitted text fitting its share without upstream uncertainty has no cut marker; otherwise use the scalar/CRLF-safe prefix and exact retained-source loss. Allocation/text is frozen at admission; rendering/recovery does not reread sources or reallocate. Unsupported Pi event/control output is withheld. Source basis stays in reference metadata; retained structured coverage facts are not exposed as YAML clipping fields. Pending/queued/presented older formats—including #N records and the first frontmatter draft—keep exact bytes, hints and budgets. Encoding names are storage replay data, not public product choices, source permissions or work authority. No standing full-map instruction or automatic research/read follows; use selective same-session investigation when needed.
@@ -49,12 +49,12 @@ Compact spawn/async-tool receipts now carry `file_navigation`: observed canonica
 For an explicit file investigation, request the existing management route:
 
 ```text
-inspect target=runtime view=runs verbose=true
+actors_inspect target=runtime view=runs verbose=true
 ```
 
 Its `navigation` selects only the actual current logical session's already cataloged, generation-checked directories. Start at the root's context index/result, then follow selected locations with ordinary file tools; no original producer key is needed. Resuming the same saved session after restart retains this research scope; a new/forked/cloned session does not inherit it through copied history or paths.
 
-The ordinary map keeps independent roots latest-registration-first and puts known failed child subtrees before other siblings without moving a descendant ahead of its ancestors. For an explicit failed investigation use inspect target=runtime view=runs status=failed verbose=true. This filters inventory, not navigation: the full owned map then puts observed failed root subtrees first, with recency as the stable peer tie-break. Its priority.root_order is latest_registration or failed_subtrees_first and priority.basis=observed_failed_rows; missing/unmatched observations remain unranked, not proof of success. Ordering grants no ownership/terminal/native authority and does not read extra evidence or rewrite the catalog.
+The ordinary map keeps independent roots latest-registration-first and puts known failed child subtrees before other siblings without moving a descendant ahead of its ancestors. For an explicit failed investigation use actors_inspect target=runtime view=runs status=failed verbose=true. This filters inventory, not navigation: the full owned map then puts observed failed root subtrees first, with recency as the stable peer tie-break. Its priority.root_order is latest_registration or failed_subtrees_first and priority.basis=observed_failed_rows; missing/unmatched observations remain unranked, not proof of success. Ordering grants no ownership/terminal/native authority and does not read extra evidence or rewrite the catalog.
 
 This bounded map marks file_inventory_scope=canonical_starting_locations and reports file locations, observed sizes and format_hint (json/jsonl/text). Hints describe the expected layout, not validated syntax/UTF-8 or complete output; it is not a full file inventory, body, original privacy, terminal/clock/native truth or authority to change state. Missing/nonregular/stale locations stay unavailable, whole-row omission counts are explicit, and corrupt/missing catalogs report `catalog_unavailable` without repair or turning healthy Runs into failures. New launches and explicit compatible singleton attachments register their exact existing generation; reads never scan/backfill missing entries. A `catalog: unavailable` launch warning means that separate registration attempt did not complete, not that the work failed. Do not relaunch merely to repair the map; even failed publication can leave committed catalog bytes. Current ordering covers directly owned rows and their exact same-session parent links, not a complete cross-session descendant tree. Compact/default inspection still does not build a map. Launch text offers that request as a fallback when no complete direct row is shown; existing new-outcome formats retain their optional request. Neither embeds a session-wide map or file bodies.
 
@@ -73,7 +73,7 @@ Do not infer successful native closure from a teardown count, signal attempt or 
 Send an actor-local action only when the root Recipe declares and implements it:
 
 ```text
-message target=run:<id> action=<declared-action> input={...}
+actors_control_apply target=run:<id> action=<declared-action> input={...}
 ```
 
 Inspect Control when readiness, capacity, stale work, or saturation matters. Put large data in an artifact and send only a bounded reference or instruction. Use runtime-owned termination for a stuck Run rather than inventing undeclared service actions.

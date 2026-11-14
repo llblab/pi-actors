@@ -25,4 +25,11 @@ export interface CoreActorToolDefinitionDeps<TContext extends RuntimeToolContext
 }
 export declare function resolveActiveRuntimeTool(name: string, activeTools: Pick<Map<string, unknown>, "has">, getDefinition: (name: string) => unknown): unknown;
 export declare const RESERVED_TOOL_NAMES: Set<string>;
+export declare const LEGACY_TOOL_NAMES: {
+    readonly register_tool: "actors_tool_register";
+    readonly spawn: "actors_run_spawn";
+    readonly message: "actors_control_apply";
+    readonly inspect: "actors_inspect";
+};
+export declare function createLegacyActorToolDefinitions(definitions: ActorToolDefinition[]): ActorToolDefinition[];
 export declare function createCoreActorToolDefinitions<TContext extends RuntimeToolContext>(deps: CoreActorToolDefinitionDeps<TContext>): ActorToolDefinition[];

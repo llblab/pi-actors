@@ -1,7 +1,7 @@
 /**
- * Public register_tool behavior
- * Zones: runtime tool registration, tool registry mutation, register_tool schema
- * Owns the public register_tool definition that persists local agent capabilities
+ * Public actors_tool_register behavior
+ * Zones: runtime tool registration, tool registry mutation, actors_tool_register schema
+ * Owns the public actors_tool_register definition that persists local agent capabilities
  */
 
 import * as Prompts from "./prompts.ts";
@@ -24,7 +24,7 @@ export function createRegisterToolDefinition<TContext>(
   deps: RegisterToolRuntimeDeps<TContext>,
 ) {
   return {
-    name: "register_tool",
+    name: "actors_tool_register",
     label: "Register Tool",
     description: Prompts.REGISTER_TOOL_DESCRIPTION,
     promptSnippet: Prompts.REGISTER_TOOL_PROMPT_SNIPPET,

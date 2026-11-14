@@ -47,28 +47,28 @@ test("Maintained invocation guidance uses complete current inspect and Control s
   const combined = sources.map(({ source }) => source).join("\n");
   assert.doesNotMatch(combined, /new tool is immediately callable/);
   for (const expected of [
-    "inspect target=runtime view=status",
-    "inspect target=recipes view=status",
-    "inspect target=recipes view=doctor identity=<skill>/<recipe>",
-    "inspect target=tool:<name> view=status",
+    "actors_inspect target=runtime view=status",
+    "actors_inspect target=recipes view=status",
+    "actors_inspect target=recipes view=doctor identity=<skill>/<recipe>",
+    "actors_inspect target=tool:<name> view=status",
     'launch_kind: "spawn"',
     'launch_kind: "tool"',
     "callable_now",
     "catalog partial",
-    "message target=runtime action=review.retry input={\"scope\":\"draft\"}",
-    "message target=runtime action=review.retry input={\"scope\":\"tool\"}",
-    "message target=runtime action=review.reset input={\"scope\":\"draft\"}",
-    "message target=runtime action=review.reset input={\"scope\":\"tool\"}",
-    "message target=run:<id> action=kill",
-    "message target=run:<id> action=archive",
-    "message target=run:<id> action=prune input={\"preserve_artifacts\":true}",
+    "actors_control_apply target=runtime action=review.retry input={\"scope\":\"draft\"}",
+    "actors_control_apply target=runtime action=review.retry input={\"scope\":\"tool\"}",
+    "actors_control_apply target=runtime action=review.reset input={\"scope\":\"draft\"}",
+    "actors_control_apply target=runtime action=review.reset input={\"scope\":\"tool\"}",
+    "actors_control_apply target=run:<id> action=kill",
+    "actors_control_apply target=run:<id> action=archive",
+    "actors_control_apply target=run:<id> action=prune input={\"preserve_artifacts\":true}",
   ]) {
     assert.ok(combined.includes(expected), `Missing canonical invocation: ${expected}`);
   }
   for (const { path, source } of sources) {
     assert.doesNotMatch(source, /body\.scope/);
     assert.doesNotMatch(source, /message to=tool:pi-actors type=review\.(?:retry|reset)/);
-    assert.doesNotMatch(source, /inspect target=run:[^\s`"']+ view=(?:artifacts|messages|turns|communications)/);
+    assert.doesNotMatch(source, /actors_inspect target=run:[^\s`"']+ view=(?:artifacts|messages|turns|communications)/);
     for (const [lineIndex, rawLine] of source.split("\n").entries()) {
       const line = rawLine.replaceAll('\\"', '"');
       for (const command of commandSegments(

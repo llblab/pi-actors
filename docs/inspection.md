@@ -1,6 +1,6 @@
 # Management Inspection
 
-The public `inspect` tool exposes four exact target families. Targets are management projections, not interchangeable aliases.
+The public `actors_inspect` tool exposes four exact target families. Targets are management projections, not interchangeable aliases.
 
 The project-wide [Agent Experience (AX) standard](./agent-experience.md) governs the direction of readable inspection text and its relationship to Inspector/agent context. Adoption does not mean current formatters already conform: rollout belongs to BACKLOG. Keep the exact target/view matrix, authorization and structured/verbose machine payloads unchanged; a new list/key-value presentation does not add fields, bodies or permission.
 
@@ -32,9 +32,9 @@ Refusal validation order, callbacks/getters/String observations and basic Error 
 ## Run Targets
 
 ```text
-inspect target=run:demo view=recipe
-inspect target=run:demo view=trace source=lifecycle lines=40
-inspect target=run:demo view=control lines=20
+actors_inspect target=run:demo view=recipe
+actors_inspect target=run:demo view=trace source=lifecycle lines=40
+actors_inspect target=run:demo view=control lines=20
 ```
 
 Run views require a current coordinator session and an exact, non-empty match between that session id and the Run's persisted owner. Possessing a `run:<id>` is not authorization. Missing coordinator identity, ownerless state, and cross-owner state fail closed.
@@ -52,10 +52,10 @@ inspect target=runtime view=runs
 ## Runtime Targets
 
 ```text
-inspect target=runtime view=status
-inspect target=runtime view=runs
-inspect target=runtime view=runs status=failed
-inspect target=runtime view=triage
+actors_inspect target=runtime view=status
+actors_inspect target=runtime view=runs
+actors_inspect target=runtime view=runs status=failed
+actors_inspect target=runtime view=triage
 ```
 
 - `status` reports immutable package/runtime identity, state schema, and current automatic-review policy.
@@ -68,11 +68,11 @@ Runtime inventory never broadens authorization and never returns ownerless or fo
 
 Compact spawn/async-tool receipts include a selected-Run `file_navigation` row: the actual directory/generation and the same nine observed canonical starting slots, without reading a catalog or evidence bodies. Kernel checks current logical session and exact physical identity before projecting files and rechecks the recipient before return. Missing/foreign/changed scope yields bounded unavailability without failing an already committed launch; unavailable slots have no path. Complete rows fit inside the remaining shared 16-KiB compact-card budget or are explicitly omitted, never path-truncated; oversized optional launch fields are labeled omitted while bounded core facts/full expert details are preserved. These are mutable location hints, not a body/privacy/terminal certificate, full session tree or filesystem sandbox. Actual source/npm public launch fixtures check reference identity and visible compact/verbose transport. Two existing real-entrypoint research journeys per layout now ordinary-read metadata selected from actual saved public-spawn and uncataloged SDK async-tool receipts before requesting any fresh map, after the producer host/runners/workloads have exited and the same saved session reopens. Actual bounded read arguments and parsed JSON digests match independent parent metadata; this is ordinary raw-file research, not original publication/privacy certification. Four fork/clone histories retain the locations as data but get no fresh owned branch or metadata selection. The async launch uses the existing controlled Kernel composition, not a claim of root-entrypoint async launching. New terminal packets now freeze current-session exact-generation member location rows before journal admission; source/npm SDK now performs an explicitly requested actual result read selected from that terminal row, with independent generation/owner/parsed-JSON checks and unchanged frozen message across continuation.
 
-Compact launch receipts use bare block-YAML fields and a nested `run_files` value for whole selected observed locations, not a fenced object-JSON dump. Machine details retain their original JSON-compatible values and full spawn-verbose is still JSON. A single leading response LF supplies invocation spacing. A full available row suppresses the redundant map request; otherwise one `next` names tool=inspect, target=runtime, view=runs and verbose=true, with optional current-session investigation intent. This request is neither polling nor a read capability. Older terminal packet versions retain `Files (optional; current session)` followed by `inspect target=runtime view=runs verbose=true`. Fresh AX completion captures use a typed next node without reinterpreting that older handoff grammar; saved versions keep their exact text. Separately, new terminal packets use navigation_handoff=captured_file_locations and freeze a bounded prefix of location observations for their captured completion members, ordered roots before descendants with observed failed child-subtrees first. This is not the complete session map. Whole outcome rows retain precedence in the shared16KiBmessage; references then fit whole or are counted omitted, including uncaptured suffixes. Schema decoding and rendering are source/clock/native-free, and never refresh historical availability. Invoking it admits the actual current logical session at that time. Older absent/current_session_request packet versions retain their exact pending/queued/presented text rather than acquiring references on reload. The new reference marker/data are admitted only for new packets after actual current logical-session checks, never by saved DTOs as authority. The single per-batch hint consumes the shared 16-KiB model budget, not a separate allowance.
+Compact launch receipts use bare block-YAML fields and a nested `run_files` value for whole selected observed locations, not a fenced object-JSON dump. Machine details retain their original JSON-compatible values and full spawn-verbose is still JSON. A single leading response LF supplies invocation spacing. A full available row suppresses the redundant map request; otherwise one `next` names tool=inspect, target=runtime, view=runs and verbose=true, with optional current-session investigation intent. This request is neither polling nor a read capability. Older terminal packet versions retain `Files (optional; current session)` followed by `actors_inspect target=runtime view=runs verbose=true`. Fresh AX completion captures use a typed next node without reinterpreting that older handoff grammar; saved versions keep their exact text. Separately, new terminal packets use navigation_handoff=captured_file_locations and freeze a bounded prefix of location observations for their captured completion members, ordered roots before descendants with observed failed child-subtrees first. This is not the complete session map. Whole outcome rows retain precedence in the shared16KiBmessage; references then fit whole or are counted omitted, including uncaptured suffixes. Schema decoding and rendering are source/clock/native-free, and never refresh historical availability. Invoking it admits the actual current logical session at that time. Older absent/current_session_request packet versions retain their exact pending/queued/presented text rather than acquiring references on reload. The new reference marker/data are admitted only for new packets after actual current logical-session checks, never by saved DTOs as authority. The single per-batch hint consumes the shared 16-KiB model budget, not a separate allowance.
 
-`inspect target=runtime view=runs verbose=true` adds `navigation` alongside the existing `runs`. Kernel uses the actual current logical Pi session, rechecks it before return, and selects only already registered exact-generation directories. The map orders roots before their directly same-session-owned children; it does not follow a foreign-session parent or claim a complete descendant tree. Each row offers the canonical context index/result first, then selected metadata/execution/published-session-catalog/Trace/Control/stream locations with observed sizes and format_hint=json/jsonl/text. The file_inventory_scope=canonical_starting_locations label means these are starting points, not an exhaustive file list. Format hints describe expected layout, not validated syntax/UTF-8 or output completeness; even binary or malformed current bytes can retain a layout hint. Present files remain mutable; missing, nonregular or stale files have no usable location. Whole rows, not path strings, are omitted under the independent 16-KiB map bound, with shown/omitted/total Run-row counts, not file counts. The legacy inventory envelope keeps its existing bounds and behavior; `status` filters inventory, not the navigation branch.
+`actors_inspect target=runtime view=runs verbose=true` adds `navigation` alongside the existing `runs`. Kernel uses the actual current logical Pi session, rechecks it before return, and selects only already registered exact-generation directories. The map orders roots before their directly same-session-owned children; it does not follow a foreign-session parent or claim a complete descendant tree. Each row offers the canonical context index/result first, then selected metadata/execution/published-session-catalog/Trace/Control/stream locations with observed sizes and format_hint=json/jsonl/text. The file_inventory_scope=canonical_starting_locations label means these are starting points, not an exhaustive file list. Format hints describe expected layout, not validated syntax/UTF-8 or output completeness; even binary or malformed current bytes can retain a layout hint. Present files remain mutable; missing, nonregular or stale files have no usable location. Whole rows, not path strings, are omitted under the independent 16-KiB map bound, with shown/omitted/total Run-row counts, not file counts. The legacy inventory envelope keeps its existing bounds and behavior; `status` filters inventory, not the navigation branch.
 
-Both priority orders use only failed rows already observed for that inspection and matching the independently admitted map's exact owner/run/generation/directory. Ordinary inspection preserves latest-registration-first independent roots, while failed subtrees precede healthy/unknown siblings within each root. For a failed investigation use `inspect target=runtime view=runs status=failed verbose=true`: known failed root-subtrees are also stable-partitioned first, preserving recency among peers and always ancestors before descendants. `navigation.priority` reports `root_order=latest_registration|failed_subtrees_first` and `basis=observed_failed_rows`. Missing, stale or unmatched observations remain unranked, not certified successful; no complete failure inventory, terminal/native authority or cross-file atomicity is claimed. Ranking performs no additional status/body/native reads, does not filter map rows, repair/reorder catalog bytes or activate compact/default/automatic maps.
+Both priority orders use only failed rows already observed for that inspection and matching the independently admitted map's exact owner/run/generation/directory. Ordinary inspection preserves latest-registration-first independent roots, while failed subtrees precede healthy/unknown siblings within each root. For a failed investigation use `actors_inspect target=runtime view=runs status=failed verbose=true`: known failed root-subtrees are also stable-partitioned first, preserving recency among peers and always ancestors before descendants. `navigation.priority` reports `root_order=latest_registration|failed_subtrees_first` and `basis=observed_failed_rows`. Missing, stale or unmatched observations remain unranked, not certified successful; no complete failure inventory, terminal/native authority or cross-file atomicity is claimed. Ranking performs no additional status/body/native reads, does not filter map rows, repair/reorder catalog bytes or activate compact/default/automatic maps.
 
 The published_sessions location is the compiler-owned evidence/sessions.json file. Kernel stats its real evidence directory and regular leaf under the admitted Run root, retaining parent/leaf/owner fences; a symlink, nonregular or unrepresentable location has no usable path. This physical location needs no producer key or context-index.json: missing/corrupt/foreign-generation or pending/unavailable semantic-index claims do not gate ordinary research. A present location does not certify catalog schema, body generation, original privacy or historical publication. The map reads neither catalog bodies nor raw session directories.
 
@@ -87,12 +87,12 @@ Controlled partial-preview/Unicode and genuine-private-writer-from-controlled-re
 ## Recipe Targets
 
 ```text
-inspect target=recipes view=status
-inspect target=recipes view=summary
-inspect target=recipes view=registry
-inspect target=recipes view=doctor identity=music-player/playback
-inspect target=recipes view=imports verbose=true
-inspect target=recipes view=reviews verbose=true
+actors_inspect target=recipes view=status
+actors_inspect target=recipes view=summary
+actors_inspect target=recipes view=registry
+actors_inspect target=recipes view=doctor identity=music-player/playback
+actors_inspect target=recipes view=imports verbose=true
+actors_inspect target=recipes view=reviews verbose=true
 ```
 
 - `status` reports registry/watch state, active/shadowed/invalid/disabled user Recipes, active Skill components, drafts, retained-library definitions, usage, and diagnostics.
@@ -101,15 +101,15 @@ inspect target=recipes view=reviews verbose=true
 - `imports` exposes active Skill namespaces and component import inventory for resolution diagnosis.
 - `reviews` exposes bounded automatic draft/tool review state and recovery guidance.
 
-The compact Recipe catalog adds `retained` as a separate count for direct `.json`/`.md` definitions under `recipes/library`. Details/verbose includes `retained` rows (exact path, source_kind=user_retained_recipe, tool=false, resolved async mode, invalid/disabled state and diagnostics) and `retained_diagnostics`. Both root and library use the active session Skill context. Storage placement does not certify review, current callability or Run state; invalid/disabled definitions remain diagnostic. The missing library is empty, without initialization. Inspection performs no retention write, activation or launch. Valid enabled exact paths remain ordinary explicit-file references for `spawn` or deliberate `register_tool from` specialization. Inspection adds no mutation or logical-reference syntax; use explicit `register_tool expose=false` for supported create-only retention, and see [capability memory](./capability-memory.md#read-only-inventory-checkpoint).
+The compact Recipe catalog adds `retained` as a separate count for direct `.json`/`.md` definitions under `recipes/library`. Details/verbose includes `retained` rows (exact path, source_kind=user_retained_recipe, tool=false, resolved async mode, invalid/disabled state and diagnostics) and `retained_diagnostics`. Both root and library use the active session Skill context. Storage placement does not certify review, current callability or Run state; invalid/disabled definitions remain diagnostic. The missing library is empty, without initialization. Inspection performs no retention write, activation or launch. Valid enabled exact paths remain ordinary explicit-file references for `actors_run_spawn` or deliberate `actors_tool_register from` specialization. Inspection adds no mutation or logical-reference syntax; use explicit `actors_tool_register expose=false` for supported create-only retention, and see [capability memory](./capability-memory.md#read-only-inventory-checkpoint).
 
 `identity` is accepted only with `view=doctor`. Skill inventory is fail-soft diagnostic evidence; exact launch and registration still resolve against the immutable active-session context.
 
 ## Tool Targets
 
 ```text
-inspect target=tool:music_player view=status
-inspect target=tool:music_player view=schema
+actors_inspect target=tool:music_player view=status
+actors_inspect target=tool:music_player view=schema
 ```
 
 - `status` separates persistence, registry admission, host registration, `callable_now`, activation boundary, source identity, and `tool_calls` versus `spawn_calls`.
@@ -119,4 +119,4 @@ A registered tool is a capability definition, not a Run. Tool status cannot subs
 
 ## Boundaries
 
-Inspection is read-only, owner-filtered where Run state is involved, and redacted. Evidence-heavy Run, review, diagnostic, and text projections apply their documented bounds; `runtime view=runs` deliberately returns the complete matching exact-owner inventory. Inspection does not mutate journals, infer authority from displayed data, expose private active-Skill installation paths, or turn retained Trace into an audit archive. Use `message` for admitted runtime or actor-local actions.
+Inspection is read-only, owner-filtered where Run state is involved, and redacted. Evidence-heavy Run, review, diagnostic, and text projections apply their documented bounds; `runtime view=runs` deliberately returns the complete matching exact-owner inventory. Inspection does not mutate journals, infer authority from displayed data, expose private active-Skill installation paths, or turn retained Trace into an audit archive. Use `actors_control_apply` for admitted runtime or actor-local actions.

@@ -1,7 +1,7 @@
 /**
- * Public register_tool behavior
- * Zones: runtime tool registration, tool registry mutation, register_tool schema
- * Owns the public register_tool definition that persists local agent capabilities
+ * Public actors_tool_register behavior
+ * Zones: runtime tool registration, tool registry mutation, actors_tool_register schema
+ * Owns the public actors_tool_register definition that persists local agent capabilities
  */
 import * as Registry from "./registry.ts";
 import * as Schema from "./schema.ts";

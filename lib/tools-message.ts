@@ -1,5 +1,5 @@
 /**
- * Public Control facade under the stable `message` tool name.
+ * Public Control facade under the stable `actors_control_apply` tool name.
  * Zones: Control request validation, Run/runtime dispatch, recipient-scoped receipts
  * Owns public Control execution; journaling, delivery, and lifecycle mutation stay in Run domains.
  */
@@ -52,9 +52,9 @@ function controlDocument(render: () => ControlDocument, order: readonly ControlP
 
 /** Only producer-known read-only inspect literals become typed next; other advice stays opaque content. */
 function controlNextPart(action: string): ControlPart {
-  const inspect = /^inspect target=([^\s]+) view=([^\s]+)$/u.exec(action);
+  const inspect = /^actors_inspect target=([^\s]+) view=([^\s]+)$/u.exec(action);
   if (inspect) {
-    return ToolsResponse.selectYamlNode("next", { tool: "inspect", target: inspect[1], view: inspect[2] }, CONTROL_BUDGET);
+    return ToolsResponse.selectYamlNode("next", { tool: "actors_inspect", target: inspect[1], view: inspect[2] }, CONTROL_BUDGET);
   }
   const wellFormed = action.isWellFormed();
   const omitted: ControlDocument = { next: { instruction: wellFormed ? "[omitted]" : "[unavailable]",
@@ -123,15 +123,15 @@ export function compactControlResult(
 }
 
 function runNextActions(run: string, result: Record<string, unknown>): string[] {
-  if (result.stopped === true) return [`inspect target=run:${run} view=trace`];
+  if (result.stopped === true) return [`actors_inspect target=run:${run} view=trace`];
   if (result.stopped === false || result.archived === false || result.pruned === false) {
     if (result.reason === "ownership changed" || result.reason === "run generation changed") {
-      return ["inspect target=runtime view=runs"];
+      return ["actors_inspect target=runtime view=runs"];
     }
-    if (result.stopped === false && result.reason !== "not running") return [`inspect target=run:${run} view=trace`];
+    if (result.stopped === false && result.reason !== "not running") return [`actors_inspect target=run:${run} view=trace`];
   }
   if (result.delivery === "queued" || result.delivery === "delivered") {
-    return [`inspect target=run:${run} view=control`];
+    return [`actors_inspect target=run:${run} view=control`];
   }
   return [];
 }
@@ -148,10 +148,10 @@ export function createControlToolDefinition<TContext = unknown>(
   deps: ControlToolDeps = {},
 ): any {
   return {
-    name: "message",
+    name: "actors_control_apply",
     label: "Control",
     description:
-      "Apply one Control action to an existing Run or the pi-actors runtime.",
+      "Apply one Run/runtime Control action. This is not chat or peer messaging.",
     parameters: Schema.objectSchema(
       {
         target: Schema.stringSchema("Run target run:<id>, or literal runtime."),
@@ -260,7 +260,7 @@ export function createControlToolDefinition<TContext = unknown>(
             // Admission-era correlation is not current reply-scope proof after an awaited dispatch.
             // Display one whole caller-owned id or an explicit whole-id omission; the warning stays literal.
             const identity = controlSelected("run", run);
-            const next = controlNextPart("inspect target=runtime view=runs");
+            const next = controlNextPart("actors_inspect target=runtime view=runs");
             const render = (): ControlDocument => ({ ...identity.selected, action: request.action,
               result: "request failed", delivery: "unconfirmed", handling: "unconfirmed",
               warning: "Effects may already exist.\nDo not repeat automatically.", ...next.selected });

@@ -250,6 +250,9 @@ export function createActorExtensionRuntime(
         sessionId,
         RecipeResolution.createEmptyRecipeResolutionContext(sessionId, ctx.cwd),
       );
+      // Deferred compatibility dispatch needs activation only after the host binds its ports.
+      // Its loadout hook hides declarations; explicit later loadout restrictions still win.
+      pi.setActiveTools([...new Set([...pi.getActiveTools(), ...Object.keys(Tools.LEGACY_TOOL_NAMES)])]);
       ctx.ui.setWidget("zz-pi-actors-comms", undefined);
       activeRunContext = ctx;
       activeRunOwnerId = sessionId;
@@ -270,9 +273,7 @@ export function createActorExtensionRuntime(
       recipeReload.watch(ctx);
     },
     registerCoreTools() {
-      Pi.registerToolDefinitions(
-        pi,
-        Tools.createCoreActorToolDefinitions<Pi.ExtensionContext>({
+      const definitions = Tools.createCoreActorToolDefinitions<Pi.ExtensionContext>({
           configPath: Paths.EXTENSION_RUNTIME_PATHS.configPath,
           getActiveTools: () => pi.getActiveTools(),
           getRecipeResolutionContext: () =>
@@ -289,8 +290,9 @@ export function createActorExtensionRuntime(
           handleRuntimeControl: automaticReview.handleControl,
           registryRuntime: runtime,
           setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
-        }).map(withCurrentThinkingContext),
-      );
+        });
+      const legacy = Tools.createLegacyActorToolDefinitions(definitions);
+      Pi.registerToolDefinitions(pi, [...definitions, ...legacy].map(withCurrentThinkingContext));
     },
   };
 }

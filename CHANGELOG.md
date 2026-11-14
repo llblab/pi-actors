@@ -2,6 +2,12 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.58.2: Canonical Actor Tool Names
+
+- `Canonical Tool Surface`: New calls use `actors_tool_register`, `actors_run_spawn`, `actors_control_apply`, and `actors_inspect`. Explicit legacy dispatch shares the same schemas/executors while model declarations and ordinary callable listings advertise canonical names only. Saved calls, Recipe identities and Run semantics remain unchanged.
+- `Control and Capability Ownership`: Control applies Run/runtime actions, not chat. Functional-owner namespaces are agent-facing naming guidance, not runtime ownership inference. Registration/discovery reject normalized foreign host collisions, including inactive tools; `update=true` grants no foreign overwrite. Own retained inactive declarations permit Recipe recreation/restoration after discovery loss. Saved names remain exact; deactivation is not complete host unregister.
+- `Migration Evidence and Guidance`: Tool/registry properties and isolated source/npm-packed default SDK journeys cover canonical/legacy parity, saved-call preservation, loss/restoration, foreign replacement refusal and canonical-only model declarations. Skills, runtime advice, schema copy and packaged references use canonical names; historical completion framing stays exact. No live registry migration, host reload or publication is implied.
+
 ## 0.58.1: Singleton Completion Indices
 
 - `Singleton Completion Index`: New completion packets omit the packet-local display index when exactly one result is shown, including with omitted results. Multiple shown results retain indices; omission/inventory facts, internal identity/correlation, numbered-stream behavior and historical replay remain unchanged.

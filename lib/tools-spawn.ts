@@ -124,7 +124,7 @@ export function createSpawnToolDefinition<
   TContext extends SpawnToolContext,
 >(): any {
   return {
-    name: "spawn",
+    name: "actors_run_spawn",
     label: "Spawn",
     description:
       "Create one controllable Run from a Recipe file or inline command template.",

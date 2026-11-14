@@ -1,5 +1,5 @@
 /**
- * Public Control facade under the stable `message` tool name.
+ * Public Control facade under the stable `actors_control_apply` tool name.
  * Zones: Control request validation, Run/runtime dispatch, recipient-scoped receipts
  * Owns public Control execution; journaling, delivery, and lifecycle mutation stay in Run domains.
  */

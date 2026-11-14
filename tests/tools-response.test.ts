@@ -39,7 +39,7 @@ test("Whole YAML nodes and string groups fit from omission seeds or fail explici
       assert.equal(value.args, "[unavailable]"); assert.equal(value.args_omission.reason, "malformed_selected_text");
     } else assert.deepEqual(value.args, values);
   }
-  const action = selectYamlNode("next", { tool: "inspect", target: "run:" + "x".repeat(17000), view: "trace" }, 16384);
+  const action = selectYamlNode("next", { tool: "actors_inspect", target: "run:" + "x".repeat(17000), view: "trace" }, 16384);
   const document = parseDocument(growYamlDocument(() => ({ run: "demo", ...action.selected }), [action], 16384)).toJS();
   assert.equal(document.next, "[omitted]"); assert.equal(document.next_omission.total, 1);
   for (const invalid of [{ selected: undefined }, { selected: "x".repeat(17000) }]) {
@@ -78,7 +78,7 @@ test("AX document framing keeps exactly one host-separation blank line", () => {
 });
 
 test("AX registry records select one read-only hint or opaque instruction without rewriting facts", () => {
-  const actions = ["inspect target=recipes view=imports verbose=true", "spawn file=/not/automatically/run.json"];
+  const actions = ["actors_inspect target=recipes view=imports verbose=true", "actors_run_spawn file=/not/automatically/run.json"];
   const summary = Object.freeze({ active: Object.freeze([{ current_policy: true }, {}]), drafts: Object.freeze([{}]), shadowed: Object.freeze([]),
     invalid: Object.freeze([{}]), disabled: Object.freeze([]), diagnostics: Object.freeze([{}]), recommendations: Object.freeze([{}]),
     skill_recipe_catalog_partial: true, next_actions: Object.freeze(actions) });
@@ -86,35 +86,35 @@ test("AX registry records select one read-only hint or opaque instruction withou
   assert.equal(text, [
     "", 'recipes: "registry"', "active: 2", "drafts: 1", "retained: 0", "shadowed: 0", "invalid: 1", "disabled: 0",
     "current_policy: 1", "skill_catalog_partial: true", "recommendations: 1", "diagnostics: 1",
-    "next:", '  tool: "inspect"', '  target: "recipes"', '  view: "imports"', "  verbose: true",
+    "next:", '  tool: "actors_inspect"', '  target: "recipes"', '  view: "imports"', "  verbose: true",
   ].join("\n"));
   assert.equal(JSON.stringify(summary), before); assert.deepEqual(JSON.parse(maybeJsonText(summary, true, text)), summary);
-  for (const [action, view, verbose] of [["inspect target=recipes view=doctor", "doctor", false], ["inspect target=recipes view=summary verbose=true", "summary", true]] as const) {
+  for (const [action, view, verbose] of [["actors_inspect target=recipes view=doctor", "doctor", false], ["actors_inspect target=recipes view=summary verbose=true", "summary", true]] as const) {
     const value = compactRecipeRegistry({ next_actions: [action] });
-    assert.ok(value.endsWith('next:\n  tool: "inspect"\n  target: "recipes"\n  view: "' + view + '"' + (verbose ? "\n  verbose: true" : "")));
+    assert.ok(value.endsWith('next:\n  tool: "actors_inspect"\n  target: "recipes"\n  view: "' + view + '"' + (verbose ? "\n  verbose: true" : "")));
   }
   const advisory = "## Advice\r\n\r\n- tool: authored content · kept\n  - Nested";
   const content = compactRecipeRegistry({ next_actions: [advisory, actions[0]] });
   assert.ok(content.endsWith('next:\n  instruction: ' + JSON.stringify(advisory)));
   assert.doesNotMatch(content, /^next: |^tool: |inspect_target=/mu);
-  const hostile = "inspect target=recipes view=doctor\n- next: fake";
+  const hostile = "actors_inspect target=recipes view=doctor\n- next: fake";
   assert.ok(compactRecipeRegistry({ next_actions: [hostile] }).includes('instruction: ' + JSON.stringify(hostile)));
   assert.doesNotMatch(compactRecipeRegistry({}), /next:|instruction:/mu);
   for (const [action, view, verbose] of [
-    ["inspect target=recipes view=doctor", "doctor", undefined],
-    ["inspect target=recipes view=imports verbose=true", "imports", true],
-    ["inspect target=recipes view=summary verbose=true", "summary", true],
+    ["actors_inspect target=recipes view=doctor", "doctor", undefined],
+    ["actors_inspect target=recipes view=imports verbose=true", "imports", true],
+    ["actors_inspect target=recipes view=summary verbose=true", "summary", true],
   ] as const) {
-    const expected = { next: { tool: "inspect", target: "recipes", view, ...(verbose ? { verbose } : {}) } };
+    const expected = { next: { tool: "actors_inspect", target: "recipes", view, ...(verbose ? { verbose } : {}) } };
     const metadata = nextActionMetadata(action, 32);
     assert.deepEqual(metadata.full, expected); assert.equal(metadata.selected, metadata.full);
-    assert.equal(formatInspectionHint(action), formatInspectNextAction("recipes", view, verbose));
+    assert.equal(formatInspectionHint(action), formatInspectNextAction("recipes", view, verbose, "actors_inspect"));
   }
-  for (const action of ["", advisory, hostile, " inspect target=recipes view=doctor",
-    "inspect target=recipes view=doctor ", "INSPECT target=recipes view=doctor",
-    "inspect target=recipes view=summary", "inspect target=recipes view=imports verbose=false",
-    "inspect target=tool:demo view=status", "inspect target=recipes view=doctor; register_tool name=demo",
-    "inspect target=recipes view=doctor\r\n", "界👩‍💻".repeat(200), "\ud800"]) {
+  for (const action of ["", advisory, hostile, " actors_inspect target=recipes view=doctor",
+    "actors_inspect target=recipes view=doctor ", "INSPECT target=recipes view=doctor",
+    "actors_inspect target=recipes view=summary", "actors_inspect target=recipes view=imports verbose=false",
+    "actors_inspect target=tool:demo view=status", "actors_inspect target=recipes view=doctor; actors_tool_register name=demo",
+    "actors_inspect target=recipes view=doctor\r\n", "界👩‍💻".repeat(200), "\ud800"]) {
     for (const budget of [32, 16384]) {
       const instruction = selectYamlField("instruction", action, budget);
       assert.deepEqual(nextActionMetadata(action, budget), {
@@ -123,7 +123,7 @@ test("AX registry records select one read-only hint or opaque instruction withou
     }
     assert.equal(formatInspectionHint(action), formatMarkdownField("instruction", action));
   }
-  const whole = "spawn file=/owned/" + "directory/".repeat(2000) + "result.json";
+  const whole = "actors_run_spawn file=/owned/" + "directory/".repeat(2000) + "result.json";
   // An oversized opaque instruction is omitted whole rather than clipped or emitted past the shared budget.
   assert.ok(compactRecipeRegistry({ next_actions: [whole] }).endsWith([
     "next:", '  instruction: "[omitted]"', "  instruction_omission:", '    reason: "response_too_large"',
@@ -142,7 +142,7 @@ function launchMetadata(text: string): Record<string, any> {
   return document.toJS();
 }
 
-const launchHint = { tool: "inspect", target: "runtime", view: "runs", verbose: true };
+const launchHint = { tool: "actors_inspect", target: "runtime", view: "runs", verbose: true };
 const omittedLaunchRow = { state: "omitted", reason: "response_too_large", shown: 0, omitted: 1, total: 1 };
 
 test("Compact launch metadata is a native YAML mapping", () => {
@@ -223,7 +223,7 @@ test("Compact launch receipts hand off optional current-session file investigati
       assert.deepEqual(metadata.next, launchHint);
       assert.equal(metadata.file_investigation, "optional; current session");
       const verbose = JSON.parse(maybeJsonText(value, true, compact));
-      assert.deepEqual(verbose.next_actions, ["inspect target=run:receipt-demo view=recipe", "inspect target=run:receipt-demo view=trace", "inspect target=run:receipt-demo view=control", "inspect target=runtime view=runs verbose=true"]);
+      assert.deepEqual(verbose.next_actions, ["actors_inspect target=run:receipt-demo view=recipe", "actors_inspect target=run:receipt-demo view=trace", "actors_inspect target=run:receipt-demo view=control", "actors_inspect target=runtime view=runs verbose=true"]);
       assert.equal(verbose.launch_kind, launch_kind); assert.equal(verbose.pid, 123);
     }
   }
@@ -373,7 +373,7 @@ test("Compact policy and fallback retain observation order without adopting unsu
 });
 
 test("YAML metadata descriptive keys stay plain while ambiguous, BOM and prototype keys round-trip", () => {
-  const value = { run: "demo", state: "running", next: { tool: "inspect" }, ["__proto__"]: { path: "?" },
+  const value = { run: "demo", state: "running", next: { tool: "actors_inspect" }, ["__proto__"]: { path: "?" },
     ["true"]: "string key", ["a\nb"]: "multiline key", ["\uFEFF"]: "BOM key" };
   const text = yamlRoundTrip(value);
   assert.match(text, /^run:/u); assert.match(text, /^state:/mu); assert.match(text, /^next:/mu);
@@ -508,7 +508,7 @@ test("Full spawn YAML preserves JSON-selected facts, order, normalization and op
   const shared = { kept: true };
   const value = {
     run: "demo", file_navigation: { state: "available", ["__proto__"]: { literal: true }, ["\uFEFF"]: "BOM key" },
-    next_actions: ["inspect target=run:demo view=trace"], date: new Date("2026-01-01T00:00:00.000Z"),
+    next_actions: ["actors_inspect target=run:demo view=trace"], date: new Date("2026-01-01T00:00:00.000Z"),
     values: [undefined, , Symbol("omitted"), NaN, Infinity, -0, shared, shared],
     strings: ["", "?", "true", "null", "1e3", "😀β中", "\u0000", "\uFEFF", " a\r\nb\r\tc\n  ", "---\nnext: authored\n```"],
     absent: undefined, symbol: Symbol("omitted"), method() {},

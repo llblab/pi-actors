@@ -205,7 +205,7 @@ export function inventoryActiveSkillRecipeComponents(
   for (const [skill, roots] of Object.entries(context.namespaces)) {
     if (roots.length > 1) {
       rejected.push({
-        reason: `Duplicate active Skill identity ${skill} (${roots.length} active definitions); exact Recipe resolution is ambiguous. Next: inspect target=recipes view=doctor identity=${skill}/<recipe>`,
+        reason: `Duplicate active Skill identity ${skill} (${roots.length} active definitions); exact Recipe resolution is ambiguous. Next: actors_inspect target=recipes view=doctor identity=${skill}/<recipe>`,
         skill,
       });
       continue;
@@ -322,13 +322,13 @@ function qualifiedRecipeNameForFile(
 function assertRecipeReferencePrefixWasNotRemoved(value: string): void {
   if (value.startsWith("std:")) {
     throw new Error(
-      "std: Recipe references were removed in pi-actors 0.46. Use <skill>/<recipe> or an explicit .json/.md file path. Next: inspect target=recipes view=status to identify the active owning Skill.",
+      "std: Recipe references were removed in pi-actors 0.46. Use <skill>/<recipe> or an explicit .json/.md file path. Next: actors_inspect target=recipes view=status to identify the active owning Skill.",
     );
   }
   if (value.startsWith("skill:")) {
     const identity = value.slice("skill:".length);
     throw new Error(
-      `skill: Recipe references were removed in pi-actors 0.46. Use ${identity} without a prefix. Next: inspect target=recipes view=doctor identity=${identity}`,
+      `skill: Recipe references were removed in pi-actors 0.46. Use ${identity} without a prefix. Next: actors_inspect target=recipes view=doctor identity=${identity}`,
     );
   }
 }
@@ -343,11 +343,11 @@ function skillRecipeCandidates(
   const roots = [...(context.namespaces[skillName] ?? [])];
   if (roots.length === 0)
     throw new Error(
-      `Active Skill Recipe not found: ${skillName}/${recipeName}. Owning Skill "${skillName}" is not active. Next: activate Skill ${skillName}, then inspect target=recipes view=doctor identity=${skillName}/${recipeName}`,
+      `Active Skill Recipe not found: ${skillName}/${recipeName}. Owning Skill "${skillName}" is not active. Next: activate Skill ${skillName}, then actors_inspect target=recipes view=doctor identity=${skillName}/${recipeName}`,
     );
   if (roots.length > 1)
     throw new Error(
-      `Duplicate active Skill identity ${skillName} (${roots.length} active definitions); ${skillName}/${recipeName} cannot resolve unambiguously. Next: inspect target=recipes view=doctor identity=${skillName}/${recipeName}`,
+      `Duplicate active Skill identity ${skillName} (${roots.length} active definitions); ${skillName}/${recipeName} cannot resolve unambiguously. Next: actors_inspect target=recipes view=doctor identity=${skillName}/${recipeName}`,
     );
   const root = roots[0];
   const candidates = ["json", "md"].map((extension) =>
@@ -356,7 +356,7 @@ function skillRecipeCandidates(
   const existing = candidates.filter((candidate) => existsSync(candidate));
   if (existing.length === 0) {
     throw new Error(
-      `Skill Recipe component not found: ${skillName}/${recipeName}; owning Skill "${skillName}" is active. Next: inspect target=recipes view=doctor identity=${skillName}/${recipeName}`,
+      `Skill Recipe component not found: ${skillName}/${recipeName}; owning Skill "${skillName}" is active. Next: actors_inspect target=recipes view=doctor identity=${skillName}/${recipeName}`,
     );
   }
   if (existing.length > 1) {
@@ -394,7 +394,7 @@ function findOwningSkillDir(recipeFile: string): string | undefined {
 function assertRecipeHasNoDeclaredName(raw: Record<string, unknown>): void {
   if (!Object.hasOwn(raw, "name")) return;
   throw new Error(
-    "Recipe.name was removed in pi-actors 0.46. File-backed Recipe identity is derived from its file name. Next: remove the name field, keep the intended filename stem, then inspect target=recipes view=doctor.",
+    "Recipe.name was removed in pi-actors 0.46. File-backed Recipe identity is derived from its file name. Next: remove the name field, keep the intended filename stem, then actors_inspect target=recipes view=doctor.",
   );
 }
 

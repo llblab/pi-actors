@@ -12,8 +12,8 @@ export const TRACE_COMPACTION_VERSION = 1;
 const PENDING_CONTROL_STATUSES = new Set(["queued", "delivered", "claimed"]);
 const TERMINAL_CONTROL_STATUSES = new Set(["handled", "failed"]);
 const CONTROL_ADMISSION_NEXT_ACTIONS = [
-    "inspect target=run:<id> view=control",
-    "inspect target=runtime view=triage",
+    "actors_inspect target=run:<id> view=control",
+    "actors_inspect target=runtime view=triage",
 ];
 function isCount(value) {
     return Number.isSafeInteger(value) && value >= 0;

@@ -132,4 +132,4 @@ Run kill revalidates owner and generation through the canonical lifecycle path. 
 
 ## Scope
 
-The Actor Inspector treats each Run as a concrete actor instance. It does not expose group conversations, peer addresses, routing, or communication topology. Use `inspect target=runtime view=status|runs|triage`, `inspect target=recipes view=status|summary|doctor|imports|reviews` (`registry` is the same view as `summary`), and `inspect target=tool:<name> view=status|schema` for non-Run management targets. See [Management Inspection](./inspection.md) for exact applicability and authorization boundaries.
+The Actor Inspector treats each Run as a concrete actor instance. It does not expose group conversations, peer addresses, routing, or communication topology. Use `actors_inspect target=runtime view=status|runs|triage`, `actors_inspect target=recipes view=status|summary|doctor|imports|reviews` (`registry` is the same view as `summary`), and `actors_inspect target=tool:<name> view=status|schema` for non-Run management targets. See [Management Inspection](./inspection.md) for exact applicability and authorization boundaries.

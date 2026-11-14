@@ -36,6 +36,131 @@ import { createRuntimeToolDefinition } from "../lib/tools-local.ts";
 import { createSpawnToolDefinition } from "../lib/tools-spawn.ts";
 import { observeFixtureBirth, captureFixtureBirths, bindFixtureBirth, joinFixtureRunners, requireFreshFixtureAbsence, throwFixtureErrors, type FixtureBirth } from "./fixtures/runner-completion.ts";
 
+test("Normalized foreign host collisions refuse registration, update and discovery without migrating saved Recipe identities", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-tool-names-"));
+  const recipeRoot = join(root, "recipes"); await mkdir(recipeRoot);
+  const host = new Map<string, { name: string; sourceInfo: { path: string } }>();
+  let active: string[] = [];
+  const runtime = createAutoToolsRuntime({ configPath: join(root, "config.json"), recipeRoot,
+    exec: async () => { throw new Error("No command execution belongs to this admission test"); },
+    getAllTools: () => [...host.values()], getActiveTools: () => active,
+    setActiveTools: names => { active = names; }, reservedToolNames: new Set(["actors_inspect"]),
+    registerTool: definition => { host.set(definition.name, { name: definition.name, sourceInfo: { path: "actors" } }); },
+  });
+  const ctx = { cwd: root, hasUI: false, ui: { notify() {} } };
+  const deps = { configPath: join(root, "config.json"), recipeRoot,
+    getRecipeResolutionContext: () => createRecipeResolutionContext("names", root, createActiveSkillRecipeContext([])),
+    getActiveTools: () => active, setActiveTools: (names: string[]) => { active = names; },
+    getTools: runtime.getTools, getToolNameBlocker: runtime.getToolNameBlocker,
+    registerRuntimeTool: runtime.registerRuntimeTool, notify: runtime.notify,
+    reservedToolNames: new Set<string>(),
+  };
+  const definition = JSON.stringify({ description: "Saved identity", template: "echo saved" });
+  try {
+    for (const [foreign, requested] of [["Audio-Transcribe", "audio_transcribe"], ["audio_transcribe", "Audio Transcribe"], ["x".repeat(65), "x".repeat(64)]]) {
+      host.clear(); host.set(foreign, { name: foreign, sourceInfo: { path: "foreign-extension" } });
+      assert.match(runtime.getToolNameBlocker(requested)!, /Host tool name collision/);
+      for (const update of [false, true]) await assert.rejects(async () => executeRegisterTool({ name: requested, update,
+        description: "Refused", template: "echo refused" }, ctx, deps), /Host tool name collision/);
+      assert.deepEqual(await import("node:fs/promises").then(fs => fs.readdir(recipeRoot)), []);
+      assert.deepEqual(active, []); assert.equal(host.size, 1);
+    }
+    host.clear(); host.set("Audio-Transcribe", { name: "Audio-Transcribe", sourceInfo: { path: "foreign-extension" } });
+    const path = join(recipeRoot, "audio_transcribe.json"); await writeFile(path, definition);
+    runtime.loadTools(ctx, deps.getRecipeResolutionContext());
+    assert.equal(runtime.getTools().has("audio_transcribe"), false); assert.equal(runtime.getToolStatus("audio_transcribe"), undefined);
+    assert.equal(await readFile(path, "utf8"), definition); assert.deepEqual(active, []);
+    assert.match(runtime.getToolNameBlocker("Actors Inspect")!, /Reserved/);
+    host.clear(); await writeFile(join(recipeRoot, "legacy.json"), definition);
+    runtime.loadTools(ctx, deps.getRecipeResolutionContext());
+    assert.equal(runtime.getToolStatus("legacy")?.callable_now, true);
+    runtime.loadTools(ctx, deps.getRecipeResolutionContext()); // Owned registrations are not foreign collisions on reload.
+    assert.equal(runtime.getToolStatus("legacy")?.callable_now, true);
+    host.set("legacy", { name: "legacy", sourceInfo: { path: "replacement-extension" } });
+    assert.match(runtime.getToolNameBlocker("legacy")!, /Host tool name collision/);
+    assert.equal(runtime.getToolStatus("legacy"), undefined);
+    assert.equal(await readFile(join(recipeRoot, "legacy.json"), "utf8"), definition);
+    await assert.rejects(async () => executeRegisterTool({ name: "legacy", template: null }, ctx, deps), /Host tool name collision/);
+    assert.equal(await readFile(join(recipeRoot, "legacy.json"), "utf8"), definition);
+    await rm(join(recipeRoot, "legacy.json"));
+    runtime.loadTools(ctx, deps.getRecipeResolutionContext());
+    assert.equal((active as string[]).includes("legacy"), true, "Removing an old Recipe must not deactivate the foreign replacement");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Retained host declarations allow Recipe restoration after discovery loss but never foreign replacement", async () => {
+  for (const loss of ["delete", "remove", "disable", "invalidate"] as const) {
+    for (const replacement of ["owned", "foreign_exact", "foreign_normalized"] as const) {
+      const root = await mkdtemp(join(tmpdir(), "pi-actors-tool-restoration-"));
+      const recipeRoot = join(root, "recipes"); await mkdir(recipeRoot);
+      const host = new Map<string, { name: string; sourceInfo: { path: string } }>();
+      let active: string[] = [], registrations = 0;
+      const runtime = createAutoToolsRuntime({ configPath: join(root, "config.json"), recipeRoot,
+        exec: async () => { throw new Error("Restoration must not execute work"); },
+        getAllTools: () => [...host.values()], getActiveTools: () => active,
+        setActiveTools: names => { active = names; }, reservedToolNames: new Set(),
+        registerTool: definition => {
+          registrations++;
+          host.set(definition.name, { name: definition.name, sourceInfo: { path: "actors" } });
+        },
+      });
+      const ctx = { cwd: root, hasUI: false, ui: { notify() {} } };
+      const deps = { configPath: join(root, "config.json"), recipeRoot,
+        getRecipeResolutionContext: () => createRecipeResolutionContext("restoration", root, createActiveSkillRecipeContext([])),
+        getActiveTools: () => active, setActiveTools: (names: string[]) => { active = names; },
+        getTools: runtime.getTools, getToolNameBlocker: runtime.getToolNameBlocker,
+        registerRuntimeTool: runtime.registerRuntimeTool, notify: runtime.notify,
+        reservedToolNames: new Set<string>(),
+      };
+      const path = join(recipeRoot, "legacy.json");
+      const saved = { description: "Saved logical identity", template: "echo saved" };
+      const scan = () => runtime.loadTools(ctx, deps.getRecipeResolutionContext());
+      try {
+        await executeRegisterTool({ name: "legacy", ...saved }, ctx, deps);
+        const bytes = await readFile(path, "utf8");
+        assert.equal(runtime.getToolStatus("legacy")?.callable_now, true);
+        if (loss === "delete") await executeRegisterTool({ name: "legacy", template: null }, ctx, deps);
+        else if (loss === "remove") await rm(path);
+        else await writeFile(path, loss === "disable" ? JSON.stringify({ ...saved, disabled: true }) : "{");
+        scan(); scan();
+        assert.equal(runtime.getToolStatus("legacy"), undefined, loss);
+        assert.deepEqual(active, [], loss);
+        assert.equal(host.has("legacy"), true, "Deactivation is not complete host unregister");
+        assert.equal(runtime.getToolNameBlocker("legacy"), undefined, "Own inactive declaration retains provenance");
+        if (replacement !== "owned") {
+          host.clear();
+          const name = replacement === "foreign_exact" ? "legacy" : "Legacy";
+          host.set(name, { name, sourceInfo: { path: "foreign-extension" } });
+          assert.match(runtime.getToolNameBlocker("legacy")!, /Host tool name collision/);
+          for (const update of [false, true]) await assert.rejects(
+            executeRegisterTool({ name: "legacy", update, ...saved }, ctx, deps), /Host tool name collision/);
+        }
+        if (loss === "delete" && replacement === "owned") {
+          await executeRegisterTool({ name: "legacy", ...saved }, ctx, deps);
+        } else await writeFile(path, bytes);
+        scan(); scan();
+        assert.equal(await readFile(path, "utf8"), bytes, "Saved name and definition remain exact");
+        if (replacement === "owned") {
+          assert.equal(registrations, 2, "Restoration refreshes the declaration once");
+          assert.equal(runtime.getToolStatus("legacy")?.activation, "current_session");
+          assert.equal(runtime.getToolStatus("legacy")?.callable_now, true);
+          assert.deepEqual(active, ["legacy"]);
+          active = [];
+          assert.equal(runtime.getToolStatus("legacy")?.callable_now, false, "Ownership is not activation proof");
+        } else {
+          assert.equal(registrations, 1, "Foreign replacement must not be overwritten");
+          assert.equal(runtime.getToolStatus("legacy"), undefined);
+          assert.equal(runtime.getTools().has("legacy"), false);
+          assert.deepEqual(active, [], "Inactive foreign declarations still block restoration");
+          const foreign = [...host.keys()][0]; active = [foreign];
+          await rm(path); scan();
+          assert.deepEqual(active, [foreign], "Discovery loss must not deactivate a foreign replacement");
+        }
+      } finally { await rm(root, { recursive: true, force: true }); }
+    }
+  }
+});
+
 const playerRecipe = {
   async: true,
   description: "Control local music.",
@@ -197,7 +322,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     ]);
     assert.deepEqual(registration.details.next_actions, [
       "call tool music_player",
-      "inspect target=tool:music_player view=status",
+      "actors_inspect target=tool:music_player view=status",
     ]);
     assert.equal("config" in registration.details, false);
     assert.equal("template" in registration.details, false);
@@ -326,7 +451,7 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
           setActiveTools: () => undefined,
         },
       ),
-      /missing\/task.*validation failed.*diagnostics_summary: "Active Skill Recipe not found: missing\/task.*active_skills_summary: "music-player, stale".*instruction: "inspect target=recipes view=doctor identity=missing\/task/s,
+      /missing\/task.*validation failed.*diagnostics_summary: "Active Skill Recipe not found: missing\/task.*active_skills_summary: "music-player, stale".*instruction: "actors_inspect target=recipes view=doctor identity=missing\/task/s,
     );
     await assert.rejects(
       readFile(join(recipeRoot, "missing_tool.json"), "utf8"),
@@ -468,7 +593,7 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
     assert.equal(inactive.validated, false);
     assert.match(
       inactive.diagnostics[0],
-      /Active Skill Recipe not found: music-player\/playback.*Owning Skill "music-player" is not active.*Next: activate Skill music-player.*inspect target=recipes view=doctor identity=music-player\/playback/s,
+      /Active Skill Recipe not found: music-player\/playback.*Owning Skill "music-player" is not active.*Next: activate Skill music-player.*actors_inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
 
     const liveContext = createRecipeResolutionContext(
@@ -505,7 +630,7 @@ test("registration truth rejects inactive, malformed, mistyped, and ambiguous wr
     assert.equal(ambiguous.validated, false);
     assert.match(
       ambiguous.diagnostics[0],
-      /Duplicate active Skill identity music-player \(2 active definitions\).*Next: inspect target=recipes view=doctor identity=music-player\/playback/s,
+      /Duplicate active Skill identity music-player \(2 active definitions\).*Next: actors_inspect target=recipes view=doctor identity=music-player\/playback/s,
     );
     assert.doesNotMatch(ambiguous.diagnostics[0], new RegExp(root));
   } finally {

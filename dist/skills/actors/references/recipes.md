@@ -14,7 +14,7 @@ music-player/playback
 For agent-facing persistent specialization, use:
 
 ```text
-register_tool from=music-player/playback defaults={"source":"~/Music/1MIX"}
+actors_tool_register from=music-player/playback defaults={"source":"~/Music/1MIX"}
 ```
 
 The delegated root inherits async behavior, args and types, defaults, artifacts, Control, and runtime-owned origins. Do not copy those fields into the wrapper.

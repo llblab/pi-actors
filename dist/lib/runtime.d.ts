@@ -27,6 +27,9 @@ export interface ToolRegistryRuntimeDeps {
     getActiveTools?: () => string[];
     getAllTools?: () => Array<{
         name: string;
+        sourceInfo?: {
+            path: string;
+        };
     }>;
     registerTool: (definition: ReturnType<typeof ToolsLocal.createRuntimeToolDefinition>) => void;
     reservedToolNames: Set<string>;

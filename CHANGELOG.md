@@ -2,6 +2,11 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.58.4: Host-Provided SDK Loading
+
+- `Extension Startup`: Standalone and kit-pointer installations no longer require a physical Pi SDK package beside the extension merely to load. Bare Pi commands keep their context/session behavior; Node CLI recognition resolves the SDK only when needed and refuses unknown scripts when that optional identity is unavailable.
+- `Package Regression`: Copied and npm-packed standalone and kit-pointer layouts load through the public Pi resource loader without local Pi peers. The checks preserve canonical tool registration and prevent unrelated Node scripts from receiving Pi-only arguments; no duplicate SDK dependency is installed.
+
 ## 0.58.3: Compact Run File Navigation
 
 - `Useful File References`: Compact spawn/async-tool receipts select useful exact starting paths without per-file format, size, mutable, scope or generation dumps. Fresh completion headers keep rooted source/artifact paths and concise admitted status, not repeated purposes or hashes. Full machine details and saved snapshot bindings remain accessible.

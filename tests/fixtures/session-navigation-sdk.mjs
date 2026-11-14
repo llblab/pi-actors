@@ -97,6 +97,14 @@ function launchReference(messages, run) {
         if (!document.errors.length) {
           const metadata = document.toJS();
           value = metadata?.file_navigation ?? metadata?.run_files;
+          if (metadata?.run === run && value?.directory && !value.state) {
+            const frame = input.frames.find(row => row.run === run); assert.ok(frame);
+            assert.equal(value.directory, frame.state_dir);
+            const path = value.metadata; assert.equal(path, join(frame.state_dir, "run.json"));
+            assert.doesNotMatch(block.text, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:/);
+            return { run, run_instance_id: frame.run_instance_id, directory: value.directory, path,
+              launch_tool: message.toolName, launch_tool_call_id: message.toolCallId };
+          }
         }
       }
       if (!value) {

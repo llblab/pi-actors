@@ -4110,9 +4110,9 @@ test("installed dist enforces the same bounded Trace, Control, and inspect contr
       ["tools-local", ".*", 5],
       ["registry", ".*", 66],
       ["runtime", ".*", process.platform === "win32" || process.platform === "darwin" ? 12 : 13],
-      ["tools-response", ".*", 28],
+      ["tools-response", ".*", 29],
       ["tools-inspect", ".*", 24],
-      ["run-delivery", ".*", 95],
+      ["run-delivery", ".*", 96],
       ["execution", "^Final response selection", 1],
       ["recipes-context", "^Pi response selection|^Pi Node CLI", 2],
       ["runs-context-exports", "^Final executor responses|^Completion text selects", 2],
@@ -4224,7 +4224,7 @@ test("packed Run retirement shares the compiled owner without treating retained 
     assert.match(directLaunch, /existing Run reused/);
     const directLaunchDocument = parseDocument(directLaunch, { version: "1.2", schema: "core", uniqueKeys: true });
     assert.deepEqual(directLaunchDocument.errors, []);
-    assert.deepEqual(directLaunchDocument.toJS().run_files, directLocations);
+    assert.deepEqual(directLaunchDocument.toJS().run_files, { directory: directLocations.directory });
     assert.doesNotMatch(directLaunch, /file_investigation:|^next:/m);
     for (const action of ["kill", "archive", "prune"]) for (const change of ["owner", "generation"]) {
       const run = `packed-scope-${randomUUID()}`;
@@ -5948,8 +5948,11 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
               const document = parseDocument(block.text, { version: "1.2", schema: "core", uniqueKeys: true });
               if (document.errors.length || document.warnings.length) return false;
               const metadata = document.toJS(), navigation = metadata?.file_navigation ?? metadata?.run_files;
-              return navigation?.state === "available" && navigation.run === run &&
+              if (navigation?.state === "available") return navigation.run === run &&
                 navigation.run_instance_id === frame.run_instance_id && navigation.directory === frame.state_dir;
+              const saved = entry.message.details?.file_navigation;
+              return metadata?.run === run && navigation?.directory === frame.state_dir && navigation.metadata === join(frame.state_dir, "run.json") &&
+                saved?.run === run && saved.run_instance_id === frame.run_instance_id && saved.directory === frame.state_dir;
             }));
           assert.equal(receipts.length, 1, "Copied history must retain exactly one generation-bound launch receipt");
           const receipt = receipts[0];
@@ -6070,7 +6073,7 @@ test("source and packed public spawn deliver complete primary sources and overfl
         "--experimental-strip-types", join(process.cwd(), "tests", "fixtures", "completion-boundary-sdk.mjs"), packageDir, agentDir, layout,
       ], {
         env: { ...process.env, ...timing.env, HOME: root, PI_ACTORS_AUTOMATIC_REVIEW: "off", PI_CODING_AGENT_DIR: agentDir, USERPROFILE: root },
-        // This watchdog covers the entire87-Run/nine-mode driver, not one workload or native-exit proof.
+        // This watchdog covers the entire135-Run/nine-mode driver, not one workload or native-exit proof.
         timeout: process.platform === "win32" ? 900_000 : 300_000, encoding: "buffer",
       });
       hostPid = pending.child.pid;
@@ -6092,7 +6095,7 @@ test("source and packed public spawn deliver complete primary sources and overfl
       const result = await evidence;
       if (result.error) { requestedTimingPids = selectSdkFailureTimingPids(result.stderr); throw result.error; }
       assert.deepEqual(hostClose, { code: 0, signal: null }); assert.equal(result.stderr.length, 0);
-      const proof = JSON.parse(await readFile(manifest, "utf8")); assert.equal(proof.captured.length, 87);
+      const proof = JSON.parse(await readFile(manifest, "utf8")); assert.equal(proof.captured.length, 135);
       const reports = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(result.stdout));
       const research = reports[0].terminalResearch; assert.ok(research);
       const frame = proof.captured.find((row: { run: string }) => row.run === research.run); assert.ok(frame);
@@ -6109,8 +6112,8 @@ test("source and packed public spawn deliver complete primary sources and overfl
       assert.equal(research.parsed_json_sha256, createHash("sha256").update(JSON.stringify(canonical)).digest("hex"));
       for (const report of reports) assert.equal(report.launchNavigationShown + report.launchNavigationUnavailable, report.publicSpawns);
       assert.ok(reports.some((report: any) => report.mode !== "final" && report.launchNavigationShown > 0), "Real compact launch receipts must show observed file references");
-      assert.equal(reports[3].primarySourcesRecovered, 40);
-      assert.ok(reports[3].omittedPrimarySourcesRecovered > 0 && reports[3].omittedPrimarySourcesRecovered < 40);
+      assert.equal(reports[3].primarySourcesRecovered, 64);
+      assert.ok(reports[3].omittedPrimarySourcesRecovered > 0 && reports[3].omittedPrimarySourcesRecovered < 64);
       assert.equal(reports[4].syntheticCompanions, 64); assert.equal(reports[4].capturedMembers, 65);
       assert.equal(reports[4].shownMembers, 64); assert.equal(reports[4].omittedMembers, 1);
       assert.equal(reports[4].rowBudgetBasis, "outcomes_before_locations");
@@ -6131,8 +6134,8 @@ test("source and packed public spawn deliver complete primary sources and overfl
         projectedBytes: _bytes, rowSelectionBytes: _rowBytes, rowBudgetBasis: _rowBasis, withOmittedRowBytes: _candidateBytes, ...report }: Record<string, unknown>) => report), [
         { mode: "tools", requests: 3, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 2, publicSpawns: 1 },
         { mode: "final", requests: 3, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 1, publicSpawns: 1 },
-        { mode: "overflow", requests: 42, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 40, publicSpawns: 40 },
-        { mode: "primary-overflow", requests: 42, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 40, publicSpawns: 40 },
+        { mode: "overflow", requests: 66, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 64, publicSpawns: 64 },
+        { mode: "primary-overflow", requests: 66, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 64, publicSpawns: 64 },
         { mode: "row-limit", requests: 3, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 1, publicSpawns: 1 },
         { mode: "failure", requests: 3, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 1, publicSpawns: 1 },
         { mode: "artifact-large", requests: 3, starts: 1, settled: 1, batches: 1, nativeSends: 0, toolExecutions: 1, publicSpawns: 1 },

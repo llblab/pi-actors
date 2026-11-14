@@ -308,6 +308,29 @@ export function runNextActions(run) {
         RUN_FILE_INVESTIGATION_COMMAND,
     ];
 }
+/** Read-free projection of already selected location facts; never a complete inventory or body certificate. */
+function compactRunFileNavigation(value, terminal) {
+    const navigation = asRecord(value);
+    if (navigation.state !== "available")
+        return value;
+    if (!Array.isArray(navigation.files))
+        return value;
+    const paths = {};
+    const unavailable = [];
+    const selected = ["context_index", "result", "execution", "metadata"];
+    for (const file of navigation.files) {
+        const item = asRecord(file);
+        if (item.state === "unavailable")
+            unavailable.push(String(item.role));
+        if (item.state === "present" && selected.includes(String(item.role)))
+            paths[String(item.role)] = item.path;
+    }
+    const facts = [
+        ...(unavailable.length ? [`Unavailable locations: ${unavailable.join(", ")}`] : []),
+        ...(terminal && navigation.files.some(file => asRecord(file).role === "result" && asRecord(file).state === "missing") ? ["Recorded result location missing"] : []),
+    ];
+    return { directory: navigation.directory, ...paths, ...(facts.length ? { status: facts.join("; ") } : {}) };
+}
 export function compactAsyncRunStatus(value) {
     const status = asRecord(value), progress = asRecord(status.progress), result = asRecord(status.result);
     const run = String(status.run ?? "<unknown>"), displayRun = run.startsWith("run:") ? run.slice(4) : run;
@@ -372,8 +395,7 @@ export function compactAsyncRunStatus(value) {
     const navigationRendering = hasNavigation ? renderYamlMetadata({ run_files: navigation }, budget) : undefined;
     const invalidNavigation = navigationRendering?.state === "unavailable" && navigationRendering.reason === "metadata_invalid";
     const locations = !hasNavigation ? {} : { run_files: invalidNavigation
-            ? { state: "unavailable", reason: "metadata_invalid" } : navigation,
-        run_files_observation: "Observed locations; mutable." };
+            ? { state: "unavailable", reason: "metadata_invalid" } : compactRunFileNavigation(navigation, ["done", "failed", "killed", "exited"].includes(String(core.state))) };
     const full = render({ ...fields, ...locations, ...(direct && !invalidNavigation ? {} : hint) });
     if (full !== undefined)
         return full;

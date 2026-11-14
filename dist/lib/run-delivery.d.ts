@@ -66,7 +66,7 @@ export interface RunCompletionBatch {
     /** Retained singleton capture; absence preserves older indexed bytes. Never a new-capture selector. */
     readonly single_result?: true;
     /** Captured record-list shape; no public format/version choice or source authority. */
-    readonly result_layout?: "records" | "run_headers" | "headings" | "headings_flat_omissions" | "headings_outcomes" | "headings_shared_results" | "headings_shared_kinds" | "frontmatter_v1" | "frontmatter_v2" | "completion_yaml_core_v1" | "completion_yaml_files_v1" | "completion_yaml_files_v2";
+    readonly result_layout?: "records" | "run_headers" | "headings" | "headings_flat_omissions" | "headings_outcomes" | "headings_shared_results" | "headings_shared_kinds" | "frontmatter_v1" | "frontmatter_v2" | "completion_yaml_core_v1" | "completion_yaml_files_v1" | "completion_yaml_files_v2" | "completion_yaml_files_v3";
     /** Immutable scope/order/range data, not a caller-selected format or allocation authority. */
     readonly numbering?: RunCompletionNumbering;
     /** Formatting version/data only; no recipient ownership, read or publication capability. */

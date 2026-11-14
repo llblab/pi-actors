@@ -2,6 +2,12 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.58.3: Compact Run File Navigation
+
+- `Useful File References`: Compact spawn/async-tool receipts select useful exact starting paths without per-file format, size, mutable, scope or generation dumps. Fresh completion headers keep rooted source/artifact paths and concise admitted status, not repeated purposes or hashes. Full machine details and saved snapshot bindings remain accessible.
+- `Truthful Projection and Replay`: Real unavailable/missing-result observations, unknown text loss, failed outcomes and whole-reference/result omissions remain visible within existing budgets. Formatting adds no source reads, probes or status authority. A private fresh-capture layout preserves byte-exact earlier packet formats and unchanged Actor Markdown.
+- `Acceptance Boundary`: Owner properties and actual-default source/packed SDK journeys cover compact content, exact references, retained bindings, fixed budgets and replay. Loaded terminal/phone acceptance, integration and publication remain separate; no reload or live registry mutation is implied.
+
 ## 0.58.2: Canonical Actor Tool Names
 
 - `Canonical Tool Surface`: New calls use `actors_tool_register`, `actors_run_spawn`, `actors_control_apply`, and `actors_inspect`. Explicit legacy dispatch shares the same schemas/executors while model declarations and ordinary callable listings advertise canonical names only. Saved calls, Recipe identities and Run semantics remain unchanged.

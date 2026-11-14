@@ -40,12 +40,14 @@ function rootedEntries(metadata: any): any[] {
 }
 
 function rootedNavigation(metadata: any): any {
-  const { group, ...observation } = metadata.files?.observation ?? {};
-  if (group === undefined) return undefined;
-  const root = metadata.files.groups[group].root;
-  const files = rootedEntries(metadata).filter(entry => entry.format_hint !== undefined).map(({ root, purpose, path, ...facts }) =>
-    ({ ...facts, path: path === null ? null : join(root, path) }));
-  return { run: observation.run, run_instance_id: observation.run_instance_id, locations: { ...observation, directory: root, files } };
+  const entries = rootedEntries(metadata).filter(entry => ["context_index", "result", "execution", "metadata"].includes(entry.role));
+  return entries.length ? Object.fromEntries(entries.map(entry => [entry.role, join(entry.root, entry.path)])) : undefined;
+}
+function selectedNavigation(locations: any): any {
+  if (locations.state !== "available") return undefined;
+  const selected = locations.files.filter((file: any) => file.state === "present" && ["context_index", "result", "execution"].includes(file.role));
+  if (!selected.length) selected.push(...locations.files.filter((file: any) => file.state === "present" && file.role === "metadata"));
+  return Object.fromEntries(selected.map((file: any) => [file.role, file.path]));
 }
 
 import * as Limits from "../lib/limits.ts";
@@ -56,13 +58,14 @@ import { renderYamlMetadata } from "../lib/tools-response.ts";
 function candidateProofWire(packet: CompletionYamlPacket): string {
   // These independently authored fixtures use canonical native paths only. The production path splitter
   // is deliberately not used: this oracle uses native relative/dirname/basename for the known fixtures.
-  const service: any = { header_layout: "rooted_files_v2", ...packet.service };
+  const service: any = { header_layout: "rooted_files_v3", ...packet.service };
+  const compact = service.header_layout === "rooted_files_v3";
   if (service.result_inventory) service.result_inventory = { ...service.result_inventory,
     path: basename(service.result_inventory.path), root: dirname(service.result_inventory.path) };
   packet = { ...packet, service, records: packet.records.map(row => {
     const { references = {}, run_files, ...metadata } = row.metadata as any;
-    if (service.header_layout === "rooted_files_v2" && packet.records.length === 1) delete metadata.index;
-    const groups: any[] = [], files: any = {};
+    if (["rooted_files_v2", "rooted_files_v3"].includes(service.header_layout) && packet.records.length === 1) delete metadata.index;
+    const groups: any[] = [], files: any = {}, status: string[] = [];
     const locations = run_files?.locations, runRoot = locations?.state === "available" ? locations.directory : undefined;
     let best = Infinity;
     const group = (root: string | null) => {
@@ -84,20 +87,34 @@ function candidateProofWire(packet: CompletionYamlPacket): string {
       ["artifact_inventory", "Declared artifact inventory; target availability unproven", 2]] as const) {
       if (!references[role]) continue;
       const { source: { path, ...source }, ...facts } = references[role];
-      add(path, { role, purpose, ...facts, source }, rank); delete notes[role];
+      add(path, compact ? { role, ...(role === "primary" ? { status: facts.text_basis === "actor_response" ? "Actor response; admission privacy" : "Exported text; admission privacy, not complete Actor output" }
+        : role === "diagnostic_metadata" ? { status: "Recorded diagnostic metadata only; admission privacy", ...(facts.recorded_fields_not_shown ? { recorded_fields_not_shown: facts.recorded_fields_not_shown } : {}) }
+        : { status: "Declarations only; target availability/production unproven" }) } : { role, purpose, ...facts, source }, rank); delete notes[role];
     }
     if (references.artifacts) {
       for (const declaration of references.artifacts.declarations)
-        add(declaration.path, { role: "artifact", purpose: "Declared artifact", name: declaration.name, scope: references.artifacts.scope, state: "declared" });
+        add(declaration.path, compact ? { role: "artifact", name: declaration.name } : { role: "artifact", purpose: "Declared artifact", name: declaration.name, scope: references.artifacts.scope, state: "declared" });
+      if (compact) status.push("Declared artifact paths; existence/production unproven");
       delete notes.artifacts;
     }
     if (locations?.state === "available") {
       const { directory, files: entries, ...observation } = locations;
-      files.observation = { ...observation, group: group(directory) };
-      for (const { path, ...facts } of entries) add(path, { ...facts, purpose: facts.role === "result" ? "Recorded result metadata"
+      if (!compact) files.observation = { ...observation, group: group(directory) };
+      if (compact) {
+        const unavailable = entries.filter((entry: any) => entry.state === "unavailable").map((entry: any) => entry.role);
+        if (unavailable.length) status.push(`Unavailable locations: ${unavailable.join(", ")}`);
+        if (entries.some((entry: any) => entry.role === "result" && entry.state === "missing")) status.push("Recorded result location missing");
+      }
+      const useful = entries.filter((entry: any) => entry.state === "present" && ["context_index", "result", "execution"].includes(entry.role));
+      if (!useful.length) useful.push(...entries.filter((entry: any) => entry.state === "present" && entry.role === "metadata"));
+      for (const { path, ...facts } of compact ? useful : entries) add(path, compact ? { role: facts.role } : { ...facts, purpose: facts.role === "result" ? "Recorded result metadata"
         : facts.role === "execution" ? "Recorded execution and capture locations" : "Recorded Run file" },
         facts.state === "present" && facts.role === "result" ? 3 : facts.state === "present" && facts.role === "execution" ? 4 : Infinity, directory);
-    } else if (locations) files.observation = locations;
+    } else if (locations) {
+      if (compact) status.push(`Run locations unavailable: ${locations.reason}`);
+      else files.observation = locations;
+    }
+    if (status.length) files.status = status.join("; ");
     if (groups.length) {
       files.groups = groups;
     }
@@ -363,7 +380,7 @@ test("Candidate r2 freezes admitted malformed metadata and unavailable bindings 
     await writeFile(sourcePath, raw); await writeFile(oppositePath, "unavailable controlled fixture");
     const input = { ownerId: "r2-replay", batchId: "r2-replay", tempDir: root, members: [primary, unavailable] };
     const batch = deliveryYamlPrototype.captureRunCompletionYamlCandidateBatch(input), expected = projectRunCompletionBatchPresentation(batch);
-    assert.equal(batch.result_layout, "completion_yaml_files_v2"); assert.ok(Number.isInteger(batch.text_budget));
+    assert.equal(batch.result_layout, "completion_yaml_files_v3"); assert.ok(Number.isInteger(batch.text_budget));
     assert.equal(batch.numbering, undefined); assert.equal(batch.members[1]!.artifact_inventory, null);
     assert.equal(batch.members[1]!.artifact_inventory_unavailable, "source_unavailable");
     const decoded = readCompletionYamlCarrier(expected.content);
@@ -482,7 +499,7 @@ test("Candidate capture is a fresh closed journal layout, not a prototype overla
           completion_text: { text: raw, shown_bytes: { start: 0, end: Buffer.byteLength(raw) } } };
       });
       const batch = deliveryYamlPrototype.captureRunCompletionYamlCandidateBatch({ ...input, members });
-      assert.equal(batch.result_layout, "completion_yaml_files_v2");
+      assert.equal(batch.result_layout, "completion_yaml_files_v3");
       assert.ok(Number.isInteger(batch.text_budget));
       assert.equal(batch.members.length, count);
       const projected = projectRunCompletionBatchPresentation(batch);
@@ -538,14 +555,14 @@ test("Fresh rooted headers group native and external paths without guessing miss
     const item = { ...base, artifacts, primary_text: primaryBinding(base, raw, "") };
     const before = JSON.stringify(item);
     const batch = admitRunCompletionBatch({ ownerId: "rooted", tempDir: root, members: [item], fileNavigation: capturedLocations([item]) });
-    assert.equal(batch.result_layout, "completion_yaml_files_v2");
+    assert.equal(batch.result_layout, "completion_yaml_files_v3");
     const projected = projectRunCompletionBatchPresentation(batch), metadata = coreRows(projected.content)[0].metadata;
     const entries = rootedEntries(metadata), groups = metadata.files.groups;
     assert.equal(groups.filter((group: any) => group.root === base.state_dir).length, 1);
     assert.equal(entries.find(entry => entry.name === "local").path, join("artifacts", "report.md"));
     for (const [name, expectedRoot] of [["external", "/outside/reports"], ["windows", "C:\\reports"], ["unc", "\\\\server\\share\\reports"]] as const) {
       const entry = entries.find(entry => entry.name === name); assert.equal(entry.root, expectedRoot); assert.equal(entry.path, "report.md");
-      assert.equal(entry.state, "declared"); assert.match(entry.scope, /unproven/);
+      assert.equal(entry.state, undefined); assert.match(metadata.files.status, /unproven/);
     }
     const unresolvedBatch = admitRunCompletionBatch({ ownerId: "unresolved", tempDir: root, members: [{ ...item, artifacts: unresolved }] });
     const unresolvedEntries = rootedEntries(coreRows(projectRunCompletionBatchPresentation(unresolvedBatch).content)[0].metadata);
@@ -555,10 +572,12 @@ test("Fresh rooted headers group native and external paths without guessing miss
       assert.equal(entry.base_unavailable, true);
     }
     const first = metadata.files.read_first, firstGroup = groups[first.group], entry = firstGroup.entries[first.entry];
-    assert.equal(entry.role, "primary"); assert.equal(entry.purpose, "Full result text");
+    assert.equal(entry.role, "primary"); assert.match(entry.status, /Exported text/);
     assert.equal(join(firstGroup.root, entry.path), item.primary_text.output.source.path);
-    assert.equal(entry.source.sha256, item.primary_text.output.source.sha256);
-    assert.deepEqual(rootedNavigation(metadata).locations, batch.file_navigation![0].locations);
+    assert.equal(entry.source, undefined);
+    assert.equal(batch.members[0].primary_text!.output!.source.sha256, item.primary_text.output.source.sha256);
+    assert.equal(rootedEntries(metadata).find(entry => entry.role === "result").path, "result.json");
+    assert.doesNotMatch(projected.content, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:|sha256:/);
     const view = readRunCompletionPresentation(projected.content, projected.presentation)!;
     assert.equal(view.segments!.some(segment => segment.kind === "service"), false);
     assert.deepEqual(view.segments!.filter(segment => segment.kind === "body").map(segment => segment.text), [raw]);
@@ -568,6 +587,25 @@ test("Fresh rooted headers group native and external paths without guessing miss
     assert.deepEqual(coreRows(projected.content)[0].parts, [{ body: raw }]);
     markRunCompletionBatchQueued({ ownerId: "rooted", tempDir: root, batchId: batch.batch_id });
     assert.deepEqual(projectRunCompletionBatchPresentation(readRunDeliveryJournal(root, "rooted").completion_batch!), projected);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Compact file status retains combined declaration and unavailable/missing facts without technical repetition", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-file-status-"));
+  try {
+    const item = { ...member("file-status"), summary: "Run completed." };
+    const fileNavigation = capturedLocations([item]).map(row => ({ ...row, locations: { ...row.locations,
+      files: row.locations.files.map(file => ["result", "stderr", "published_sessions"].includes(file.role)
+        ? { ...file, state: file.role === "published_sessions" ? "unavailable" as const : "missing" as const, path: null, bytes_total: undefined } : file) } }));
+    const batch = admitRunCompletionBatch({ ownerId: "file-status", tempDir: root, members: [item], fileNavigation });
+    const before = JSON.stringify(batch), projected = projectRunCompletionBatchPresentation(batch), metadata = coreRows(projected.content)[0].metadata;
+    assert.equal(metadata.files.status, "Declared artifact paths; existence/production unproven; Unavailable locations: published_sessions; Recorded result location missing");
+    assert.ok(rootedEntries(metadata).some(entry => entry.role === "artifact"));
+    assert.ok(!rootedEntries(metadata).some(entry => ["result", "stderr", "published_sessions"].includes(entry.role)));
+    assert.doesNotMatch(projected.content, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:|sha256:|path: null/);
+    assert.deepEqual(batch.file_navigation, fileNavigation.map(row => ({ ...row, locations: { ...row.locations,
+      files: row.locations.files.map(({ bytes_total, ...file }) => bytes_total === undefined ? file : { ...file, bytes_total }) } })));
+    assert.equal(JSON.stringify(batch), before);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -607,21 +645,21 @@ test("Retained core-v1 and rooted-v1 snapshots keep their exact indices, referen
     const view = readRunCompletionPresentation(before.content, before.presentation)!;
     assert.equal(view.text.includes("references:"), false); assert.ok(view.text.endsWith("original"));
     const fresh = admitRunCompletionBatch({ ownerId: "new", tempDir: root, members: [item] });
-    assert.equal(fresh.result_layout, "completion_yaml_files_v2");
+    assert.equal(fresh.result_layout, "completion_yaml_files_v3");
     const freshProjection = projectRunCompletionBatchPresentation(fresh);
     assert.equal(Object.hasOwn(coreRows(freshProjection.content)[0].metadata, "index"), false);
     assert.deepEqual(projectRunCompletionBatchPresentation(legacy), before);
     assert.equal(coreRows(before.content)[0].metadata.references.primary.source.path, item.primary_text.output.source.path);
     assert.equal(coreRows(before.content)[0].metadata.files, undefined);
     const journalPath = getRunDeliveryJournalPath(root, "new"), journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
-    for (const result_layout of ["completion_yaml_core_v1", "completion_yaml_files_v1"] as const) {
+    for (const result_layout of ["completion_yaml_core_v1", "completion_yaml_files_v1", "completion_yaml_files_v2"] as const) {
       const saved = { ...legacy, result_layout }, expected = projectRunCompletionBatchPresentation(saved);
       const expectedWire: string = result_layout === "completion_yaml_core_v1" ? encoded.text : candidateProofWire({
-        batchId: legacy.batch_id, records: [row], service: { header_layout: "rooted_files_v1" },
+        batchId: legacy.batch_id, records: [row], service: { header_layout: result_layout === "completion_yaml_files_v2" ? "rooted_files_v2" : "rooted_files_v1" },
       });
       assert.equal(expected.content, expectedWire);
-      assert.equal(coreRows(expected.content)[0].metadata.index, 0);
-      assert.ok(readRunCompletionPresentation(expected.content, expected.presentation)!.segments!.some(segment => segment.kind === "header" && /^index: 0$/mu.test(segment.text)));
+      assert.equal(coreRows(expected.content)[0].metadata.index, result_layout === "completion_yaml_files_v2" ? undefined : 0);
+      if (result_layout !== "completion_yaml_files_v2") assert.ok(readRunCompletionPresentation(expected.content, expected.presentation)!.segments!.some(segment => segment.kind === "header" && /^index: 0$/mu.test(segment.text)));
       journal.completion_batch = saved;
       fs.writeFileSync(journalPath, JSON.stringify(journal));
       for (const transition of [undefined, markRunCompletionBatchQueued, markRunCompletionBatchPresented]) {
@@ -1578,7 +1616,7 @@ test("Fresh frontmatter separates compiler blocks from arbitrary authored Markdo
     const base = { ...member("front"), summary: "Run completed.", artifacts: undefined };
     const item = { ...base, primary_text: primaryBinding(base, text, "🚀tail") };
     const batch = admitRunCompletionBatch({ members: [item], ownerId: "front", tempDir: root });
-    assert.equal(batch.result_layout, "completion_yaml_files_v2");
+    assert.equal(batch.result_layout, "completion_yaml_files_v3");
     const projected = projectRunCompletionBatchPresentation(batch), rows = coreRows(projected.content);
     assert.deepEqual([rows[0].metadata.index, rows[0].metadata.run, rows[0].metadata.state, rows[0].metadata.kind], [undefined, "front", "done", "primary"]);
     assert.deepEqual(rows[0].parts, [{ body: text }, { marker: "\n" }, { marker: "[5 characters omitted]" }]);
@@ -1703,14 +1741,14 @@ test("Fresh completion kinds classify admitted sources without upgrading fallbac
   try {
     const batch = admitRunCompletionBatch({ members: retainedSharedKindFixture().members, ownerId: "simple", tempDir: root });
     const projected = projectRunCompletionBatchPresentation(batch), content = projected.content;
-    assert.equal(batch.result_layout, "completion_yaml_files_v2");
+    assert.equal(batch.result_layout, "completion_yaml_files_v3");
     const rows = coreRows(content);
     assert.equal(rows.filter(row => row.metadata.kind === "primary").length, 2);
     assert.equal(rows.filter(row => row.metadata.kind === "diagnostic").length, 1);
     assert.doesNotMatch(content, /^- (?:result_kind|preview_kind|legacy_basis):|^- kind: (?:legacy|response)$/mu);
     assert.ok(content.includes("Untracked text\r\n🌍"));
     assert.match(content, /\[omitted: unknown\] \(summary\/fallback text: original completeness\/privacy unproven\)/);
-    assert.equal(rootedEntries(rows[1].metadata).find(entry => entry.role === "primary").text_basis, "actor_response");
+    assert.equal(rootedEntries(rows[1].metadata).find(entry => entry.role === "primary").status, "Actor response; admission privacy");
     const fallbackRecord = rows.find(row => row.metadata.run === "fallback")!;
     assert.equal(fallbackRecord.metadata.kind, undefined);
     assert.ok(readRunCompletionPresentation(content, projected.presentation));
@@ -1901,7 +1939,7 @@ test("AX completion is a new immutable capture with packet-local indices only fo
       assert.equal(fs.existsSync(getRunDeliveryJournalPath(root, ownerId)), false);
     }
     const before = JSON.stringify(batch), text = formatRunCompletionBatchMessage(batch);
-    assert.equal(batch.result_layout, "completion_yaml_files_v2"); assert.equal(batch.single_result, undefined);
+    assert.equal(batch.result_layout, "completion_yaml_files_v3"); assert.equal(batch.single_result, undefined);
     const rows = coreRows(text);
     assert.deepEqual(rows.map(row => [row.metadata.index, row.metadata.run, row.metadata.state]), [[0, "p", "done"], [1, "d", "failed"]]);
     assert.deepEqual([...text.matchAll(/^index: (\d+)$/gmu)].map(match => Number(match[1])), [0, 1]);
@@ -1918,8 +1956,8 @@ test("AX completion is a new immutable capture with packet-local indices only fo
     assert.doesNotMatch(view.text, /Run completed\.|(?:^|\n)  - technical:/u);
     assert.ok(view.text.includes('run: "' + members[0].run + '"'));
     assert.ok(rows[0].metadata.files);
-    assert.ok(rootedEntries(rows[0].metadata).some(entry => entry.source && join(entry.root, entry.path) === members[0].primary_text!.output!.source.path));
-    assert.ok(rootedEntries(rows[1].metadata).some(entry => entry.source && join(entry.root, entry.path) === members[1].result_diagnostics!.source.path));
+    assert.ok(rootedEntries(rows[0].metadata).some(entry => entry.role === "primary" && join(entry.root, entry.path) === members[0].primary_text!.output!.source.path));
+    assert.ok(rootedEntries(rows[1].metadata).some(entry => entry.role === "diagnostic_metadata" && join(entry.root, entry.path) === members[1].result_diagnostics!.source.path));
     assert.equal(text.split("[2 characters omitted]").length - 1, 2);
     assert.equal(JSON.stringify(batch), before);
     for (const transition of [markRunCompletionBatchQueued, markRunCompletionBatchPresented]) {
@@ -1928,7 +1966,7 @@ test("AX completion is a new immutable capture with packet-local indices only fo
       assert.equal(saved.presentation_format, "ax_records"); assert.equal(formatRunCompletionBatchMessage(saved), text);
     }
     const single = admitRunCompletionBatch({ members: [members[0]], ownerId: "single-v3", tempDir: root });
-    assert.equal(single.result_layout, "completion_yaml_files_v2"); assert.equal(single.single_result, undefined);
+    assert.equal(single.result_layout, "completion_yaml_files_v3"); assert.equal(single.single_result, undefined);
     assert.deepEqual([coreRows(formatRunCompletionBatchMessage(single))[0].metadata.index, coreRows(formatRunCompletionBatchMessage(single))[0].metadata.run], [undefined, "p"]);
     assert.doesNotMatch(formatRunCompletionBatchMessage(single), /(?:^|\n)\s*- (?:members|#0|completions):/u);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -1949,7 +1987,7 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
     for (const input of [primary, diagnostic, legacy, missing, malformed]) {
       const ownerId = input.run, expected = JSON.parse(JSON.stringify(input));
       const batch = admitRunCompletionBatch({ members: [input], fileNavigation: capturedLocations([input]), ownerId, tempDir: root });
-      assert.equal(batch.result_layout, "completion_yaml_files_v2"); assert.equal(batch.single_result, undefined); assert.equal(batch.presentation_format, "ax_records");
+      assert.equal(batch.result_layout, "completion_yaml_files_v3"); assert.equal(batch.single_result, undefined); assert.equal(batch.presentation_format, "ax_records");
       const projected = projectRunCompletionBatchPresentation(batch), content = projected.content;
       const view = readRunCompletionPresentation(content, projected.presentation)!;
       assert.equal(view.single, undefined); assert.equal(view.compact, true);
@@ -1960,11 +1998,12 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
       assert.deepEqual([row.metadata.run, row.metadata.state], [input.run, input.status]);
       assert.doesNotMatch(content, /^- completions:|^- members:|^  - #0:/mu);
       const location = { run: input.run, run_instance_id: input.run_instance_id, locations: batch.file_navigation![0].locations };
-      assert.deepEqual(rootedNavigation(row.metadata), location); assert.ok(view.text.includes('run: "' + input.run + '"'));
+      assert.deepEqual(rootedNavigation(row.metadata), selectedNavigation(location.locations)); assert.ok(view.text.includes('run: "' + input.run + '"'));
+      assert.deepEqual(batch.file_navigation![0].locations, capturedLocations([input])[0].locations);
       assert.ok(content.includes("files:\n"));  assert.ok(Buffer.byteLength(content) <= Limits.RUN_COMPLETION_MODEL_MAX_BYTES);
       for (const binding of [input.primary_text?.output?.source, input.result_diagnostics?.source]) if (binding) {
-        assert.ok(rootedEntries(row.metadata).some(entry => entry.source && join(entry.root, entry.path) === binding.path)); assert.ok(content.includes(binding.sha256));
-        assert.ok(content.includes(JSON.stringify(input.run_instance_id)));
+        assert.ok(rootedEntries(row.metadata).some(entry => join(entry.root, entry.path) === binding.path)); assert.ok(!content.includes(binding.sha256));
+        assert.ok(!content.includes(JSON.stringify(input.run_instance_id)));
       }
       if (input.primary_text?.output || input.diagnostic_excerpt) assert.ok(view.text.includes("[2 characters omitted]"));
       if (input === legacy) {
@@ -1981,7 +2020,7 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
       for (const transition of [undefined, markRunCompletionBatchQueued, markRunCompletionBatchPresented]) {
         transition?.({ batchId: batch.batch_id, ownerId, tempDir: root });
         const saved = readRunDeliveryJournal(root, ownerId).completion_batch!;
-        assert.equal(saved.result_layout, "completion_yaml_files_v2"); assert.equal(saved.single_result, undefined); assert.deepEqual(saved.members, [expected]);
+        assert.equal(saved.result_layout, "completion_yaml_files_v3"); assert.equal(saved.single_result, undefined); assert.deepEqual(saved.members, [expected]);
         assert.deepEqual(projectRunCompletionBatchPresentation(saved), projected);
       }
       assert.equal(JSON.stringify(batch), snapshot);
@@ -2010,7 +2049,7 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
       const snapshot = JSON.stringify(pair);
       const pairProjection = projectRunCompletionBatchPresentation(pair), pairView = readRunCompletionPresentation(pairProjection.content, pairProjection.presentation)!;
       assert.equal(pair.single_result, undefined); assert.equal(pairView.single, undefined);
-      assert.equal(pair.result_layout, "completion_yaml_files_v2"); assert.equal(pairView.records, true);
+      assert.equal(pair.result_layout, "completion_yaml_files_v3"); assert.equal(pairView.records, true);
       const rows = coreRows(pairProjection.content); assert.equal(rows.length, 1);
       assert.equal(Object.hasOwn(rows[0].metadata, "index"), false);
       assert.ok(pairView.segments!.filter(segment => segment.kind === "header").every(segment => !/^index:/mu.test(segment.text)));
@@ -2024,8 +2063,8 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
         members.map(row => [row.run, row.run_instance_id, row.status]));
       assert.deepEqual(pair.members, JSON.parse(JSON.stringify(members)));
       assert.deepEqual(pair.file_navigation!.map(row => row.member_index), [0, 1]);
-      assert.equal(rootedNavigation(rows[0].metadata).run_instance_id, small.run_instance_id);
-      assert.deepEqual(rootedNavigation(rows[0].metadata).locations, pair.file_navigation![members.indexOf(small)].locations);
+      assert.equal(pair.members[members.indexOf(small)].run_instance_id, small.run_instance_id);
+      assert.deepEqual(rootedNavigation(rows[0].metadata), selectedNavigation(pair.file_navigation![members.indexOf(small)].locations));
       for (const transition of [undefined, markRunCompletionBatchQueued, markRunCompletionBatchPresented]) {
         transition?.({ batchId: pair.batch_id, ownerId, tempDir: root });
         assert.deepEqual(projectRunCompletionBatchPresentation(readRunDeliveryJournal(root, ownerId).completion_batch!), pairProjection);
@@ -2106,19 +2145,22 @@ test("AX bounds omit whole rows/references and retain correct displayed-index ge
     assert.deepEqual(coreRows(complete).map(row => [row.metadata.index, row.metadata.run]), [[0, "parent"], [1, "child"]]);
     for (const row of located.file_navigation!) {
       const m = located.members[row.member_index]!;
-      assert.deepEqual(rootedNavigation(coreRows(complete).find(record => record.metadata.run === m.run)!.metadata), { run: m.run, run_instance_id: m.run_instance_id, locations: row.locations });
+      assert.deepEqual(rootedNavigation(coreRows(complete).find(record => record.metadata.run === m.run)!.metadata), selectedNavigation(row.locations));
     }
-    const verbose = Array.from({ length: 10 }, (_, i) => ({ ...member(`budget${i}`), artifacts: undefined, summary: "Run completed.", output: "x".repeat(4000) }));
+    const verbose = Array.from({ length: 10 }, (_, i) => {
+      const base = { ...member(`budget${i}`), artifacts: undefined, summary: "Run completed." }, raw = "x".repeat(4300);
+      return { ...base, primary_text: primaryBinding(base, "", raw), completion_text: { text: raw, shown_bytes: { start: 0, end: raw.length } } };
+    });
     const limited = admitRunCompletionBatch({ members: verbose, fileNavigation: capturedLocations(verbose), ownerId: "limited-refs", tempDir: root });
     const limitedText = formatRunCompletionBatchMessage(limited);
     assert.equal(limitedText.includes("members_omitted"), false);
     const limitedRows = coreRows(limitedText);
     const shown = limitedRows.filter(row => rootedNavigation(row.metadata) !== undefined).length;
-    assert.ok(shown > 0 && shown < verbose.length);
+    assert.ok(shown > 0 && shown < verbose.length, JSON.stringify({ shown, rows: verbose.length, quota: limited.text_budget, bytes: Buffer.byteLength(limitedText) }));
     assert.equal(limitedRows.filter(row => row.metadata.run_files_omission?.omitted === 1).length, verbose.length - shown);
     for (const [index, row] of limited.file_navigation!.entries()) {
       const m = limited.members[row.member_index]!;
-      const reference = { run: m.run, run_instance_id: m.run_instance_id, locations: row.locations };
+      const reference = selectedNavigation(row.locations);
       assert.deepEqual(rootedNavigation(limitedRows.find(record => record.metadata.run === m.run)!.metadata), index < shown ? reference : undefined, "References fit whole or are omitted, never sliced or rebound");
     }
     assert.ok(Buffer.byteLength(limitedText) <= Limits.RUN_COMPLETION_MODEL_MAX_BYTES);
@@ -3399,7 +3441,7 @@ test("unadmitted YAML core body presence governs single, adjacent bare, mixed an
       text.replace('run: "only"\nstate:', 'index: 0\nrun: "only"\nstate:')]) {
       assert.equal(readCompletionYamlCarrier(invalid).state, "unavailable");
     }
-    for (const service of [undefined, { header_layout: "rooted_files_v1" }, { header_layout: "rooted_files_v3" },
+    for (const service of [undefined, { header_layout: "rooted_files_v1" }, { header_layout: "rooted_files_v4" },
       { ...serviceV2, numbering: { kind: "stream" } }]) {
       assert.equal(encodeCompletionYamlCarrier({ ...packet, service }).state, "unavailable");
     }

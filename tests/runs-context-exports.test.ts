@@ -1371,8 +1371,9 @@ test("Eligible natural outcomes join canonical artifact bindings only after body
   assert.equal(metadata.get("artifact_declarations"), 5);
   const sourceEntries = metadata.toJS().files.groups.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
   assert.ok(sourceEntries.some((entry: any) => entry.role === "artifact_inventory" && join(entry.root, entry.path) === path
-    && entry.source.sha256 === binding.artifact_inventory.source.sha256));
-  assert.match(message, /Metadata only; target availability\/production not asserted; bodies not read\./u);
+    && entry.source === undefined));
+  assert.deepEqual(batch.members[0].artifact_inventory, binding.artifact_inventory);
+  assert.match(message, /Declarations only; target availability\/production unproven/u);
   assert.doesNotMatch(message, /never-created/); fs.unlinkSync(path);
   assert.equal(formatRunCompletionBatchMessage(readRunDeliveryJournal(f.root, f.meta.ownerId).completion_batch!), message);
   const summary = summarizeRuns(f.root); const changed = collectRunCompletionBatchMembers(detectRunTransitions(new Map([[f.stateDir, "running"]]), summary), summary.runs);
@@ -3654,7 +3655,8 @@ test("Eligible canonical diagnostic outcomes verify source only after body-free 
     const header = parseDocument(message.slice(4, message.indexOf("\n---\n", 4))); assert.deepEqual(header.errors, []);
     const sourceEntries = header.toJS().files.groups.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
     assert.ok(sourceEntries.some((entry: any) => entry.role === "diagnostic_metadata" && join(entry.root, entry.path) === f.sourcePath
-      && entry.source.run_instance_id === captured.run_instance_id));
+      && entry.source === undefined));
+    assert.deepEqual(packet.members[0].result_diagnostics, captured.result_diagnostics);
     assert.doesNotMatch(message, /PRIVATE_LEGACY_BODY|PRIVATE_TAIL_SECRET/);
     const sourceOpens = opens; rmSync(f.sourcePath);
     assert.equal(formatRunCompletionBatchMessage(readRunDeliveryJournal(f.root, "owner-a").completion_batch!), message); assert.equal(opens, sourceOpens);

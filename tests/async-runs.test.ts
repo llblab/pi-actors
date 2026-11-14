@@ -29,7 +29,7 @@ import {
   tmpdir,
 } from "node:os";
 import {
-  join,
+  basename, join,
 } from "node:path";
 import test from "node:test";
 import {
@@ -2255,7 +2255,7 @@ test("Real ordinary primary publication joins full UTF-8 source, classifies expo
         else { assert.equal(members[0].result_diagnostics, null); assert.equal(members[0].result_diagnostics_unavailable, "publication_failed"); }
         const packet = admitRunCompletionBatch({ members, ownerId: metadata.ownerId ?? "primary-fixture", tempDir: root });
         const message = formatRunCompletionBatchMessage(packet); assert.doesNotMatch(message, /hidden-live-token|Legacy diagnostic display/);
-        if (mode === "workload_failure") assert.match(message, /Diagnostic metadata only; not primary output/);
+        if (mode === "workload_failure") assert.match(message, /Recorded diagnostic metadata only; admission privacy/);
         else {
           const metadata = parseDocument(message, { version: "1.2", schema: "core", uniqueKeys: true });
           assert.deepEqual(metadata.errors, []); assert.deepEqual(metadata.warnings, []);
@@ -2279,7 +2279,12 @@ test("Real ordinary primary publication joins full UTF-8 source, classifies expo
         const message = formatRunCompletionBatchMessage(packet);
         assert.equal(formatRunCompletionBatchMessage(readRunDeliveryJournal(root, packetOwner).completion_batch!), message);
         assert.doesNotMatch(message, /hidden-live-token/);
-        if (result.output) { assert.ok(message.includes(result.output.preview), "Fresh completion retains the admitted source prefix without outer indentation"); assert.ok(message.includes(result.output.source.sha256)); }
+        if (result.output) {
+          assert.ok(message.includes(result.output.preview), "Fresh completion retains the admitted source prefix without outer indentation");
+          assert.ok(message.includes(JSON.stringify(basename(result.output.source.path))));
+          assert.ok(!message.includes(result.output.source.sha256));
+          assert.deepEqual(packet.members[0].primary_text?.output?.source, result.output.source);
+        }
         else {
           const metadata = parseDocument(message, { version: "1.2", schema: "core", uniqueKeys: true });
           assert.deepEqual(metadata.errors, []); assert.deepEqual(metadata.warnings, []);

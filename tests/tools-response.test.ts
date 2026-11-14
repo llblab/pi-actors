@@ -182,7 +182,7 @@ test("A complete direct launch row needs no redundant session-wide map instructi
     directory: "/owned/demo", files: [{ role: "metadata", state: "present", path: "/owned/demo/run.json", mutable: true }] };
   const value = { run: "demo", status: "running", launch_kind: "spawn", file_navigation };
   const text = compactAsyncRunStatus(value);
-  assert.deepEqual(launchMetadata(text).run_files, file_navigation);
+  assert.deepEqual(launchMetadata(text).run_files, { directory: "/owned/demo", metadata: "/owned/demo/run.json" });
   assert.equal(launchMetadata(text).next, undefined);
   assert.doesNotMatch(text, /file_investigation:|^next:/m);
   assert.ok(Buffer.byteLength(text) <= 16384);
@@ -190,7 +190,7 @@ test("A complete direct launch row needs no redundant session-wide map instructi
   const padding = 16384 - Buffer.byteLength(compactAsyncRunStatus(base));
   const exact = compactAsyncRunStatus({ ...base, file_navigation: { ...base.file_navigation, directory: "x".repeat(padding) } });
   assert.equal(Buffer.byteLength(exact), 16384);
-  assert.deepEqual(launchMetadata(exact).run_files, { ...base.file_navigation, directory: "x".repeat(padding) });
+  assert.deepEqual(launchMetadata(exact).run_files, { directory: "x".repeat(padding), metadata: "/owned/demo/run.json" });
   assert.doesNotMatch(exact, /file_investigation:|state: omitted/);
   const over = compactAsyncRunStatus({ ...base, file_navigation: { ...base.file_navigation, directory: "x".repeat(padding + 1) } });
   assert.deepEqual(launchMetadata(over).run_files, omittedLaunchRow);
@@ -236,8 +236,9 @@ test("Compact launch receipts carry complete literal observed file locations wit
     files: [{ role: "metadata", format_hint: "json", state: "present", path: "/owned/β/run.json", bytes_total: 12, mutable: true }] };
   const value = { run: "direct", status: "running", launch_kind: "spawn", file_navigation };
   const text = compactAsyncRunStatus(value);
-  assert.equal(launchMetadata(text).run_files_observation, "Observed locations; mutable.");
-  assert.deepEqual(launchMetadata(text).run_files, file_navigation);
+  assert.equal(launchMetadata(text).run_files_observation, undefined);
+  assert.deepEqual(launchMetadata(text).run_files, { directory: file_navigation.directory, metadata: "/owned/β/run.json" });
+  assert.doesNotMatch(text, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:|content_scope:|file_inventory_scope:/);
   assert.equal(Buffer.byteLength(text) <= 16384, true);
   const large = compactAsyncRunStatus({ ...value, file_navigation: { ...file_navigation, directory: "😀".repeat(16384) } });
   assert.deepEqual(launchMetadata(large).run_files, omittedLaunchRow);
@@ -248,6 +249,21 @@ test("Compact launch receipts carry complete literal observed file locations wit
   assert.equal(launchMetadata(crowded).launch_fields, "omitted"); assert.ok(!crowded.includes("/owned"));
   const refused = compactAsyncRunStatus({ ...value, file_navigation: { state: "unavailable", reason: "session_changed" } });
   assert.equal(launchMetadata(refused).run_files.reason, "session_changed"); assert.ok(!refused.includes("/owned"));
+});
+
+test("Compact launch selects useful paths and preserves unavailable observations without optional-file noise", () => {
+  const files = [
+    { role: "metadata", state: "present", path: "/owned/run.json", format_hint: "json", bytes_total: 10, mutable: true },
+    { role: "result", state: "missing", path: null, format_hint: "json", mutable: true },
+    { role: "stderr", state: "missing", path: null, format_hint: "text", mutable: true },
+    { role: "published_sessions", state: "unavailable", path: null, format_hint: "json", mutable: true },
+  ];
+  const value = { run: "selected", status: "failed", file_navigation: { state: "available", directory: "/owned", files } };
+  const before = JSON.stringify(value), text = compactAsyncRunStatus(value);
+  assert.deepEqual(launchMetadata(text).run_files, { directory: "/owned", metadata: "/owned/run.json", status: "Unavailable locations: published_sessions; Recorded result location missing" });
+  assert.equal(launchMetadata(text).state, "failed");
+  assert.doesNotMatch(text, /stderr|path: null|format_hint:|bytes_total:|mutable:/);
+  assert.equal(JSON.stringify(value), before);
 });
 
 test("Compact launch native scalars, literal locations, privacy and wrapper spacing remain selected", () => {
@@ -263,7 +279,7 @@ test("Compact launch native scalars, literal locations, privacy and wrapper spac
   assert.equal(metadata.run, "run:demo"); assert.equal(metadata.pid, 123);
   assert.equal(metadata.active_subagents, 2); assert.equal(metadata.completed, 3); assert.equal(metadata.failures, 1);
   assert.equal(metadata.code, 0); assert.equal(metadata.killed, true); assert.equal(metadata.draft_recipe, "?");
-  assert.equal(metadata.catalog, "unavailable"); assert.deepEqual(metadata.run_files, navigation);
+  assert.equal(metadata.catalog, "unavailable"); assert.deepEqual(metadata.run_files, { directory: path });
   assert.equal(metadata.next, undefined); assert.equal(metadata.file_investigation, undefined);
   assert.doesNotMatch(text, /not disclosed|```|^---|\{"state"/mu);
   assert.match(text, /^\nrun:/u); assert.match(text, /draft_recipe: "\?"/u);

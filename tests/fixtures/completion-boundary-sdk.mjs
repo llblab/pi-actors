@@ -527,7 +527,7 @@ function completionCore(text) {
       if (Object.hasOwn(bookkeeping, "service")) {
         service = bookkeeping.service;
         exactKeys(service, [], ["header_layout", "omitted_results", "omitted_states", "inventory_warning", "result_inventory"]);
-        if (service.header_layout !== undefined) assert.ok(["rooted_files_v1", "rooted_files_v2"].includes(service.header_layout));
+        if (service.header_layout !== undefined) assert.ok(["rooted_files_v1", "rooted_files_v2", "rooted_files_v3"].includes(service.header_layout));
         assert.ok(Object.keys(service).length > 0);
         if (Object.hasOwn(service, "omitted_results")) assert.ok(Number.isSafeInteger(service.omitted_results) && service.omitted_results > 0);
         if (Object.hasOwn(service, "omitted_states")) {
@@ -573,7 +573,7 @@ function completionCore(text) {
     const indexed = Object.hasOwn(header, "index");
     assert.deepEqual(keys.slice(0, indexed ? 3 : 2), indexed ? ["index", "run", "state"] : ["run", "state"]);
     if (indexed) assert.ok(Number.isSafeInteger(header.index) && header.index === records.length, "Ordinary displayed indices remain packet-local");
-    else assert.equal(service?.header_layout, "rooted_files_v2");
+    else assert.ok(["rooted_files_v2", "rooted_files_v3"].includes(service?.header_layout));
     assert.equal(typeof header.run, "string"); assert.ok(header.run.length > 0);
     assert.ok(["done", "failed", "killed", "exited"].includes(header.state));
     const allowed = ["index", "run", "state", "kind", "preview_field", "redacted", "result_state", "parent_run", "primary_unavailable",
@@ -602,7 +602,7 @@ function completionCore(text) {
   }
   assert.equal(cursor, text.length, "Whole core consumed; no compiler tail or extra bytes");
   assert.ok(batchId);
-  assert.equal(records.some(record => !Object.hasOwn(record.header, "index")), service?.header_layout === "rooted_files_v2" && records.length === 1,
+  assert.equal(records.some(record => !Object.hasOwn(record.header, "index")), ["rooted_files_v2", "rooted_files_v3"].includes(service?.header_layout) && records.length === 1,
     "Only a new packet with exactly one shown result omits its display index");
   return { batchId, service: service ?? {}, records };
 }
@@ -616,6 +616,10 @@ function containsRootedPath(text, path) {
 }
 // Independent reconstruction of selected source bindings from explicit header roots.
 // No body parsing, cwd lookup, product projector or evidence refresh participates.
+// Fixture-held canonical bindings are NOT reconstructed public fields. Exact displayed paths
+// select admitted bindings for source/hash/read checks; raw-header checks separately prove compaction.
+const canonicalSourceFacts = new Map();
+let fixtureFrame = () => undefined;
 function rootedTechnical(header) {
   const files = header.files, references = { ...files?.notes };
   let runFiles;
@@ -623,6 +627,28 @@ function rootedTechnical(header) {
   const entries = (files.groups ?? []).flatMap(group => group.entries.map(entry => ({
     ...entry, path: typeof group.root === "string" && typeof entry.path === "string" ? join(group.root, entry.path) : entry.path,
   })));
+  const compact = entries.some(entry => entry.status !== undefined) || (!files.observation && (files.groups || typeof files.status === "string"));
+  if (compact) {
+    for (const role of ["primary", "diagnostic_metadata", "artifact_inventory"]) {
+      const entry = entries.find(entry => entry.role === role);
+      if (!entry) continue;
+      assert.equal(entry.source, undefined); assert.equal(entry.purpose, undefined);
+      const source = canonicalSourceFacts.get(entry.path); assert.ok(source, `Displayed source must match an admitted fixture binding: ${entry.path}`);
+      references[role] = { status: entry.status, ...(role === "diagnostic_metadata" ? { field: header.preview_field, recorded_fields_not_shown: entry.recorded_fields_not_shown } : {}), source };
+    }
+    const selected = entries.filter(entry => ["context_index", "result", "execution", "metadata"].includes(entry.role));
+    const frame = fixtureFrame(header.run);
+    if (selected.length) {
+      assert.ok(frame); assert.ok(selected.every(entry => entry.path.startsWith(frame.state_dir + sep)));
+      runFiles = { run: header.run, run_instance_id: frame.run_instance_id,
+        locations: { state: "available", directory: frame.state_dir,
+          files: selected.map(entry => ({ role: entry.role, state: "present", path: entry.path })) } };
+    } else if (typeof files.status === "string" && files.status.startsWith("Run locations unavailable: ")) {
+      runFiles = { run: header.run, run_instance_id: frame?.run_instance_id,
+        locations: { state: "unavailable", reason: files.status.slice("Run locations unavailable: ".length) } };
+    }
+    return { references, runFiles };
+  }
   for (const role of ["primary", "diagnostic_metadata", "artifact_inventory"]) {
     const entry = entries.find(entry => entry.role === role);
     if (!entry) continue;
@@ -702,7 +728,8 @@ function rootedRequiredFacts(member, minimal = false) {
     const root = dirname(path);
     let group = groups.find(item => item.root === root);
     if (!group) { group = { root, entries: [] }; groups.push(group); }
-    group.entries.push({ role, purpose, ...(minimal ? { scope: detail.scope } : detail), source, path: basename(path) });
+    group.entries.push({ role, status: role === "primary" ? (facts.primary.text_basis === "actor_response" ? "Actor response; admission privacy" : "Exported text; admission privacy, not complete Actor output")
+      : "Recorded diagnostic metadata only; admission privacy", ...(minimal || role !== "diagnostic_metadata" ? {} : { recorded_fields_not_shown: detail.recorded_fields_not_shown }), path: basename(path) });
   }
   return { read_first: { group: 0, entry: 0 }, groups };
 }
@@ -769,7 +796,7 @@ function candidateRecord(text, batchId) {
   assert.equal(Object.hasOwn(header, "index"), false); assert.equal(header.state, "done"); assert.equal(header.kind, "primary");
   const core = header._completion;
   assert.deepEqual(Object.keys(core), ["codec", "batch_id", "service", "parts"]);
-  assert.deepEqual(core.service, { header_layout: "rooted_files_v2" });
+  assert.deepEqual(core.service, { header_layout: "rooted_files_v3" });
   assert.equal(core.codec, "completion_yaml_core_v1"); assert.equal(core.batch_id, batchId);
   assert.ok(Array.isArray(core.parts) && core.parts.length > 0);
   const blocks = []; let cursor = end + 5;
@@ -800,7 +827,8 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
   const defaultContexts = [];
   let candidateText, candidateEvidence;
   const ownerId = manager.getSessionId();
-  const overflowCount = 40; const overflowMode = mode === "overflow" || mode === "primary-overflow"; const rowLimitMode = mode === "row-limit";
+  // Compact rows need more real producers to force byte overflow; 64 keeps the independent row cap inactive.
+  const overflowCount = 64; const overflowMode = mode === "overflow" || mode === "primary-overflow"; const rowLimitMode = mode === "row-limit";
   const failureMode = mode === "failure"; const artifactMode = mode === "artifact-large"; const lossMode = mode === "source-loss";
   const sessionMode = mode === "session-response";
   const companionCount = candidate ? 0 : rowLimitMode ? 64 : overflowMode || failureMode || artifactMode || lossMode || sessionMode ? 0 : 1;
@@ -814,6 +842,12 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
   const stateDirs = overflowMode ? [] : [undefined, ...Array.from({ length: companionCount }, (_, i) => join(agentDir, "tmp", "pi-actors", "runs", companionName(i + 1)))];
   const generations = overflowMode ? [] : [undefined, ...Array.from({ length: companionCount }, (_, i) => `${mode}-generation-${i + 1}`)];
   const modeRuns = []; const requests = []; const errors = []; const diagnosticSources = new Map(); const primarySources = new Map();
+  fixtureFrame = run => {
+    const native = modeRuns.find(frame => frame.run === run);
+    if (native) return native;
+    const index = stateDirs.findIndex((_, index) => companionName(index) === run);
+    return index < 0 ? undefined : { state_dir: stateDirs[index], run_instance_id: generations[index] };
+  };
   let toolExecutions = 0; let starts = 0; let settled = 0; let sends = 0; let spawnCalls = 0;
   let launchNavigationShown = 0; let launchNavigationUnavailable = 0;
   let terminalSelection, terminalBatchText, terminalResearch; const terminalReadEvents = [];
@@ -886,9 +920,11 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
         assert.deepEqual(Object.keys(metadata.fields), diagnosticFields); assert.equal(metadata.schema, "run-result-diagnostics-v1");
         assert.equal(metadata.privacy_scope, "producer_admission"); assert.equal(metadata.primary_text, "not_included");
         diagnosticSources.set(run.run, { reference, metadata });
+        canonicalSourceFacts.set(reference.source.path, { ...reference.source, bytes_total: reference.bytes_total, fields: reference.fields });
       } else { assert.equal(result.result_diagnostics, null); assert.equal(result.result_diagnostics_unavailable, "not_recorded"); }
       if (artifactCount > 0) {
         assert.ok(result.artifact_inventory); artifactInventory = result.artifact_inventory; assert.equal(result.artifact_inventory.declarations_total, artifactCount);
+        canonicalSourceFacts.set(artifactInventory.source.path, { ...artifactInventory.source, bytes_total: artifactInventory.bytes_total, declarations_total: artifactInventory.declarations_total });
         const inventory = JSON.parse(await readRetainedText(result.artifact_inventory.source, result.artifact_inventory.bytes_total));
         assert.equal(inventory.schema, "run-artifact-inventory-v1"); assert.equal(inventory.capture_scope, "producer_admission");
         assert.equal(inventory.contents, "not_read"); assert.equal(inventory.availability, "not_observed"); assert.equal(inventory.production_provenance, "not_asserted");
@@ -908,10 +944,11 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
       }
       if (mode === "overflow") {
         assert.equal(result.output.text_basis, "actor_response");
-        primarySources.set(run.run, result.output); return;
+        primarySources.set(run.run, result.output); canonicalSourceFacts.set(result.output.source.path, result.output.source); return;
       }
       if (sessionMode) { assert.equal(result.output.text_basis, "actor_response"); assert.equal(result.output.upstream_truncated, false); }
       primary = { output: result.output }; assert.ok(primary.output); primarySources.set(run.run, primary.output);
+      canonicalSourceFacts.set(primary.output.source.path, primary.output.source);
       const execution = JSON.parse(await readFile(join(run.state_dir, "execution.json"), "utf8"));
       assert.equal(execution.commands[0].stdout_truncated, mode === "tools" || mode === "primary-overflow");
       assert.doesNotMatch(JSON.stringify(execution), /stdoutSha256/); assert.doesNotMatch(JSON.stringify(result), /stdoutSha256/);
@@ -995,7 +1032,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               const { input, batch, journal: capturedJournal } = candidateCaptures[0];
               assert.deepEqual(capturedJournal.completion_batch, batch);
               assert.equal(capturedJournal.owner_id, ownerId); assert.equal(batch.phase, "pending");
-              assert.equal(input.ownerId, ownerId); assert.equal(batch.result_layout, "completion_yaml_files_v2");
+              assert.equal(input.ownerId, ownerId); assert.equal(batch.result_layout, "completion_yaml_files_v3");
               assert.equal(batch.members.length, 1); assert.equal(batch.members[0].run, currentRun.run);
               assert.equal(batch.members[0].run_instance_id, currentRun.run_instance_id);
               const record = candidateRecord(matches[0], batch.batch_id);
@@ -1071,10 +1108,10 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               }
               for (const row of locations) if (row.locations.state === "available") {
                 const index = stateDirs.indexOf(row.locations.directory); assert.ok(index >= 0);
-                assert.equal(row.locations.run_instance_id, generations[index]); assert.equal(row.run_instance_id, generations[index]);
-                assert.equal(row.run, row.locations.run); assert.equal(row.locations.files.length, 9);
+                assert.equal(row.run_instance_id, generations[index]);
+                assert.ok(row.locations.files.length > 0 && row.locations.files.length <= 3);
                 assert.equal(row.locations.files.find(file => file.role === "result")?.path, join(stateDirs[index], "result.json"));
-                assert.equal(row.locations.content_scope, "file_locations_only");
+                assert.equal(row.locations.content_scope, undefined);
               }
               if (mode === "tools") {
                 const selected = locations.find(row => row.locations.state === "available" && row.locations.directory === currentRun.state_dir); assert.ok(selected);
@@ -1112,7 +1149,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                 const batchText = navigationBatch;
                 assert.equal(records.filter(record => record.header.state === "failed").length, 1);
                 assert.equal(records[0].header.primary_unavailable, "primary_not_selected_for_failure");
-                assert.match(batchText, /Diagnostic metadata only; not primary output/);
+                assert.match(batchText, /Recorded diagnostic metadata only; admission privacy/);
                 const coverage = technical.find(value => value.diagnostic_metadata)?.diagnostic_metadata; assert.ok(coverage);
                 assert.equal(coverage.field, "error");
                 const delivered = deliveredBody(records[0], full);
@@ -1150,8 +1187,10 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                   const parts = record.blocks.filter(block => block.kind !== "header").map(block => ({ [block.kind]: block.text }));
                   if (metadata.files) {
                     delete metadata.files.observation;
+                    if (metadata.files.status?.startsWith("Run locations unavailable: ")) delete metadata.files.status;
+                    delete metadata.files.unavailable; delete metadata.files.result_status;
                     if (metadata.files.groups) {
-                      for (const group of metadata.files.groups) group.entries = group.entries.filter(entry => !entry.format_hint);
+                      for (const group of metadata.files.groups) group.entries = group.entries.filter(entry => !entry.format_hint && !["context_index", "result", "execution", "metadata"].includes(entry.role));
                       // Fixture reference groups precede the navigation-only group, so filtering empty suffix groups preserves read_first.
                       metadata.files.groups = metadata.files.groups.filter(group => group.entries.length);
                       if (!metadata.files.groups.length) delete metadata.files.groups;
@@ -1159,7 +1198,8 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                     if (!metadata.files.groups) delete metadata.files.read_first;
                     if (!Object.keys(metadata.files).length) delete metadata.files;
                   }
-                  metadata.run_files_omission = { reason: "packet_byte_limit", shown: 0, omitted: 1, total: 1 };
+                  // Outcome-only observed cost excludes navigation and its omission scaffolding.
+                  delete metadata.run_files_omission;
                   metadata._completion = { ...(index === 0 ? { codec: "completion_yaml_core_v1",
                     batch_id: completionCore(batchText).batchId, service } : {}),
                     ...(parts.length ? { parts: parts.map(part => { const kind = Object.keys(part)[0]; return { [kind]: part[kind].length }; }) } : {}) };
@@ -1236,7 +1276,8 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                 assert.match(text, new RegExp(`${mode}-first`)); if (companionCount > 0) assert.match(text, new RegExp(`${mode}-second`));
                 assert.ok(primary?.output);
                 const primaryRecord = records.find(record => record.header.references?.primary); assert.ok(primaryRecord);
-                assert.ok(text.includes(primary.output.source.sha256)); assert.equal(primaryRecord.header.redacted, true);
+                assert.ok(!navigationBatch.includes(primary.output.source.sha256)); assert.equal(primaryRecord.header.redacted, true);
+                assert.doesNotMatch(navigationBatch, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:/);
                 const coverage = primaryRecord.header.references.primary; assert.ok(coverage);
                 assert.doesNotMatch(text, /hidden-sdk-source-token|hidden-prefix-sdk-token/);
                 const primaryReference = references.find(reference => reference.declarations_total === undefined && reference.fields === undefined);
@@ -1254,7 +1295,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                 const metadata = JSON.parse(await readRetainedText(diagnosticReference, diagnosticReference.bytes_total));
                 assert.deepEqual(metadata, diagnostic.metadata); assert.equal(metadata.primary_text, "not_included");
                 const batchText = navigationBatch;
-                assert.match(batchText, /Diagnostic metadata only; not primary output/);
+                assert.match(batchText, /Recorded diagnostic metadata only; admission privacy/);
                 assert.ok(technical.some(value => value.diagnostic_metadata)); assert.ok(containsRootedPath(batchText, diagnosticReference.path));
                 if (artifactCount > 0) {
                   const reference = references.find(reference => reference.declarations_total === artifactCount); assert.ok(reference); assert.ok(artifactInventory);
@@ -1263,7 +1304,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                   assert.equal(inventory.artifacts.length, artifactCount); assert.equal(inventory.contents, "not_read"); assert.equal(inventory.availability, "not_observed");
                   assert.equal(inventory.production_provenance, "not_asserted");
                   assert.equal(Number(primaryRecord.header.artifact_declarations), artifactCount);
-                  assert.ok(technical.some(value => value.artifact_inventory?.scope.startsWith("Metadata only"))); assert.ok(containsRootedPath(batchText, reference.path));
+                  assert.ok(technical.some(value => value.artifact_inventory?.status === "Declarations only; target availability/production unproven")); assert.ok(containsRootedPath(batchText, reference.path));
                   assert.equal(batchText.includes("never-created-"), false, "No legacy path slice substitutes for the admitted inventory");
                   if (artifactMode) {
                     assert.equal(inventory.run, currentRun.run); assert.equal(inventory.run_instance_id, currentRun.run_instance_id);
@@ -1402,8 +1443,12 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               assert.equal(navigation.file_inventory_scope, "canonical_starting_locations"); assert.equal(navigation.files.length, 9);
               assert.equal(navigation.files.find(file => file.role === "metadata")?.path, join(run.state_dir, "run.json"));
               if (mode !== "final") {
-                assert.deepEqual(launchMetadata.run_files, navigation, "Actual compact YAML receipt carries every selected starting-location value");
-                assert.equal(launchMetadata.run_files_observation, "Observed locations; mutable.");
+                const useful = Object.fromEntries(navigation.files.filter(file => file.state === "present" && ["context_index", "result", "execution", "metadata"].includes(file.role)).map(file => [file.role, file.path]));
+                const unavailable = navigation.files.filter(file => file.state === "unavailable").map(file => file.role);
+                assert.deepEqual(launchMetadata.run_files, { directory: navigation.directory, ...useful,
+                  ...(unavailable.length ? { status: `Unavailable locations: ${unavailable.join(", ")}` } : {}) });
+                assert.doesNotMatch(receipt, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:/);
+                assert.equal(launchMetadata.run_files_observation, undefined);
                 assert.equal(literalBlocks(receipt).length, 0, "Launch metadata has no object-JSON fence or completion Markdown body");
               }
             } else {
@@ -1413,7 +1458,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
             if (mode !== "final") {
               assert.equal(launchMetadata.run, run.run); assert.equal(launchMetadata.launch_kind, "spawn");
               assert.equal(launchMetadata.pid, run.pid); assert.doesNotMatch(receipt, /next=|inspect_target=|view[:=] ?recipe|view[:=] ?trace|view[:=] ?control/);
-              const directLocationsShown = navigation.state === "available" && launchMetadata.run_files?.state === "available";
+              const directLocationsShown = navigation.state === "available" && launchMetadata.run_files?.directory === navigation.directory;
               if (directLocationsShown) assert.equal(Object.hasOwn(launchMetadata, "next"), false,
                 "Complete direct launch locations replace the redundant map hint");
               else assert.deepEqual(launchMetadata.next, { tool: "actors_inspect", target: "runtime", view: "runs", verbose: true },

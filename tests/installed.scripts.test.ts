@@ -19,7 +19,7 @@ import { parseDocument } from "yaml";
 
 import { deliverRunControl } from "../lib/runs-control-delivery.ts";
 import { splitCommandTemplate } from "../lib/command-templates.ts";
-import { bindFixtureBirth, captureFixtureBirths, joinFixtureRunners, requireFreshFixtureAbsence, throwFixtureErrors } from "./fixtures/runner-completion.ts";
+import { bindFixtureBirth, captureFixtureBirths, joinFixtureRunners, observeFixtureBirth, requireFreshFixtureAbsence, throwFixtureErrors } from "./fixtures/runner-completion.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -4727,6 +4727,17 @@ esac
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+  const birth = observeFixtureBirth(child), errors: unknown[] = [];
+  let closedAt: number | undefined;
+  child.once("close", () => { closedAt = performance.now(); });
+  const waitClosed = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([birth.closed, new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`music-player close unproven; retaining state: ${root}`)), 5000);
+      })]);
+    } finally { if (timer !== undefined) clearTimeout(timer); }
+  };
   child.stdout.on("data", (chunk) => { childOutput += String(chunk); });
   child.stderr.on("data", (chunk) => { childOutput += String(chunk); });
   try {
@@ -4912,11 +4923,13 @@ esac
       controlsBeforeInvalidVolume,
     );
     const action = process.platform === "win32" ? "status" : "stop";
-    const stopStartedAt = Date.now();
+    const stopStartedAt = performance.now();
     await deliverRunControl("music", stateDir, {
       action,
       run_instance_id: "generation-a",
     });
+    // Force close-before-ACK-observation: retained birth evidence must survive a late reader.
+    if (process.platform !== "win32") await waitClosed();
     try {
       await waitForText(join(stateDir, "controls.jsonl"), new RegExp(`"action":"${action}".*"status":"handled"`));
     } catch (error) {
@@ -4930,14 +4943,9 @@ esac
     if (process.platform === "win32") {
       child.kill("SIGTERM");
     } else {
-      const code = await Promise.race([
-        new Promise<number | null>((resolve) => child.once("exit", resolve)),
-        new Promise<never>((_resolve, reject) =>
-          setTimeout(() => reject(new Error("music-player did not stop")), 5000),
-        ),
-      ]);
-      assert.equal(code, 0);
-      assert.ok(Date.now() - stopStartedAt < 2500, "music-player stop must beat natural fixture exit");
+      assert.deepEqual(birth.close, { code: 0, signal: null });
+      assert.ok(closedAt !== undefined && closedAt >= stopStartedAt && closedAt - stopStartedAt < 2500,
+        "music-player stop must beat natural fixture exit");
     }
     const controls = (await readFile(join(stateDir, "controls.jsonl"), "utf8"))
       .trim()
@@ -4974,28 +4982,28 @@ esac
     const delivered = controls.find((control) => control.action === action);
     assert.equal(delivered?.status, "handled");
     assert.equal(typeof delivered?.delivered_at, "string");
-  } finally {
-    if (process.platform === "win32") {
-      const quotedPlayer = fakePlayer.replaceAll("'", "''");
-      await execFileAsync("powershell.exe", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `$target = '${quotedPlayer}'; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $target } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
-      ]).catch(() => {});
-      for (const pid of playbackPids) {
-        await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"]).catch(() => {});
+  } catch (error) { errors.push(error); }
+  finally {
+    try {
+      if (process.platform === "win32") {
+        const quotedPlayer = fakePlayer.replaceAll("'", "''");
+        await execFileAsync("powershell.exe", [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `$target = '${quotedPlayer}'; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $target } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+        ]).catch(() => {});
+        for (const pid of playbackPids) {
+          await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"]).catch(() => {});
+        }
       }
-    }
-    if (child.exitCode === null) {
-      child.kill("SIGKILL");
-      await Promise.race([
-        new Promise((resolve) => child.once("exit", resolve)),
-        new Promise((resolve) => setTimeout(resolve, 5000)),
-      ]);
-    }
-    await removeTreeEventually(root);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await waitClosed();
+      requireFreshFixtureAbsence(birth);
+      if (!errors.length) await removeTreeEventually(root);
+    } catch (error) { errors.push(error); }
   }
+  throwFixtureErrors(errors);
 });
 
 test("installed async-runner avoids importing TypeScript from node_modules", async (t) => {

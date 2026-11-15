@@ -2,6 +2,12 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.58.6: Completion Navigation and Reliable Validation
+
+- `Completion Navigation`: Fresh completions use direct rooted file groups, omit redundant roles/field inventories and recommend `Read first` only for recoverable incomplete text. Primary-file cuts expose exact line continuation; JSON diagnostics keep character counts. Source/privacy distinctions, fixed budgets and byte-exact historical replay remain unchanged.
+- `Control Fixture Closure`: Public music-player Control tests retain close evidence from child birth and deliberately observe stop ACKs after close. Successful native completion and the original prompt-stop bound stay required; watchdogs are cancelled, cleanup requires fresh service absence, and failures retain roots plus original causes.
+- `Lifecycle Fixture Readiness`: Singleton clock/reuse tests await real gated-workload readiness before temporarily rewriting canonical metadata, preventing runner admission from racing the test. The shared fixture keeps its existing readiness bound, all generation/origin/reuse assertions and fresh process-exit checks.
+
 ## 0.58.5: Actionable Completion Navigation
 
 - `Compact Completion Files`: Fresh completion headers expose `files` directly as rooted entry groups, without role labels, read-first index pointers or diagnostic field inventories. Concise source/privacy status, exact paths and real group-wide uncertainty remain; full machine bindings are unchanged.

@@ -868,6 +868,12 @@ function fixture(t: TestContext, ownedStateDir?: string, runId = "admission-cloc
     if (!Number.isSafeInteger(work.pid) || work.pid <= 0) throw Error("Captured fixture workload PID unavailable; retaining state");
     pids.add(work.pid); return true;
   };
+  const waitReady = async () => {
+    const deadline = performance.now() + 5000;
+    while (!captureWork() && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(captureWork(), true, "Gated fixture workload did not become ready; retaining state: " +
+      ["result.json", "stderr.log"].map(name => { const path = join(stateDir, name); return fs.existsSync(path) ? fs.readFileSync(path, "utf8") : `${name}:absent`; }).join("\n"));
+  };
   const settle = async () => {
     for (const pid of pids) {
       let exited = false; for (let attempt = 0; attempt < 400; attempt++) { captureWork(); if (readProcessLiveness(pid) === "dead") { exited = true; break; } await new Promise(resolve => setTimeout(resolve, 25)); }
@@ -893,7 +899,7 @@ function fixture(t: TestContext, ownedStateDir?: string, runId = "admission-cloc
     syncBuiltinESMExports(); try { return start(); } finally { childProcess.spawn = spawn; syncBuiltinESMExports(); }
   };
   const start = (...args: Parameters<typeof startRun>) => captureNative(() => startRun(...args));
-  return { root, stateDir, gate, ready, params, start, settle, captureWork, captureNative, capturedPids: () => [...pids] };
+  return { root, stateDir, gate, ready, params, start, settle, waitReady, captureWork, captureNative, capturedPids: () => [...pids] };
 }
 
 function coordinatorHarness(enabled = true) {
@@ -934,9 +940,7 @@ test("Opt-in real coordinator retains original wrapped spawn/async-tool admissio
       const response = await pending; const meta = response.details; const expected = { run: meta.run, run_instance_id: meta.run_instance_id, ownerId: meta.ownerId };
       assert.equal(meta.ownerId, `owner-${route}`); assert.equal(Object.hasOwn(meta, "snapshot_references"), false); assert.equal(Object.hasOwn(meta, "origin"), false);
       assert.equal(Object.hasOwn(meta, "onSupervisionClockCaptured"), false);
-      const readyUntil = performance.now() + 5000;
-      while (!f.captureWork() && performance.now() < readyUntil) await new Promise(resolve => setTimeout(resolve, 25));
-      assert.equal(f.captureWork(), true, "Coordinator fixture workload readiness remains unproven");
+      await f.waitReady();
       for (const busy of [true, false]) {
         h.busy(busy); h.runtime.onAgentSettled(active.ctx);
         const reading = h.runtime.observeRunSnapshot(expected, new Date().toISOString());
@@ -1064,10 +1068,7 @@ test("Real start hands off a frozen original clock under lifecycle admission bef
     assert.ok(observedTime.timing.elapsed_ms !== null && observedTime.timing.elapsed_ms >= 0); assert.equal(observedTime.unchanged(), true); }
   assert.equal(owner.snapshot(event.identity).state, "retained");
   // The workload marker only synchronizes this test; lifecycle/timing still require their independent owners.
-  const readyDeadline = performance.now() + 5000;
-  while (!f.captureWork() && performance.now() < readyDeadline) await new Promise(resolve => setTimeout(resolve, 25));
-  assert.equal(f.captureWork(), true, "Gated fixture workload did not become ready: " +
-    ["result.json", "stderr.log"].map(name => { const path = join(f.stateDir, name); return fs.existsSync(path) ? fs.readFileSync(path, "utf8") : `${name}:absent`; }).join("\n"));
+  await f.waitReady();
   const active = readRunSnapshotFacts(f.stateDir, event.identity, new Date().toISOString(), owner.observeTime);
   assert.equal(active.state, "available");
   if (active.state === "available") {
@@ -1120,6 +1121,8 @@ test("Singleton/legacy reuse preserves one origin; refused replacement retains o
   assert.equal(reused.reused, true); assert.equal(reused.run_instance_id, first.run_instance_id); assert.equal(reused.started_at, first.started_at); assert.equal(captures.length, 1);
   assert.deepEqual(fs.readFileSync(join(f.stateDir, "run.json")), before);
   assert.equal(owner.snapshot(captures[0].identity).state, "retained");
+  // The runner must finish metadata admission before this test rewrites its clock fields.
+  await f.waitReady();
   const legacy = JSON.parse(before.toString()); delete legacy.started_at; delete legacy.supervision; delete legacy.supervision_provenance;
   const bytes = JSON.stringify(legacy); fs.writeFileSync(join(f.stateDir, "run.json"), bytes);
   const old = f.start({ file, state_dir: f.stateDir, ownerId: "owner-a" }, process.cwd(), options);

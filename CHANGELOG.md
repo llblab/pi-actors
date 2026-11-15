@@ -8,6 +8,7 @@
 - `Control Fixture Closure`: Public music-player Control tests retain close evidence from child birth and deliberately observe stop ACKs after close. Successful native completion and the original prompt-stop bound stay required; watchdogs are cancelled, cleanup requires fresh service absence, and failures retain roots plus original causes.
 - `Lifecycle Fixture Readiness`: Singleton clock/reuse tests await real gated-workload readiness before temporarily rewriting canonical metadata, preventing runner admission from racing the test. The shared fixture keeps its existing readiness bound, all generation/origin/reuse assertions and fresh process-exit checks.
 - `SDK Fixture Cleanup`: Long source/packed SDK journeys wait read-only for current PID absence before the immediate final fresh-ESRCH census, reusing the existing bounded settlement policy without changing captured records. Persistent presence, denied/unknown probes and PID reappearance still refuse cleanup and retain roots plus original causes; no process is signalled and product deadlines stay unchanged.
+- `Coordinator Fixture Settlement`: Repeated finally cleanup retains accepted settlement only for the original runtime-local row/PID; copied records and changed PIDs cannot borrow it. First-time denied/unknown probes still fail, native bounds and genuine-close requirements remain unchanged, and independent fresh parent probes continue to gate file research and deletion.
 
 ## 0.58.6: Completion Navigation and Reliable Validation
 

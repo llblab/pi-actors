@@ -29,6 +29,7 @@ const { readProcessIdentity } = await import(modulePath("runs-process"));
 fs.mkdirSync(agentDir, { recursive: true });
 const manifestPath = join(agentDir, "fixture-processes.json");
 const captured = [], scopes = [], runtimes = [], specs = [], publicLaunches = [];
+const settledPids = new WeakMap();
 let launching = false, complete = false, providerError, publicBirthSpec, observationOrder = 0;
 const nativeSpawn = childProcess.spawn;
 // A loader may retain this function after builtin restoration; only the current tool-start window can arm it.
@@ -50,6 +51,8 @@ const expected = spec => ({ run: spec.run, run_instance_id: spec.runner.run_inst
 const absent = pid => { try { process.kill(pid, 0); return false; } catch (error) { if (error.code === "ESRCH") return true; throw error; } };
 async function settlePid(row) {
   assert.ok(Number.isSafeInteger(row.pid) && row.pid > 0, "Captured fixture PID is unavailable; retaining state");
+  // Repeated finally settlement retains this exact row/PID's observation, not a fresh cleanup grant.
+  if (settledPids.get(row) === row.pid) return;
   const until = performance.now() + 8000;
   // ESRCH does not dispatch Node's close callback. Require both observations
   // for a runner whose actual ChildProcess close is captured by this fixture.
@@ -57,8 +60,8 @@ async function settlePid(row) {
     if (performance.now() >= until) throw Error(`Captured fixture ${row.role} exit remains unproven; retaining state`);
     await pause();
   }
-  if (!row.settled) row.settled_order = ++observationOrder;
-  row.settled = true; persist();
+  row.settled_order = ++observationOrder;
+  row.settled = true; settledPids.set(row, row.pid); persist();
 }
 function captureRunner(spec, child) {
   const row = { pid: child.pid, role: "runner", run: spec.run, ownerId: spec.ownerId, state_dir: spec.stateDir, settled: false, captured_order: ++observationOrder };

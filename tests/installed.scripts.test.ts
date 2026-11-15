@@ -5693,6 +5693,65 @@ test("source and packed default SDK shutdown stops captured live processes witho
   }
 });
 
+test("Coordinator fixture settlement is once per original row and PID without weakening fresh cleanup", async () => {
+  const source = await readFile(join(process.cwd(), "tests/fixtures/coordinator-lifetime-sdk.mjs"), "utf8");
+  const start = source.indexOf("const absent = pid =>"); const end = source.indexOf("function captureRunner", start);
+  assert.ok(start >= 0 && end > start);
+  const absent = Object.assign(Error("absent"), { code: "ESRCH" });
+  const denied = Object.assign(Error("denied"), { code: "EPERM" });
+  const make = (scenario?: "shutdown") => {
+    const counts = { probes: 0, persists: 0, pauses: 0 };
+    const ports: { probe: (pid: number) => void; afterPause?: () => void; clock: number } = {
+      probe: () => { throw absent; }, clock: 0,
+    };
+    const context = { assert, scenario, settledPids: new WeakMap(), observationOrder: 0,
+      process: { kill: (pid: number, signal: number) => { assert.equal(signal, 0); counts.probes++; ports.probe(pid); } },
+      performance: { now: () => ports.clock }, persist: () => { counts.persists++; },
+      pause: async () => { counts.pauses++; ports.clock += 25; ports.afterPause?.(); },
+    };
+    return { counts, ports, context, settle: runInNewContext(source.slice(start, end) + "\nsettlePid", context) };
+  };
+
+  const h = make(); const row: any = { pid: 123, role: "workload", settled: false };
+  await h.settle(row); const accepted = JSON.stringify(row);
+  assert.equal(row.settled, true); assert.equal(row.settled_order, 1);
+  h.ports.probe = () => { throw denied; };
+  await h.settle(row);
+  assert.equal(JSON.stringify(row), accepted);
+  assert.deepEqual(h.counts, { probes: 1, persists: 1, pauses: 0 });
+  await assert.rejects(h.settle({ ...row }), error => error === denied);
+  row.pid = 456; await assert.rejects(h.settle(row), error => error === denied);
+  assert.equal(h.counts.probes, 3); assert.equal(h.counts.persists, 1);
+  assert.throws(() => assertFreshFixtureRunnerAbsence([row], "fixture-root", undefined, () => { throw denied; }), (error: unknown) => {
+    assert.ok(error instanceof AggregateError); assert.deepEqual(error.errors, [denied]); return true;
+  });
+
+  for (const fault of [denied, Error("unknown probe failure")]) {
+    const fresh = make(); const pending = { pid: 789, role: "workload", settled: false };
+    fresh.ports.probe = () => { throw fault; };
+    await assert.rejects(fresh.settle(pending), error => error === fault);
+    assert.equal(pending.settled, false); assert.deepEqual(fresh.counts, { probes: 1, persists: 0, pauses: 0 });
+    fresh.ports.probe = () => { throw absent; }; await fresh.settle(pending);
+    assert.equal(fresh.counts.probes, 2); assert.equal(fresh.counts.persists, 1);
+  }
+  const live = make(); const pending = { pid: 123, role: "workload", settled: false };
+  live.ports.probe = () => {};
+  await assert.rejects(live.settle(pending), /exit remains unproven; retaining state/);
+  assert.equal(live.ports.clock, 8000); assert.equal(live.counts.probes, 321);
+  assert.equal(pending.settled, false); assert.equal(live.counts.persists, 0);
+
+  const shutdown = make("shutdown"); const runner: any = { pid: 123, role: "runner", settled: false };
+  shutdown.ports.afterPause = () => { runner.close = { code: 0, signal: null }; };
+  await shutdown.settle(runner);
+  assert.deepEqual(shutdown.counts, { probes: 2, persists: 1, pauses: 1 });
+  shutdown.ports.probe = () => { throw denied; }; await shutdown.settle(runner);
+  assert.equal(shutdown.counts.probes, 2);
+  for (const pid of [0, -1, NaN, undefined]) {
+    const invalid = make(); await assert.rejects(invalid.settle({ pid, settled: true }), /PID is unavailable/);
+    assert.equal(invalid.counts.probes, 0); assert.equal(invalid.counts.persists, 0);
+  }
+});
+
 test("source and packed private coordinator epochs and producer-exit ordinary research keep authority separate", async () => {
   for (const layout of ["source", "packed"]) {
     // A complete-map witness needs a short canonical root; JSON also doubles

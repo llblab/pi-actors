@@ -279,7 +279,7 @@ function isFrontmatterCompletionLayout(layout) {
     return layout === "frontmatter_v1" || layout === "frontmatter_v2";
 }
 function isRootedCompletionLayout(layout) {
-    return layout === "completion_yaml_files_v1" || layout === "completion_yaml_files_v2" || layout === "completion_yaml_files_v3";
+    return layout === "completion_yaml_files_v1" || layout === "completion_yaml_files_v2" || layout === "completion_yaml_files_v3" || layout === "completion_yaml_files_v4";
 }
 function isYamlCompletionLayout(layout) {
     return layout === "completion_yaml_core_v1" || isRootedCompletionLayout(layout);
@@ -691,7 +691,7 @@ export function requestRunCompletionStream(input) {
     });
 }
 export function admitRunCompletionBatch(input) {
-    return captureCompletionBatch(input, false, "completion_yaml_files_v3");
+    return captureCompletionBatch(input, false, "completion_yaml_files_v4");
 }
 /** Kernel-only opt-in; ordinary Pi capture stays fenced until session/lifecycle integration is admitted. */
 export function captureRunCompletionStreamBatch(input) {
@@ -699,7 +699,7 @@ export function captureRunCompletionStreamBatch(input) {
 }
 /** Private ordinary candidate composition; stream capture retains its separately gated codec. */
 export function captureRunCompletionYamlCandidateBatch(input) {
-    return captureCompletionBatch(input, false, "completion_yaml_files_v3");
+    return captureCompletionBatch(input, false, "completion_yaml_files_v4");
 }
 function captureCompletionBatch(input, numbered, layout = "frontmatter_v2") {
     const now = (input.now ?? new Date()).toISOString();
@@ -1312,6 +1312,9 @@ function completionRecordRow(member, index, byIdentity, flat = false, layout, te
                 end: diagnostic.shown_bytes.start + selected.shown_bytes.end }, chars_shown: shown,
             chars_omitted: diagnostic.chars_total - shown, truncated: shown < diagnostic.chars_total };
     }
+    // LF-delimited file lines, not terminal wrapping; a partial final line must be read again.
+    const continuationLine = layout === "completion_yaml_files_v4" && primary && primary.chars_omitted > 0 && primary.shown_bytes.start === 0
+        ? primary.preview.split("\n").length : undefined;
     const kind = primary ? primary.text_basis === "actor_response" ? "response" : "primary" : diagnostic ? "diagnostic" : member.output ? "legacy" : undefined;
     const boilerplate = isRoutineCompletionSummary(member);
     let legacy = !!member.output;
@@ -1356,7 +1359,8 @@ function completionRecordRow(member, index, byIdentity, flat = false, layout, te
                     pieces.push({ text: "[omitted: unknown] (retained excerpt starts after the source boundary)", compact: true, block: "marker" });
                 pieces.push({ text: value, compact: true, block: "body" });
                 if (chosen && chosen.chars_omitted > 0)
-                    pieces.push({ text: `[${chosen.chars_omitted} characters omitted]`, compact: true, block: "marker" });
+                    pieces.push({ text: continuationLine === undefined
+                            ? `[${chosen.chars_omitted} characters omitted]` : `[Read from line ${continuationLine}]`, compact: true, block: "marker" });
             }
             else {
                 const complete = shared && primary && primary.shown_bytes.start === 0 && primary.shown_bytes.end === primary.bytes_total && !primary.upstream_truncated;
@@ -1419,7 +1423,8 @@ function completionRecordRow(member, index, byIdentity, flat = false, layout, te
         pieces.push(completionPiece("artifact_declarations", String(artifacts.length), depth));
         technical.artifacts = { scope: "Declared paths; existence/production unproven.", declarations: artifacts.map(([name, path]) => ({ name, path })) };
     }
-    return { pieces, technical: Object.keys(technical).length ? formatMarkdownField(flat ? "result_details" : `#${index}`, formatLiteralBlock(JSON.stringify(technical, null, 2))) : "", technical_data: technical, legacy, ...(completionText ? { completion_text: completionText } : {}) };
+    return { pieces, technical: Object.keys(technical).length ? formatMarkdownField(flat ? "result_details" : `#${index}`, formatLiteralBlock(JSON.stringify(technical, null, 2))) : "", technical_data: technical, legacy, ...(completionText ? { completion_text: completionText } : {}),
+        ...(continuationLine === undefined ? {} : { continuation_line: continuationLine }) };
 }
 const FRONTMATTER_FRAME = "<!-- pi-actors:frontmatter ";
 function readFrontmatterFrame(content) {
@@ -1638,7 +1643,7 @@ function rootedCompletionPath(path, runRoot) {
     return { root: path.slice(0, end), path: path.slice(split + 1) };
 }
 /** Body-free, read-free navigation over already selected references. Roots are presentation bases, not containment proof. */
-function completionRootedFiles(row, member, locations, compact = false) {
+function completionRootedFiles(row, member, locations, compact = false, simple = false) {
     const technical = completionYamlReferences(row), files = {};
     const status = [];
     const groups = [];
@@ -1655,11 +1660,22 @@ function completionRootedFiles(row, member, locations, compact = false) {
         const selected = rootedCompletionPath(path, runRoot);
         const index = group(selected?.root ?? (base === undefined ? null : completionYamlString(base)));
         const selectedPath = selected?.path ?? path;
-        groups[index].entries.push({ ...entry, path: selectedPath,
-            ...(!selected && base === undefined ? { path_basis: "as_recorded", base_unavailable: true } : {}) });
+        const shown = { ...entry, path: selectedPath,
+            ...(!selected && base === undefined ? { path_basis: "as_recorded", base_unavailable: true } : {}) };
+        groups[index].entries.push(shown);
         if (selected && rank < priority) {
             priority = rank;
-            files.read_first = { group: index, entry: groups[index].entries.length - 1 };
+            if (simple) {
+                shown.status = `Read first; ${entry.status}`;
+                if (row.continuation_line !== undefined && entry.role === "primary")
+                    shown.continue_from_line = row.continuation_line;
+            }
+            else
+                files.read_first = { group: index, entry: groups[index].entries.length - 1 };
+        }
+        if (simple) {
+            delete shown.role;
+            delete shown.recorded_fields_not_shown;
         }
     };
     for (const [role, purpose, rank] of [
@@ -1671,10 +1687,13 @@ function completionRootedFiles(row, member, locations, compact = false) {
             continue;
         const { source: rawSource, ...facts } = detail;
         const { path, ...binding } = rawSource;
+        const coverage = row.technical_data[role];
+        const continuation = (role === "primary" || (role === "diagnostic_metadata" && !row.technical_data.primary)) &&
+            coverage?.state === "clipped" && coverage.chars_total > coverage.chars_shown;
         add(path, compact ? { role, ...(role === "primary" ? { status: facts.text_basis === "actor_response" ? "Actor response; admission privacy" : "Exported text; admission privacy, not complete Actor output" }
                 : role === "diagnostic_metadata" ? { status: "Recorded diagnostic metadata only; admission privacy",
                     ...(facts.recorded_fields_not_shown ? { recorded_fields_not_shown: facts.recorded_fields_not_shown } : {}) }
-                    : { status: "Declarations only; target availability/production unproven" }) } : { role, purpose, ...facts, source: binding }, rank);
+                    : { status: "Declarations only; target availability/production unproven" }) } : { role, purpose, ...facts, source: binding }, simple && !continuation ? Infinity : rank);
         delete technical[role];
     }
     const artifacts = technical.artifacts;
@@ -1703,7 +1722,7 @@ function completionRootedFiles(row, member, locations, compact = false) {
         for (const item of compact ? useful : selectedFiles) {
             const { path, ...facts } = item;
             const purpose = item.role === "result" ? "Recorded result metadata" : item.role === "execution" ? "Recorded execution and capture locations" : "Recorded Run file";
-            add(typeof path === "string" ? completionYamlString(path) : null, compact ? { role: item.role } : { ...facts, purpose }, item.state === "present" && item.role === "result" ? 3 : item.state === "present" && item.role === "execution" ? 4 : Infinity, directory);
+            add(typeof path === "string" ? completionYamlString(path) : null, compact ? { role: item.role } : { ...facts, purpose }, !simple && item.state === "present" && item.role === "result" ? 3 : !simple && item.state === "present" && item.role === "execution" ? 4 : Infinity, directory);
         }
     }
     else if (locations) {
@@ -1724,7 +1743,8 @@ function completionRootedFiles(row, member, locations, compact = false) {
 function prepareCompletionYamlProjection(safe, candidates, references, ordered) {
     const packet = { batchId: safe.batch_id, records: [] };
     const rooted = isRootedCompletionLayout(safe.result_layout);
-    const compact = safe.result_layout === "completion_yaml_files_v3";
+    const simple = safe.result_layout === "completion_yaml_files_v4";
+    const compact = simple || safe.result_layout === "completion_yaml_files_v3";
     const localSingleton = (compact || safe.result_layout === "completion_yaml_files_v2") && !safe.numbering && candidates.length === 1;
     if (!safe.batch_id.isWellFormed())
         return { state: "unsupported" };
@@ -1753,8 +1773,16 @@ function prepareCompletionYamlProjection(safe, candidates, references, ordered) 
         const navigation = references.has(index) && location
             ? safe.file_navigation.find(item => safe.members[item.member_index] === member).locations : undefined;
         if (rooted) {
-            const files = completionRootedFiles(row, member, navigation, compact);
-            if (Object.keys(files).length)
+            const files = completionRootedFiles(row, member, navigation, compact, simple);
+            if (simple) {
+                if (files.groups)
+                    metadata.files = files.groups;
+                if (files.status)
+                    metadata.files_status = files.status;
+                if (files.notes)
+                    metadata.files_notes = files.notes;
+            }
+            else if (Object.keys(files).length)
                 metadata.files = files;
         }
         else {
@@ -1776,7 +1804,8 @@ function prepareCompletionYamlProjection(safe, candidates, references, ordered) 
             if (piece.block) {
                 if (!piece.text.isWellFormed())
                     return { state: "unsupported" };
-                if (rooted && piece.block === "marker" && !/^\[[0-9]+ characters omitted\]$/u.test(piece.text)) {
+                if (rooted && piece.block === "marker" && !/^\[[0-9]+ characters omitted\]$/u.test(piece.text) &&
+                    !(simple && row.continuation_line !== undefined && piece.text === `[Read from line ${row.continuation_line}]`)) {
                     metadata.text_warnings ??= [];
                     metadata.text_warnings.push(piece.text);
                 }
@@ -1792,7 +1821,7 @@ function prepareCompletionYamlProjection(safe, candidates, references, ordered) 
         packet.records.push({ metadata, parts });
     }
     const service = rooted ? {
-        header_layout: compact ? "rooted_files_v3" : safe.result_layout === "completion_yaml_files_v2" ? "rooted_files_v2" : "rooted_files_v1",
+        header_layout: simple ? "rooted_files_v4" : compact ? "rooted_files_v3" : safe.result_layout === "completion_yaml_files_v2" ? "rooted_files_v2" : "rooted_files_v1",
     } : {};
     const omitted = safe.members.length - candidates.length;
     if (omitted) {
@@ -2332,7 +2361,7 @@ export function readRunCompletionPresentation(content, value) {
             hint.content_sha256 !== createHash("sha256").update(content).digest("hex"))
             return full;
         const segments = [];
-        const rooted = core.packet.service?.header_layout === "rooted_files_v1" || core.packet.service?.header_layout === "rooted_files_v2" || core.packet.service?.header_layout === "rooted_files_v3";
+        const rooted = core.packet.service?.header_layout === "rooted_files_v1" || core.packet.service?.header_layout === "rooted_files_v2" || core.packet.service?.header_layout === "rooted_files_v3" || core.packet.service?.header_layout === "rooted_files_v4";
         const facts = Object.fromEntries(Object.entries(core.packet.service ?? {}).filter(([key]) => key !== "header_layout"));
         for (const [index, record] of core.packet.records.entries()) {
             if (index)
@@ -2582,7 +2611,7 @@ export function encodeCompletionYamlCarrier(input) {
         (!packet.records.length && !Object.hasOwn(packet, "service")))
         return unavailable;
     const localSingleton = packet.records.length === 1 && completionYamlMapping(packet.service) &&
-        (packet.service.header_layout === "rooted_files_v2" || packet.service.header_layout === "rooted_files_v3") && !Object.hasOwn(packet.service, "numbering");
+        (packet.service.header_layout === "rooted_files_v2" || packet.service.header_layout === "rooted_files_v3" || packet.service.header_layout === "rooted_files_v4") && !Object.hasOwn(packet.service, "numbering");
     const rows = [];
     for (let index = 0; index < Math.max(1, packet.records.length); index++) {
         const row = packet.records[index];

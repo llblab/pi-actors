@@ -2,6 +2,12 @@
 
 > Each release keeps at most 8 outcome records of at most 512 characters.
 
+## 0.58.5: Actionable Completion Navigation
+
+- `Compact Completion Files`: Fresh completion headers expose `files` directly as rooted entry groups, without role labels, read-first index pointers or diagnostic field inventories. Concise source/privacy status, exact paths and real group-wide uncertainty remain; full machine bindings are unchanged.
+- `Selective Continuation`: `Read first` appears only for incomplete selected text recoverable from its source. Primary text prefixes add `continue_from_line` and compact `[Read from line N]` guidance, rereading partial LF/CRLF file lines. JSON diagnostics retain character counts; complete answers and upstream uncertainty alone create no reading recommendation.
+- `Replay and Safety`: A fresh-only snapshot layout preserves earlier packet bytes, pointers, markers and budgets. Formatting reads no files, changes no source/privacy or delivery authority and leaves Actor Markdown intact. Loaded-host acceptance, integration and publication remain separate.
+
 ## 0.58.4: Host-Provided SDK Loading
 
 - `Extension Startup`: Standalone and kit-pointer installations no longer require a physical Pi SDK package beside the extension merely to load. Bare Pi commands keep their context/session behavior; Node CLI recognition resolves the SDK only when needed and refuses unknown scripts when that optional identity is unavailable.

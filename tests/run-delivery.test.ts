@@ -36,12 +36,14 @@ function coreRows(text: string): Array<{ metadata: any; parts: Array<{ body: str
 }
 
 function rootedEntries(metadata: any): any[] {
-  return (metadata.files?.groups ?? []).flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
+  const groups = Array.isArray(metadata.files) ? metadata.files : metadata.files?.groups ?? [];
+  return groups.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
 }
 
 function rootedNavigation(metadata: any): any {
-  const entries = rootedEntries(metadata).filter(entry => ["context_index", "result", "execution", "metadata"].includes(entry.role));
-  return entries.length ? Object.fromEntries(entries.map(entry => [entry.role, join(entry.root, entry.path)])) : undefined;
+  const paths = new Map([["context-index.json", "context_index"], ["result.json", "result"], ["execution.json", "execution"], ["run.json", "metadata"]]);
+  const entries = rootedEntries(metadata).filter(entry => paths.has(entry.path));
+  return entries.length ? Object.fromEntries(entries.map(entry => [paths.get(entry.path), join(entry.root, entry.path)])) : undefined;
 }
 function selectedNavigation(locations: any): any {
   if (locations.state !== "available") return undefined;
@@ -58,13 +60,14 @@ import { renderYamlMetadata } from "../lib/tools-response.ts";
 function candidateProofWire(packet: CompletionYamlPacket): string {
   // These independently authored fixtures use canonical native paths only. The production path splitter
   // is deliberately not used: this oracle uses native relative/dirname/basename for the known fixtures.
-  const service: any = { header_layout: "rooted_files_v3", ...packet.service };
-  const compact = service.header_layout === "rooted_files_v3";
+  const service: any = { header_layout: "rooted_files_v4", ...packet.service };
+  const simple = service.header_layout === "rooted_files_v4";
+  const compact = simple || service.header_layout === "rooted_files_v3";
   if (service.result_inventory) service.result_inventory = { ...service.result_inventory,
     path: basename(service.result_inventory.path), root: dirname(service.result_inventory.path) };
   packet = { ...packet, service, records: packet.records.map(row => {
     const { references = {}, run_files, ...metadata } = row.metadata as any;
-    if (["rooted_files_v2", "rooted_files_v3"].includes(service.header_layout) && packet.records.length === 1) delete metadata.index;
+    if (["rooted_files_v2", "rooted_files_v3", "rooted_files_v4"].includes(service.header_layout) && packet.records.length === 1) delete metadata.index;
     const groups: any[] = [], files: any = {}, status: string[] = [];
     const locations = run_files?.locations, runRoot = locations?.state === "available" ? locations.directory : undefined;
     let best = Infinity;
@@ -79,8 +82,18 @@ function candidateProofWire(packet: CompletionYamlPacket): string {
       const selected = typeof path === "string" && isAbsolute(path) ? within ? relative(runRoot, path) : basename(path) : path;
       const index = group(root); groups[index].entries.push({ ...entry, path: selected });
       if (typeof path === "string" && isAbsolute(path) && rank < best) {
-        best = rank; files.read_first = { group: index, entry: groups[index].entries.length - 1 };
+        best = rank;
+        if (simple) {
+          const shown = groups[index].entries.at(-1);
+          shown.status = `Read first; ${entry.status}`;
+          if (entry.role === "primary") {
+            const marker = row.parts.find(part => "marker" in part && /^\[Read from line \d+\]$/u.test(part.marker));
+            if (marker && "marker" in marker) shown.continue_from_line = Number(marker.marker.match(/\d+/u)![0]);
+          }
+        }
+        else files.read_first = { group: index, entry: groups[index].entries.length - 1 };
       }
+      if (simple) { delete groups[index].entries.at(-1).role; delete groups[index].entries.at(-1).recorded_fields_not_shown; }
     };
     const notes = { ...references };
     for (const [role, purpose, rank] of [["primary", "Full result text", 0], ["diagnostic_metadata", "Recorded error and command metadata", 1],
@@ -89,7 +102,9 @@ function candidateProofWire(packet: CompletionYamlPacket): string {
       const { source: { path, ...source }, ...facts } = references[role];
       add(path, compact ? { role, ...(role === "primary" ? { status: facts.text_basis === "actor_response" ? "Actor response; admission privacy" : "Exported text; admission privacy, not complete Actor output" }
         : role === "diagnostic_metadata" ? { status: "Recorded diagnostic metadata only; admission privacy", ...(facts.recorded_fields_not_shown ? { recorded_fields_not_shown: facts.recorded_fields_not_shown } : {}) }
-        : { status: "Declarations only; target availability/production unproven" }) } : { role, purpose, ...facts, source }, rank); delete notes[role];
+        : { status: "Declarations only; target availability/production unproven" }) } : { role, purpose, ...facts, source },
+        simple && !((role === "primary" || (role === "diagnostic_metadata" && !references.primary)) &&
+          row.parts.some(part => "marker" in part && /^\[(?:[1-9][0-9]* characters omitted|Read from line [1-9][0-9]*)\]$/u.test(part.marker))) ? Infinity : rank); delete notes[role];
     }
     if (references.artifacts) {
       for (const declaration of references.artifacts.declarations)
@@ -109,7 +124,7 @@ function candidateProofWire(packet: CompletionYamlPacket): string {
       if (!useful.length) useful.push(...entries.filter((entry: any) => entry.state === "present" && entry.role === "metadata"));
       for (const { path, ...facts } of compact ? useful : entries) add(path, compact ? { role: facts.role } : { ...facts, purpose: facts.role === "result" ? "Recorded result metadata"
         : facts.role === "execution" ? "Recorded execution and capture locations" : "Recorded Run file" },
-        facts.state === "present" && facts.role === "result" ? 3 : facts.state === "present" && facts.role === "execution" ? 4 : Infinity, directory);
+        !simple && facts.state === "present" && facts.role === "result" ? 3 : !simple && facts.state === "present" && facts.role === "execution" ? 4 : Infinity, directory);
     } else if (locations) {
       if (compact) status.push(`Run locations unavailable: ${locations.reason}`);
       else files.observation = locations;
@@ -119,7 +134,11 @@ function candidateProofWire(packet: CompletionYamlPacket): string {
       files.groups = groups;
     }
     if (Object.keys(notes).length) files.notes = notes;
-    if (Object.keys(files).length) metadata.files = files;
+    if (simple) {
+      if (groups.length) metadata.files = groups;
+      if (files.status) metadata.files_status = files.status;
+      if (files.notes) metadata.files_notes = files.notes;
+    } else if (Object.keys(files).length) metadata.files = files;
     const parts = [...row.parts];
     if (parts.some(part => "marker" in part && part.marker === "Run-file reference omitted (packet byte limit).")) {
       metadata.run_files_omission = { reason: "packet_byte_limit", shown: 0, omitted: 1, total: 1 };
@@ -153,7 +172,7 @@ function candidateProofPrimary(item: RunCompletionBatchMember, index: number, ra
   return { metadata: { index, run: item.run, state: item.status, kind: "primary", redacted: true,
     references: { primary: { scope: "Exported primary text at capture; admission privacy, not complete Actor output.",
       redacted: true, source: { ...item.primary_text!.output!.source } } } },
-    parts: [{ body }, ...(omitted ? [{ marker: "\n" }, { marker: `[${omitted} characters omitted]` }] : [])] };
+    parts: [{ body }, ...(omitted ? [{ marker: "\n" }, { marker: `[Read from line ${body.split("\n").length}]` }] : [])] };
 }
 
 test("Candidate q gap attributes minimal row cap independently of bytes", async () => {
@@ -264,7 +283,7 @@ test("Candidate q proof independently maximizes frozen equal shares including in
       }
       if (count === 64) {
         const at99 = Buffer.byteLength(candidateProofWire(expected(99))), at100 = Buffer.byteLength(candidateProofWire(expected(100)));
-        assert.equal(at100 - at99, 64, "Body +1 and descriptor +1 offset omitted-count -1 at 1000 to 999");
+        assert.equal(at100 - at99, 128, "Each body and its UTF-16 length grow by one; same-line continuation stays fixed");
       }
       if (batch.inventory_source) {
         const source = batch.inventory_source, content = fs.readFileSync(source.path);
@@ -380,13 +399,13 @@ test("Candidate r2 freezes admitted malformed metadata and unavailable bindings 
     await writeFile(sourcePath, raw); await writeFile(oppositePath, "unavailable controlled fixture");
     const input = { ownerId: "r2-replay", batchId: "r2-replay", tempDir: root, members: [primary, unavailable] };
     const batch = deliveryYamlPrototype.captureRunCompletionYamlCandidateBatch(input), expected = projectRunCompletionBatchPresentation(batch);
-    assert.equal(batch.result_layout, "completion_yaml_files_v3"); assert.ok(Number.isInteger(batch.text_budget));
+    assert.equal(batch.result_layout, "completion_yaml_files_v4"); assert.ok(Number.isInteger(batch.text_budget));
     assert.equal(batch.numbering, undefined); assert.equal(batch.members[1]!.artifact_inventory, null);
     assert.equal(batch.members[1]!.artifact_inventory_unavailable, "source_unavailable");
     const decoded = readCompletionYamlCarrier(expected.content);
     assert.equal(decoded.state, "available"); if (decoded.state !== "available") throw new Error("Candidate carrier unavailable");
     const row = decoded.packet.records.find(row => row.metadata.run === primary.run)!;
-    assert.deepEqual(rootedEntries(row.metadata).find(entry => entry.role === "artifact").path, { utf16_code_units: "002f 0074 006d 0070 002f d800" });
+    assert.deepEqual(rootedEntries(row.metadata).find(entry => entry.name !== undefined).path, { utf16_code_units: "002f 0074 006d 0070 002f d800" });
     assert.deepEqual(row.parts, [{ body: raw }]); assert.equal(JSON.stringify(row.parts).includes("utf16_code_units"), false);
     assert.match(expected.content, /source_unavailable/u);
     await writeFile(sourcePath, "opposite live body must not renew retained text");
@@ -499,7 +518,7 @@ test("Candidate capture is a fresh closed journal layout, not a prototype overla
           completion_text: { text: raw, shown_bytes: { start: 0, end: Buffer.byteLength(raw) } } };
       });
       const batch = deliveryYamlPrototype.captureRunCompletionYamlCandidateBatch({ ...input, members });
-      assert.equal(batch.result_layout, "completion_yaml_files_v3");
+      assert.equal(batch.result_layout, "completion_yaml_files_v4");
       assert.ok(Number.isInteger(batch.text_budget));
       assert.equal(batch.members.length, count);
       const projected = projectRunCompletionBatchPresentation(batch);
@@ -555,14 +574,16 @@ test("Fresh rooted headers group native and external paths without guessing miss
     const item = { ...base, artifacts, primary_text: primaryBinding(base, raw, "") };
     const before = JSON.stringify(item);
     const batch = admitRunCompletionBatch({ ownerId: "rooted", tempDir: root, members: [item], fileNavigation: capturedLocations([item]) });
-    assert.equal(batch.result_layout, "completion_yaml_files_v3");
+    assert.equal(batch.result_layout, "completion_yaml_files_v4");
     const projected = projectRunCompletionBatchPresentation(batch), metadata = coreRows(projected.content)[0].metadata;
-    const entries = rootedEntries(metadata), groups = metadata.files.groups;
+    const entries = rootedEntries(metadata), groups = metadata.files;
+    assert.ok(Array.isArray(groups));
+    assert.ok(entries.every(entry => !Object.hasOwn(entry, "role") && !Object.hasOwn(entry, "recorded_fields_not_shown")));
     assert.equal(groups.filter((group: any) => group.root === base.state_dir).length, 1);
     assert.equal(entries.find(entry => entry.name === "local").path, join("artifacts", "report.md"));
     for (const [name, expectedRoot] of [["external", "/outside/reports"], ["windows", "C:\\reports"], ["unc", "\\\\server\\share\\reports"]] as const) {
       const entry = entries.find(entry => entry.name === name); assert.equal(entry.root, expectedRoot); assert.equal(entry.path, "report.md");
-      assert.equal(entry.state, undefined); assert.match(metadata.files.status, /unproven/);
+      assert.equal(entry.state, undefined); assert.match(metadata.files_status, /unproven/);
     }
     const unresolvedBatch = admitRunCompletionBatch({ ownerId: "unresolved", tempDir: root, members: [{ ...item, artifacts: unresolved }] });
     const unresolvedEntries = rootedEntries(coreRows(projectRunCompletionBatchPresentation(unresolvedBatch).content)[0].metadata);
@@ -571,12 +592,12 @@ test("Fresh rooted headers group native and external paths without guessing miss
       assert.equal(entry.root, null); assert.equal(entry.path, unresolved[name]); assert.equal(entry.path_basis, "as_recorded");
       assert.equal(entry.base_unavailable, true);
     }
-    const first = metadata.files.read_first, firstGroup = groups[first.group], entry = firstGroup.entries[first.entry];
-    assert.equal(entry.role, "primary"); assert.match(entry.status, /Exported text/);
-    assert.equal(join(firstGroup.root, entry.path), item.primary_text.output.source.path);
+    assert.doesNotMatch(projected.content, /Read first|read_first:/);
+    const entry = entries.find(entry => join(entry.root ?? "", entry.path) === item.primary_text.output.source.path);
+    assert.match(entry.status, /Exported text/);
     assert.equal(entry.source, undefined);
     assert.equal(batch.members[0].primary_text!.output!.source.sha256, item.primary_text.output.source.sha256);
-    assert.equal(rootedEntries(metadata).find(entry => entry.role === "result").path, "result.json");
+    assert.equal(rootedEntries(metadata).find(entry => entry.path === "result.json").path, "result.json");
     assert.doesNotMatch(projected.content, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:|sha256:/);
     const view = readRunCompletionPresentation(projected.content, projected.presentation)!;
     assert.equal(view.segments!.some(segment => segment.kind === "service"), false);
@@ -599,14 +620,68 @@ test("Compact file status retains combined declaration and unavailable/missing f
         ? { ...file, state: file.role === "published_sessions" ? "unavailable" as const : "missing" as const, path: null, bytes_total: undefined } : file) } }));
     const batch = admitRunCompletionBatch({ ownerId: "file-status", tempDir: root, members: [item], fileNavigation });
     const before = JSON.stringify(batch), projected = projectRunCompletionBatchPresentation(batch), metadata = coreRows(projected.content)[0].metadata;
-    assert.equal(metadata.files.status, "Declared artifact paths; existence/production unproven; Unavailable locations: published_sessions; Recorded result location missing");
-    assert.ok(rootedEntries(metadata).some(entry => entry.role === "artifact"));
-    assert.ok(!rootedEntries(metadata).some(entry => ["result", "stderr", "published_sessions"].includes(entry.role)));
+    assert.equal(metadata.files_status, "Declared artifact paths; existence/production unproven; Unavailable locations: published_sessions; Recorded result location missing");
+    assert.ok(rootedEntries(metadata).some(entry => entry.name !== undefined));
+    assert.ok(!rootedEntries(metadata).some(entry => ["result.json", "stderr.log", "published-sessions.json"].includes(entry.path)));
     assert.doesNotMatch(projected.content, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:|sha256:|path: null/);
     assert.deepEqual(batch.file_navigation, fileNavigation.map(row => ({ ...row, locations: { ...row.locations,
       files: row.locations.files.map(({ bytes_total, ...file }) => bytes_total === undefined ? file : { ...file, bytes_total }) } })));
     assert.equal(JSON.stringify(batch), before);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Continuation lines address the exact primary file prefix, not wrapping or diagnostic JSON", () => {
+  const base = { ...member("continuation"), summary: "Run completed.", artifacts: undefined };
+  const shape = { batch_id: "continuation", created_at: "2026-08-31T12:00:00.000Z", phase: "pending" as const,
+    presentation_format: "ax_records" as const, result_layout: "completion_yaml_files_v4" as const };
+  for (const full of ["", "\uFEFF🌍\r\nsecond\n\nlast", "one\rtwo\r\nthree", "x".repeat(200)]) {
+    const item = { ...base, primary_text: primaryBinding(base, full, ""),
+      completion_text: { text: full, shown_bytes: { start: 0, end: Buffer.byteLength(full) } } };
+    for (let quota = 0; quota <= Buffer.byteLength(full); quota++) {
+      const projected = projectRunCompletionBatchPresentation({ ...shape, text_budget: quota, members: [item] });
+      const row = coreRows(projected.content)[0], shown = (row.parts[0] as { body: string }).body;
+      const entries = rootedEntries(row.metadata), entry = entries.find(entry => join(entry.root, entry.path) === item.primary_text.output.source.path);
+      assert.ok(Array.isArray(row.metadata.files));
+      assert.ok(entries.every(entry => !Object.hasOwn(entry, "role") && !Object.hasOwn(entry, "recorded_fields_not_shown")));
+      assert.equal(row.metadata.files.read_first, undefined);
+      const lost = shown.length < full.length;
+      assert.equal(entry.status.startsWith("Read first; "), lost);
+      if (lost) {
+        const line = 1 + (shown.match(/\n/gu) ?? []).length;
+        assert.equal(entry.continue_from_line, line);
+        assert.deepEqual(row.parts.slice(1), [{ marker: "\n" }, { marker: `[Read from line ${line}]` }]);
+        const fileLines = full.split("\n");
+        assert.equal(fileLines.slice(0, line - 1).join("\n") + (line > 1 ? "\n" : "") + fileLines.slice(line - 1).join("\n"), full);
+        assert.ok(shown.startsWith(fileLines.slice(0, line - 1).join("\n")));
+      } else {
+        assert.equal(entry.continue_from_line, undefined); assert.deepEqual(row.parts, [{ body: full }]);
+      }
+    }
+  }
+  const diagnostic = { ...base, ...diagnosticBinding(base, "failure\n", "tail") };
+  const response = { ...base, primary_text: { output: { ...primaryBinding(base, "complete", "").output,
+    text_basis: "actor_response" as const, upstream_truncated: true } }, ...diagnosticBinding(base, "failure\n", "tail") };
+  for (const [item, expected] of [[diagnostic, true], [response, false],
+    [{ ...base, primary_text: { output: null, output_unavailable: "source_unavailable" } }, false]] as const) {
+    const projected = projectRunCompletionBatchPresentation({ ...shape, text_budget: 200, members: [item] });
+    assert.equal(projected.content.includes("Read first;"), expected);
+    assert.doesNotMatch(projected.content, /continue_from_line:|\[Read from line /u);
+    if (expected) assert.match(projected.content, /^\[4 characters omitted\]$/mu);
+  }
+});
+
+test("Retained compact-v3 files preserve pointers, roles, field inventories and character cuts", () => {
+  const base = { ...member("compact-v3"), summary: "Run completed.", artifacts: undefined };
+  const item = { ...base, primary_text: primaryBinding(base, "first\npartial", "tail"), ...diagnosticBinding(base) };
+  const shape = { batch_id: "compact-v3", created_at: "2026-08-31T12:00:00.000Z", phase: "pending" as const,
+    presentation_format: "ax_records" as const, result_layout: "completion_yaml_files_v3" as const, text_budget: 100, members: [item] };
+  const content = projectRunCompletionBatchPresentation(shape).content, row = coreRows(content)[0];
+  assert.deepEqual(row.metadata.files.read_first, { group: 0, entry: 0 });
+  assert.equal(row.metadata.files.groups[0].entries[0].role, "primary");
+  assert.deepEqual(row.metadata.files.groups[0].entries[1].recorded_fields_not_shown, ["failure_reason"]);
+  assert.deepEqual(row.parts, [{ body: "first\npartial" }, { marker: "\n" }, { marker: "[4 characters omitted]" }]);
+  assert.doesNotMatch(content, /Read first|continue_from_line|\[Read from line /u);
+  assert.equal(projectRunCompletionBatchPresentation(shape).content, content);
 });
 
 test("Rooted completion omissions and inventory stay in the first header, never after Markdown", async () => {
@@ -645,21 +720,22 @@ test("Retained core-v1 and rooted-v1 snapshots keep their exact indices, referen
     const view = readRunCompletionPresentation(before.content, before.presentation)!;
     assert.equal(view.text.includes("references:"), false); assert.ok(view.text.endsWith("original"));
     const fresh = admitRunCompletionBatch({ ownerId: "new", tempDir: root, members: [item] });
-    assert.equal(fresh.result_layout, "completion_yaml_files_v3");
+    assert.equal(fresh.result_layout, "completion_yaml_files_v4");
     const freshProjection = projectRunCompletionBatchPresentation(fresh);
     assert.equal(Object.hasOwn(coreRows(freshProjection.content)[0].metadata, "index"), false);
     assert.deepEqual(projectRunCompletionBatchPresentation(legacy), before);
     assert.equal(coreRows(before.content)[0].metadata.references.primary.source.path, item.primary_text.output.source.path);
     assert.equal(coreRows(before.content)[0].metadata.files, undefined);
     const journalPath = getRunDeliveryJournalPath(root, "new"), journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
-    for (const result_layout of ["completion_yaml_core_v1", "completion_yaml_files_v1", "completion_yaml_files_v2"] as const) {
+    for (const result_layout of ["completion_yaml_core_v1", "completion_yaml_files_v1", "completion_yaml_files_v2", "completion_yaml_files_v3"] as const) {
       const saved = { ...legacy, result_layout }, expected = projectRunCompletionBatchPresentation(saved);
       const expectedWire: string = result_layout === "completion_yaml_core_v1" ? encoded.text : candidateProofWire({
-        batchId: legacy.batch_id, records: [row], service: { header_layout: result_layout === "completion_yaml_files_v2" ? "rooted_files_v2" : "rooted_files_v1" },
+        batchId: legacy.batch_id, records: [row], service: { header_layout: result_layout === "completion_yaml_files_v3" ? "rooted_files_v3" : result_layout === "completion_yaml_files_v2" ? "rooted_files_v2" : "rooted_files_v1" },
       });
       assert.equal(expected.content, expectedWire);
-      assert.equal(coreRows(expected.content)[0].metadata.index, result_layout === "completion_yaml_files_v2" ? undefined : 0);
-      if (result_layout !== "completion_yaml_files_v2") assert.ok(readRunCompletionPresentation(expected.content, expected.presentation)!.segments!.some(segment => segment.kind === "header" && /^index: 0$/mu.test(segment.text)));
+      const singleton = result_layout === "completion_yaml_files_v2" || result_layout === "completion_yaml_files_v3";
+      assert.equal(coreRows(expected.content)[0].metadata.index, singleton ? undefined : 0);
+      if (!singleton) assert.ok(readRunCompletionPresentation(expected.content, expected.presentation)!.segments!.some(segment => segment.kind === "header" && /^index: 0$/mu.test(segment.text)));
       journal.completion_batch = saved;
       fs.writeFileSync(journalPath, JSON.stringify(journal));
       for (const transition of [undefined, markRunCompletionBatchQueued, markRunCompletionBatchPresented]) {
@@ -1616,11 +1692,11 @@ test("Fresh frontmatter separates compiler blocks from arbitrary authored Markdo
     const base = { ...member("front"), summary: "Run completed.", artifacts: undefined };
     const item = { ...base, primary_text: primaryBinding(base, text, "🚀tail") };
     const batch = admitRunCompletionBatch({ members: [item], ownerId: "front", tempDir: root });
-    assert.equal(batch.result_layout, "completion_yaml_files_v3");
+    assert.equal(batch.result_layout, "completion_yaml_files_v4");
     const projected = projectRunCompletionBatchPresentation(batch), rows = coreRows(projected.content);
     assert.deepEqual([rows[0].metadata.index, rows[0].metadata.run, rows[0].metadata.state, rows[0].metadata.kind], [undefined, "front", "done", "primary"]);
-    assert.deepEqual(rows[0].parts, [{ body: text }, { marker: "\n" }, { marker: "[5 characters omitted]" }]);
-    assert.ok(projected.content.includes(text + "\n[5 characters omitted]"));
+    assert.deepEqual(rows[0].parts, [{ body: text }, { marker: "\n" }, { marker: "[Read from line 8]" }]);
+    assert.ok(projected.content.includes(text + "\n[Read from line 8]"));
     assert.doesNotMatch(projected.content, /^#0:|^- (?:result|preview):/mu);
     const view = readRunCompletionPresentation(projected.content, projected.presentation)!;
     assert.equal(view.compact, true);
@@ -1741,14 +1817,14 @@ test("Fresh completion kinds classify admitted sources without upgrading fallbac
   try {
     const batch = admitRunCompletionBatch({ members: retainedSharedKindFixture().members, ownerId: "simple", tempDir: root });
     const projected = projectRunCompletionBatchPresentation(batch), content = projected.content;
-    assert.equal(batch.result_layout, "completion_yaml_files_v3");
+    assert.equal(batch.result_layout, "completion_yaml_files_v4");
     const rows = coreRows(content);
     assert.equal(rows.filter(row => row.metadata.kind === "primary").length, 2);
     assert.equal(rows.filter(row => row.metadata.kind === "diagnostic").length, 1);
     assert.doesNotMatch(content, /^- (?:result_kind|preview_kind|legacy_basis):|^- kind: (?:legacy|response)$/mu);
     assert.ok(content.includes("Untracked text\r\n🌍"));
     assert.match(content, /\[omitted: unknown\] \(summary\/fallback text: original completeness\/privacy unproven\)/);
-    assert.equal(rootedEntries(rows[1].metadata).find(entry => entry.role === "primary").status, "Actor response; admission privacy");
+    assert.equal(rootedEntries(rows[1].metadata).find(entry => entry.path.startsWith("primary-") || entry.path.includes("/primary-")).status, "Actor response; admission privacy");
     const fallbackRecord = rows.find(row => row.metadata.run === "fallback")!;
     assert.equal(fallbackRecord.metadata.kind, undefined);
     assert.ok(readRunCompletionPresentation(content, projected.presentation));
@@ -1780,7 +1856,7 @@ test("Shared48KiB completion budgets preserve whole results or exact fair previe
       assert.equal(projected.presentation?.format, "completion_yaml_core_v1");
       const bodies = coreRows(projected.content).flatMap(row => row.parts.flatMap(part => "body" in part ? [part.body] : []));
       assert.equal(bodies.length, count);
-      assert.equal((projected.content.match(/^\[[1-9]\d* characters omitted\]$/gmu) ?? []).length, full ? 0 : count);
+      assert.equal((projected.content.match(/^\[Read from line 1\]$/gmu) ?? []).length, full ? 0 : count);
       const view = readRunCompletionPresentation(projected.content, projected.presentation)!; assert.equal(view.compact, true);
       assert.equal(bodies.reduce((sum, body) => sum + body.length, 0), full ? count * size : count * batch.text_budget!);
       if (!full) assert.ok(batch.text_budget! < 48 * 1024 / count);
@@ -1840,7 +1916,7 @@ test("Shared48KiB completion budgets preserve whole results or exact fair previe
     const frozen = batch.members[0]!.completion_text!;
     assert.equal(Buffer.from(frozen.text).toString("utf8"), frozen.text);
     assert.ok(text.startsWith(frozen.text)); assert.equal(frozen.text.endsWith("\r"), false);
-    assert.match(projectRunCompletionBatchPresentation(batch).content, /^\[[1-9]\d* characters omitted\]$/mu);
+    assert.match(projectRunCompletionBatchPresentation(batch).content, /^\[Read from line 3\]$/mu);
     const crowd = admitRunCompletionBatch({ members: Array.from({length:64}, (_, i) => item("crowd-" + i, "Q".repeat(48 * 1024))), ownerId: "crowd", tempDir: root });
     assert.ok(Buffer.byteLength(formatRunCompletionBatchMessage(crowd)) <= 48 * 1024);
     assert.ok(Buffer.byteLength(JSON.stringify(crowd)) <= 1024 * 1024);
@@ -1877,11 +1953,11 @@ test("Fresh outcome records never substitute launch metadata and retain explicit
     const shown = readRunCompletionPresentation(projected.content, projected.presentation)!.text;
     assert.equal(coreRows(projected.content)[0].metadata.kind, "primary"); assert.ok(shown.includes("ACTUAL ANSWER 🌍"));
     assert.match(shown, /\[omitted: unknown\] \(upstream completeness unproven\)/);
-    assert.match(shown, /^\[4 characters omitted\]$/mu);
+    assert.match(shown, /^\[Read from line 1\]$/mu);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("AX omitted counts are direct fields for fresh captures while saved heading packets keep exact replay", async () => {
+test("AX source continuation and diagnostic counts stay distinct while saved packets keep exact replay", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-omitted-field-"));
   try {
     const members = omissionMembers("x".repeat(997));
@@ -1896,7 +1972,8 @@ test("AX omitted counts are direct fields for fresh captures while saved heading
     const input = JSON.stringify(members);
     const batch = admitRunCompletionBatch({ members, batchId: retained.batch_id, now: new Date(retained.created_at), ownerId: "fresh", tempDir: root });
     const projected = projectRunCompletionBatchPresentation(batch);
-    assert.equal((projected.content.match(/^\[997 characters omitted\]$/gmu) ?? []).length, 2);
+    assert.equal((projected.content.match(/^\[997 characters omitted\]$/gmu) ?? []).length, 1);
+    assert.match(projected.content, /^\[Read from line 1\]$/mu);
     assert.doesNotMatch(projected.content, /^- omission: \[omitted:/mu);
     assert.doesNotMatch(projected.content, /secondary_diagnostic_excerpt/u);
     assert.match(readRunCompletionPresentation(projected.content, projected.presentation)!.text, /^\[997 characters omitted\]$/mu);
@@ -1918,13 +1995,14 @@ test("AX omitted counts are direct fields for fresh captures while saved heading
     for (const [suffix, omitted] of [["", 0], ["🚀a", 2]] as const) {
       const packet = admitRunCompletionBatch({ members: omissionMembers(suffix), ownerId: "count-" + omitted, tempDir: root });
       const content = formatRunCompletionBatchMessage(packet);
-      assert.equal((content.match(new RegExp("^\\[" + omitted + " characters omitted\\]$", "gmu")) ?? []).length, omitted ? 2 : 0);
+      assert.equal((content.match(new RegExp("^\\[" + omitted + " characters omitted\\]$", "gmu")) ?? []).length, omitted ? 1 : 0);
+      assert.equal((content.match(/^\[Read from line 1\]$/gmu) ?? []).length, omitted ? 1 : 0);
       assert.doesNotMatch(content, /^- omission: \[omitted:/mu);
     }
     const authored = { ...member("opaque"), summary: "Run completed.", primary_text: primaryBinding(member("opaque"), "- omission: [omitted: 7 chars]\r\n🌍", "x") };
     const literal = formatRunCompletionBatchMessage(admitRunCompletionBatch({ members: [authored], ownerId: "opaque", tempDir: root }));
     assert.ok(literal.includes("- omission: [omitted: 7 chars]\r\n🌍"), "Authored preview text is not globally replaced");
-    assert.match(literal, /^\[1 characters omitted\]$/mu);
+    assert.match(literal, /^\[Read from line 2\]$/mu);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -1939,7 +2017,7 @@ test("AX completion is a new immutable capture with packet-local indices only fo
       assert.equal(fs.existsSync(getRunDeliveryJournalPath(root, ownerId)), false);
     }
     const before = JSON.stringify(batch), text = formatRunCompletionBatchMessage(batch);
-    assert.equal(batch.result_layout, "completion_yaml_files_v3"); assert.equal(batch.single_result, undefined);
+    assert.equal(batch.result_layout, "completion_yaml_files_v4"); assert.equal(batch.single_result, undefined);
     const rows = coreRows(text);
     assert.deepEqual(rows.map(row => [row.metadata.index, row.metadata.run, row.metadata.state]), [[0, "p", "done"], [1, "d", "failed"]]);
     assert.deepEqual([...text.matchAll(/^index: (\d+)$/gmu)].map(match => Number(match[1])), [0, 1]);
@@ -1950,15 +2028,16 @@ test("AX completion is a new immutable capture with packet-local indices only fo
     assert.doesNotMatch(text, /- member:/u);
     const projected = projectRunCompletionBatchPresentation(batch);
     assert.equal(batch.members[0].summary, "Run completed."); assert.doesNotMatch(text, /Run completed\./u);
-    assert.deepEqual(rows[0].parts, [{ body: "🌍" }, { marker: "\n" }, { marker: "[2 characters omitted]" }]);
+    assert.deepEqual(rows[0].parts, [{ body: "🌍" }, { marker: "\n" }, { marker: "[Read from line 1]" }]);
     const view = readRunCompletionPresentation(text, projected.presentation)!;
     assert.equal(view.compact, true); assert.equal(view.records, true); assert.equal(view.single, undefined);
     assert.doesNotMatch(view.text, /Run completed\.|(?:^|\n)  - technical:/u);
     assert.ok(view.text.includes('run: "' + members[0].run + '"'));
     assert.ok(rows[0].metadata.files);
-    assert.ok(rootedEntries(rows[0].metadata).some(entry => entry.role === "primary" && join(entry.root, entry.path) === members[0].primary_text!.output!.source.path));
-    assert.ok(rootedEntries(rows[1].metadata).some(entry => entry.role === "diagnostic_metadata" && join(entry.root, entry.path) === members[1].result_diagnostics!.source.path));
-    assert.equal(text.split("[2 characters omitted]").length - 1, 2);
+    assert.ok(rootedEntries(rows[0].metadata).some(entry => join(entry.root, entry.path) === members[0].primary_text!.output!.source.path));
+    assert.ok(rootedEntries(rows[1].metadata).some(entry => join(entry.root, entry.path) === members[1].result_diagnostics!.source.path));
+    assert.equal(text.split("[2 characters omitted]").length - 1, 1);
+    assert.match(text, /^\[Read from line 1\]$/mu);
     assert.equal(JSON.stringify(batch), before);
     for (const transition of [markRunCompletionBatchQueued, markRunCompletionBatchPresented]) {
       transition({ batchId: batch.batch_id, ownerId: "v3", tempDir: root });
@@ -1966,7 +2045,7 @@ test("AX completion is a new immutable capture with packet-local indices only fo
       assert.equal(saved.presentation_format, "ax_records"); assert.equal(formatRunCompletionBatchMessage(saved), text);
     }
     const single = admitRunCompletionBatch({ members: [members[0]], ownerId: "single-v3", tempDir: root });
-    assert.equal(single.result_layout, "completion_yaml_files_v3"); assert.equal(single.single_result, undefined);
+    assert.equal(single.result_layout, "completion_yaml_files_v4"); assert.equal(single.single_result, undefined);
     assert.deepEqual([coreRows(formatRunCompletionBatchMessage(single))[0].metadata.index, coreRows(formatRunCompletionBatchMessage(single))[0].metadata.run], [undefined, "p"]);
     assert.doesNotMatch(formatRunCompletionBatchMessage(single), /(?:^|\n)\s*- (?:members|#0|completions):/u);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -1987,7 +2066,7 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
     for (const input of [primary, diagnostic, legacy, missing, malformed]) {
       const ownerId = input.run, expected = JSON.parse(JSON.stringify(input));
       const batch = admitRunCompletionBatch({ members: [input], fileNavigation: capturedLocations([input]), ownerId, tempDir: root });
-      assert.equal(batch.result_layout, "completion_yaml_files_v3"); assert.equal(batch.single_result, undefined); assert.equal(batch.presentation_format, "ax_records");
+      assert.equal(batch.result_layout, "completion_yaml_files_v4"); assert.equal(batch.single_result, undefined); assert.equal(batch.presentation_format, "ax_records");
       const projected = projectRunCompletionBatchPresentation(batch), content = projected.content;
       const view = readRunCompletionPresentation(content, projected.presentation)!;
       assert.equal(view.single, undefined); assert.equal(view.compact, true);
@@ -2005,7 +2084,8 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
         assert.ok(rootedEntries(row.metadata).some(entry => join(entry.root, entry.path) === binding.path)); assert.ok(!content.includes(binding.sha256));
         assert.ok(!content.includes(JSON.stringify(input.run_instance_id)));
       }
-      if (input.primary_text?.output || input.diagnostic_excerpt) assert.ok(view.text.includes("[2 characters omitted]"));
+      if (input.primary_text?.output) assert.ok(view.text.includes("[Read from line 1]"));
+      else if (input.diagnostic_excerpt) assert.ok(view.text.includes("[2 characters omitted]"));
       if (input === legacy) {
         assert.ok(view.text.includes(input.output!));
         assert.match(view.text, /\[omitted: unknown\] \(summary\/fallback text:/u);
@@ -2020,7 +2100,7 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
       for (const transition of [undefined, markRunCompletionBatchQueued, markRunCompletionBatchPresented]) {
         transition?.({ batchId: batch.batch_id, ownerId, tempDir: root });
         const saved = readRunDeliveryJournal(root, ownerId).completion_batch!;
-        assert.equal(saved.result_layout, "completion_yaml_files_v3"); assert.equal(saved.single_result, undefined); assert.deepEqual(saved.members, [expected]);
+        assert.equal(saved.result_layout, "completion_yaml_files_v4"); assert.equal(saved.single_result, undefined); assert.deepEqual(saved.members, [expected]);
         assert.deepEqual(projectRunCompletionBatchPresentation(saved), projected);
       }
       assert.equal(JSON.stringify(batch), snapshot);
@@ -2049,7 +2129,7 @@ test("AX singleton shape is captured once, stays flat across preview kinds and p
       const snapshot = JSON.stringify(pair);
       const pairProjection = projectRunCompletionBatchPresentation(pair), pairView = readRunCompletionPresentation(pairProjection.content, pairProjection.presentation)!;
       assert.equal(pair.single_result, undefined); assert.equal(pairView.single, undefined);
-      assert.equal(pair.result_layout, "completion_yaml_files_v3"); assert.equal(pairView.records, true);
+      assert.equal(pair.result_layout, "completion_yaml_files_v4"); assert.equal(pairView.records, true);
       const rows = coreRows(pairProjection.content); assert.equal(rows.length, 1);
       assert.equal(Object.hasOwn(rows[0].metadata, "index"), false);
       assert.ok(pairView.segments!.filter(segment => segment.kind === "header").every(segment => !/^index:/mu.test(segment.text)));
@@ -2147,8 +2227,19 @@ test("AX bounds omit whole rows/references and retain correct displayed-index ge
       const m = located.members[row.member_index]!;
       assert.deepEqual(rootedNavigation(coreRows(complete).find(record => record.metadata.run === m.run)!.metadata), selectedNavigation(row.locations));
     }
-    const verbose = Array.from({ length: 10 }, (_, i) => {
-      const base = { ...member(`budget${i}`), artifacts: undefined, summary: "Run completed." }, raw = "x".repeat(4300);
+    const costSeed = Array.from({ length: 10 }, (_, i) => {
+      const base = { ...member(`budget${i}`), artifacts: undefined, summary: "Run completed." };
+      return { ...base, primary_text: primaryBinding(base, "", "x".repeat(4000)) };
+    });
+    const fullCost = Buffer.byteLength(candidateProofWire({ batchId: "cost", records: costSeed.map((item, index) => {
+      const row = candidateProofPrimary(item, index, "x".repeat(4000), 4915);
+      return { ...row, metadata: { ...row.metadata, run_files: { run: item.run, run_instance_id: item.run_instance_id,
+        locations: capturedLocations([item])[0].locations } } };
+    }) }));
+    // Force full-location overflow from the independently encoded native-path cost, not a POSIX-only body size.
+    const bodySize = Math.floor((49152 - fullCost + 40000 + 50) / 10);
+    const verbose = costSeed.map(base => {
+      const raw = "x".repeat(bodySize);
       return { ...base, primary_text: primaryBinding(base, "", raw), completion_text: { text: raw, shown_bytes: { start: 0, end: raw.length } } };
     });
     const limited = admitRunCompletionBatch({ members: verbose, fileNavigation: capturedLocations(verbose), ownerId: "limited-refs", tempDir: root });
@@ -3441,7 +3532,7 @@ test("unadmitted YAML core body presence governs single, adjacent bare, mixed an
       text.replace('run: "only"\nstate:', 'index: 0\nrun: "only"\nstate:')]) {
       assert.equal(readCompletionYamlCarrier(invalid).state, "unavailable");
     }
-    for (const service of [undefined, { header_layout: "rooted_files_v1" }, { header_layout: "rooted_files_v4" },
+    for (const service of [undefined, { header_layout: "rooted_files_v1" }, { header_layout: "rooted_files_unknown" },
       { ...serviceV2, numbering: { kind: "stream" } }]) {
       assert.equal(encodeCompletionYamlCarrier({ ...packet, service }).state, "unavailable");
     }

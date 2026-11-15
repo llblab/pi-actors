@@ -337,7 +337,7 @@ test("Candidate epoch property: only pinned lifetimes capture or ACK; saved pack
         }
         const proposal = harness.runtime.onTurnEnd(completedBoundary(), first.context);
         assert.equal(readRunDeliveryJournal(extensionTempDir, ownerId).completion_stream, undefined);
-        assert.equal(pending()!.result_layout, "completion_yaml_files_v3");
+        assert.equal(pending()!.result_layout, "completion_yaml_files_v4");
         held();
         if (scenario === "capture-return") {
           assert.equal(proposal, undefined); assert.equal(harness.sendAttempts(), 0);
@@ -397,7 +397,7 @@ test("Candidate generation property: captured data cannot handle a replacement g
   try {
     const entry = harness.runtime.onTurnEnd(completedBoundary(), active.context)!.entries![0] as any;
     const captured = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
-    assert.equal(captured.result_layout, "completion_yaml_files_v3");
+    assert.equal(captured.result_layout, "completion_yaml_files_v4");
     assert.equal(captured.members[0].run_instance_id, oldGeneration);
     await writeTerminalRun(ownerId, run, newGeneration);
     assert.equal(JSON.parse(await readFile(join(directory, "run.json"), "utf8")).run_instance_id, newGeneration);
@@ -508,7 +508,7 @@ test("Candidate composition property: private extension port and passive supervi
     const directory = await writeTerminalRun(ownerId, ownerId, "candidate-extension-generation");
     const entry = extension.onTurnEnd(completedBoundary(), first.context)!.entries![0] as any;
     const pending = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
-    assert.equal(captures, 1); assert.equal(pending.result_layout, "completion_yaml_files_v3");
+    assert.equal(captures, 1); assert.equal(pending.result_layout, "completion_yaml_files_v4");
     await extension.onSessionStart(replacement.context);
     const wrapper = { ...replacement.context, isIdle: () => true };
     const currentObserver = extension.getRunAdmissionObserver(wrapper)!;
@@ -1106,8 +1106,8 @@ test("Core YAML native renderer keeps service-only and explicit body partitions 
   let renderer: any;
   registerRunCompletionRenderer({ registerMessageRenderer: (_type: string, value: unknown) => { renderer = value; } } as never);
   const theme = { fg: (_color: string, text: string) => text };
-  for (const header_layout of [undefined, "rooted_files_v1", "rooted_files_v2", "rooted_files_v3"]) for (const parts of [undefined, [], [{ body: "" }], [{ body: " \n" }], [{ marker: "WARNING_ONLY" }]]) {
-    const localSingleton = header_layout === "rooted_files_v2" || header_layout === "rooted_files_v3";
+  for (const header_layout of [undefined, "rooted_files_v1", "rooted_files_v2", "rooted_files_v3", "rooted_files_v4"]) for (const parts of [undefined, [], [{ body: "" }], [{ body: " \n" }], [{ marker: "WARNING_ONLY" }]]) {
+    const localSingleton = header_layout === "rooted_files_v2" || header_layout === "rooted_files_v3" || header_layout === "rooted_files_v4";
     const encoded = encodeCompletionYamlCarrier({ batchId: "HIDDEN_BATCH_ID", records: parts === undefined ? [] : [{ metadata: { ...(localSingleton ? {} : { index: 0 }), run: "r", state: "done" }, parts }], service: { ...(header_layout ? { header_layout } : {}), omitted_results: 9, omitted_states: { killed: 2 }, inventory_warning: "NO_INVENTORY" } });
     assert.equal(encoded.state, "available"); if (encoded.state !== "available") continue;
     const message = { content: encoded.text, details: { pi_actors_presentation: { format: "completion_yaml_core_v1", content_sha256: createHash("sha256").update(encoded.text).digest("hex") } } };
@@ -1165,7 +1165,7 @@ test("Fresh completion renderer separates metadata, Markdown and cut markers wit
       assert.match(text, /^run: "markdown"\s*$/mu); assert.match(text, /^run: "peer"\s*$/mu);
       assert.ok(text.includes("Visible heading")); assert.doesNotMatch(text, /## Visible heading|\*\*FIRST_BOLD\*\*|\*\*SECOND_BOLD\*\*/u);
       assert.ok(text.includes("FIRST_BOLD")); assert.ok(text.includes("SECOND_BOLD"));
-      assert.match(text, /^\[4 characters omitted\]\s*$/mu);
+      assert.match(text, /^\[Read from line 12\]\s*$/mu);
       assert.ok(text.includes("[7 characters omitted]")); assert.ok(text.includes("KEEP_BODY_REFERENCE"));
       assert.ok(text.includes("KEEP_BODY_LOCATION")); assert.ok(text.includes("index: 99"));
       assert.equal(text.includes("primary-"), true); assert.ok(text.includes("files:")); assert.equal(text.includes(batch.batch_id), false);
@@ -1326,7 +1326,7 @@ test("Fresh UI completion admissions select AX while all historical formats reco
           const admitted = readRunDeliveryJournal(extensionTempDir, ownerId).completion_batch!;
           assert.equal(admitted.presentation_format, "ax_records"); assert.equal(admitted.excerpt_format, undefined);
           assert.equal(admitted.members.length, 1); assert.equal(admitted.members[0].run, freshRun); assert.equal(admitted.members[0].run_instance_id, freshGeneration);
-          assert.equal(admitted.result_layout, "completion_yaml_files_v3"); assert.equal(admitted.single_result, undefined);
+          assert.equal(admitted.result_layout, "completion_yaml_files_v4"); assert.equal(admitted.single_result, undefined);
           const header = freshCoreHeaders(fresh.content)[0];
           assert.deepEqual([header.index, header.run, header.state], [undefined, freshRun, "done"]);
           assert.equal(header._completion.codec, "completion_yaml_core_v1"); assert.equal(header._completion.batch_id, admitted.batch_id);
@@ -1360,9 +1360,11 @@ test("New terminal admissions capture current-session file locations once and pr
     assert.equal(locations.files.find(file => file.role === "result")!.path, join(directory, "result.json"));
     const files = freshCoreHeaders(entry.content)[0].files;
     assert.equal(files.observation, undefined);
-    const group = files.groups.find((group: any) => group.root === directory); assert.ok(group);
-    const decodedFiles = group.entries.filter((item: any) => ["context_index", "result", "execution"].includes(item.role))
-      .map(({ role, path }: any) => ({ role, path: join(directory, path) }));
+    assert.ok(Array.isArray(files));
+    const group = files.find((group: any) => group.root === directory); assert.ok(group);
+    const paths = new Map([["context-index.json", "context_index"], ["result.json", "result"], ["execution.json", "execution"]]);
+    const decodedFiles = group.entries.filter((item: any) => paths.has(item.path))
+      .map(({ path }: any) => ({ role: paths.get(path), path: join(directory, path) }));
     const selected = locations.files.filter(file => file.state === "present" && ["context_index", "result", "execution"].includes(file.role));
     assert.deepEqual(decodedFiles, selected.map(({ role, path }) => ({ role, path })));
     assert.doesNotMatch(entry.content, /format_hint:|purpose:|run_instance_id:|mutable:|bytes_total:/);

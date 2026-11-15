@@ -527,7 +527,7 @@ function completionCore(text) {
       if (Object.hasOwn(bookkeeping, "service")) {
         service = bookkeeping.service;
         exactKeys(service, [], ["header_layout", "omitted_results", "omitted_states", "inventory_warning", "result_inventory"]);
-        if (service.header_layout !== undefined) assert.ok(["rooted_files_v1", "rooted_files_v2", "rooted_files_v3"].includes(service.header_layout));
+        if (service.header_layout !== undefined) assert.ok(["rooted_files_v1", "rooted_files_v2", "rooted_files_v3", "rooted_files_v4"].includes(service.header_layout));
         assert.ok(Object.keys(service).length > 0);
         if (Object.hasOwn(service, "omitted_results")) assert.ok(Number.isSafeInteger(service.omitted_results) && service.omitted_results > 0);
         if (Object.hasOwn(service, "omitted_states")) {
@@ -573,17 +573,17 @@ function completionCore(text) {
     const indexed = Object.hasOwn(header, "index");
     assert.deepEqual(keys.slice(0, indexed ? 3 : 2), indexed ? ["index", "run", "state"] : ["run", "state"]);
     if (indexed) assert.ok(Number.isSafeInteger(header.index) && header.index === records.length, "Ordinary displayed indices remain packet-local");
-    else assert.ok(["rooted_files_v2", "rooted_files_v3"].includes(service?.header_layout));
+    else assert.ok(["rooted_files_v2", "rooted_files_v3", "rooted_files_v4"].includes(service?.header_layout));
     assert.equal(typeof header.run, "string"); assert.ok(header.run.length > 0);
     assert.ok(["done", "failed", "killed", "exited"].includes(header.state));
     const allowed = ["index", "run", "state", "kind", "preview_field", "redacted", "result_state", "parent_run", "primary_unavailable",
-      "diagnostic_metadata_unavailable", "artifact_declarations", "artifact_inventory_unavailable", "run_files_unavailable", "references", "run_files", "files", "run_files_omission", "text_warnings"];
+      "diagnostic_metadata_unavailable", "artifact_declarations", "artifact_inventory_unavailable", "run_files_unavailable", "references", "run_files", "files", "files_status", "files_notes", "run_files_omission", "text_warnings"];
     assert.ok(keys.every(key => allowed.includes(key)), "No body-coverage metadata or legacy facade fields");
     if (Object.hasOwn(header, "kind")) {
       assert.equal(keys[indexed ? 3 : 2], "kind"); assert.ok(["primary", "diagnostic"].includes(header.kind));
     }
     if (Object.hasOwn(header, "redacted")) assert.equal(header.redacted, true);
-    if (header.files) {
+    if (header.files || header.files_status || header.files_notes) {
       const restored = rootedTechnical(header);
       // Non-enumerable compatibility facts keep subsequent independent raw-header cost checks honest.
       Object.defineProperty(header, "references", { value: restored.references });
@@ -602,7 +602,7 @@ function completionCore(text) {
   }
   assert.equal(cursor, text.length, "Whole core consumed; no compiler tail or extra bytes");
   assert.ok(batchId);
-  assert.equal(records.some(record => !Object.hasOwn(record.header, "index")), ["rooted_files_v2", "rooted_files_v3"].includes(service?.header_layout) && records.length === 1,
+  assert.equal(records.some(record => !Object.hasOwn(record.header, "index")), ["rooted_files_v2", "rooted_files_v3", "rooted_files_v4"].includes(service?.header_layout) && records.length === 1,
     "Only a new packet with exactly one shown result omits its display index");
   return { batchId, service: service ?? {}, records };
 }
@@ -611,8 +611,8 @@ function completionPacket(text) {
 }
 function completionRecords(text) { return completionCore(text).records; }
 function containsRootedPath(text, path) {
-  return completionRecords(text).some(record => record.header.files?.groups?.some(group => typeof group.root === "string"
-    && group.entries.some(entry => typeof entry.path === "string" && join(group.root, entry.path) === path)));
+  return completionRecords(text).some(record => (Array.isArray(record.header.files) ? record.header.files : record.header.files?.groups ?? [])
+    .some(group => typeof group.root === "string" && group.entries.some(entry => typeof entry.path === "string" && join(group.root, entry.path) === path)));
 }
 // Independent reconstruction of selected source bindings from explicit header roots.
 // No body parsing, cwd lookup, product projector or evidence refresh participates.
@@ -621,8 +621,29 @@ function containsRootedPath(text, path) {
 const canonicalSourceFacts = new Map();
 let fixtureFrame = () => undefined;
 function rootedTechnical(header) {
-  const files = header.files, references = { ...files?.notes };
+  const files = header.files, references = { ...header.files_notes, ...files?.notes };
   let runFiles;
+  if (Array.isArray(files) || header.files_status !== undefined || header.files_notes !== undefined) {
+    const entries = (files ?? []).flatMap(group => group.entries.map(entry => ({ ...entry,
+      path: typeof group.root === "string" && typeof entry.path === "string" ? join(group.root, entry.path) : entry.path })));
+    assert.ok(entries.every(entry => !Object.hasOwn(entry, "role") && !Object.hasOwn(entry, "recorded_fields_not_shown")));
+    for (const entry of entries) {
+      const source = canonicalSourceFacts.get(entry.path);
+      if (!source) continue;
+      const role = source.fields ? "diagnostic_metadata" : source.declarations_total !== undefined ? "artifact_inventory" : "primary";
+      references[role] = { status: entry.status, ...(role === "diagnostic_metadata" ? { field: header.preview_field } : {}), source };
+    }
+    const frame = fixtureFrame(header.run);
+    const leaves = new Map([["context-index.json", "context_index"], ["result.json", "result"], ["execution.json", "execution"], ["run.json", "metadata"]]);
+    const selected = entries.filter(entry => leaves.has(basename(entry.path)) && frame && dirname(entry.path) === frame.state_dir);
+    if (selected.length) runFiles = { run: header.run, run_instance_id: frame.run_instance_id,
+      locations: { state: "available", directory: frame.state_dir,
+        files: selected.map(entry => ({ role: leaves.get(basename(entry.path)), state: "present", path: entry.path })) } };
+    else if (typeof header.files_status === "string" && header.files_status.startsWith("Run locations unavailable: "))
+      runFiles = { run: header.run, run_instance_id: frame?.run_instance_id,
+        locations: { state: "unavailable", reason: header.files_status.slice("Run locations unavailable: ".length) } };
+    return { references, runFiles };
+  }
   if (!files) return {};
   const entries = (files.groups ?? []).flatMap(group => group.entries.map(entry => ({
     ...entry, path: typeof group.root === "string" && typeof entry.path === "string" ? join(group.root, entry.path) : entry.path,
@@ -690,11 +711,19 @@ function deliveredBody(record, full) {
   assert.ok(shown <= total);
   assert.ok(!(full[body.length - 1] === "\r" && full[body.length] === "\n"), "Source prefix must not split an original CRLF pair");
   const omission = total - shown, cut = record.blocks.indexOf(bodies[0]);
-  const known = record.blocks.filter(block => block.kind === "marker" && /^\[\d+ characters omitted\]$/u.test(block.text));
-  assert.deepEqual(known.map(block => block.text), omission ? [`[${omission} characters omitted]`] : []);
+  const line = 1 + (body.match(/\n/gu) ?? []).length;
+  const fileContinuation = Array.isArray(record.header.files) && record.header.kind === "primary";
+  const marker = fileContinuation ? `[Read from line ${line}]` : `[${omission} characters omitted]`;
+  const known = record.blocks.filter(block => block.kind === "marker" && /^\[(?:\d+ characters omitted|Read from line \d+)\]$/u.test(block.text));
+  assert.deepEqual(known.map(block => block.text), omission ? [marker] : []);
+  if (fileContinuation) {
+    const recommended = record.header.files.flatMap(group => group.entries).filter(entry => entry.status?.startsWith("Read first; "));
+    assert.equal(recommended.length, omission ? 1 : 0);
+    if (omission) assert.equal(recommended[0].continue_from_line, line);
+  }
   if (omission) {
     assert.equal(record.blocks[cut + 1]?.kind, "marker"); assert.equal(record.blocks[cut + 1]?.text, "\n");
-    assert.equal(record.blocks[cut + 2]?.kind, "marker"); assert.equal(record.blocks[cut + 2]?.text, `[${omission} characters omitted]`);
+    assert.equal(record.blocks[cut + 2]?.kind, "marker"); assert.equal(record.blocks[cut + 2]?.text, marker);
   }
   return body;
 }
@@ -728,16 +757,23 @@ function rootedRequiredFacts(member, minimal = false) {
     const root = dirname(path);
     let group = groups.find(item => item.root === root);
     if (!group) { group = { root, entries: [] }; groups.push(group); }
-    group.entries.push({ role, status: role === "primary" ? (facts.primary.text_basis === "actor_response" ? "Actor response; admission privacy" : "Exported text; admission privacy, not complete Actor output")
-      : "Recorded diagnostic metadata only; admission privacy", ...(minimal || role !== "diagnostic_metadata" ? {} : { recorded_fields_not_shown: detail.recorded_fields_not_shown }), path: basename(path) });
+    group.entries.push({ status: role === "primary" ? "Read first; " + (facts.primary.text_basis === "actor_response" ? "Actor response; admission privacy" : "Exported text; admission privacy, not complete Actor output")
+      : "Recorded diagnostic metadata only; admission privacy", ...(role === "primary" ? { continue_from_line: minimal ? 1 : member.primary_text.output.chars_total + 1 } : {}), path: basename(path) });
   }
-  return { read_first: { group: 0, entry: 0 }, groups };
+  return groups;
 }
 function mandatoryOutcomeBytes(members) {
-  // Native fixture sources share evidence/; their parent-root representation is no larger than
-  // Run-root plus repeated evidence/ prefixes. Keep required roles/purposes/privacy scopes/read_first; drop optional facts and all non-reference metadata.
-  return members.reduce((sum, member, index) => sum + Buffer.byteLength(oracleYaml({ index, run: member.run,
-    state: "done", kind: "primary", files: rootedRequiredFacts(member, true) })), 0);
+  assert.equal(members.length, 64);
+  // Every source exceeds even the maximum64-candidate share, so every shown prefix must be clipped.
+  // Evidence-parent roots, line1, body0 and absent service/redaction are independent lower bounds.
+  const marker = "[Read from line 1]";
+  return members.reduce((sum, member, index) => {
+    assert.ok(member.primary_text.output.bytes_total > Math.floor(49152 / 64));
+    assert.equal(member.primary_text.output.shown_bytes.start, 0);
+    return sum + Buffer.byteLength(oracleYaml({ index, run: member.run, state: "done", kind: "primary",
+      files: rootedRequiredFacts(member, true), _completion: { parts: [{ body: 0 }, { marker: 1 }, { marker: marker.length }] } }))
+      + 8 + 1 + Buffer.byteLength(marker);
+  }, 0);
 }
 function outcome65UpperBound(inventory, inventoryReference, batchId, legacyCompanionRuns) {
   // Constructor-owned set plus caller marker-absence check binds this private legacy-only model.
@@ -760,7 +796,7 @@ function outcome65UpperBound(inventory, inventoryReference, batchId, legacyCompa
       metadata = { index, run: member.run, state: "done", kind: "primary", redacted: true,
         files: rootedRequiredFacts(member), text_warnings: [unknown], run_files_omission: locationOmission };
       // Decimal maximum source count bounds omitted-count spelling; no full source bytes charged.
-      const omitted = `[${output.chars_total} characters omitted]`;
+      const omitted = `[Read from line ${output.chars_total + 1}]`;
       parts = [{ body: maximumBodyBytes }, { marker: 1 }, { marker: omitted.length }];
       payloadBytes = maximumBodyBytes + 1 + Buffer.byteLength(omitted);
     } else {
@@ -796,7 +832,7 @@ function candidateRecord(text, batchId) {
   assert.equal(Object.hasOwn(header, "index"), false); assert.equal(header.state, "done"); assert.equal(header.kind, "primary");
   const core = header._completion;
   assert.deepEqual(Object.keys(core), ["codec", "batch_id", "service", "parts"]);
-  assert.deepEqual(core.service, { header_layout: "rooted_files_v3" });
+  assert.deepEqual(core.service, { header_layout: "rooted_files_v4" });
   assert.equal(core.codec, "completion_yaml_core_v1"); assert.equal(core.batch_id, batchId);
   assert.ok(Array.isArray(core.parts) && core.parts.length > 0);
   const blocks = []; let cursor = end + 5;
@@ -1032,7 +1068,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               const { input, batch, journal: capturedJournal } = candidateCaptures[0];
               assert.deepEqual(capturedJournal.completion_batch, batch);
               assert.equal(capturedJournal.owner_id, ownerId); assert.equal(batch.phase, "pending");
-              assert.equal(input.ownerId, ownerId); assert.equal(batch.result_layout, "completion_yaml_files_v3");
+              assert.equal(input.ownerId, ownerId); assert.equal(batch.result_layout, "completion_yaml_files_v4");
               assert.equal(batch.members.length, 1); assert.equal(batch.members[0].run, currentRun.run);
               assert.equal(batch.members[0].run_instance_id, currentRun.run_instance_id);
               const record = candidateRecord(matches[0], batch.batch_id);
@@ -1060,7 +1096,7 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
               const bodyIndex = record.blocks.findIndex(block => block.kind === "body");
               assert.ok(omitted > 0);
               assert.deepEqual(record.blocks.slice(bodyIndex + 1, bodyIndex + 3), [
-                { kind: "marker", text: "\n" }, { kind: "marker", text: `[${omitted} characters omitted]` },
+                { kind: "marker", text: "\n" }, { kind: "marker", text: `[Read from line ${body.split("\n").length}]` },
               ], "Known loss immediately follows the raw prefix through the compiler newline part");
               assert.ok(Buffer.byteLength(matches[0]) <= 49152);
               if (request === 2) candidateText = matches[0]; else assert.equal(matches[0], candidateText);
@@ -1155,7 +1191,8 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                 const delivered = deliveredBody(records[0], full);
                 assert.equal(delivered, preview); assert.equal([...delivered].length, shown);
                 assert.equal(Buffer.byteLength(delivered), Buffer.byteLength(preview)); assert.ok(total > shown);
-                assert.deepEqual(coverage.recorded_fields_not_shown, ["failure_reason"]);
+                assert.equal(coverage.recorded_fields_not_shown, undefined);
+                assert.deepEqual(coverage.source.fields, ["error", "failure_reason"]);
                 assert.ok(full.includes("\uFEFF") && full.includes("\uFFFD") && full.includes("`````") && full.includes("FAILURE-TAIL🌈"));
                 for (const value of [batchText, JSON.stringify(metadata)]) assert.doesNotMatch(value, /hidden-failure-prefix-token|hidden-failure-tail-token|hidden-failure-literal-token|LEGACY_FAILURE_STREAM_ONLY_CANARY|Legacy diagnostic display/);
                 assert.ok(Buffer.byteLength(batchText) <= 48 * 1024);
@@ -1185,7 +1222,12 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                 const rowSelectionBytes = records.reduce((bytes, record, index) => {
                   const metadata = structuredClone(record.header); delete metadata.run_files;
                   const parts = record.blocks.filter(block => block.kind !== "header").map(block => ({ [block.kind]: block.text }));
-                  if (metadata.files) {
+                  if (Array.isArray(metadata.files)) {
+                    metadata.files = metadata.files.map(group => ({ ...group,
+                      entries: group.entries.filter(entry => canonicalSourceFacts.has(join(group.root, entry.path))) })).filter(group => group.entries.length);
+                    if (!metadata.files.length) delete metadata.files;
+                    if (metadata.files_status?.startsWith("Run locations unavailable: ")) delete metadata.files_status;
+                  } else if (metadata.files) {
                     delete metadata.files.observation;
                     if (metadata.files.status?.startsWith("Run locations unavailable: ")) delete metadata.files.status;
                     delete metadata.files.unavailable; delete metadata.files.result_status;
@@ -1199,10 +1241,12 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
                     if (!Object.keys(metadata.files).length) delete metadata.files;
                   }
                   // Outcome-only observed cost excludes navigation and its omission scaffolding.
-                  delete metadata.run_files_omission;
+                  delete metadata.run_files_omission; delete metadata.run_files_unavailable;
+                  if (metadata.files_status?.startsWith("Run locations unavailable: ")) delete metadata.files_status;
                   metadata._completion = { ...(index === 0 ? { codec: "completion_yaml_core_v1",
                     batch_id: completionCore(batchText).batchId, service } : {}),
                     ...(parts.length ? { parts: parts.map(part => { const kind = Object.keys(part)[0]; return { [kind]: part[kind].length }; }) } : {}) };
+                  if (!Object.keys(metadata._completion).length) delete metadata._completion;
                   return bytes + Buffer.byteLength(oracleYaml(metadata)) + (parts.length ? 8 : 0)
                     + parts.reduce((sum, part) => sum + Buffer.byteLength(Object.values(part)[0]), 0) + (index < 63 ? parts.length ? 2 : 1 : 0);
                 }, 0);

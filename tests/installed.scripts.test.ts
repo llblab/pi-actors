@@ -4112,7 +4112,7 @@ test("installed dist enforces the same bounded Trace, Control, and inspect contr
       ["runtime", ".*", process.platform === "win32" || process.platform === "darwin" ? 12 : 13],
       ["tools-response", ".*", 29],
       ["tools-inspect", ".*", 24],
-      ["run-delivery", ".*", 96],
+      ["run-delivery", ".*", 98],
       ["execution", "^Final response selection", 1],
       ["recipes-context", "^Pi response selection|^Pi Node CLI", 2],
       ["runs-context-exports", "^Final executor responses|^Completion text selects", 2],

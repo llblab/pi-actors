@@ -1369,8 +1369,8 @@ test("Eligible natural outcomes join canonical artifact bindings only after body
   const metadata = parseDocument(message, { version: "1.2", schema: "core", uniqueKeys: true });
   assert.deepEqual(metadata.errors, []); assert.deepEqual(metadata.warnings, []);
   assert.equal(metadata.get("artifact_declarations"), 5);
-  const sourceEntries = metadata.toJS().files.groups.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
-  assert.ok(sourceEntries.some((entry: any) => entry.role === "artifact_inventory" && join(entry.root, entry.path) === path
+  const sourceEntries = metadata.toJS().files.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
+  assert.ok(sourceEntries.some((entry: any) => entry.role === undefined && entry.status === "Declarations only; target availability/production unproven" && join(entry.root, entry.path) === path
     && entry.source === undefined));
   assert.deepEqual(batch.members[0].artifact_inventory, binding.artifact_inventory);
   assert.match(message, /Declarations only; target availability\/production unproven/u);
@@ -3653,8 +3653,8 @@ test("Eligible canonical diagnostic outcomes verify source only after body-free 
     assert.equal(captured.diagnostic_excerpt?.chars_total, Array.from(raw).length); assert.doesNotMatch(raw, /PRIVATE_TAIL_SECRET/);
     const packet = admitRunCompletionBatch({ members, ownerId: "owner-a", tempDir: f.root }); const message = formatRunCompletionBatchMessage(packet);
     const header = parseDocument(message.slice(4, message.indexOf("\n---\n", 4))); assert.deepEqual(header.errors, []);
-    const sourceEntries = header.toJS().files.groups.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
-    assert.ok(sourceEntries.some((entry: any) => entry.role === "diagnostic_metadata" && join(entry.root, entry.path) === f.sourcePath
+    const sourceEntries = header.toJS().files.flatMap((group: any) => group.entries.map((entry: any) => ({ ...entry, root: group.root })));
+    assert.ok(sourceEntries.some((entry: any) => entry.role === undefined && entry.status?.includes("Recorded diagnostic metadata only; admission privacy") && join(entry.root, entry.path) === f.sourcePath
       && entry.source === undefined));
     assert.deepEqual(packet.members[0].result_diagnostics, captured.result_diagnostics);
     assert.doesNotMatch(message, /PRIVATE_LEGACY_BODY|PRIVATE_TAIL_SECRET/);

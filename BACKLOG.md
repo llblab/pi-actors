@@ -6,9 +6,9 @@ Task IDs name bounded work, not execution order. The operator authorizes autonom
 
 ## R0 — Complete the actionable-completion release through CI
 
-Outcome: Publish the approved completion navigation changes and reliable lifecycle witnesses to npm through repository CI, then synchronize and release Pi Kit. Keep the failed unpublished `v0.58.5` tag immutable; use a new patch release for corrections. Scope excludes live reload, unrelated backlog work, manual publication and weakened native-exit or Control assertions.
+Outcome: Publish the approved completion navigation changes and reliable lifecycle witnesses to npm through repository CI, then synchronize and release Pi Kit. Keep failed unpublished tags immutable; use a new patch release for corrections. Scope excludes live reload, unrelated backlog work, manual publication and weakened native-exit or Control assertions.
 
-- [ ] **R0.4 — Publish through the existing CI owners.** Deliver the validated candidate through dev → PR → main, preserve tree-bound evidence, create only the new version tag, pass the three-OS immutable-tag gate and verify exact public npm/GitHub identity. Diagnose further failures and continue useful scoped fixes/hotfixes; never bypass checks or reinterpret a failed gate as publication.
+- [ ] **R0.4 — Publish through the existing CI owners.** Deliver the SDK parent cleanup correction with bounded read-only absence waiting and a final fresh ESRCH census. Validate the next patch through dev → PR → main, preserve tree-bound evidence, create only the new version tag, pass the three-OS immutable-tag gate and verify exact public npm/GitHub identity. Diagnose further failures and continue useful scoped fixes/hotfixes; never bypass checks or reinterpret a failed gate as publication.
 - [ ] **R0.5 — Synchronize and release Pi Kit.** After verified upstream npm publication, update the exact Actors pin, kit version, lockfile and inventory under `~/Repos/pi-kit/AGENTS.md`, validate its package-coherence contract and verify its CI-owned npm/GitHub publication. No installation or live reload.
 
 ## Next bounded work

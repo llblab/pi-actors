@@ -4,13 +4,6 @@ Canonical open work: `BACKLOG.md`. Contracts and durable constraints live in `AG
 
 Task IDs name bounded work, not execution order. The operator authorizes autonomous selection and execution of open pi-actors work in Grow Loop: choose dependency-ready high-value cohorts across this backlog without repeated routine permission questions. Dependencies, factual acceptance and specific safety/authority boundaries remain explicit; a gated task is not completed merely because another cohort can proceed. Completing a child does not complete its checkpoint.
 
-## R0 — Complete the actionable-completion release through CI
-
-Outcome: Publish the approved completion navigation changes and reliable lifecycle witnesses to npm through repository CI, then synchronize and release Pi Kit. Keep failed unpublished tags immutable; use a new patch release for corrections. Scope excludes live reload, unrelated backlog work, manual publication and weakened native-exit or Control assertions.
-
-- [ ] **R0.4 — Publish through the existing CI owners.** Deliver the SDK cleanup corrections with original-row settlement idempotence, bounded read-only parent absence waiting and an independent final fresh ESRCH census. Validate the patch through dev → PR → main, preserve tree-bound evidence, create only the new version tag, pass the three-OS immutable-tag gate and verify exact public npm/GitHub identity. Diagnose further failures and continue useful scoped fixes/hotfixes; never bypass checks or reinterpret a failed gate as publication.
-- [ ] **R0.5 — Synchronize and release Pi Kit.** After verified upstream npm publication, update the exact Actors pin, kit version, lockfile and inventory under `~/Repos/pi-kit/AGENTS.md`, validate its package-coherence contract and verify its CI-owned npm/GitHub publication. No installation or live reload.
-
 ## Next bounded work
 
 - **Capability memory:** P1.3 must admit the evidence contract before P1.2c can change automatic retention/exposure. These future slices are separate from the explicit manual workflow; source/package acceptance does not authorize live migration or reload an already running host.

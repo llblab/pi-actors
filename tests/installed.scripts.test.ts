@@ -2221,6 +2221,22 @@ function assertFreshFixtureRunnerAbsence(captured: readonly { pid: number }[], r
     `Captured fixture runner exit remains unproven; retaining state: ${root}`);
 }
 
+async function waitForFreshFixtureRunnerAbsence(captured: readonly { pid: number }[], root: string, primaryError?: unknown,
+  ports: { now?: () => number; probe?: (pid: number, signal: 0) => void; sleep?: (ms: number) => Promise<void> } = {}): Promise<void> {
+  const modulePath = "./fixtures/sdk-runner-settlement.mjs";
+  const { settleCapturedRunner } = await import(modulePath);
+  // Driver settlement is historical. Wait read-only for current absence without changing its records.
+  for (const { pid } of captured) {
+    try { await settleCapturedRunner({ pid }, () => {}, ports); }
+    catch (error) {
+      throw new AggregateError([...(primaryError ? [primaryError] : []), error],
+        `Captured fixture runner exit remains unproven; retaining state: ${root}; pid=${pid}`);
+    }
+  }
+  // A PID can become present again during the wait; only this final fresh census admits deletion.
+  assertFreshFixtureRunnerAbsence(captured, root, primaryError, ports.probe);
+}
+
 async function prepareInstalledPackage(root: string, withPiPeers = true): Promise<string> {
   const packageDir = join(root, "node_modules", "@llblab", "pi-actors");
   await mkdir(packageDir, { recursive: true });
@@ -5230,6 +5246,54 @@ test("Public SDK fixture cleanup requires fresh ESRCH and preserves uncertainty 
   }
 });
 
+test("Public SDK fixture parent absence wait preserves the final fresh census and uncertainty causes", async () => {
+  const captured = [{ pid: 123, settled: true }, { pid: 456, settled: true }];
+  const primary = Error("fixture failed before cleanup");
+  const absent = Object.assign(Error("absent"), { code: "ESRCH" });
+  let clock = 0; const calls: number[] = [];
+  await waitForFreshFixtureRunnerAbsence(captured, "fixture-root", primary, {
+    now: () => clock, sleep: async ms => { clock += ms; },
+    probe: (pid, signal) => { assert.equal(signal, 0); calls.push(pid); if (calls.length !== 1) throw absent; },
+  });
+  assert.deepEqual(calls, [123, 123, 456, 123, 456]); assert.equal(clock, 25);
+  assert.deepEqual(captured, [{ pid: 123, settled: true }, { pid: 456, settled: true }]);
+
+  const faults = [Object.assign(Error("denied"), { code: "EPERM" }), Error("unknown probe failure")];
+  for (const fault of faults) {
+    let sleeps = 0;
+    await assert.rejects(waitForFreshFixtureRunnerAbsence(captured, "fixture-root", primary, {
+      probe: () => { throw fault; }, sleep: async () => { sleeps++; },
+    }), (error: unknown) => {
+      assert.ok(error instanceof AggregateError); assert.match(error.message, /retaining state: fixture-root; pid=123$/);
+      assert.deepEqual(error.errors, [primary, fault]); return true;
+    });
+    assert.equal(sleeps, 0);
+  }
+
+  clock = 0; let probes = 0;
+  await assert.rejects(waitForFreshFixtureRunnerAbsence(captured, "fixture-root", primary, {
+    now: () => clock, sleep: async ms => { clock += ms; }, probe: () => { probes++; },
+  }), (error: unknown) => {
+    assert.ok(error instanceof AggregateError); assert.equal(error.errors[0], primary);
+    assert.match(error.message, /retaining state: fixture-root; pid=123$/);
+    assert.match(error.errors[1].message, /exit remains unproven; retaining state/); return true;
+  });
+  assert.equal(clock, 5000); assert.equal(probes, 201);
+
+  for (const finalFault of ["present", ...faults]) {
+    let observations = 0;
+    await assert.rejects(waitForFreshFixtureRunnerAbsence(captured.slice(0, 1), "fixture-root", primary, {
+      probe: () => { if (++observations === 1) throw absent; if (finalFault !== "present") throw finalFault; },
+    }), (error: unknown) => {
+      assert.ok(error instanceof AggregateError); assert.equal(error.errors[0], primary);
+      if (finalFault === "present") assert.match(error.errors[1].message, /PID remains present: 123/);
+      else assert.equal(error.errors[1], finalFault);
+      return true;
+    });
+    assert.equal(observations, 2);
+  }
+});
+
 test("source and packed private context preserve Recipe correspondence and Control/Trace/Execution publication without authority reconstruction", async () => {
   type SavedSession = { state: string; session_id: string; session_file: string; cwd: string };
   type Publication = { binding_capture_index: number; source_scope: string; export_id: string; command_id: string;
@@ -5626,6 +5690,65 @@ test("source and packed default SDK shutdown stops captured live processes witho
       whole_scope_closure: witness.whole_scope_closure, crash_supervision: witness.crash_supervision } }));
     assertFreshFixtureRunnerAbsence(captured, root);
     await removeTreeEventually(root);
+  }
+});
+
+test("Coordinator fixture settlement is once per original row and PID without weakening fresh cleanup", async () => {
+  const source = await readFile(join(process.cwd(), "tests/fixtures/coordinator-lifetime-sdk.mjs"), "utf8");
+  const start = source.indexOf("const absent = pid =>"); const end = source.indexOf("function captureRunner", start);
+  assert.ok(start >= 0 && end > start);
+  const absent = Object.assign(Error("absent"), { code: "ESRCH" });
+  const denied = Object.assign(Error("denied"), { code: "EPERM" });
+  const make = (scenario?: "shutdown") => {
+    const counts = { probes: 0, persists: 0, pauses: 0 };
+    const ports: { probe: (pid: number) => void; afterPause?: () => void; clock: number } = {
+      probe: () => { throw absent; }, clock: 0,
+    };
+    const context = { assert, scenario, settledPids: new WeakMap(), observationOrder: 0,
+      process: { kill: (pid: number, signal: number) => { assert.equal(signal, 0); counts.probes++; ports.probe(pid); } },
+      performance: { now: () => ports.clock }, persist: () => { counts.persists++; },
+      pause: async () => { counts.pauses++; ports.clock += 25; ports.afterPause?.(); },
+    };
+    return { counts, ports, context, settle: runInNewContext(source.slice(start, end) + "\nsettlePid", context) };
+  };
+
+  const h = make(); const row: any = { pid: 123, role: "workload", settled: false };
+  await h.settle(row); const accepted = JSON.stringify(row);
+  assert.equal(row.settled, true); assert.equal(row.settled_order, 1);
+  h.ports.probe = () => { throw denied; };
+  await h.settle(row);
+  assert.equal(JSON.stringify(row), accepted);
+  assert.deepEqual(h.counts, { probes: 1, persists: 1, pauses: 0 });
+  await assert.rejects(h.settle({ ...row }), error => error === denied);
+  row.pid = 456; await assert.rejects(h.settle(row), error => error === denied);
+  assert.equal(h.counts.probes, 3); assert.equal(h.counts.persists, 1);
+  assert.throws(() => assertFreshFixtureRunnerAbsence([row], "fixture-root", undefined, () => { throw denied; }), (error: unknown) => {
+    assert.ok(error instanceof AggregateError); assert.deepEqual(error.errors, [denied]); return true;
+  });
+
+  for (const fault of [denied, Error("unknown probe failure")]) {
+    const fresh = make(); const pending = { pid: 789, role: "workload", settled: false };
+    fresh.ports.probe = () => { throw fault; };
+    await assert.rejects(fresh.settle(pending), error => error === fault);
+    assert.equal(pending.settled, false); assert.deepEqual(fresh.counts, { probes: 1, persists: 0, pauses: 0 });
+    fresh.ports.probe = () => { throw absent; }; await fresh.settle(pending);
+    assert.equal(fresh.counts.probes, 2); assert.equal(fresh.counts.persists, 1);
+  }
+  const live = make(); const pending = { pid: 123, role: "workload", settled: false };
+  live.ports.probe = () => {};
+  await assert.rejects(live.settle(pending), /exit remains unproven; retaining state/);
+  assert.equal(live.ports.clock, 8000); assert.equal(live.counts.probes, 321);
+  assert.equal(pending.settled, false); assert.equal(live.counts.persists, 0);
+
+  const shutdown = make("shutdown"); const runner: any = { pid: 123, role: "runner", settled: false };
+  shutdown.ports.afterPause = () => { runner.close = { code: 0, signal: null }; };
+  await shutdown.settle(runner);
+  assert.deepEqual(shutdown.counts, { probes: 2, persists: 1, pauses: 1 });
+  shutdown.ports.probe = () => { throw denied; }; await shutdown.settle(runner);
+  assert.equal(shutdown.counts.probes, 2);
+  for (const pid of [0, -1, NaN, undefined]) {
+    const invalid = make(); await assert.rejects(invalid.settle({ pid, settled: true }), /PID is unavailable/);
+    assert.equal(invalid.counts.probes, 0); assert.equal(invalid.counts.persists, 0);
   }
 });
 
@@ -6231,7 +6354,7 @@ test("source and packed public spawn deliver complete primary sources and overfl
           if (primaryError) throw new AggregateError([primaryError, error], error.message);
           throw error;
         }
-        assertFreshFixtureRunnerAbsence([...proof.captured, { pid: hostPid }], root, primaryError);
+        await waitForFreshFixtureRunnerAbsence([...proof.captured, { pid: hostPid }], root, primaryError);
       }
       if (!primaryError) await rm(root, { recursive: true, force: true });
     }

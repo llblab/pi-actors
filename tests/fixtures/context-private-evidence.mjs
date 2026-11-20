@@ -426,7 +426,7 @@ try {
     const sourceKey = createHash("sha256").update(JSON.stringify([run, frame.run_instance_id, frame.ownerId ?? null])).digest("hex");
     const targets = [caseMetadata.artifacts.operational, join(caseMetadata.cwd, caseMetadata.artifacts.report ?? caseMetadata.artifacts.api_key)];
     const inventory = withoutSourceProbes(unsafe ? [capture, sessionPath, executionPath, ...targets,
-      join(frame.state_dir, "evidence", `primary-${sourceKey}.txt`), join(frame.state_dir, "evidence", `artifact-inventory-${sourceKey}.json`)] : targets, () => {
+      join(frame.state_dir, "evidence", "primary.txt"), join(frame.state_dir, "evidence", "artifact-inventory.json")] : targets, () => {
       // Privileged synthetic complete UTF-8 selection, not executor work or failed/session primary permission.
       if (unsafe || code === 0) { primary.observe(raw, { commandId: "command-001", attempts: [{ attempt: 1, result: raw }], session: false }); primary.select(raw); }
       writeRunSessionContextIndex(frame.state_dir, key, query);
@@ -434,7 +434,7 @@ try {
       const inventory = prepareRunArtifactInventoryPublication(frame.state_dir, key); assert.equal(inventory.readFailure(), undefined); assert.equal(primary.readFailure(), undefined);
       if (unsafe) { assert.equal(primary.snapshot().output_unavailable, "identity_redacted"); assert.equal(inventory.snapshot().artifact_inventory_unavailable, "identity_redacted");
         assert.equal(body(join(frame.state_dir, "context-index.json")).entries.sessions.reason, "session_identity_redacted");
-        for (const name of ["artifacts.json", "sessions.json", `primary-${sourceKey}.txt`, `artifact-inventory-${sourceKey}.json`]) assert.equal(fs.existsSync(join(frame.state_dir, "evidence", name)), false);
+        for (const name of ["artifacts.json", "sessions.json", "primary.txt", "artifact-inventory.json"]) assert.equal(fs.existsSync(join(frame.state_dir, "evidence", name)), false);
       } else { assert.ok(inventory.snapshot().artifact_inventory); if (code === 0) assert.ok(primary.snapshot().output); else assert.equal(primary.snapshot().output_unavailable, "not_selected"); }
       return inventory;
     });

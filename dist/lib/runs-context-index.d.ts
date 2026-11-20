@@ -19,6 +19,8 @@ declare const EXPORTS: {
     readonly stderr: readonly ["stderr.log", "text/plain", true];
 };
 export type RunContextRole = keyof typeof EXPORTS;
+/** The complete compiler-owned evidence namespace, in role order; nothing else may claim these paths. */
+export declare function runContextExportPaths(): readonly string[];
 export declare function runContextExportPath(role: RunContextRole): string;
 export interface RunContextIndexIdentity {
     readonly run: string;

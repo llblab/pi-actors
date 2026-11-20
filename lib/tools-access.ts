@@ -87,9 +87,10 @@ export function assertRunAccessibleToContext(
   runId: string,
   ctx: unknown,
 ): Record<string, unknown> {
+  const sessionId = requireContextSessionId(ctx, `run:${runId}`);
   return assertRunStatusAccessibleToContext(
     runId,
-    AsyncRuns.getRunStatus(runId),
+    AsyncRuns.getRunStatus(runId, sessionId),
     ctx,
   );
 }

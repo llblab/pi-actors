@@ -4,7 +4,7 @@
  * Owns the public spawn execution path for run-backed actors
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import * as AsyncRuns from "./async-runs.ts";
@@ -33,9 +33,12 @@ function getRunOwnerId(ctx: SpawnToolContext): string | undefined {
   return ctx.sessionManager?.getSessionId?.();
 }
 
-function draftRecipeName(run: string): string {
-  return `${run.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "spawn"}.json`;
+function draftRecipeStem(run: string): string {
+  return run.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "spawn";
 }
+
+/** Run names repeat across sessions, so a draft takes the first free `<run>[-N].json`; it never replaces another draft. */
+const MAX_DRAFT_NAME_ATTEMPTS = 1_000;
 
 function draftRecipeDefaults(
   values: Record<string, unknown>,
@@ -64,7 +67,7 @@ function writeSpawnDraftRecipe(
     return undefined;
   const root = Paths.getRecipeDraftRoot();
   mkdirSync(root, { recursive: true });
-  const path = join(root, draftRecipeName(String(meta.run)));
+  const stem = draftRecipeStem(String(meta.run));
   const defaults = draftRecipeDefaults(meta.values);
   const recipe = {
     async: true,
@@ -73,11 +76,17 @@ function writeSpawnDraftRecipe(
     ...(defaults ? { defaults } : {}),
     template: input.template,
   };
-  withFileMutationLock(root, () =>
-    withFileMutationLock(path, () =>
-      writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`, { flag: "wx" }),
-    ),
-  );
+  const path = withFileMutationLock(root, () => {
+    for (let attempt = 1; attempt <= MAX_DRAFT_NAME_ATTEMPTS; attempt += 1) {
+      const candidate = join(root, `${stem}${attempt === 1 ? "" : `-${attempt}`}.json`);
+      if (existsSync(candidate)) continue;
+      withFileMutationLock(candidate, () =>
+        writeFileSync(candidate, `${JSON.stringify(recipe, null, 2)}\n`, { flag: "wx" }),
+      );
+      return candidate;
+    }
+    throw new Error(`Draft recipe names for ${stem} are exhausted; prune unused drafts.`);
+  });
   RecipesUsage.recordRecipeLaunch(path, new Date(), "spawn", Paths.getRecipeRoot());
   return path;
 }

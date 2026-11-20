@@ -18,6 +18,7 @@ import { EventEmitter } from "node:events";
 import { parseDocument } from "yaml";
 
 import { deliverRunControl } from "../lib/runs-control-delivery.ts";
+import { sessionComponent } from "../lib/runs-naming.ts";
 import { splitCommandTemplate } from "../lib/command-templates.ts";
 import { bindFixtureBirth, captureFixtureBirths, joinFixtureRunners, observeFixtureBirth, requireFreshFixtureAbsence, throwFixtureErrors } from "./fixtures/runner-completion.ts";
 
@@ -3597,6 +3598,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
          const musicPlayer = definitions.get("music_player");
          const wrapperPath = join(process.env.PI_CODING_AGENT_DIR, "recipes", "music_player.json");
          const authoredWrapper = JSON.parse(readFileSync(wrapperPath, "utf8"));
+         let musicStateDir = "";
          const waitForMusicTerminal = async () => {
            for (let attempt = 0; attempt < 200; attempt += 1) {
              const current = await inspect.execute("packed-music-terminal", {
@@ -3607,10 +3609,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
              if (current.details.status !== "running") {
                let pid = 0;
                try {
-                 const runState = JSON.parse(readFileSync(join(
-                   process.env.PI_CODING_AGENT_DIR,
-                   "tmp", "pi-actors", "runs", "music-player", "run.json",
-                 ), "utf8"));
+                 const runState = JSON.parse(readFileSync(join(musicStateDir, "run.json"), "utf8"));
                  pid = Number(runState.pid || 0);
                } catch {}
                try {
@@ -3628,6 +3627,7 @@ test("packed artifact first session preserves agent-native Skill and tool parity
            recipe: "music-player/playback",
            values: { source: sourceDir, loop: false, player: "ffplay" },
          }, undefined, undefined, context);
+         musicStateDir = String(mediaSpawn.details.state_dir);
          await waitForMusicTerminal();
          const wrapperSpawn = await spawn.execute("packed-wrapper-spawn", {
            file: wrapperPath,
@@ -4116,7 +4116,7 @@ test("installed dist enforces the same bounded Trace, Control, and inspect contr
     await cp(join(process.cwd(), "tests", "test-environment.mjs"), join(root, "test-environment.mjs"));
     for (const [owner, pattern, passes] of [
       ["run-ui-runtime", ".*", process.platform === "win32" ? 51 : 55],
-      ["observability", ".*", 56],
+      ["observability", ".*", 57],
       ["runs-control-delivery", "Control delivery retains exact transport|Admitted Control failures preserve|Unix FIFO path accepts|A handled Control remains", process.platform === "win32" ? 3 : 4],
       ["runs-retention", "Manual retirement preserves exact failures|Retirement chains recording", 2],
       ["async-runs", "Awaited Control facade preserves", process.platform === "linux" ? 1 : 0],
@@ -4128,7 +4128,7 @@ test("installed dist enforces the same bounded Trace, Control, and inspect contr
       ["runtime", ".*", process.platform === "win32" || process.platform === "darwin" ? 12 : 13],
       ["tools-response", ".*", 29],
       ["tools-inspect", ".*", 24],
-      ["run-delivery", ".*", 98],
+      ["run-delivery", ".*", 99],
       ["execution", "^Final response selection", 1],
       ["recipes-context", "^Pi response selection|^Pi Node CLI", 2],
       ["runs-context-exports", "^Final executor responses|^Completion text selects", 2],
@@ -4244,7 +4244,7 @@ test("packed Run retirement shares the compiled owner without treating retained 
     assert.doesNotMatch(directLaunch, /file_investigation:|^next:/m);
     for (const action of ["kill", "archive", "prune"]) for (const change of ["owner", "generation"]) {
       const run = `packed-scope-${randomUUID()}`;
-      const stateDir = join(paths.getRunStateRoot(), run);
+      const stateDir = join(paths.getRunStateRoot(), "owner-A", run);
       ownership.claimRunStateDirectory(stateDir, run);
       await writeFile(join(stateDir, "run.json"), JSON.stringify({ run, state_dir: stateDir, pid: 0,
         ownerId: change === "owner" ? "owner-B" : "owner-A",
@@ -5630,7 +5630,7 @@ test("source and packed default SDK shutdown stops captured live processes witho
       for (const [key, outcome] of [["owned", report.owned], ["foreign", report.foreign]] as const) {
         const frames = report.before[key];
         assert.equal(frames.length, 2); assert.deepEqual(frames.map((row: any) => row.role), ["runner", "workload"]);
-        const stateDir = join(agentDir, "tmp", "pi-actors", "runs", outcome.run);
+        const stateDir = join(agentDir, "tmp", "pi-actors", "runs", sessionComponent(outcome.owner), outcome.run);
         const meta = JSON.parse(await readFile(join(stateDir, "run.json"), "utf8"));
         assert.equal(meta.pid, frames[0].pid); assert.equal(meta.run_instance_id, outcome.generation); assert.equal(meta.ownerId, outcome.owner);
         assert.deepEqual(meta.process_identity, frames[0].identity);
@@ -5817,19 +5817,19 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
         assert.equal(launch.events[0].id, launch.events[1].id); assert.equal(launch.events[2].id, launch.events[3].id);
         assert.equal(launch.events[1].is_error, false); assert.equal(launch.events[3].is_error, false);
       }
-      assert.equal(report.entrypointLaunch.run, "sdk-lifetime-entrypoint"); assert.equal(report.parallelLaunch.run, "sdk-lifetime-parallel");
+      assert.equal(report.entrypointLaunch.run, "l-entrypoint"); assert.equal(report.parallelLaunch.run, "l-parallel");
       assert.equal(report.entrypointLaunch.events[2].template, "{node} {script}");
       assert.deepEqual(report.parallelLaunch.events[2].template, { parallel: true, template: ["{node} {script_1}", "{node} {script_2}"] });
-      assert.equal(report.naturalParallel.run, "sdk-lifetime-parallel"); assert.equal(report.naturalParallel.root_code, 0);
+      assert.equal(report.naturalParallel.run, "l-parallel"); assert.equal(report.naturalParallel.root_code, 0);
       assert.deepEqual(report.naturalParallel.codes, [0, 0]); assert.equal(new Set(report.naturalParallel.command_ids).size, 2);
-      assert.equal(report.degradedLaunch.run, "sdk-lifetime-degraded");
+      assert.equal(report.degradedLaunch.run, "l-degraded");
       assert.deepEqual(report.degradedLaunch.events[2].template, report.parallelLaunch.events[2].template);
-      assert.equal(report.naturalDegraded.run, "sdk-lifetime-degraded"); assert.equal(report.naturalDegraded.root_code, 0);
+      assert.equal(report.naturalDegraded.run, "l-degraded"); assert.equal(report.naturalDegraded.root_code, 0);
       assert.deepEqual(report.naturalDegraded.codes, [7, 0]); assert.deepEqual(report.naturalDegraded.native_codes, [7, 0]);
       assert.deepEqual(report.naturalDegraded.statuses, ["failed", "done"]); assert.equal(new Set(report.naturalDegraded.command_ids).size, 2);
-      assert.equal(report.unusableLaunch.run, "sdk-lifetime-unusable");
+      assert.equal(report.unusableLaunch.run, "l-unusable");
       assert.deepEqual(report.unusableLaunch.events[2].template, { ...report.parallelLaunch.events[2].template, failure: "branch" });
-      assert.equal(report.naturalUnusable.run, "sdk-lifetime-unusable"); assert.equal(report.naturalUnusable.root_code, 7);
+      assert.equal(report.naturalUnusable.run, "l-unusable"); assert.equal(report.naturalUnusable.root_code, 7);
       assert.equal(report.naturalUnusable.failure_reason, "all_branches_unusable");
       assert.deepEqual(report.naturalUnusable.soft_quorum, { coverage: 0, degraded: true, done: 0, expected: 2, failed: 2, usable: false });
       assert.deepEqual(report.naturalUnusable.codes, [7, 7]); assert.deepEqual(report.naturalUnusable.native_codes, [7, 7]);
@@ -5842,14 +5842,14 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
         assert.deepEqual(outcome.workload_pids, overlap.live_probes);
       }
       assert.equal(report.privateToolContexts, 5); assert.equal(report.privateShutdownContexts, 6);
-      assert.equal(report.naturalComposition.run, "sdk-lifetime-composition"); assert.equal(report.naturalComposition.root_code, 0);
+      assert.equal(report.naturalComposition.run, "l-composition"); assert.equal(report.naturalComposition.root_code, 0);
       assert.deepEqual(report.naturalComposition.codes, [0, 0]); assert.equal(report.naturalComposition.command_ids.length, 2);
       assert.equal(new Set(report.naturalComposition.command_ids).size, 2);
       assert.equal(report.naturalComposition.workload_pids.length, 2);
-      assert.equal(report.naturalRetry.run, "sdk-lifetime-retry"); assert.equal(report.naturalRetry.root_code, 0);
+      assert.equal(report.naturalRetry.run, "l-retry"); assert.equal(report.naturalRetry.root_code, 0);
       assert.deepEqual(report.naturalRetry.attempt_codes, [7, 0]); assert.deepEqual(report.naturalRetry.native_codes, [7, 0]);
       assert.equal(report.naturalRetry.workload_pids.length, 2);
-      assert.deepEqual(report.naturalFailure, { run: "sdk-lifetime-failure", code: 7, native_exit_code: 7,
+      assert.deepEqual(report.naturalFailure, { run: "l-failure", code: 7, native_exit_code: 7,
         stderr_bytes: Buffer.byteLength("finite SDK failure stderr 😀") });
       assert.equal(report.sameIdForeignManagerRejected, true); assert.equal(report.oldOriginNotReconstructed, true);
       assert.equal(report.controllerTimers, 0); assert.equal(report.deadlineNotices, 0);
@@ -5870,14 +5870,14 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
       assert.deepEqual(Buffer.from(stdio.stdout_base64, "base64"), actualHostCapture.stdout);
       assert.deepEqual(Buffer.from(stdio.stderr_base64, "base64"), actualHostCapture.stderr);
       const proof = JSON.parse(await readFile(manifest, "utf8"));
-      const runs = new Set(["sdk-lifetime-spawn", "sdk-lifetime-async", "sdk-lifetime-failure", "sdk-lifetime-retry", "sdk-lifetime-composition", "sdk-lifetime-entrypoint", "sdk-lifetime-parallel", "sdk-lifetime-degraded", "sdk-lifetime-unusable", "sdk-lifetime-actor-session"]);
+      const runs = new Set(["l-spawn", "l-async", "l-failure", "l-retry", "l-composition", "l-entrypoint", "l-parallel", "l-degraded", "l-unusable", "l-actor-session"]);
       assert.equal(proof.schema, "coordinator-sdk-fixture-v1"); assert.equal(proof.complete, true); assert.equal(proof.launching, false);
       assertCapturedFixtureLifetimes(proof.captured, 25);
       for (const row of proof.captured) {
         assert.ok(Number.isSafeInteger(row.pid) && row.pid > 0 && row.pid !== pid); assert.equal(row.settled, true);
         assert.ok(runs.has(row.run)); assert.ok(["runner", "workload"].includes(row.role));
         assert.equal(typeof row.run_instance_id, "string"); assert.ok(row.run_instance_id); assert.equal(typeof row.ownerId, "string"); assert.ok(row.ownerId);
-        assert.equal(row.state_dir, join(agentDir, "tmp", "pi-actors", "runs", row.run));
+        assert.equal(row.state_dir, join(agentDir, "tmp", "pi-actors", "runs", sessionComponent(row.ownerId), row.run));
         const meta = JSON.parse(await readFile(join(row.state_dir, "run.json"), "utf8"));
         assert.equal(meta.run, row.run); assert.equal(meta.run_instance_id, row.run_instance_id); assert.equal(meta.ownerId, row.ownerId); assert.equal(meta.state_dir, row.state_dir);
         if (row.role === "runner") assert.equal(meta.pid, row.pid);
@@ -5890,14 +5890,14 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
       for (const run of runs) {
         const rows = proof.captured.filter((row: { run: string }) => row.run === run);
         assert.equal(new Set(rows.map((row: { run_instance_id: string }) => row.run_instance_id)).size, 1);
-        assert.deepEqual(rows.map((row: { role: string }) => row.role).sort(), ["sdk-lifetime-retry", "sdk-lifetime-composition", "sdk-lifetime-parallel", "sdk-lifetime-degraded", "sdk-lifetime-unusable"].includes(run) ? ["runner", "workload", "workload"] : ["runner", "workload"]);
+        assert.deepEqual(rows.map((row: { role: string }) => row.role).sort(), ["l-retry", "l-composition", "l-parallel", "l-degraded", "l-unusable"].includes(run) ? ["runner", "workload", "workload"] : ["runner", "workload"]);
         assert.deepEqual(rows.filter((row: { role: string }) => row.role === "workload").map((row: { command: number; attempt: number }) => [row.command, row.attempt]).sort(),
-          ["sdk-lifetime-composition", "sdk-lifetime-parallel", "sdk-lifetime-degraded", "sdk-lifetime-unusable"].includes(run) ? [[1, 1], [2, 1]] : run === "sdk-lifetime-retry" ? [[1, 1], [1, 2]] : [[1, 1]]);
+          ["l-composition", "l-parallel", "l-degraded", "l-unusable"].includes(run) ? [[1, 1], [2, 1]] : run === "l-retry" ? [[1, 1], [1, 2]] : [[1, 1]]);
       }
       const summary = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(stdio.stdout_base64, "base64")));
-      assert.deepEqual(summary.naturalRetry.workload_pids, proof.captured.filter((row: { run: string; role: string }) => row.run === "sdk-lifetime-retry" && row.role === "workload")
+      assert.deepEqual(summary.naturalRetry.workload_pids, proof.captured.filter((row: { run: string; role: string }) => row.run === "l-retry" && row.role === "workload")
         .map((row: { pid: number }) => row.pid));
-      assert.deepEqual(summary.naturalComposition.workload_pids, proof.captured.filter((row: { run: string; role: string }) => row.run === "sdk-lifetime-composition" && row.role === "workload")
+      assert.deepEqual(summary.naturalComposition.workload_pids, proof.captured.filter((row: { run: string; role: string }) => row.run === "l-composition" && row.role === "workload")
         .map((row: { pid: number }) => row.pid));
       assert.deepEqual(proof.public_launches, [summary.entrypointLaunch, summary.parallelLaunch, summary.degradedLaunch, summary.unusableLaunch, summary.actorSessionLaunch]);
       for (const launch of proof.public_launches) {
@@ -5908,10 +5908,12 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
       for (const [launch, outcome] of [[summary.parallelLaunch, summary.naturalParallel], [summary.degradedLaunch, summary.naturalDegraded], [summary.unusableLaunch, summary.naturalUnusable]]) {
         assert.deepEqual(launch.overlap.members, proof.captured.filter((row: { run: string; role: string }) => row.run === launch.run && row.role === "workload")
           .map(({ pid, command, attempt }: { pid: number; command: number; attempt: number }) => ({ pid, command, attempt })));
-        const execution = JSON.parse(await readFile(join(agentDir, "tmp", "pi-actors", "runs", launch.run, "execution.json"), "utf8"));
+        const execution = JSON.parse(await readFile(join(agentDir, "tmp", "pi-actors", "runs", sessionComponent(launch.owner), launch.run, "execution.json"), "utf8"));
         assert.deepEqual(outcome.command_ids, execution.commands.map((command: { id: string }) => command.id));
       }
-      const compositionExecution = JSON.parse(await readFile(join(agentDir, "tmp", "pi-actors", "runs", "sdk-lifetime-composition", "execution.json"), "utf8"));
+      const compositionRunner = proof.captured.find((row: { run: string; role: string }) => row.run === "l-composition" && row.role === "runner");
+      const compositionExecution = JSON.parse(await readFile(join(agentDir, "tmp", "pi-actors", "runs",
+        sessionComponent(compositionRunner?.ownerId), "l-composition", "execution.json"), "utf8"));
       assert.deepEqual(summary.naturalComposition.command_ids, compositionExecution.commands.map((command: { id: string }) => command.id));
       captured = [...proof.captured, { pid: pid! }];
     } catch (error) { proofErrors.push(error); }
@@ -5927,30 +5929,30 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
       const frames = proof.captured.filter((row: { role: string }) => row.role === "runner").map((row: {
         run: string; run_instance_id: string; ownerId: string; state_dir: string;
       }) => ({ run: row.run, run_instance_id: row.run_instance_id, ownerId: row.ownerId, state_dir: row.state_dir }));
-      assert.equal(frames.length, 10); assert.equal(frames.every((row: { run: string; ownerId: string }) => row.ownerId === (row.run === "sdk-lifetime-actor-session" ? actorCoordinator!.owner : ownerSession)), true);
+      assert.equal(frames.length, 10); assert.equal(frames.every((row: { run: string; ownerId: string }) => row.ownerId === (row.run === "l-actor-session" ? actorCoordinator!.owner : ownerSession)), true);
       const catalog = join(agentDir, "tmp", "pi-actors", "runs", "index.json");
       const catalogBefore = await readFile(catalog), rows = JSON.parse(catalogBefore.toString("utf8")).entries;
-      assert.deepEqual(rows.map((row: { run: string }) => row.run), ["sdk-lifetime-actor-session", "sdk-lifetime-unusable", "sdk-lifetime-degraded", "sdk-lifetime-parallel", "sdk-lifetime-entrypoint", "sdk-lifetime-composition", "sdk-lifetime-retry", "sdk-lifetime-failure", "sdk-lifetime-spawn"]); // Failed registration is not backfilled.
+      assert.deepEqual(rows.map((row: { run: string }) => row.run), ["l-actor-session", "l-unusable", "l-degraded", "l-parallel", "l-entrypoint", "l-composition", "l-retry", "l-failure", "l-spawn"]); // Failed registration is not backfilled.
       const captureLocations = await Promise.all(frames.map(async (row: { run: string; run_instance_id: string; state_dir: string }) => {
         const execution = JSON.parse(await readFile(join(row.state_dir, "execution.json"), "utf8"));
         assert.equal(execution.run, row.run); assert.equal(execution.run_instance_id, row.run_instance_id);
-        const outcome = JSON.parse(await readFile(join(row.state_dir, "result.json"), "utf8")), code = ["sdk-lifetime-failure", "sdk-lifetime-unusable"].includes(row.run) ? 7 : 0;
-        const commandCodes = row.run === "sdk-lifetime-unusable" ? [[7], [7]] : row.run === "sdk-lifetime-degraded" ? [[7], [0]] : ["sdk-lifetime-composition", "sdk-lifetime-parallel"].includes(row.run) ? [[0], [0]] : [row.run === "sdk-lifetime-retry" ? [7, 0] : [code]];
+        const outcome = JSON.parse(await readFile(join(row.state_dir, "result.json"), "utf8")), code = ["l-failure", "l-unusable"].includes(row.run) ? 7 : 0;
+        const commandCodes = row.run === "l-unusable" ? [[7], [7]] : row.run === "l-degraded" ? [[7], [0]] : ["l-composition", "l-parallel"].includes(row.run) ? [[0], [0]] : [row.run === "l-retry" ? [7, 0] : [code]];
         assert.equal(outcome.run_instance_id, row.run_instance_id); assert.equal(outcome.terminal_acceptance, "natural"); assert.equal(outcome.code, code);
-        if (["sdk-lifetime-actor-session", "sdk-lifetime-retry", "sdk-lifetime-composition", "sdk-lifetime-parallel", "sdk-lifetime-degraded"].includes(row.run)) {
+        if (["l-actor-session", "l-retry", "l-composition", "l-parallel", "l-degraded"].includes(row.run)) {
           assert.equal(outcome.output.text_basis, "actor_response");
           const response = await readFile(outcome.output.source.path, "utf8");
           assert.equal(createHash("sha256").update(response).digest("hex"), outcome.output.source.sha256);
           assert.equal([...response].length, outcome.output.chars_total);
-          if (row.run === "sdk-lifetime-actor-session") {
+          if (row.run === "l-actor-session") {
             assert.equal(response, "FINITE_GENUINE_ACTOR_SESSION 😀\n");
             await assert.rejects(readFile(join(row.state_dir, "evidence", "sessions.json")), { code: "ENOENT" });
-          } else if (["sdk-lifetime-retry", "sdk-lifetime-composition"].includes(row.run)) {
+          } else if (["l-retry", "l-composition"].includes(row.run)) {
             const last = execution.commands.at(-1), attempt = last.attempts.at(-1);
             assert.equal(response, await readFile(join(row.state_dir, attempt.stdout.path), "utf8"));
           }
         }
-        if (row.run === "sdk-lifetime-unusable") {
+        if (row.run === "l-unusable") {
           assert.equal(outcome.failure_reason, "all_branches_unusable");
           assert.deepEqual(outcome.soft_quorum, { coverage: 0, degraded: true, done: 0, expected: 2, failed: 2, usable: false });
           assert.match(outcome.error, /all parallel branches failed or produced empty output/);
@@ -5969,7 +5971,7 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
           });
         });
       }));
-      const actorFrame = frames.find((row: { run: string }) => row.run === "sdk-lifetime-actor-session")!;
+      const actorFrame = frames.find((row: { run: string }) => row.run === "l-actor-session")!;
       const actorCommand = JSON.parse(await readFile(join(actorFrame.state_dir, "execution.json"), "utf8")).commands[0];
       assert.equal(actorCommand.session_dir, "sessions/command-001"); assert.equal(actorCommand.session_files.length, 1);
       const piCli = fileURLToPath(new URL("./bundle/cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")));
@@ -5978,7 +5980,7 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
       assert.deepEqual(splitCommandTemplate(actorCommand.command).slice(0, 4),
         [process.execPath, piCli, "--session-dir", join(actorFrame.state_dir, "sessions", "command-001")]);
       const actorPath = join(actorFrame.state_dir, actorCommand.session_files[0]);
-      const actorStarted = JSON.parse(await readFile(join(agentDir, "sdk-lifetime-actor-session.command-1.ready.json.1.session"), "utf8"));
+      const actorStarted = JSON.parse(await readFile(join(agentDir, "l-actor-session.command-1.ready.json.1.session"), "utf8"));
       assert.equal(actorStarted.session_file, actorPath); assert.equal(actorStarted.cwd, agentDir); assert.notEqual(actorStarted.session_id, actorCoordinator!.owner);
       assert.equal(actorStarted.pid, proof.captured.find((row: { run: string; role: string }) => row.run === actorFrame.run && row.role === "workload").pid);
       const actorBytes = await readFile(actorPath); assert.ok(actorBytes.length < 4 * 1024 * 1024);
@@ -6000,7 +6002,7 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
       } }));
       assert.equal(typeof entrypointPath, "string");
       const input = { packageDir, agentDir, layout, sessionFile, phase: "genuine_research", entrypointPath, actorSession, sessions: [ownerSession, randomUUID()], frames,
-        registeredRun: "sdk-lifetime-spawn", failedRun: "sdk-lifetime-failure", retryRun: "sdk-lifetime-retry", compositionRun: "sdk-lifetime-composition", entrypointRun: "sdk-lifetime-entrypoint", parallelRun: "sdk-lifetime-parallel", degradedRun: "sdk-lifetime-degraded", unusableRun: "sdk-lifetime-unusable", manifest: join(agentDir, "research-manifest.json") };
+        registeredRun: "l-spawn", failedRun: "l-failure", retryRun: "l-retry", compositionRun: "l-composition", entrypointRun: "l-entrypoint", parallelRun: "l-parallel", degradedRun: "l-degraded", unusableRun: "l-unusable", manifest: join(agentDir, "research-manifest.json") };
       const inputPath = join(agentDir, "research-input.json"); await writeFile(inputPath, JSON.stringify(input));
       assertFreshFixtureRunnerAbsence(captured, root);
       const pending = execFileAsync(process.execPath, ["--experimental-strip-types",
@@ -6028,7 +6030,7 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
       assert.equal(report.navigationHandoffJourneys, 18); assert.equal(report.copiedNavigationHandoffIsolated, true);
       assert.equal(report.copiedLaunchLocationsIsolated, true); assert.equal(report.selectedLaunchMetadataReads.length, 2);
       for (const [index, selection] of report.selectedLaunchMetadataReads.entries()) {
-        const run = index === 0 ? "sdk-lifetime-async" : input.entrypointRun;
+        const run = index === 0 ? "l-async" : input.entrypointRun;
         const frame = frames.find((frame: { run: string }) => frame.run === run)!;
         assert.equal(selection.run, run); assert.equal(selection.run_instance_id, frame.run_instance_id);
         assert.equal(selection.directory, frame.state_dir); assert.equal(selection.path, join(frame.state_dir, "run.json"));
@@ -6134,7 +6136,7 @@ test("source and packed private coordinator epochs and producer-exit ordinary re
         const inherited = inspections.find((item: any) => item.view.owner_session === ownerSession && item.view.navigation.items.some((row: any) => row.directory === rows.find((entry: { run: string }) => entry.run === input.registeredRun).state_dir));
         assert.ok(inherited, "Accepted source navigation must survive as history, not be erased to obtain isolation");
         assert.deepEqual(inherited.entry.message.content, sourceEntries.find((entry: any) => entry.id === inherited.entry.id)!.message.content);
-        for (const [tool, run] of [["spawn", input.entrypointRun], ["sdk_lifetime_async", "sdk-lifetime-async"]]) {
+        for (const [tool, run] of [["spawn", input.entrypointRun], ["sdk_lifetime_async", "l-async"]]) {
           const frame = frames.find((row: { run: string }) => row.run === run); assert.ok(frame);
           const receipts = copiedEntries.filter((entry: any) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === tool &&
             entry.message.content.some((block: any) => {

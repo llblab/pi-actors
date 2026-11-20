@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import test from "node:test";
+import { RUN_NAME_MAX_LENGTH } from "../lib/runs-naming.ts";
 import { parseDocument } from "yaml";
 
 // Read only compiler headers, then consume declared UTF-16 lengths; authored body delimiters stay opaque.
@@ -560,6 +561,18 @@ test("Candidate capture is a fresh closed journal layout, not a prototype overla
       }
       assert.equal(JSON.stringify(batch), snapshot);
     }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Completion members accept every admitted Run name length and still bound longer names", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-long-run-name-"));
+  try {
+    // Names up to the session allocator bound must not lose their completion; 120 used to silently refuse them.
+    const admitted = "n".repeat(RUN_NAME_MAX_LENGTH);
+    const batch = admitRunCompletionBatch({ ownerId: "long-name", tempDir: root, members: [{ ...member(admitted), summary: "Run completed." }] });
+    assert.equal(batch.members[0].run, admitted);
+    assert.throws(() => admitRunCompletionBatch({ ownerId: "too-long-name", tempDir: root, members: [member("n".repeat(RUN_NAME_MAX_LENGTH + 1))] }),
+      /Completion batch member run exceeds/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

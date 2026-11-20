@@ -4,6 +4,11 @@
  * Excludes: lock acquisition, primary body admission/publication, deadline eligibility, signals, exit proof and delivery.
  */
 export declare const RUN_PRIMARY_TEXT_PROTOCOL = "run-primary-text-v1";
+/** Fixed retained sources of one execution, relative to its Run directory; a fresh generation removes them before work. */
+export declare const RUN_PRIMARY_SOURCE_FILE = "evidence/primary.txt";
+export declare const RUN_RESULT_DIAGNOSTICS_SOURCE_FILE = "evidence/result-diagnostics.json";
+export declare const RUN_ARTIFACT_INVENTORY_SOURCE_FILE = "evidence/artifact-inventory.json";
+export declare const RUN_RETAINED_SOURCE_FILES: readonly string[];
 export declare const RUN_ARTIFACT_INVENTORY_PROTOCOL = "run-artifact-inventory-v1";
 export declare const RUN_RESULT_DIAGNOSTICS_PROTOCOL = "run-result-diagnostics-v1";
 export declare const RUN_RESULT_DIAGNOSTIC_FIELDS: readonly ["command", "error", "failure_reason"];

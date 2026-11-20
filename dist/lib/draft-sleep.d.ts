@@ -23,6 +23,8 @@ export interface DraftSleepState {
     processingAttempts?: number;
     reviewerInputPath: string;
     runId?: string;
+    /** Exact Run directory captured at launch: processing reads it without guessing the current session. */
+    runStateDir?: string;
     sourcePaths: string[];
     updatedAt: string;
 }
@@ -42,6 +44,7 @@ export interface DraftSleepSchedulerDeps {
     hasActiveActors(): boolean;
     launch(batch: DraftSleepBatch): {
         run: string;
+        state_dir?: string;
     };
     now?(): Date;
     process?(state: DraftSleepState): DraftSleepProcessResult;

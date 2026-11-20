@@ -22,7 +22,7 @@ import { runContextExportPath, writeRunContextIndexUnderLock, readRunContextIden
 import { readRunControlJournalFromStateDir, runControlsFile } from "./runs-controls.js";
 import { assertOwnedRunStateDirectory, RUN_STATE_OWNERSHIP_FILE } from "./runs-ownership.js";
 import { describeRunArtifactReferences, observeRunArtifactReference } from "./runs-artifacts.js";
-import { decodeRunPrimaryTextBinding, readRunNaturalOutcomeSnapshot, RUN_OUTCOME_PROTOCOL, RUN_PRIMARY_TEXT_PROTOCOL, RUN_ARTIFACT_INVENTORY_PROTOCOL, decodeRunArtifactInventoryBinding, RUN_RESULT_DIAGNOSTIC_FIELDS as RESULT_DIAGNOSTIC_FIELDS, RUN_RESULT_DIAGNOSTICS_PROTOCOL, decodeRunResultDiagnosticsBinding, RUN_RESULT_DIAGNOSTIC_EXCERPT_CHARS, decodeRunResultDiagnosticExcerpt } from "./runs-outcomes.js";
+import { decodeRunPrimaryTextBinding, readRunNaturalOutcomeSnapshot, RUN_OUTCOME_PROTOCOL, RUN_PRIMARY_TEXT_PROTOCOL, RUN_ARTIFACT_INVENTORY_PROTOCOL, RUN_PRIMARY_SOURCE_FILE, RUN_RESULT_DIAGNOSTICS_SOURCE_FILE, RUN_ARTIFACT_INVENTORY_SOURCE_FILE, decodeRunArtifactInventoryBinding, RUN_RESULT_DIAGNOSTIC_FIELDS as RESULT_DIAGNOSTIC_FIELDS, RUN_RESULT_DIAGNOSTICS_PROTOCOL, decodeRunResultDiagnosticsBinding, RUN_RESULT_DIAGNOSTIC_EXCERPT_CHARS, decodeRunResultDiagnosticExcerpt } from "./runs-outcomes.js";
 import { withRunProducerEvidence, readRunProducerCapturedMetadata, readRunProducerCleanupFailure, withRunResultDiagnosticsAdmission } from "./runs-results.js";
 import { readRunTraceJournal, runTraceFile, summarizeRunTraceJournal } from "./runs-trace.js";
 import { readJsonFileResilient, readJsonlFileResilient } from "./state-readers.js";
@@ -820,9 +820,8 @@ export function createRunResultDiagnosticsPublisher(stateDir, producer) {
 function diagnosticsReadUnavailable(reason) {
     return Object.freeze({ state: "unavailable", reason });
 }
-function resultDiagnosticsPath(root, identity) {
-    const key = createHash("sha256").update(JSON.stringify([identity.run, identity.run_instance_id, identity.ownerId ?? null])).digest("hex");
-    return join(root, "evidence", `result-diagnostics-${key}.json`);
+function resultDiagnosticsPath(root, _identity) {
+    return join(root, RUN_RESULT_DIAGNOSTICS_SOURCE_FILE);
 }
 function diagnosticExcerpt(text, range, maxChars = RESULT_DIAGNOSTIC_PREVIEW_CHARS) {
     const bytes = Buffer.from(text, "utf8");
@@ -1143,9 +1142,8 @@ function captureArtifacts(stateDir, producer) {
         return artifactUnavailable("artifact_manifest_too_large");
     return Object.freeze({ status: "captured", captured_at: capturedAt, content });
 }
-function artifactInventoryPath(root, identity) {
-    const key = createHash("sha256").update(JSON.stringify([identity.run, identity.run_instance_id, identity.ownerId ?? null])).digest("hex");
-    return join(root, "evidence", `artifact-inventory-${key}.json`);
+function artifactInventoryPath(root, _identity) {
+    return join(root, RUN_ARTIFACT_INVENTORY_SOURCE_FILE);
 }
 /** Overflow source permission is fixed at genuine producer admission, not refreshed from live declarations. */
 function retainArtifactInventoryView(stateDir, producer) {
@@ -1687,9 +1685,9 @@ function publishContextIndex(stateDir, producer, role, view) {
         return Object.freeze({ status: "published", ...publication });
     });
 }
-function primarySourcePath(stateDir, identity) {
-    const key = createHash("sha256").update(JSON.stringify([identity.run, identity.run_instance_id, identity.ownerId ?? null])).digest("hex");
-    return join(stateDir, "evidence", `primary-${key}.txt`);
+/** One execution owns its directory; the generation binding lives in the descriptor (generation + digest), not the filename. */
+function primarySourcePath(stateDir, _identity) {
+    return join(stateDir, RUN_PRIMARY_SOURCE_FILE);
 }
 class PrimaryTextBindingRefusal extends Error {
 }

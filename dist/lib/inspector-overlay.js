@@ -543,7 +543,7 @@ export class ActorInspectorOverlay {
         if (this.tab === "trace")
             return this.renderTraceList(run, width);
         const selectedRun = run.run;
-        const stateDir = path.join(this.stateRoot, selectedRun);
+        const stateDir = this.runStateDir(selectedRun);
         const value = this.tab === "recipe"
             ? ActorInspector.readActorInspectorRecipe(stateDir)
             : this.controlDocument(run, stateDir);
@@ -684,7 +684,7 @@ export class ActorInspectorOverlay {
     }
     renderTraceList(run, width) {
         const items = this.traceItems(run);
-        const summary = this.traceCache.journalSummary ??= RunsTrace.summarizeRunTraceJournal(RunsTrace.readRunTraceJournal(path.join(this.stateRoot, run.run)));
+        const summary = this.traceCache.journalSummary ??= RunsTrace.summarizeRunTraceJournal(RunsTrace.readRunTraceJournal(this.runStateDir(run.run)));
         const banner = summary.history_complete ? [] : [this.theme.fg("warning", width < visibleWidth(" ! Trace history incomplete:") ? " ! Trace incomplete…" : this.traceTableLine(` ! Trace history incomplete: ${summary.compacted ? `${summary.compactions_total} compaction(s), ` : ""}${summary.dropped_event_count_exact ? summary.dropped_events : "unknown"} dropped event(s), ${summary.dropped_bytes} bytes`, width))];
         if (items.length === 0)
             return [...banner, this.theme.fg("muted", " No Trace evidence")];
@@ -868,7 +868,11 @@ export class ActorInspectorOverlay {
     controlDocument(run, stateDir) {
         return this.controlObservation(run, stateDir).document;
     }
-    controlObservation(run, stateDir = path.join(this.stateRoot, run.run)) {
+    /** Every evidence read for a listed Run resolves inside the owner's session namespace. */
+    runStateDir(run) {
+        return ActorInspector.actorInspectorRunStateDir(this.stateRoot, this.ownerId, run);
+    }
+    controlObservation(run, stateDir = this.runStateDir(run.run)) {
         if (this.controlCache?.run === run.run && this.controlCache.generation === run.runInstanceId)
             return this.controlCache;
         const meta = this.readRunMeta(stateDir);
@@ -1033,7 +1037,7 @@ export class ActorInspectorOverlay {
             this.traceCache.runInstanceId === run.runInstanceId) {
             return this.traceCache.items;
         }
-        const items = this.readTrace(path.join(this.stateRoot, run.run), {
+        const items = this.readTrace(this.runStateDir(run.run), {
             limit: 100,
             source: "all",
         });

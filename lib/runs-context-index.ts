@@ -28,6 +28,10 @@ const EXPORTS = {
 } as const;
 
 export type RunContextRole = keyof typeof EXPORTS;
+/** The complete compiler-owned evidence namespace, in role order; nothing else may claim these paths. */
+export function runContextExportPaths(): readonly string[] {
+  return Object.freeze((Object.keys(EXPORTS) as RunContextRole[]).map(runContextExportPath));
+}
 export function runContextExportPath(role: RunContextRole): string {
   return "evidence/" + EXPORTS[role][0];
 }

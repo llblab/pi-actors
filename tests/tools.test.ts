@@ -9,7 +9,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { RegisteredTool } from "../lib/config.ts";
-import { getRunStateRoot } from "../lib/paths.ts";
+import { getRecipeDraftRoot, getRunStateRoot } from "../lib/paths.ts";
 import { createRecipeResolutionContext } from "../lib/recipes-context.ts";
 import { createRegisterToolDefinition } from "../lib/tools-register.ts";
 import { createCoreActorToolDefinitions, createLegacyActorToolDefinitions, LEGACY_TOOL_NAMES, RESERVED_TOOL_NAMES } from "../lib/tools.ts";
@@ -143,7 +143,7 @@ test("Spawn launches a qualified active-Skill Recipe", async (t) => {
   const skillDir = join(root, "skill");
   const recipeDir = join(skillDir, "recipes");
   const runId = `spawn-skill-${process.pid}-${Date.now()}`;
-  const stateDir = join(getRunStateRoot(), runId);
+  let stateDir = "";
   const capture = captureFixtureBirths(t); let dispatched = false, accepted = false;
   const errors: unknown[] = [];
   try {
@@ -172,6 +172,7 @@ test("Spawn launches a qualified active-Skill Recipe", async (t) => {
       undefined,
       { recipeResolutionContext, cwd: process.cwd() },
     );
+    stateDir = String(result.details.state_dir);
     assert.equal(result.details.launch_kind, "spawn");
     assert.equal(result.details.recipe_file, join(recipeDir, "task.json"));
     assert.equal(result.details.values.skill_dir, skillDir);
@@ -191,6 +192,75 @@ test("Spawn launches a qualified active-Skill Recipe", async (t) => {
       } else if (!dispatched) await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     } catch (error) { errors.push(error); }
     // Failed/unknown launches retain both state and Skill files.
+  }
+  throwFixtureErrors(errors);
+});
+
+test("Inline spawns in two sessions keep separate drafts when their allocated Run names coincide", async (t) => {
+  const previous = process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST;
+  process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST = "1";
+  const drafts = getRecipeDraftRoot();
+  const capture = captureFixtureBirths(t); let accepted = false;
+  const errors: unknown[] = [], stateDirs: string[] = [];
+  try {
+    const spawn = createSpawnToolDefinition();
+    const template = `${JSON.stringify(process.execPath)} -e "console.log('draft')"`;
+    const launch = (session: string) => spawn.execute(`draft-${session}`, { template }, undefined, undefined,
+      { cwd: process.cwd(), sessionManager: { getSessionId: () => session } });
+    const first = await launch("draft-session-a"), second = await launch("draft-session-b");
+    stateDirs.push(String(first.details.state_dir), String(second.details.state_dir));
+    // Both sessions allocate the same first name; neither the launch nor its draft may collide.
+    assert.equal(first.details.run, second.details.run);
+    assert.notEqual(first.details.state_dir, second.details.state_dir);
+    assert.equal(first.details.draft_recipe, join(drafts, `${String(first.details.run)}.json`));
+    assert.equal(second.details.draft_recipe, join(drafts, `${String(second.details.run)}-2.json`));
+    assert.match(JSON.parse(await readFile(String(first.details.draft_recipe), "utf8")).description, /spawn run run-0/u);
+    await joinFixtureRunners([first, second].map(result => ({ path: join(String(result.details.state_dir), "result.json"),
+      birth: bindFixtureBirth(capture.births, result.details.pid) })));
+    accepted = true;
+  } catch (error) { errors.push(error); }
+  finally {
+    if (previous === undefined) delete process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST;
+    else process.env.PI_ACTORS_ENABLE_SPAWN_DRAFTS_IN_TEST = previous;
+    try { capture.restore(); } catch (error) { errors.push(error); }
+    if (errors.length === 0 && accepted) try {
+      for (const birth of capture.births) requireFreshFixtureAbsence(birth);
+      for (const stateDir of stateDirs) await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      await rm(drafts, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    } catch (error) { errors.push(error); }
+  }
+  throwFixtureErrors(errors);
+});
+
+test("A registered async Recipe tool and a direct spawn share one session allocator", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-tool-allocator-"));
+  const capture = captureFixtureBirths(t); let accepted = false;
+  const errors: unknown[] = [], stateDirs: string[] = [];
+  try {
+    const file = join(root, "review.json"), template = `${JSON.stringify(process.execPath)} -e "0"`;
+    await writeFile(file, JSON.stringify({ async: true, template }));
+    const tool = createRuntimeToolDefinition({ name: "review_run", args: [], defaults: {}, recipe: { async: true, file }, template } as any,
+      async () => ({ stdout: "", stderr: "", code: 0, killed: false }));
+    const ctx = { cwd: process.cwd(), sessionManager: { getSessionId: () => "allocator-session" } } as any;
+    const viaTool = await tool.execute("tool-0", {}, undefined, undefined, ctx);
+    const viaSpawn = await createSpawnToolDefinition().execute("spawn-1", { file }, undefined, undefined, ctx);
+    const exact = await tool.execute("tool-exact", { run_id: "nightly" }, undefined, undefined, ctx);
+    const results = [viaTool, viaSpawn, exact];
+    stateDirs.push(...results.map(result => String(result.details.state_dir)));
+    assert.deepEqual(results.map(result => result.details.run), ["review-0", "review-1", "nightly"]);
+    assert.equal(viaTool.details.state_dir, join(getRunStateRoot(), "allocator-session", "review-0"));
+    await joinFixtureRunners(results.map(result => ({ path: join(String(result.details.state_dir), "result.json"),
+      birth: bindFixtureBirth(capture.births, result.details.pid) })));
+    await assert.rejects(tool.execute("tool-repeat", { run_id: "nightly" }, undefined, undefined, ctx), /already used in this session/u);
+    accepted = true;
+  } catch (error) { errors.push(error); }
+  finally {
+    try { capture.restore(); } catch (error) { errors.push(error); }
+    if (errors.length === 0 && accepted) try {
+      for (const birth of capture.births) requireFreshFixtureAbsence(birth);
+      for (const stateDir of stateDirs) await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    } catch (error) { errors.push(error); }
   }
   throwFixtureErrors(errors);
 });
@@ -254,7 +324,7 @@ test("Runtime async tools persist inherited policy provenance", async (t) => {
     async () => ({ stdout: "ok", stderr: "", code: 0, killed: false }),
   );
   const runId = `runtime-policy-${process.pid}-${Date.now()}`;
-  const stateDir = join(getRunStateRoot(), runId);
+  let stateDir = "";
   const capture = captureFixtureBirths(t); let accepted = false;
   const errors: unknown[] = [];
   try {
@@ -269,6 +339,7 @@ test("Runtime async tools persist inherited policy provenance", async (t) => {
         model: { provider: "test-provider", id: "test-model" },
       },
     );
+    stateDir = String(result.details.state_dir);
     const runMeta = JSON.parse(await readFile(join(stateDir, "run.json"), "utf8"));
     assert.deepEqual(runMeta.launch_correlation, {
       tool_call_id: "call-runtime-current-policy",

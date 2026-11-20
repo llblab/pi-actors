@@ -12,9 +12,10 @@ process.env.PI_CODING_AGENT_DIR = agentDir;
 const AsyncRuns = await import("../lib/async-runs.ts");
 const { createInspectToolDefinition } = await import("../lib/tools-inspect.ts");
 const { createSpawnToolDefinition } = await import("../lib/tools-spawn.ts");
+const owner = "run-kernel-dogfood-owner";
 const context = {
   cwd: process.cwd(),
-  sessionManager: { getSessionId: () => "run-kernel-dogfood-owner" },
+  sessionManager: { getSessionId: () => owner },
 } as any;
 
 async function waitForStatus(
@@ -22,7 +23,7 @@ async function waitForStatus(
   expected: string,
 ): Promise<Record<string, unknown>> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const status = AsyncRuns.getRunStatus(run);
+    const status = AsyncRuns.getRunStatus(run, owner);
     if (status.status === expected) return status;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -31,7 +32,7 @@ async function waitForStatus(
 
 async function waitForProcessExit(run: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const pid = Number(AsyncRuns.getRunStatus(run).pid || 0);
+    const pid = Number(AsyncRuns.getRunStatus(run, owner).pid || 0);
     if (!pid) return;
     try {
       process.kill(pid, 0);
@@ -54,7 +55,7 @@ async function missing(path: string): Promise<boolean> {
 
 test.after(async () => {
   try {
-    const status = AsyncRuns.getRunStatus("replacement");
+    const status = AsyncRuns.getRunStatus("replacement", owner);
     if (status.status === "running") {
       AsyncRuns.killRun("replacement", {
         ownerId: "run-kernel-dogfood-owner",
@@ -107,7 +108,7 @@ test("public spawn and Inspect expose one-shot Recipe, Trace, and Control only",
   assert.equal(await missing(join(stateDir, "control-endpoint.json")), true);
 });
 
-test("same-id replacement rejects and hides the old Run generation", async () => {
+test("same-name public spawn is refused; internal re-entry rejects and hides the old Run generation", async () => {
   const run = "replacement";
   const recipePath = join(agentDir, "controlled.json");
   await writeFile(
@@ -128,8 +129,15 @@ test("same-id replacement rejects and hides the old Run generation", async () =>
   });
   await waitForStatus(run, "killed");
   await waitForProcessExit(run);
-  const second = await spawn.execute("spawn-second", { as: `run:${run}`, file: recipePath }, undefined, undefined, context);
-  const generationB = String(second.details.run_instance_id);
+  // An exact public name is single-use per session: the repeat is refused and names the earlier generation.
+  await assert.rejects(
+    spawn.execute("spawn-second", { as: `run:${run}`, file: recipePath }, undefined, undefined, context),
+    (error: any) => /already used in this session/u.test(String(error?.message)) && String(error?.message).includes(generationA),
+  );
+  // Only declared re-entry (internal per-work-item callers, singletons) replaces the generation under the same name.
+  const second = AsyncRuns.startRun({ file: recipePath, run_id: run, ownerId: owner, reenter: true }, process.cwd());
+  assert.equal(second.state_dir, stateDir);
+  const generationB = String(second.run_instance_id);
   assert.notEqual(generationB, generationA);
   await assert.rejects(
     AsyncRuns.sendRunControl(

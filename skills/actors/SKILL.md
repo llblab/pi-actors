@@ -162,7 +162,7 @@ Run = Recipe + Trace + Control
 ```
 
 1. Spawn with the exact logical Recipe identity and caller-owned values.
-2. Retain the returned `run:<id>` and normally wait for the root coordinator's completion batch instead of polling. While Pi is active, ready results arrive together at the next safe model-step boundary after the full tool batch; already-idle Pi wakes through a debounced follow-up. Nested actor completions wait for their complete containing top-level tree and arrive in that one compressed batch; descendant sessions do not need notification options.
+2. Retain the returned `run:<id>`; names are session-local, allocated as `<recipe>-<ordinal>` unless `as` requests an exact name, and an exact name is refused once used in the session (see [Runs](./references/runs.md#launch)). Normally wait for the root coordinator's completion batch instead of polling. While Pi is active, ready results arrive together at the next safe model-step boundary after the full tool batch; already-idle Pi wakes through a debounced follow-up. Nested actor completions wait for their complete containing top-level tree and arrive in that one compressed batch; descendant sessions do not need notification options.
 3. Inspect `view=trace` when retained observations or attention matter.
 4. Inspect `view=control` before diagnosing service readiness, stale work, or saturation.
 5. Send `actors_control_apply` only for an action declared and consumed by that controlled Recipe.

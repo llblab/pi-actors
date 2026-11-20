@@ -26,7 +26,7 @@ import { runContextExportPath, writeRunContextIndexUnderLock, readRunContextIden
 import { readRunControlJournalFromStateDir, runControlsFile, type RunControlRecord } from "./runs-controls.ts";
 import { assertOwnedRunStateDirectory, RUN_STATE_OWNERSHIP_FILE } from "./runs-ownership.ts";
 import { describeRunArtifactReferences, observeRunArtifactReference } from "./runs-artifacts.ts";
-import { decodeRunPrimaryTextBinding, readRunNaturalOutcomeSnapshot, RUN_OUTCOME_PROTOCOL, RUN_PRIMARY_TEXT_PROTOCOL, RUN_ARTIFACT_INVENTORY_PROTOCOL, decodeRunArtifactInventoryBinding, RUN_RESULT_DIAGNOSTIC_FIELDS as RESULT_DIAGNOSTIC_FIELDS, RUN_RESULT_DIAGNOSTICS_PROTOCOL, decodeRunResultDiagnosticsBinding, type RunResultDiagnosticsBinding, type RunResultDiagnosticCandidate, type RunResultDiagnosticExcerpt, type RunResultDiagnosticPacketExcerpt, RUN_RESULT_DIAGNOSTIC_EXCERPT_CHARS, decodeRunResultDiagnosticExcerpt, type RunArtifactInventoryBinding, type RunArtifactInventoryReference, type RunPrimaryTextBinding, type RunPrimaryTextOutput } from "./runs-outcomes.ts";
+import { decodeRunPrimaryTextBinding, readRunNaturalOutcomeSnapshot, RUN_OUTCOME_PROTOCOL, RUN_PRIMARY_TEXT_PROTOCOL, RUN_ARTIFACT_INVENTORY_PROTOCOL, RUN_PRIMARY_SOURCE_FILE, RUN_RESULT_DIAGNOSTICS_SOURCE_FILE, RUN_ARTIFACT_INVENTORY_SOURCE_FILE, decodeRunArtifactInventoryBinding, RUN_RESULT_DIAGNOSTIC_FIELDS as RESULT_DIAGNOSTIC_FIELDS, RUN_RESULT_DIAGNOSTICS_PROTOCOL, decodeRunResultDiagnosticsBinding, type RunResultDiagnosticsBinding, type RunResultDiagnosticCandidate, type RunResultDiagnosticExcerpt, type RunResultDiagnosticPacketExcerpt, RUN_RESULT_DIAGNOSTIC_EXCERPT_CHARS, decodeRunResultDiagnosticExcerpt, type RunArtifactInventoryBinding, type RunArtifactInventoryReference, type RunPrimaryTextBinding, type RunPrimaryTextOutput } from "./runs-outcomes.ts";
 import { withRunProducerEvidence, readRunProducerCapturedMetadata, readRunProducerCleanupFailure, withRunResultDiagnosticsAdmission, type RunResultDiagnosticsAdmission, type RunResultProducer } from "./runs-results.ts";
 import { readRunTraceJournal, runTraceFile, summarizeRunTraceJournal, type RunTraceSummary } from "./runs-trace.ts";
 import { readJsonFileResilient, readJsonlFileResilient } from "./state-readers.ts";
@@ -734,9 +734,8 @@ type DiagnosticsReadUnavailable = Extract<RunResultDiagnosticsReading, { state: 
 function diagnosticsReadUnavailable(reason: DiagnosticsReadUnavailable["reason"]): Readonly<DiagnosticsReadUnavailable> {
   return Object.freeze({ state: "unavailable", reason });
 }
-function resultDiagnosticsPath(root: string, identity: RunContextIndexIdentity): string {
-  const key = createHash("sha256").update(JSON.stringify([identity.run, identity.run_instance_id, identity.ownerId ?? null])).digest("hex");
-  return join(root, "evidence", `result-diagnostics-${key}.json`);
+function resultDiagnosticsPath(root: string, _identity: RunContextIndexIdentity): string {
+  return join(root, RUN_RESULT_DIAGNOSTICS_SOURCE_FILE);
 }
 function diagnosticExcerpt(text: string, range?: Readonly<{ start: number; end: number }>, maxChars = RESULT_DIAGNOSTIC_PREVIEW_CHARS): Readonly<RunResultDiagnosticExcerpt> {
   const bytes = Buffer.from(text, "utf8"); const preview = range ? bytes.subarray(range.start, range.end).toString("utf8")
@@ -959,9 +958,8 @@ function captureArtifacts(stateDir: string, producer: RunResultProducer): Artifa
   return Object.freeze({ status: "captured", captured_at: capturedAt, content });
 }
 
-function artifactInventoryPath(root: string, identity: RunContextIndexIdentity): string {
-  const key = createHash("sha256").update(JSON.stringify([identity.run, identity.run_instance_id, identity.ownerId ?? null])).digest("hex");
-  return join(root, "evidence", `artifact-inventory-${key}.json`);
+function artifactInventoryPath(root: string, _identity: RunContextIndexIdentity): string {
+  return join(root, RUN_ARTIFACT_INVENTORY_SOURCE_FILE);
 }
 
 /** Overflow source permission is fixed at genuine producer admission, not refreshed from live declarations. */
@@ -1455,9 +1453,9 @@ export interface RunPrimaryTextPublisher {
   readonly snapshot: () => Readonly<RunPrimaryTextBinding>;
   readonly readFailure: () => unknown;
 }
-function primarySourcePath(stateDir: string, identity: RunContextIndexIdentity): string {
-  const key = createHash("sha256").update(JSON.stringify([identity.run, identity.run_instance_id, identity.ownerId ?? null])).digest("hex");
-  return join(stateDir, "evidence", `primary-${key}.txt`);
+/** One execution owns its directory; the generation binding lives in the descriptor (generation + digest), not the filename. */
+function primarySourcePath(stateDir: string, _identity: RunContextIndexIdentity): string {
+  return join(stateDir, RUN_PRIMARY_SOURCE_FILE);
 }
 class PrimaryTextBindingRefusal extends Error {}
 function primaryUnavailable(reason: string): Readonly<RunPrimaryTextBinding> { return Object.freeze({ output: null, output_unavailable: reason }); }

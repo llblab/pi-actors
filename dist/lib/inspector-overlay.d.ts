@@ -95,6 +95,8 @@ export declare class ActorInspectorOverlay {
     private metadataText;
     private agentDetailProjection;
     private controlDocument;
+    /** Every evidence read for a listed Run resolves inside the owner's session namespace. */
+    private runStateDir;
     private controlObservation;
     private selectedControl;
     private openControlList;

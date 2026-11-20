@@ -8,20 +8,12 @@
     "model:string",
     "thinking:string",
     "tools:string",
-    "output_format:string",
-    "report_path:path",
-    "summary_path:path"
+    "output_format:string"
   ],
   "defaults": {
     "thinking": "off",
     "tools": "",
-    "output_format": "Concise Markdown with assumptions and next actions.",
-    "report_path": "{state_dir}/stdout.log",
-    "summary_path": "{state_dir}/result.json"
-  },
-  "artifacts": {
-    "report": "{report_path}",
-    "summary": "{summary_path}"
+    "output_format": "Concise Markdown with assumptions and next actions."
   },
   "repeat": "{prompts.length}",
   "parallel": true,

@@ -4,13 +4,14 @@
  * Excludes: native closure proof, process actuation and ordinary non-Run temp cleanup.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, lstatSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { acquireFileMutationLock, writeJsonAtomic, writeTextAtomic } from "./file-state.js";
 import * as Limits from "./limits.js";
 import { readJsonFileResilient, readJsonlFileResilient } from "./state-readers.js";
 import { readRunContextIdentity, RUN_CONTEXT_SOURCE_METADATA_MAX_BYTES } from "./runs-context-index.js";
+import { RUN_NAME_LEDGER_DIR, RUN_RETENTION_CONTAINER_NAMES } from "./runs-naming.js";
 import { readProcessLiveness } from "./runs-process.js";
 import { acquireStateStartLock, assertNoActiveRunState } from "./runs-start.js";
 import { resolveArtifactManifest, } from "./runs-artifacts.js";
@@ -83,6 +84,11 @@ export function retainRun(stateDir, action, expected, readStatus, options = {}) 
         throw failures[0];
     throw new AggregateError(failures, RETIREMENT_FAILURE_MESSAGE, { cause: failures[0] });
 }
+/** Retention containers hold already-retired evidence; age cleanup and inventory must never treat their children as live Runs. */
+const RUN_RETENTION_CONTAINERS = new Set(RUN_RETENTION_CONTAINER_NAMES);
+export function isRetentionContainerName(name) {
+    return RUN_RETENTION_CONTAINERS.has(name);
+}
 /** Filesystem age selects candidates; it grants neither retirement nor native scope authority. */
 export async function cleanupStaleRunEntries(runsDir, maxAgeMs = DEFAULT_RUN_MAX_AGE_MS, now = Date.now()) {
     let entries;
@@ -100,10 +106,26 @@ export async function cleanupStaleRunEntries(runsDir, maxAgeMs = DEFAULT_RUN_MAX
             throw new Error("Run retirement metadata is unavailable.");
         return reading.value;
     };
+    // A Run lives inside its session namespace, so candidates are depth one or two; a ledger directory holds no Run.
+    const candidates = [];
     for (const entry of entries) {
-        if (!entry.isDirectory())
+        if (!entry.isDirectory() || entry.isSymbolicLink())
             continue;
-        const stateDir = join(root, entry.name);
+        const directory = join(root, entry.name);
+        if (existsSync(join(directory, "run.json")))
+            candidates.push(directory);
+        else if (RUN_RETENTION_CONTAINERS.has(entry.name) || entry.name === RUN_NAME_LEDGER_DIR)
+            continue;
+        else {
+            try {
+                for (const child of await readdir(directory, { withFileTypes: true }))
+                    if (child.isDirectory() && !child.isSymbolicLink())
+                        candidates.push(join(directory, child.name));
+            }
+            catch { /* Unreadable namespaces retain their candidates. */ }
+        }
+    }
+    for (const stateDir of candidates) {
         try {
             const selected = lstatSync(stateDir);
             if (now - Math.min(selected.birthtimeMs || selected.mtimeMs, selected.mtimeMs) <= maxAgeMs)

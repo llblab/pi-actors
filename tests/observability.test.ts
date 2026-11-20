@@ -1451,6 +1451,32 @@ test("Run-state watcher records degradation and bounded rearm diagnostics", asyn
   }
 });
 
+test("Run-state watcher observes Runs inside session namespaces, not the name ledger or retired containers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-watcher-sessions-"));
+  class FakeWatcher extends EventEmitter { close(): void {} }
+  const watched = new Set<string>();
+  const session = join(root, "session-a"), run = join(session, "review-0"), later = join(session, "review-1");
+  const watcher = createRunStateWatcher({ stateRoot: root, onChange: () => {},
+    watchPath: (path) => { watched.add(path); return new FakeWatcher() as FSWatcher; } });
+  try {
+    await mkdir(run, { recursive: true }); await writeFile(join(run, "run.json"), "{}");
+    await mkdir(join(session, "archived", "old-0"), { recursive: true });
+    await mkdir(join(root, "names"), { recursive: true });
+    await mkdir(join(root, "archived", "retired"), { recursive: true });
+    const legacy = join(root, "legacy-flat"); await mkdir(join(legacy, "evidence"), { recursive: true }); await writeFile(join(legacy, "run.json"), "{}");
+    watcher.refresh();
+    for (const path of [root, session, run, legacy]) assert.equal(watched.has(path), true, `${path} must be watched`);
+    for (const path of [join(root, "names"), join(root, "archived"), join(root, "archived", "retired"), join(session, "archived"), join(legacy, "evidence")])
+      assert.equal(watched.has(path), false, `${path} holds no live Run`);
+    await mkdir(later); watcher.refresh();
+    assert.equal(watched.has(later), true, "A Run created after the first refresh is watched on the next refresh");
+    assert.deepEqual(watcher.getDiagnostics(), []);
+  } finally {
+    watcher.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Run-state watcher removes deleted run directories without degradation warnings", () => {
   const root = "/virtual/runs";
   const stateDir = `${root}/completed`;

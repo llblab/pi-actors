@@ -14,6 +14,7 @@ import * as Limits from "./limits.js";
 import { decodeRunDirectoryNavigation } from "./runs-index.js";
 import { formatInspectNextAction, formatLiteralBlock, formatMarkdownField, formatRunFileNavigationHandoff } from "./tools-response.js";
 import { decodeRunCompletionText, projectRunCompletionText, decodeRunPrimaryTextBinding, decodeRunArtifactInventoryBinding, decodeRunResultDiagnosticsBinding, decodeRunResultDiagnosticExcerpt } from "./runs-outcomes.js";
+import { RUN_NAME_MAX_LENGTH } from "./runs-naming.js";
 const RUN_DELIVERY_SCHEMA = "run-delivery-v1";
 const COMPLETION_STREAM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MEMBER_FIELDS = new Set([
@@ -190,7 +191,7 @@ function parseMember(value) {
     const parsedArtifacts = artifacts(record.artifacts);
     const parentRun = record.parent_run === undefined
         ? undefined
-        : boundedString(record.parent_run, "Completion batch member parent_run", 120);
+        : boundedString(record.parent_run, "Completion batch member parent_run", RUN_NAME_MAX_LENGTH);
     const parentRunInstanceId = record.parent_run_instance_id === undefined
         ? undefined
         : boundedString(record.parent_run_instance_id, "Completion batch member parent_run_instance_id", 256);
@@ -235,7 +236,7 @@ function parseMember(value) {
                 parent_state_dir: parentStateDir,
             }
             : {}),
-        run: boundedString(record.run, "Completion batch member run", 120),
+        run: boundedString(record.run, "Completion batch member run", RUN_NAME_MAX_LENGTH),
         run_instance_id: generation,
         state_dir: stateDir,
         status: completionStatus(record.status),
@@ -483,7 +484,7 @@ function parseSteer(value) {
         phase,
         ...(presentedAt ? { presented_at: presentedAt } : {}),
         ...(queuedAt ? { queued_at: queuedAt } : {}),
-        run: boundedString(record.run, "Urgent steer run", 120),
+        run: boundedString(record.run, "Urgent steer run", RUN_NAME_MAX_LENGTH),
         run_instance_id: boundedString(record.run_instance_id, "Urgent steer run_instance_id", 256),
         state_dir: boundedString(record.state_dir, "Urgent steer state_dir", 4_096),
         steer_id: boundedString(record.steer_id, "Urgent steer id", 128),

@@ -44,7 +44,7 @@ function runtimeRuns(ctx, deps, status, includeNavigation = false) {
         try {
             const observed = deps.getRunStatus
                 ? deps.getRunStatus(String(run.state_dir ?? run.run))
-                : AsyncRuns.getRunStatus(String(run.state_dir ?? run.run));
+                : AsyncRuns.getRunStatus(String(run.state_dir ?? run.run), session);
             if (includeNavigation && observed.status === "failed" && typeof observed.run === "string" && typeof observed.run_instance_id === "string" &&
                 typeof observed.state_dir === "string" && observed.ownerId === session) {
                 observedFailures.push({ run: observed.run, run_instance_id: observed.run_instance_id, state_dir: observed.state_dir, ownerId: session });

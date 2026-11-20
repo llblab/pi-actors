@@ -160,7 +160,7 @@ test("Tool review scheduler launches one captured portfolio and defers under act
       hasActiveActors: () => active,
       launch: (batch) => {
         launches.push(batch.reviewId);
-        return { run: `tool-review-${batch.reviewId}` };
+        return { run: `tool-review-${batch.reviewId}`, state_dir: `/runs/session-a/tool-review-${batch.reviewId}` };
       },
       recipeRoot: paths.recipeRoot,
       statePath: paths.statePath,
@@ -175,6 +175,7 @@ test("Tool review scheduler launches one captured portfolio and defers under act
     const state = JSON.parse(readFileSync(paths.statePath, "utf8")) as Record<string, unknown>;
     assert.equal(state.phase, "launched");
     assert.equal(state.attempts, 1);
+    assert.equal(state.runStateDir, `/runs/session-a/${String(state.runId)}`, "The exact launched directory is retained for processing");
     scheduler.close();
   } finally {
     rmSync(paths.root, { recursive: true, force: true });
@@ -365,6 +366,17 @@ test("Tool review classifies missing reviewer run state without throwing", () =>
     ),
     { error: "run missing", outcome: "review_failed", stage: "review_state" },
   );
+});
+
+test("Tool review reads its reviewer by the captured directory, not by name in the current session", () => {
+  const asked: string[] = [];
+  processToolReviewResult(
+    { attempts: 1, inputPath: "/missing/input.json", phase: "launched", reviewerInputPath: "/missing/review-input.json",
+      reviewId: "12345678-1234-1234-1234-123456789abc", runId: "tool-review-x", runStateDir: "/runs/session-a/tool-review-x",
+      toolNames: [], updatedAt: "2026-01-01T00:00:00.000Z" },
+    { getRunStatus: (run) => { asked.push(run); return { status: "running" }; } },
+  );
+  assert.deepEqual(asked, ["/runs/session-a/tool-review-x"]);
 });
 
 test("Tool review bounds unexpected result-processing failures", async () => {

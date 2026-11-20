@@ -132,7 +132,7 @@ test("Draft sleep defers under actor load and launches one silent batch later", 
       hasActiveActors: () => active,
       launch: (batch) => {
         launched.push(batch);
-        return { run: `draft-sleep-${batch.batchId}` };
+        return { run: `draft-sleep-${batch.batchId}`, state_dir: `/runs/session-a/draft-sleep-${batch.batchId}` };
       },
     });
     scheduler.schedule();
@@ -147,6 +147,7 @@ test("Draft sleep defers under actor load and launches one silent batch later", 
     const state = JSON.parse(await readFile(paths.statePath, "utf8"));
     assert.equal(state.phase, "launched");
     assert.equal(state.attempts, 1);
+    assert.equal(state.runStateDir, `/runs/session-a/${state.runId}`, "The exact launched directory is retained for processing");
     scheduler.close();
   } finally {
     await rm(paths.agentRoot, { recursive: true, force: true });
@@ -386,6 +387,17 @@ test("Draft sleep classifies missing reviewer run state without throwing", () =>
     ),
     { error: "run missing", outcome: "review_failed", stage: "review_state" },
   );
+});
+
+test("Draft sleep reads its reviewer by the captured directory, not by name in the current session", () => {
+  const asked: string[] = [];
+  processDraftSleepReview(
+    { attempts: 1, batchId: "12345678-1234-1234-1234-123456789abc", inputPath: "/missing/input.json", phase: "launched",
+      reviewerInputPath: "/missing/review-input.json", runId: "draft-sleep-x", runStateDir: "/runs/session-a/draft-sleep-x",
+      sourcePaths: [], updatedAt: "2026-01-01T00:00:00.000Z" },
+    { getRunStatus: (run) => { asked.push(run); return { status: "running" }; } },
+  );
+  assert.deepEqual(asked, ["/runs/session-a/draft-sleep-x"]);
 });
 
 test("Draft sleep bounds unexpected result-processing failures", async () => {

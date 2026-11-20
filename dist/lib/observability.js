@@ -8,6 +8,8 @@ import { basename, dirname, isAbsolute, join, relative, } from "node:path";
 import * as AsyncRuns from "./async-runs.js";
 import * as Paths from "./paths.js";
 import * as Limits from "./limits.js";
+import { isRetentionContainerName } from "./runs-retention.js";
+import { RUN_NAME_LEDGER_DIR } from "./runs-naming.js";
 import * as RunsTrace from "./runs-trace.js";
 import { readRunCompletionTextSource, readRunResultArtifactInventory, readRunResultDiagnosticOutcome } from "./runs-context-exports.js";
 import { readJsonlFileResilient } from "./state-readers.js";
@@ -179,13 +181,35 @@ export function createRunStateWatcher(input) {
                 record("attach_failed", "root", stateRoot, error);
             }
         }
-        let stateDirs;
+        let children;
         try {
-            stateDirs = listDirectories(stateRoot);
+            children = listDirectories(stateRoot);
         }
         catch (error) {
             record("attach_failed", "root", stateRoot, error);
             return;
+        }
+        // Runs live one level below their session namespace: watch the namespace for new Runs and each Run for its
+        // own file writes. The name ledger and retention containers hold no live Run; a pre-layout flat Run has none nested.
+        const stateDirs = [];
+        for (const child of children) {
+            const name = basename(child);
+            if (name === RUN_NAME_LEDGER_DIR || isRetentionContainerName(name))
+                continue;
+            stateDirs.push(child);
+            if (pathExists(join(child, "run.json")))
+                continue;
+            let nested;
+            try {
+                nested = listDirectories(child);
+            }
+            catch (error) {
+                record("attach_failed", "run", child, error);
+                continue;
+            }
+            for (const runDir of nested)
+                if (!isRetentionContainerName(basename(runDir)))
+                    stateDirs.push(runDir);
         }
         const present = new Set(stateDirs);
         for (const [stateDir, watcher] of runDirWatchers) {
@@ -282,6 +306,8 @@ function scanRunStateDirs(stateRoot, depth = 0, seen = new Set()) {
         if (!entry.isDirectory())
             continue;
         const child = join(stateRoot, entry.name);
+        if (isRetentionContainerName(entry.name))
+            continue;
         if (existsSync(join(child, "run.json")))
             result.push(child);
         if (depth + 1 < RUN_STATE_DISCOVERY_MAX_DEPTH)

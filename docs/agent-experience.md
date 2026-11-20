@@ -1,125 +1,70 @@
 # Agent Experience (AX)
 
-Status: Adopted project-wide design standard. The operator has selected **JSON inputs → YAML runtime-output metadata + unchanged authored text/Markdown** as the one presentation direction. Implementation is not yet uniform: Control/inspect and other projections still include Markdown-list records and JSON. Fresh ordinary source and normally built package completions use the minimal block-YAML core without compiler HTML tails; retained packets and inactive numbered-stream layouts keep their original encodings. Bounded actual-default outcome-carrier source/packed acceptance composes current-path observations with unchanged accepted components; full-spawn metadata and navigation have bounded source/compiled and source/packed acceptance; loaded-host acceptance remains separate. [BACKLOG.md](../BACKLOG.md) alone owns rollout and acceptance work. This document defines presentation, not a new machine protocol, Recipe schema, source permission or release claim.
+| Item | Value |
+| --- | --- |
+| Status | Adopted project-wide design standard |
+| Version | r2, 2026-11-20 |
+| Scope | Presentation only: no new machine protocol, Recipe schema, source permission or release claim |
+| Per-surface implementation status | [Runtime Output Projection Map](./output-projection-map.md) |
+| Rollout and acceptance work | [BACKLOG.md](../BACKLOG.md) |
 
-## One first AX contract
+This document is the normative presentation standard. What is already migrated, still on an earlier layout, or accepted on which host lives in the projection map and the backlog, never here, so design adoption is not mistaken for runtime delivery.
 
-AX is one canonical Agent Experience being prepared for its first release, not a product family of numbered drafts or user/model-selectable formats. The selected target is YAML metadata plus optional opaque authored content; the former Markdown-list key/value grammar is an implemented pre-unification layout, not another target to preserve for new output. Ordinary source and normally built package Batch admission now capture ax_records/completion_yaml_files_v4 over the unchanged completion_yaml_core_v1 carrier, and fresh attention/steer use typed block-YAML metadata plus opaque raw body text. The inactive numbered-stream path and saved frontmatter_v1/v2 retain their older layouts. Bounded source/compiled/actual-default accepted-path evidence exists; it does not establish default-disk, global lifetime-policy or loaded-host acceptance. Remaining rollout is tracked in [BACKLOG.md](../BACKLOG.md).
-
-A completion group is the result sequence itself, not a container with members. Each result's YAML metadata begins run, state, then kind:primary for admitted primary text/final Actor response or kind:diagnostic for explicit diagnostics. The admitted Markdown follows from the left margin, outside metadata, with no #N heading, result:/preview: wrapper or whole-body literal fence. One blank separator distinguishes records. A recoverable primary-text cut uses [Read from line N] with the matching file entry's continue_from_line. Lines are one-based LF-delimited source-file lines (including CRLF), not terminal wrapping; a partly shown line is read again. Diagnostic JSON and text without an exact file-line mapping retain [N characters omitted], counting admitted Unicode scalars. No extra ellipsis or body clipping counters appear in YAML. New rooted captures keep unknown upstream completeness/privacy in header text_warnings without inventing a count or claiming a known positive loss. Retained captures preserve their original body-boundary warnings. Untracked fallback has no primary kind. Missing text stays explicit; a checkpoint retains its Actor-authored notification body. Successful automatic delivery has no extra receipt, routine outer counters, members wrapper, Batch caption, time window, status-summary copies or standing full-map instruction; real failures stay reportable. Exact useful source/location paths remain in complete model content; generation/hash bindings remain in the saved snapshot and full machine detail rather than repeated per file, with whole-reference/result omission and non-done omitted states explicit. Prepend the packet-local index only when two or more results are shown. Exactly one visible row omits its display index even with omitted results; omission/inventory facts and internal member/generation/correlation stay unchanged. This rule does not apply to numbered streams. Fresh ordinary packets put minimal packet identity and relative body/marker lengths in YAML metadata, without compiler HTML tails. Older saved layouts retain their original compiler boundary/correlation framing; neither encoding grants authenticity, read permission or acceptance. Their compatibility boundary is governed separately below; never strip required historical framing. This is one new-capture contract, not a selectable AX product version.
-
-Illustrative compact completion shape (not actual Run data):
-
-```text
----
-index: 0
-run: check-config
-state: done
-kind: primary
----
-
-Configuration is **valid**.
-
----
-index: 1
-run: build
-state: failed
-kind: diagnostic
----
-
-Module was not found.
-[120 characters omitted]
-```
-
-An only shown item uses the same block without its packet-local index, not a second public format. Full text has no cut marker; an unavailable index is the YAML string "?", never a fabricated zero. The compact TUI renders compiler headers and markers as literal Text and each body as independent native Markdown, so an unfinished fence/list/quote cannot consume another block. New rooted headers keep navigation visible and put packet omission/inventory facts in the first header, never after the Markdown. Retained core-v1 compact views keep their original whole-reference/location hiding. Expansion or invalid/missing hints reveals the full original text. Source bodies and retained structured coverage facts are not rewritten.
-
-Storage compatibility is separate: already-captured Batch snapshots need their original codec to reproduce exact delivery text, while steer envelopes replay their saved content directly. Do not relabel, migrate or reformat existing journals/session messages to make the interface look uniform. Retained encoding identifiers are internal replay data, not alternate AX products. See [retained capture compatibility](coordinator-delivery.md#retained-capture-compatibility).
-
-## Rooted completion files
-
-New source captures use a private `completion_yaml_files_v4` snapshot layout and `rooted_files_v4` service discriminator for compact useful-field navigation and the existing singleton rule. This is replay data, not an input selector or a new status engine. The YAML carrier/hint stays `completion_yaml_core_v1`. Existing snapshots, including rooted v1/v2/v3, keep their exact previous projection, indices and bindings.
-
-All runtime metadata belongs above the selected Markdown. New compact views have no service footer, appended file list or runtime warning after the body. A known primary-file cut adds `[Read from line N]`; diagnostic JSON and unmapped text keep `[N characters omitted]`. Unknown loss/privacy and whole-reference omissions belong in header fields. Authored Markdown, filenames and paths keep their original language/bytes; compiler keys and purpose explanations are English.
-
-`files` is a sequence of literal roots with relative `entries[].path`. Select primary/diagnostic/inventory references, declared artifacts and observed context-index/result/execution paths (metadata fallback), not every technical file. Entries omit `role` and diagnostic field inventories; keep path/name and concise admitted status. Status preserves Actor-response/exported-text, admission privacy, diagnostic-only scope and unverified declarations. Optional `files_status` and `files_notes` retain real group-wide uncertainty and notes beside the sequence. Routine absent optional files and repeated purpose/format/size/mutable/generation/hash facts stay out; full bindings remain in the snapshot.
-
-Prefix one entry's status with `Read first;` only when the displayed primary or selected error/failure diagnostic omits retained text recoverable from that source. Complete answers, upstream uncertainty alone, extra diagnostics, declared artifacts and result/execution metadata never trigger it. For a primary prefix starting at file byte zero, `continue_from_line` names the first not-fully-shown LF-delimited file line, repeated in `[Read from line N]` at the cut. CRLF stays intact; lone CR and terminal wrapping do not add file lines. A single long line can still exceed a reader's budget. JSON diagnostic text has no such file-line mapping and retains character counts. No automatic read, current-file guarantee or permission transfer follows.
-
-Paths under the observed Run root share that group. External absolute paths have their own literal parent roots. Relative, malformed or dot-segment paths without a safe captured base remain as recorded under a null root with explicit base unavailability; no cwd/Run-id guess, normalization, source read or symlink resolution is allowed. A reader combines a known root and its relative path, never its own cwd. Packet-level inventory references likewise use one root plus relative leaf.
-
-Illustrative abbreviated header, not actual Run data or a complete source binding:
-
-```text
----
-run: "review"
-state: "done"
-kind: "primary"
-files:
-  - root: "/work/runs/review"
-    entries:
-      - status: "Read first; Actor response; admission privacy"
-        continue_from_line: 143
-        path: "evidence/primary.txt"
-      - name: "report"
-        path: "artifacts/report.md"
-files_status: "Declared artifact paths; existence/production unproven"
----
-
-The selected Actor Markdown is truncated here.
-[Read from line 143]
-```
-
-The unchanged 48 KiB packet budget includes every root, entry and compiler hint. Outcomes retain priority over optional Run-file rows; whole omitted rows/locations remain explicitly covered. Stored member data, file-navigation DTOs, privacy/source fences and phase recovery are unchanged.
+**The rule in one line:** structured inputs stay JSON; runtime-authored output metadata is block YAML; authored text stays unchanged Markdown outside that metadata.
 
 ## Purpose
 
-AX means **Agent Experience**: convey enough structured, visible context for an agent to understand what happened and choose its next step, while remaining immediately readable to a person. The same projection should serve both rather than forcing the agent to reconstruct meaning from raw dumps or giving the human decorative prose that hides important facts.
+AX means **Agent Experience**: give an agent enough structured, visible context to understand what happened and choose its next step, in a form a person can read at a glance. One projection serves both audiences. The agent should not have to reconstruct meaning from a raw dump, and the human should not get decorative prose that hides the facts.
 
-The intended form uses actual YAML for runtime-authored metadata and preserves the producer's selected text as content. It is neither raw JSON with punctuation removed nor a YAML-like Markdown-list grammar. The serialization direction is about readable public output, not a demand to maximize nesting or convert an Actor's report into structured runtime data. Compact means selected meaning, not the fewest possible lines. UX also includes responsive navigation: reuse the current admitted snapshot on the hot path instead of repeated body reads. Keep explanatory context available in existing detail rather than filling the first screen with standing hints; real uncertainty/loss still needs truthful markers. Caching must retain the owning refresh/invalidation policy, not invent freshness or immutability. Inspector notifications belong in separate overlay chrome, not as inserted rows among source data: showing or dismissing feedback must not shift the document, selection or stripes.
+- **Compact means selected meaning**, not the fewest lines. Two or more useful lines are normal; do not clip a short complete phrase to keep a record on one line.
+- **Truth over polish.** Real uncertainty, loss and refusal stay visible. A cleaner answer must never claim readiness, completion, delivery or "no effects" that is not established.
+- **Responsive, not chatty.** Reuse the current admitted snapshot on the hot path instead of rereading bodies, and keep explanations in detail views rather than standing hints on the first screen. Caching follows its owner's refresh and invalidation policy; it does not invent freshness or immutability. Inspector notifications live in overlay chrome, never as rows inserted among source data: showing or dismissing feedback must not shift the document, selection or stripes.
 
-## Project-Wide Scope
+## Scope
 
 Apply this standard when creating or changing:
 
-- Inspector lists, detail documents, diagnostics and actionable explanations.
-- Public tool launch, success, refusal and error text.
-- Agent-bound completion, attention, diagnostic and other contextual messages.
-- Human-facing examples of those surfaces and the checks that preserve their behavior.
+- public tool launch, success, refusal and error text;
+- agent-bound completion, attention, diagnostic and other contextual messages;
+- Actor Inspector lists, detail documents, notices and actionable explanations;
+- human-facing examples of those surfaces and the checks that preserve them.
 
-Keep facts, field meanings, ordering priorities, uncertainty and omission semantics consistent across surfaces. A terminal browser, tool result and phone need not have identical layout or byte-for-byte text. Source permissions and the recipient's ownership remain authoritative at every surface, including verbose/detail views.
+Facts, field meanings, ordering priorities, uncertainty and omission semantics stay consistent across surfaces; layout and exact bytes may differ between a terminal, a tool result and a phone. Source permissions and recipient ownership stay authoritative everywhere, including verbose and detail views.
 
-Machine JSON, canonical journals, SDK DTOs and parameter schemas remain machine contracts. Literal source text remains source text. Neither is rewritten into this presentation just because the default human/model-facing view changes.
+Out of scope: machine JSON, canonical journals, SDK DTOs, parameter schemas, native wire formats and literal source text. They keep their own contracts and are never rewritten into this presentation because the default view changes.
 
 ## JSON Input, YAML Output, Opaque Content
 
-- **Structured inputs:** Tool arguments and SDK parameter schemas remain their JSON machine contracts. JSON Recipe definitions remain inputs; no Recipe schema, existing supported Markdown-Recipe source or container migration is authorized by this presentation rule.
-- **Runtime-authored outputs:** Launch/attachment receipts, registration, status, Control, inspect, notices, refusals, diagnostics and completion metadata use one YAML presentation for both agent and human. A verbose view is more admitted information in that presentation, not an exception that dumps internal JSON into readable text. Machine `details`/DTOs, journals, native-helper wire protocols and stored artifacts retain their own formats and authority boundaries.
-- **Authored content:** Preserve the selected Actor/producer text in its original format, often Markdown. Keep it outside metadata, unindented, without an `answer`/`output` YAML scalar, a universal body fence, JSON escaping or a structural minus added to each line. Existing privacy/source selection and admitted clipping still apply; this is not permission to recover discarded text or widen retention.
-- **Literal source:** An explicitly requested Recipe/file/code/JSON source may remain literal source content. Its JSON is not a runtime metadata serializer or a second public output mode. Do not disguise generated object dumps as source text to evade this rule.
-- **One metadata language:** Render structured runtime fields as native YAML nodes, never as a JSON object/array string inside YAML or a nested JSON code fence. Do not parse and reserialize authored bodies to make them conform. Exact historical packets keep their original formats.
+- **Structured inputs.** Tool arguments and SDK parameter schemas remain JSON machine contracts. JSON and supported Markdown Recipe definitions remain inputs; this rule authorizes no Recipe-schema or container migration.
+- **Runtime-authored outputs.** Launch and attachment receipts, registration, status, Control, inspect, notices, refusals, diagnostics and completion metadata use one YAML presentation for agent and human. A verbose view adds admitted information in that same presentation; it is not a licence to dump internal JSON into readable text. Machine `details`, journals and stored artifacts keep their own formats and authority.
+- **Authored content.** The selected Actor or producer text keeps its original format, usually Markdown: outside the metadata, at the left margin, with no `answer:`/`output:` scalar, universal body fence, JSON escaping or per-line list marker. Existing privacy, source selection and admitted clipping still apply; this is not permission to recover discarded text or widen retention.
+- **Literal source.** An explicitly requested Recipe, file, code or JSON source may stay literal. That literal is not a second output mode; never disguise a generated object dump as source text.
+- **One metadata language.** Structured runtime fields are native YAML nodes, never a JSON string inside YAML or a nested JSON fence. Authored bodies are never parsed and reserialized to conform.
 
 ## Document Envelope and YAML Syntax
 
-The metadata language is always YAML; its framing depends only on whether the output has a separate selected text body:
+Framing depends only on whether the output has a separate selected text body:
 
-- **Metadata only:** Emit bare YAML without an opening or closing `---`, a Markdown code fence or an empty frontmatter wrapper. Routine tool/spawn/attachment/registration receipts usually use this form; they report invocation/launch facts, not the Actor's eventual completion.
-- **Metadata plus authored/explanatory body:** Put exactly one `---` line above and below the YAML header, then preserve the selected text/Markdown at the left margin. The delimiters separate languages here; the body is not a YAML scalar or a whole-body fence.
-- Choose by actual body presence, not by whether a tool returns synchronously or its workload runs asynchronously. An asynchronous launch receipt can be metadata-only, and a synchronous tool can carry text. Do not invent filler prose, trim away selected content or infer the case by parsing that content.
+- **Metadata only** — bare YAML: no `---`, no code fence, no empty frontmatter. Routine tool, spawn, attachment and registration receipts usually take this form; they report invocation facts, not the Actor's eventual result.
+- **Metadata plus body** — exactly one `---` line above and below the YAML header, then the selected text at the left margin. The delimiters separate two languages; the body is neither a YAML scalar nor fenced.
 
-A completion sequence remains independent per-result documents, not a new Batch/results wrapper. This is one YAML presentation with body-dependent framing, not two selectable formats. These are target rules, not a claim that all current emitters already conform. Fences around the documentation examples below are explanatory only, never part of emitted receipt text.
+Choose by **actual body presence**, not by sync versus async execution: an async launch receipt can be metadata-only and a sync tool can carry text. Do not invent filler prose, trim selected content, or infer the case by parsing it. This is one presentation with body-dependent framing, not two selectable formats.
 
-- One entity is a YAML mapping with descriptive `key: value` fields. Do not put `- ` before every mapping field; YAML sequence markers are only for actual sequences.
-- Use YAML 1.2 block mappings/sequences with two-space nesting, stable semantic ordering and safe scalar serialization. No custom pseudo-YAML grammar, nonempty flow collections, tags, anchors or implicit alternate document formats. Standard empty YAML collections `[]`/`{}` and quoted scalars retain their types; these are YAML syntax, not embedded JSON dumps. Do not replace an empty collection with null, absence or an invented status merely to avoid punctuation.
-- Nested fields such as model/thinking provenance, references and Run-file locations use YAML nesting. Strings, null/booleans/numbers and literal source references retain their selected meanings; quote ambiguous strings, including the unknown completion index `"?"`. Do not change opaque IDs, display ordering, field semantics or permission by changing syntax.
-- Runtime-owned multiline metadata strings use a proper YAML scalar with round-trippable line/chomping behavior. Actor reports and other opaque authored bodies stay outside that metadata rather than becoming such a scalar. Existing selected diagnostic/advice content must remain content, not be parsed into fields/actions.
-- Keep a real warning/uncertainty visible with its relevant record. Do not add empty fields, decorate a no-effects claim or hide safety information in service metadata.
-- Existing bounded omissions, whole-reference coverage and budgets include YAML indentation/escaping and service data. Formatting does not grant a larger budget, extra source reads, shortened paths or loss of generation/privacy facts.
-- Body-authored frontmatter, `next:`/tool labels, lists, code, YAML/JSON and HTML remain opaque content. The runtime's compiler boundaries, not text-shaped guesses, identify its metadata; independent rendering must prevent an unfinished body fence/list/quote from consuming a later header.
+Syntax:
 
-Illustrative target spawn receipt, not actual Run data:
+- One entity is one YAML 1.2 block mapping of descriptive `key: value` fields with two-space nesting and stable semantic order. Sequence markers (`- `) appear only for real sequences, never before every field. No pseudo-YAML grammar, non-empty flow collections, tags, anchors or alternate document formats.
+- Empty `[]`/`{}` and quoted scalars keep their types; never replace an empty collection with null, absence or an invented status.
+- Nest naturally related facts (model/thinking provenance, references, Run-file locations). Strings, null, booleans and numbers keep their meaning; syntax never changes an opaque id, ordering, field semantics or permission.
+- **Quoting:** plain unambiguous scalars are unquoted (`run: review-0`, `state: done`, paths). Quote a string only when its value is ambiguous, contains structurally significant characters, or is the unknown index `"?"`.
+- Runtime-owned multiline metadata uses a proper round-trippable YAML block scalar. Authored reports stay outside metadata; selected diagnostic or advice text stays content and is never parsed into fields or actions.
+- A real warning stays next to the record it qualifies. Do not add empty fields, decorate a "no effects" claim or hide safety information in service metadata.
+- Budgets and whole-value omission already include YAML indentation, escaping and service data. Formatting never grants a larger budget, an extra source read, a shortened path or the loss of a generation or privacy fact.
+- Body-authored frontmatter, `next:`/tool labels, lists, code, YAML, JSON and HTML are opaque content. Compiler boundaries, never text-shaped guesses, identify runtime metadata.
+
+Illustrative metadata-only spawn receipt (not real Run data):
 
 ```yaml
-run: check-config
+run: review-0
 state: running
 launch_kind: spawn
 recipe: swarm/subagent-prompt
@@ -128,55 +73,33 @@ model:
   value: example/model
 ```
 
-The completion example above instead has an authored Markdown body, so its YAML header has the opening and closing `---` lines. `kind: primary`/`diagnostic` remains outcome-content classification, not a new launch kind; a launch receipt does not invent a completion index or final Actor output. All examples are selected display fields, not new API schemas or permission to invent a missing fact.
+Code fences around examples in this document are explanatory only and never part of emitted text.
 
 ## Tool Invocation and Response Separation
 
-Every tool surface must show exactly one visual blank line between the host-owned invocation header/arguments and the first response line. This applies to spawn and registered tools, compact/verbose replies, YAML or selected text, success, refusal and error. It is independent of the YAML body/framing decision; do not add `---` merely to create spacing.
+Every tool surface shows exactly one blank line between the host-owned invocation header and the first response line: spawn and registered tools, compact and verbose, YAML or text, success, refusal and error alike. This spacing belongs to the result boundary, independent of the YAML framing decision; never add `---` to create it.
 
-The separation belongs to the runtime/host result boundary, not the YAML data or Actor's selected text. Do not trim/rewrite that text, duplicate tool names/options/private inputs in the response, add a filler body or accumulate extra blank lines on repeated wrapping. Preserve structured `details`, non-text blocks, error identity/handling and existing budgets. Current spacing helpers establish a text-prefix convention on their wired paths; actual host/UI and pre-facade-error coverage must be verified separately rather than assumed.
-
-Illustrative visual arrangement, not API invocation syntax or real Run data; the first line belongs to host chrome:
+Do not trim or rewrite selected text, repeat tool names, options or private inputs in the response, add a filler body, or accumulate blank lines through repeated wrapping. Structured `details`, non-text blocks, error identity and budgets are preserved.
 
 ```text
 spawn  recipe=swarm/subagent-prompt
 
-run: check-config
+run: review-0
 state: running
 launch_kind: spawn
 ```
 
-### Current rollout status
+The first line above is host chrome, not response text.
 
-Migrated owned projections emit block YAML (bare when metadata-only, one delimiter pair before a separate selected body): Control receipts, guards and the awaiting-dispatch notice; inspect refusals, compact Run/runtime/tool/Recipe success views and the explicit `tool:* view=schema` text; registry registration/listing/deletion/draft receipts and all locally authored refusals; registered-command success bodies and failure exit-status documents; the local usage/argument-repair heading; pre-launch spawn guards; runtime callback failure, completion recovery/acceptance, steer diagnostics and the shutdown teardown report; watcher and retirement notices; and fresh completion/attention captures.
+## Identifiers, Facts and Next Actions
 
-Deliberately still on their earlier layout: registry activation/promotion/deletion notices and runtime startup warnings (flat report/category fields, separately scoped), Inspector UI feedback and chrome (UI text whose recognition is verified separately, not model-facing metadata), and every retained historical completion/packet encoding, which replays its exact saved bytes. Machine `details`, verbose JSON, canonical journals and literal source files are not presentation targets.
+**Identifiers.** Display `run: demo`, not `run: run:demo`: the key already names the namespace. Canonical targets keep `run:demo` wherever machine fields, references or tool arguments require it. Avoid authored middle-dot separators and ornamental boilerplate, but preserve them inside producer-authored data or immutable history.
 
-The rollout audit for this state found no second or missing host-separation blank line on a migrated model-facing path and no runtime-authored object dump or `- key:` pseudo-record left in the migrated set; the shared helpers `withLeadingLineBreak`, `formatToolText`, `compactYamlDocument` and `spaceToolError` are the single framing owners, guarded by `tests/tools-response.test.ts`. Loaded terminal/phone acceptance and any service-carrier change remain separate gates.
+**Stage vocabulary.** A request is not actuation, delivery is not handling, a natural result is not whole-scope closure, and a legacy kill attempt is not proven termination. A later error can coexist with admitted handling or committed filesystem effects. Never merge the Run state with the state of one Control request; preserve original refusal facts and private causes without inventing correlation or exposing a replacement owner's state.
 
-## Service Framing Is Not Authored Content
+**Next actions.** A next step is an instruction, not observed state. Name the tool and its real arguments instead of hiding a command string in a vague field, and show it only when it is relevant and permitted; healthy responses do not carry a routine inspection command. A displayed action is not evidence it ran and not permission to run it automatically.
 
-The target readable runtime output contains no pi-actors HTML-comment transport framing. Audit each service field against actual consumers first: remove unnecessary fresh data rather than relocating the whole existing payload. If content-carried service data is necessary, prefer its minimum in the response's block-YAML header metadata, not an HTML tail. Separately review the actual Pi storage/model/UI path and preserve the required functions; the current mechanism is not itself a requirement. This does not adopt a new kernel interface or assert that hidden `details` alone is sufficient. Prove persisted replay, model-context acceptance/recovery, full-content binding, independent header/body boundaries, fallback and fixed budgets before switching.
-
-The necessity audit identifies a smaller fresh target: one packet identity and only the relative body/marker segmentation needed to keep opaque content separate; absolute coordinates are derived. Do not carry a duplicate block table, derived compact-range table, prefix digest or default-inactive numbering payload into that new text format. Any optional native presentation digest must have a specific stale-hint/full-content consistency witness and stays outside the content it hashes. Preserve native delivery-envelope behavior and all saved numbering facts/decoders initially; these decisions do not activate S1.
-
-Inspected Pi 1.0 storage and native context preserve custom-message `details`. Provider conversion drops both details and customType only after the extension context hook; that does not strip the saved native entry or prove kernel correlation loss. Current details-stripped witnesses deliberately simulate degraded envelopes. Retain the admitted conservative fallback duties, but do not justify a full text-carried frame by claiming ordinary SDK storage loses metadata. Native content arrays also do not prove independent fallback Markdown rendering.
-
-HTML compiler frames/markers remain required for their saved layouts and may remain in older installed/loaded runtimes. Ordinary source and normally built packages use the minimal YAML core with bounded actual-default source/packed acceptance. Retained storage/renderer/reopen facts transfer only within the unchanged successful original-current-manager path, not as fresh default-disk, native-scope or loaded-host observations. Do not strip them by regex, infer authenticity from their hash, erase Actor-authored HTML, move warnings out of view, or rewrite historical messages to look uniform. If equivalent carriage cannot yet be established, keep the existing implementation and name the blocker; do not ship an apparently clean but uncorrelated/unverifiable replacement.
-
-Use `run: demo` as the labeled display value, not `run: run:demo`: the key already supplies the namespace. Canonical targets remain `run:demo` where required by machine fields, references or tool arguments. Presentation does not change identifier or target grammar.
-
-Avoid authored middle-dot separators and ornamental boilerplate. Preserve such characters if they belong to producer-authored literal data or immutable history; the rule is not permission to edit source content.
-
-## Facts, Uncertainty and Next Actions
-
-Use precise stage vocabulary. A request is not actuation, delivery is not handling, a successful natural result is not whole-scope closure, and a legacy kill attempt is not proven full termination. A later error can coexist with admitted handling or committed filesystem effects.
-
-Do not merge the Run state with the state of one Control request. Preserve original refusal facts and private error causes without inventing missing correlation or exposing replacement-owner state. A visually cleaner answer must not claim readiness, completion, later delivery or no effects when that fact is unavailable.
-
-A next step is an instruction, not extra observed state. Name the tool and its actual arguments rather than hiding a command string inside a vaguely named `details` value. Show it only when it is relevant and permitted; do not attach a routine inspection command to every healthy response.
-
-Illustrative Control error projection, not an executed request:
+Illustrative Control error (not an executed request):
 
 ```yaml
 run: demo
@@ -188,73 +111,172 @@ warning: |-
   Effects may already exist.
   Do not repeat automatically.
 next:
-  tool: inspect
+  tool: actors_inspect
   target: runtime
   view: runs
 ```
 
-This example does not authorize publishing a saved Control id or generation. [Recipient-bound correlation](./run-supervision.md#recipient-bound-correlation-preparation) retains its separate host/adoption gate. A displayed next action is not evidence that it already ran or permission to execute it automatically.
+This does not authorize publishing a saved Control id or generation; [recipient-bound correlation](./run-supervision.md#recipient-bound-correlation-preparation) keeps its own gate.
 
-## Text, Clipping and Omission
+## Completion Cards
 
-Do not clip a complete short phrase merely to keep a record on one line. Two or more useful lines are normal. Respect genuine shared message, source, field and renderer budgets; do not silently widen retention or remove required safety information to make the layout look shorter.
+A completion card is what the agent and the human see when a Run finishes. It is a captured presentation of admitted facts, not another result store or a filesystem inventory. A batch is simply a sequence of per-Run cards, not a container with members.
 
-For non-completion derived previews whose existing owner supplies a known omission fact, use YAML metadata rather than a Markdown-list field. Illustrative selected display value:
+### Card shape
 
-```yaml
-omitted: "840 chars"
+Each card's metadata begins `run`, `state`, then `kind`:
+
+- `kind: primary` — admitted primary text or the final Actor response;
+- `kind: diagnostic` — explicit error or failure diagnostics, never a launch command.
+
+Untracked fallback text has no `kind` and cannot become primary. Missing text stays explicit. `kind` classifies outcome content, not the launch: a launch receipt never invents a completion index or a final Actor output.
+
+When a card has a body, the admitted Markdown follows the closed header at the left margin: no `#N` heading, no `result:`/`preview:` wrapper, no whole-body fence, and exactly one blank line between cards.
+
+**Display index.** Prepend a packet-local `index` only when two or more cards are shown. A single shown card has no index, even when other results were omitted. An unavailable index is the string `"?"`, never a fabricated zero. A display index is not a member index, generation or global counter.
+
+### Rooted completion files
+
+`files` tells the agent which files are worth opening and why. It is a sequence of groups, each with one literal `root` and relative `entries[].path`:
+
+- **What is listed:** the retained primary, diagnostic and inventory sources; declared artifacts; observed `context-index.json`, `result.json` and `execution.json` as metadata fallback. Not every technical file.
+- **What an entry carries:** `path`, an optional logical `name`, and a concise `status` only when the filename alone cannot convey why to read it. Status keeps Actor-response versus exported-text, admission privacy, diagnostic-only scope and unverified declarations distinct. Entries never carry `role` or diagnostic field inventories.
+- **Group-wide facts:** optional `files_status` and `files_notes` hold real group-wide uncertainty, such as "Declared artifact paths; existence/production unproven".
+- **What stays out:** routine absent optional files and repeated purpose, format, size, mutability, generation and hash facts. Full bindings remain in the saved snapshot and machine detail.
+
+Root and path semantics:
+
+- Paths under the Run's own directory share its group. External absolute paths get their own literal parent root.
+- A relative, malformed or dot-segment path without a safe captured base stays as recorded under a null root with explicit base unavailability: no cwd or Run-id guess, normalization, source read or symlink resolution.
+- A reader joins a known root with its relative path, never with its own cwd. A grouped root does not assert containment or grant access to its other children.
+- Declarations are not production evidence, and paths mentioned inside Actor Markdown are authored text, not verified references.
+
+### Read first and continuation
+
+Prefix one entry's status with `Read first;` **only** when the shown primary text, or the selected error/failure diagnostic, omits retained text that this source can recover. Never for a complete answer, upstream uncertainty alone, extra diagnostics, declared artifacts or result/execution metadata.
+
+For a primary-text cut, the entry carries `continue_from_line: N` and the body ends with `[Read from line N]`:
+
+- lines are one-based LF-delimited lines of the source file (CRLF files included), not terminal wrapping;
+- a partly shown line is read again, so `N` is the first line not fully shown;
+- lone CR and soft wrapping add no lines; CRLF stays intact;
+- one very long line can still exceed a reader's budget.
+
+Diagnostic JSON and other text without an exact file-line mapping use a character count instead (below).
+
+### Markers and omission
+
+| Case | Shown as | Counts | Rules |
+| --- | --- | --- | --- |
+| Primary text cut at a known file line | `[Read from line N]` in the body, `continue_from_line: N` on the entry | First not-fully-shown file line | As in the line model above |
+| Diagnostic JSON or text without line mapping | `[N characters omitted]` at the cut | Admitted Unicode scalars | No added ellipsis; no clipping counters in YAML |
+| Unknown upstream completeness or privacy | Header `text_warnings` | None | No invented count and no claim of known positive loss |
+| Complete text with no known loss | Nothing | — | Never manufacture an exact zero for unproven completeness |
+
+Counts cover only already-authorized, privacy-projected text: never hidden secrets, discarded upstream lengths, UTF-16 units or bytes. A known local count and unknown upstream loss stay distinct when both apply. Only the exact cut marker may follow a body; every other runtime fact stays in the header.
+
+### Placement, budgets and delivery
+
+- All runtime metadata sits above the Markdown: no service footer, appended file list or trailing warning. Packet-level omission and inventory facts go in the first header.
+- The fixed 48 KiB packet budget covers every root, entry and compiler hint across up to 64 shown cards and 256 captured members. Run identity and recorded state come first, outcomes outrank optional file rows, whole omitted rows stay explicitly covered, and no path is ever shortened.
+- Successful automatic delivery adds no receipt, outer counters, `members` wrapper, batch caption, time window, status copies or standing "full map" instruction. Real failures stay reportable.
+- Fresh packets carry only a minimal packet identity and relative body/marker lengths in YAML metadata, with no compiler HTML tail. That data is display and correlation consistency, not authenticity, read permission or acceptance.
+
+### Rendering
+
+The compact TUI renders compiler headers and markers as literal text and each body as independent native Markdown, so an unfinished fence, list or quote in one body cannot consume the next card. Expansion, or an invalid or missing hint, reveals the original full text. Rendering never rewrites source bodies or retained coverage facts.
+
+### Example
+
+Illustrative two-card packet (not real Run data):
+
+```text
+---
+index: 0
+run: review-0
+state: done
+kind: primary
+files:
+  - root: /home/user/.pi/agent/tmp/pi-actors/runs/session-a/review-0
+    entries:
+      - status: "Read first; Actor response; admission privacy"
+        path: evidence/primary.txt
+        continue_from_line: 143
+      - path: result.json
+      - path: execution.json
+  - root: /home/user/project/reports
+    entries:
+      - name: report
+        path: review.md
+files_status: "Declared artifact paths; existence/production unproven"
+---
+
+## Review
+
+The package is ready. The report covers the two remaining warnings.
+[Read from line 143]
+
+---
+index: 1
+run: build-0
+state: failed
+kind: diagnostic
+files:
+  - root: /home/user/.pi/agent/tmp/pi-actors/runs/session-a/build-0
+    entries:
+      - status: "Recorded diagnostic metadata only; admission privacy"
+        path: evidence/result-diagnostics.json
+      - path: result.json
+---
+
+Module was not found.
+[120 characters omitted]
 ```
 
-This is not a new completion-header clipping field. Fresh completion text retains the cut-local `[N characters omitted]` rule above, without an added ellipsis or body-count flags; saved messages retain their original codec.
+## Text, Clipping and Omission Elsewhere
 
-Inline annotations, where used, remain [omitted: N chars] or [omitted: unknown]. Saved packets retain their original spelling; this display change does not recapture source facts.
+Outside completion cards, previews follow their existing owners:
 
-An exact number counts Unicode code points removed from the already-authorized privacy-projected source at the declared stage. It does not count hidden secrets, recover discarded upstream lengths or turn UTF-16 units/UTF-8 bytes into characters. Keep a known local display count distinct from unknown upstream loss when both are relevant. A known complete value needs no new omission decoration; never manufacture an exact zero for unproven completeness.
+- A derived preview with a known omission fact uses YAML `omitted: "<N> chars"`, counting Unicode code points removed from already-authorized, privacy-projected source at the declared stage.
+- Inline annotations, where an owner uses them, read `[omitted: N chars]` or `[omitted: unknown]`.
+- Where an owner already uses gap ellipses, U+2026 marks the cut boundary: after a retained prefix, before a retained suffix, on both sides of a removed interior gap, or at both ends of a middle excerpt. A combined count means the total omitted content, not a count repeated per end.
 
-Where an existing non-completion preview owner already uses gap ellipses, preserve U+2026 (`…`) separately from its omission metadata or inline marker:
+These are presentation patterns, not permission to select a suffix or middle the owner does not admit. An authored ellipsis or replacement character is not a loss flag; U+2026 is one code point but three UTF-8 bytes, so budgets stay explicit. Annotations live outside the literal retained bytes and inside the shared output bound. Actionable paths and references stay whole or are explicitly omitted, never cut for width.
 
-- A retained prefix ends with an ellipsis when its tail is omitted.
-- A retained suffix starts with an ellipsis when its head is omitted.
-- A removed interior gap can be shown between an ellipsis after the prefix and one before the suffix, with the omission annotation identifying the gap.
-- A retained middle excerpt can have ellipses at both external boundaries. A combined known count must mean total omitted content, not the same count repeated for each end.
+## Service Framing Is Not Authored Content
 
-These are presentation patterns, not permission to select a suffix/middle source that the existing owner does not admit. An authored ellipsis or replacement character is not a reliable loss/count flag. U+2026 is one code point but three UTF-8 bytes, the same byte size as three ASCII periods; budget calculations remain explicit.
+Fresh readable output carries no pi-actors HTML-comment transport framing. Service data that must travel in content is reduced to its proven minimum (one packet identity plus the relative body/marker segmentation needed to keep opaque content separate) and placed in the YAML header. Do not carry duplicate block tables, derived range tables, prefix digests or default-inactive numbering payloads.
 
-Indentation, fences, ellipses and annotations belong to the projection. Preserve the exact retained source/preview bytes and their range/hash metadata, keeping annotations outside literal content. Include rendering overhead in the shared output bound. Keep actionable paths and references complete or explicitly omit them; never cut a path to satisfy cosmetic width.
+Saved layouts keep their HTML compiler frames and markers, and older installed runtimes may still emit them. Never strip them by regex, infer authenticity from a hash, erase Actor-authored HTML, move warnings out of view, or rewrite historical messages to look uniform. A replacement carrier ships only after replay, model-context recovery, full-content binding, independent boundaries, fallback and fixed budgets are proven equivalent; otherwise keep the existing mechanism and name the blocker.
 
 ## Compatibility and Trust Boundaries
 
-Adoption of this AX standard is not a claim that old renderers already conform. Current source/compiled behavior and live client behavior must remain distinguishable from the target design.
+- **Adoption is not conformance.** Current source, compiled and loaded-host behavior must stay distinguishable from this target.
+- **Saved history is immutable.** Captured completion and steer packets replay with their original codec and exact bytes; steer envelopes replay their saved content directly. Do not relabel, migrate or reformat journals or session messages. Retained encoding identifiers are internal replay data, not alternate AX products — see [retained capture compatibility](./coordinator-delivery.md#retained-capture-compatibility).
+- **New captures need their own path.** A fresh read-time projection over admitted data may update its current summary without changing canonical fields; a new capture layout needs a distinct admitted path in its owner. Never reinterpret an existing aspect such as `bracketed_omissions_v1`. Old strings cannot supply original counts or a privacy certificate ([legacy disclosure boundary](./run-supervision.md#legacy-completion-disclosure-boundary)).
+- **Formatting grants nothing.** Privacy, ownership, generation fencing, source selection and native or clock authority are separate from presentation. A DTO, path or readable old manager is not permission. Verbose output is recipient-scoped, not a raw-data escape hatch, and rendering a nicer record never enables a policy, retry, source read or refresh.
 
-Do not rewrite saved completion/steer packets, historical messages or source journals. A fresh read-time projection over already admitted data is not a persisted capture version: it may update its current summary leaf without changing canonical fields, adding an aspect to source journals or regenerating saved text. A new capture presentation needs a distinct admitted compatibility path in its existing owner; do not reinterpret an existing formatting aspect such as `bracketed_omissions_v1` to silently change saved text. [Legacy completion source-loss evidence](./run-supervision.md#legacy-completion-disclosure-boundary) already explains why old strings cannot supply original counts or a new privacy certificate. Unknown-only display can use the newly approved presentation direction without broader retention; exact new counters still require their admitted source basis.
+## Implementation Owners
 
-Keep privacy, ownership, generation fencing, source selection and native/clock authority separate from formatting. A DTO, source path or readable old manager is not new permission. Structured/verbose output remains explicit and recipient-scoped, not an unrestricted raw-data escape hatch. Do not enable a new runtime policy, retry, source read, result refresh or operation merely to render a better record.
+Each projection stays with its cohesive owner; the [projection map](./output-projection-map.md) records the audited functions, egress paths and test owners.
 
-## Existing Implementation Owners
+- `tools-message.ts` — Control receipts, refusals and conservative public errors.
+- `tools-response.ts`, `tools-spawn.ts`, `tools-local.ts` — shared response primitives, launch and runtime-tool presentation. `renderYamlMetadata` is the bounded block-YAML foundation (49,152-byte ceiling, at most 64 nesting levels); those limits are not caller allowances.
+- `tools-inspect.ts`, `inspector.ts`, `inspector-overlay.ts` — public inspection and Inspector presentation, preserving ranks, ids, source order, selection and focus.
+- `observability.ts`, `run-delivery.ts`, `run-ui-runtime.ts` — observed outcomes and attention, versioned packet projection, active-context delivery. Formatting owns neither scheduling nor acceptance.
+- `trace-projection.ts` and the admitted source owners — truthful bounded summaries on their existing privacy and count basis.
 
-The [runtime output projection map](output-projection-map.md) names the audited current functions, egress paths, source/machine/UI boundaries and existing test owners. It is source evidence for rollout, not proof that YAML migration or an alternate service carrier already works; remaining tasks stay in `BACKLOG.md`.
-
-The prepared `tools-response.ts` `renderYamlMetadata` foundation uses the directly declared `yaml@2.9.0` public API for selected own-data mappings/sequences. It emits bare YAML without invocation spacing or body processing, preserves scalar types/strings and refuses unsupported or over-budget whole values. Its execution ceiling is 49,152 bytes and supported nesting is at most 64 levels; these are not caller allowances or drop-in compatibility for larger existing budgets. Preflight bounds scalar/node traversal, not atomic key enumeration or arbitrary Proxy execution. Focused parser/property and shared response-owner tests cover this foundation; compact asynchronous launch receipts are the first production caller. Other surfaces and loaded-host acceptance remain separately staged; full spawn-verbose shares the final YAML style without inheriting this bounded emitter's limits.
-
-The following is the current pre-unification implementation inventory, not a set of alternate adopted output styles. Existing flat records, literal JSON fields, verbose JSON and retained-layout HTML compiler frames remain code facts until their owned rollout changes; the target above does not restyle or relabel stored text. This standard spans surfaces, not a new library domain. Control compact-result/public-error is now bare block-YAML metadata with native option sequences, whole selected values or explicit omission records under the existing16KiB cap, no duplicated run namespace, stage/reuse distinctions, typed selective inspect next nodes and opaque advice scalars; verbose JSON remains the machine path. Launch model/thinking groups use the concise `model` and `thinking` labels and preserve their actual source/value relationship; compact launch navigation now selects useful exact paths and any unavailable-location status in one native YAML value or explicit whole-row omission within16KiB including invocation-response spacing. Full spawn-verbose in source and normally built packages uses the legacy once-only JSON selection followed by clone-only YAML, without a new fixed byte/depth cap. Absent selected JSON, malformed selected text or recoverable post-selection failures withhold the whole projection with an attributable no-auto-repeat warning; original selection throws and structured details remain unchanged. Source/unit and installed compiled response checks, the strict ordinary-metadata source/packed completion journey, and all three source/packed navigation owners are accepted within their bounded domains. Native assertions remain indirect proof, not current global absence. Owning Skill byte parity does not establish a loaded-host change. The older field/inspect-action primitives remain with their unmigrated consumers; compact launch serialization now uses the YAML metadata primitive. Structured/verbose results, exact dispatch/private error causes and old completion handoff text retain their contracts. Fresh ordinary source completion admission captures canonical AX with the private completion_yaml_files_v3 layout: run/state YAML with packet-local indices only for multiple shown results, independently rendered raw Markdown and cut-local [N characters omitted]. The minimal ordinary hint binds whole content to the YAML core, whose relative lengths derive header/body/marker boundaries without fresh HTML tails. Retained completion_frontmatter_v1 hints keep their complete ranges and original compiler frames; neither hint name is a public selector. Only valid compiler headers can hide whole reference/location rows. Markers remain literal and body-authored labels never become metadata/actions. Expansion and invalid/missing hints reveal full original text. These checks establish display consistency, not authentication, source/read scope or acceptance; display line-ending/tab handling never rewrites saved content. Routine state-equivalent summaries remain in the journal, not the new model content; meaningful summaries, loss/redaction/unavailability and reference coverage remain visible. Exact source/generation/parent bindings remain internally retained; useful whole references and fresh48KiB/64row limits include required packet correlation data; retained codecs keep16KiB. The postprivacy byte budget is divided equally between candidate rows: roughly48KiB for one,24KiB each for two,16KiB each for three, less encoded service overhead. Whole admitted text uses result only when it fits without known upstream clipping; otherwise preview uses the safe prefix with exact retained-source omissions. There is no fixed16KiB result/2KiB preview cap and no render-time source IO or reallocation. Already-retained packets keep their exact captured bytes; pre-record messages keep the host renderer and retained record messages keep their original verified view. The Pi boundary recognizes the strict whole YAML core for ordinary source records, or original closed markers/anchored headers for retained captures, after private details are stripped, preserving exact owned-context acceptance without interpreting authored body labels. Actual actors guidance describes this implemented fresh-capture route; this is not a claim that a loaded host was reloaded. Fresh source urgent-steer captures use typed YAML metadata and a separate raw selected body before saving immutable envelope.content: complete final-message fitting and whole reference sequences retain16KiB/eight-slot bounds. Ordinary attention remains unbounded; bounded source/compiled/actual-default acceptance does not establish loaded-host acceptance. Existing envelopes are not reinterpreted, and no older new-message default remains. Fresh ordinary notify/followup uses one AX formatter in the existing sink: the same opaque checkpoint/body and whole first-eight reference projection, without borrowing steer's shared byte cap or changing routing. Committed history keeps its exact text; the retired presentation selector is not a compatibility API. Fresh read-time agent Trace preview leaves now also use boundary U+2026, exact admitted normalized-retained-turn omissions and separately unknown upstream loss, without changing the160UTF-16 source allowance, identifiers/chronology, detail/source data or public JSON schema. Malformed text is unknown, not repaired; no journal capture aspect is minted for a derived current read. New urgent admission/send/recovery diagnostics now also use event/attention/stage AX records, opaque raw240-unit previews and unknown loss while their persisted message-only evidence stays unchanged. A failed send leaves delivery/presentation unconfirmed, and unknown/conflicting queued recovery does not force replay. Fresh non-runtime explicit inspection also uses bare block-YAML metadata: unchanged Run/view headers, tool activation/argument sequences and Recipe registry/focused-doctor facts, whole selected source/identity/advice scalars or explicit whole-field omission, native counts/flags and one typed read-only hint or opaque `next.instruction`. The explicit `tool:* view=schema` text is generated definition metadata in the same bare YAML form with native parameter nodes when renderable; unsupported/over-ceiling schemas retain the exact legacy JSON fallback. Compact argument sequences are whole or explicitly omitted/unavailable. Verbose views bypass compact formatting and machine details keep their JSON contracts. Only the three existing closed read-only Recipe inspect literals become typed next; other advisory strings remain opaque instruction values with full next_actions retained in unchanged details/verbose JSON. Existing body/scope/budget/default-status contracts stay independent. Compact runtime status/runs/triage now also presents only its existing facts/counts as AX fields, with full owned inventory independent from bounded verbose navigation and bounded triage rows. Fresh locally owned runtime notices (callback failure, completion recovery/acceptance, steer admission/delivery/recovery diagnostics and the shutdown teardown report) are now bare block-YAML metadata with explicit receipt/report stages and native counters. UI-only notices keep complete well-formed selected fields without borrowing the model byte/depth ceilings; malformed selected text is explicitly unavailable. Existing steer preview bounds, source/errors, acceptance and native authority are unchanged. Producer-owned watcher/retirement notices now also use uncapped bare block-YAML metadata: whole selected literal paths and opaque diagnostics preserve raw signature/dedup/rearm behavior, while returned stop/reported cancellation/skip/failure remain non-closure reports with exact existing optional-notifier/error observation semantics. Inspector document/detail rendering now uses flat semantic fields, real sequence lists and opaque literal terminal values, with ephemeral compiler-label provenance instead of parsing authored colon/bullet lines as metadata. Separator-preserving native-column wrapping keeps whole text/references, source values, root stripes and existing identity/chronology/navigation/source bounds. Empty containers remain typed values; terminal line-ending/tab display policy does not rewrite source. Ten locally authored inspect refusals now render bare block-YAML metadata with true supported-value sequences, field-local whole-field coverage records and one typed read-only next, preserving their original guards and Error/dependency behavior. Only the two already-guided tool failures retain typed read-only next actions. New local error text shares16KiB including public spacing; variable fields/actions are whole or explicitly counted omitted without shortening targets, reading raw private lengths or wrapping unowned exceptions. Session/source/dependency errors keep their separate owners and old catches rather than being globally restyled. Inspector Kill confirmation now also uses captured run/state/action AX fields with whole-value paging, while both choices and closure: unconfirmed remain pinned at narrow/low viewports. Read-only PgUp/PgDn preserves original Cancel/choice/confirmation/generation behavior and adds no actuation or source permission. Inspector Kill cancellation only closes the dialog; successful actions use the selected Run's visible status without a second Notice. Failures/refusals/uncertainty remain visible, and notifications on other surfaces are not suppressed. Remaining Inspector feedback shows the complete selected opaque message directly in a modal popup over unchanged data rows, without i prefix/command or another reader. Esc dismisses; only physical overflow scrolls within that same popup. Kill uses the same centered rectangle compositor. Both use terminal-default backgrounds rather than a theme fill, two-column left content insets and top/bottom blank spacing, plus the Inspector's shared frame/key/description color grammar. On space-constrained heights, safety/choices/readable text take priority over decorative blanks. They keep the captured underlay stable through resize/invalidation and resume ordinary refresh on close, without fresh evidence/native authority. Action-port feedback pins closure uncertainty/no automatic retry without inferring native effects from message text. Fresh Kill producers now use a shared pure selected-value AX formatter: domain180-unit normalization/trim and overlay160-unit normalization/slice remain, while a cut pair retracts one unit and malformed selected text is unknown/unavailable. Dynamic legacy values state upstream completeness/privacy unproven, with unknown local clipping markers rather than private-tail counts; compiler refusals add no fake loss. ok/callback/getter/coercion/error semantics and old success suppression stay unchanged, and the popup's anchored header recognition affects color only. This does not recover discarded Markdown/causes or create a saved capture version. Trace table rows now mark actual column/line gaps with native ellipsis while preserving full selected item/detail, and compact warning captions keep incomplete-history/non-lifetime/unavailable-rank meaning visible at narrow widths. This is UI preview loss only, not new source/private character counts, rank/identity changes or a generic selector/fit rewrite. Four locally authored Control pre-dispatch guards now also use caller target/action/result and actual supported/available-action sequences: whole target/list groups fit16KiB including public spacing or carry field/entry omission counts, while malformed selected text is unavailable without repair. Original guard/getter/join/coercion observations, plain Error/host-error behavior and all unowned/dispatch exceptions stay separate; no input/status/correlation/retry/no-effects or new dispatch authority follows. Synchronous registered-command failures now present compiler-owned exit_code/killed metadata as bare block YAML, followed by a delimited header before the unchanged selected stderr/stdout bodies (or metadata-only when no stream text was selected); trim/tail selection, truncation notices, temp-file publication and exact executor failures are unchanged. The pre-dispatch argument-repair error now likewise puts owned tool/required/optional facts in a closed YAML header and keeps the original validation prose plus the verbatim JSON invocation example as unparsed body text, and local spawn pre-launch guards use bare block YAML with one whole selected value or an explicit omission record. Three local spawn pre-launch guards present field/result and a whole or explicitly omitted selected caller value as bare block YAML rather than inventing an admitted Run: unsupported state_dir, missing run: namespace and invalid id. Whole valid-scalar values fit16KiB or are omitted; malformed selections are unavailable, without repair or source/private-tail counts. Original input/method/coercion/launch behavior stays separate. The real host still rejects unsupported state_dir through its own unchanged schema before the facade, so this does not claim all SDK validation errors are AX. Namespace/id guard errors retain real host isError behavior. Successful normal registration/update-or-persisted receipts now use original tool/outcome/source/callable facts, actual required/optional argument and warning lists, a whole fenced non-template source and one prior hint. Invocation advice stays opaque instruction; only the producer-known unverified tool-status hint is typed next. Complete safety warnings have first budget priority; all variable fields/groups/actions fit16KiB including public spacing or show whole selected-field/entry omission, with malformed selections unavailable without repair. Original post-effect warning/argument/coercion/boundary observations and all transaction/details/notify/error behavior remain. This is not new callability, host activation, rollback or invocation authority. Registry current-name listing and deletion returns now also use AX: original sorted/captured names are a whole selected group with shown/omitted/total coverage, never a new page/work quota or active/callable/global registry claim. Overlarge groups are wholly omitted and malformed groups unavailable without raw-key re-coercion or repair. Deletion keeps original selected tool/result and the exact operator reload note as opaque instruction; current-map not found stays a returned result, not a new error or orphan-file cleanup. Lookup/file/deactivation/notify/errors/details remain unchanged, including post-effect failures. Draft promotion success now also uses only its prior selected name/new-update/source=draft/exact callable display/first hint as AX. It does not inherit ordinary-registration args/warnings/boundary facts or change its admission/rollback policy. Original template String conversions remain after notify, including zero/object/Symbol behavior and post-effect failures. Whole scalars/actions fit16KiB or are explicitly omitted/unavailable; only the closed producer-known read-only status hint is typed, and invocation advice is opaque. Machine details/bytes and later activation observations remain unchanged. Locally authored registry mode/name/source/template/draft/transaction refusals now render as bare block-YAML metadata documents with compiler-literal fields, native choice sequences, and each opaque selected value whole or explicitly omitted under the unchanged16KiB cap; authored text stays scalar content with escaped line breaks rather than becoming keys or actions. Registry activation/promotion/deletion notice text remains flat report/tool fields, outside this refusal migration. No supplied source values, new helper/wrapper or changed guard/descriptor/getter/trim order. The host still owns cloning, coercion and schema validation: rejected extra/object fields need not reach these AX guards, while numeric input may normalize and preserve a non-error unnamed list result. This is not new schema, no-effects or automatic retry authority. Three ordinary name/source refusals now also use AX: invalid normalized name without raw caller echo, reserved selected-name value whole or explicitly omitted/unavailable, and missing source only for a new registration with actual source choices/opaque prior advice. Original normalization/reserved-set/resolution/lookup/blocker/fault order stays unchanged; empty-name listing, existing-tool update with retained source and dependency blocker text are not reinterpreted. SDK clone/coercion/schema remains separate. Ordinary and draft duplicate-registration refusals now show their original selected name whole/omitted/unavailable plus the original update advice as opaque instruction; distinct authoritative-file/Map/exists/blocker/update predicates and original single display coercion stay unchanged. No overwrite/retry, body-read or no-effects authority follows. Template-shape helper errors now also use fixed template/result records for nested Recipe objects, empty sequences and unsupported types, with actual supported-kind lists/opaque old correction and no supplied value echo. Getter/Array/reference/key/expand semantics and external errors stay exact; null/undefined/deletion/retained-source behavior and SDK coercion remain separate. Authored-Recipe non-object defaults, missing command description, null-at-authoring and missing-final-template constants now also use fixed field/result, without new value echoes or changes to args/from/description/default/retained-source order. Front deletion, inheritance and Schema/dependency errors keep separate ownership. The delegated runtime-owned-default-key refusal now shows only its original first selected key, defaults/result and opaque old correction. Full copy/find order, eight-name membership and the delegated-only condition remain; no all-key/value disclosure, early rejection optimization or new retry authority. Two draft-path refusals now show only their old captured allowed root or resolved path as complete dynamically fenced literals, or explicit whole-reference omission/unavailability under16KiB. Refused caller path stays undisplayed in root refusal; existing containment/exists/getter/error behavior and opaque prior advice are unchanged, not new absence/native proof. Public from-normalization refusal now also uses only its old displayed source/reason/legacy summary/doctor advice as AX, preserving inner errors, catch/coercion/method order and source/hint disagreement. Source is a whole literal; reason/summary preserve opaque Markdown, and advice is instruction content. Monotone whole-field omission/unavailability fits16KiB without parsing old summary text, adding causes/counts or widening source/catch authority. Normal candidate-admission refusal now also projects only its old source-conditional displayed source/joined diagnostics/legacy summary/advice, preserving branch/coercion/join and pre-Error order. Existing4096-unit upstream admission diagnostic clipping is not widened or repaired; selected summary fields are whole/omitted/unavailable under16KiB, with fitting diagnostics first. This adds no admission policy, full diagnostics/source proof or rollback/readiness authority. Draft raw/candidate invalid-Recipe errors now likewise expose only old optional reason/joined diagnostics with fixed draft/result, preserving separate read/diagnose, truthiness/coercion, Error-before-join and legacy diagnostic bounds. No new path/body, cause, reader, policy or retry follows; whole opaque values fit16KiB or are explicitly omitted/unavailable. Outer registration transaction errors now also project only old post-cleanup stage/resolution-generation/legacy summary/error, preserving cleanup and fallible template order exactly. Resolution generation is not a Run epoch; fitting surfaced error has budget priority and opaque inner rollback/advice text is not a new guarantee. No replay, extra cause/source read or changed transaction policy follows. Registry activation/promotion/deletion notices now also use report/tool AX fields for only old compiler report identity/name, preserving callback order/info type/faults and real hasUI gate. Report wording is not callable/full-host-removal proof. UI text stays literal with native wrapping; no borrowed model16KiB cap, whole well-formed values retained and malformed selected name unavailable. RPC delivery remains fire-and-forget, and loaded UI acceptance stays separate. Recipe registry watcher warning/refresh messages now also use report and opaque instruction constants only, preserving their distinct direct ctx.ui.notify calls (no added hasUI gate), failure dedup/pending-load/callback fault order and old default-root report rather than new verified metadata. Runtime startup warnings now also preserve true category sequences/singletons and whole opaque selected entries through the existing shared field primitive. Original suppression/classification/map/push/join/coercion precedes new projection from compiler-known slots, not parsed authored labels. Trailing LF/no UI cap remain; malformed selected warning is unavailable and old doctor advice is opaque instruction. Native Inspector Run controls retain their selection grammar rather than forced Markdown: producer-specific column gaps now carry ellipses, and complete selected_run_id context uses existing Recipe/Control literal documents, separately from authored fields. Generic fit/composition, source reads, keys and action targets remain unchanged; loaded colored-terminal/phone acceptance stays gated. Other errors/notifications/public owners remain separately scoped, with live client acceptance independent. Reuse the cohesive owner of each projection:
-
-- `tools-message.ts`: Control receipts, refusals and conservative public error text.
-- `tools-response.ts`, `tools-spawn.ts`, `tools-local.ts`: shared response primitives and launch/runtime-tool presentation.
-- `tools-inspect.ts`, `inspector.ts`, `inspector-overlay.ts`: public inspection and Inspector list/detail/action presentation. Preserve ranks, ids, source order, selection, focus and navigation contracts.
-- `observability.ts`, `run-delivery.ts`, `run-ui-runtime.ts`: observed outcomes/attention, versioned saved packet projection and active-context delivery respectively. Formatting does not own scheduling or acceptance.
-- `trace-projection.ts` and the admitted source owners: truthful bounded observation summaries and their existing privacy/count basis.
-
-Do not add a generic presentation authority, lifetime registry or second status implementation. Earn a shared formatting primitive through actual reuse and keep typed source/admission contracts distinct. Agent operating Skills should describe implemented behavior as slices land; they must not promise this target layout is already deployed or depend on human docs as their normal operating protocol.
+Do not add a generic presentation authority, lifetime registry or second status implementation; earn a shared primitive through real reuse. Agent Skills describe implemented behavior as slices land and never depend on these human docs as their operating protocol.
 
 ## Acceptance
 
-For each owned implementation slice:
+For each implementation slice:
 
-- Compare the same admitted facts in tool text, Inspector and agent context where the slice applies; differences in presentation must not change meaning or permission.
-- Cover flat records, justified nesting, opaque Markdown with its own lists/keys, literal code, long/empty values, absent optional facts and complete references.
-- Check exact/unknown omission classes, Unicode boundaries, unchanged source bytes and immutable old-format replay under the real output budget.
-- Preserve the owning scenarios/assertions/teardown and use source/npm replay of the same properties, not a duplicate assertion harness.
-- Verify applicable keys, indentation, table fallback, focus/scroll/selection and safety notices at narrow/medium/wide widths. Actual authorized terminal/phone observation remains separate from headless source checks; Markdown syntax does not prove every client renders it correctly.
-- Reconcile implementation memory, actual agent-facing guidance, human references and the canonical backlog without claiming design adoption is runtime delivery.
+- Compare the same admitted facts in tool text, Inspector and agent context; presentation differences must not change meaning or permission.
+- Cover flat records, justified nesting, opaque Markdown with its own lists and keys, literal code, long and empty values, absent optional facts and complete references.
+- Check exact and unknown omission classes, Unicode boundaries, unchanged source bytes and byte-exact old-format replay under the real budget.
+- Preserve owning scenarios, assertions and teardown, and replay the same properties against source and the npm-packed package rather than a duplicate harness.
+- Verify keys, indentation, table fallback, focus, scroll, selection and safety notices at narrow, medium and wide widths. Authorized terminal and phone observation stays separate from headless checks.
+- Reconcile implementation notes, agent-facing Skills, human references and the backlog without presenting design adoption as runtime delivery.
 
-Implementation work and external gates stay in [BACKLOG.md](../BACKLOG.md), not a second AX task list. [Run supervision](./run-supervision.md), [Inspector](./actor-inspector.md), [management inspection](./inspection.md) and [coordinator delivery](./coordinator-delivery.md) retain their own feature contracts and evidence.
+Feature contracts and evidence stay with [run supervision](./run-supervision.md), the [Actor Inspector](./actor-inspector.md), [management inspection](./inspection.md) and [coordinator delivery](./coordinator-delivery.md).

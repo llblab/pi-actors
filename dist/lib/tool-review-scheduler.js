@@ -158,7 +158,7 @@ export function processToolReviewResult(state, deps) {
     }
     let status;
     try {
-        status = deps.getRunStatus(state.runId);
+        status = deps.getRunStatus(state.runStateDir ?? state.runId);
     }
     catch (error) {
         return {
@@ -407,7 +407,7 @@ export function createToolReviewScheduler(deps) {
                                 : "failed",
                             ...(processed.outcome === "processing_failed"
                                 ? { processingAttempts: (existing.processingAttempts ?? 0) + 1 }
-                                : { runId: undefined }),
+                                : { runId: undefined, runStateDir: undefined }),
                             updatedAt: now().toISOString(),
                         });
                         return;
@@ -428,6 +428,7 @@ export function createToolReviewScheduler(deps) {
                                 attempts: existing.attempts + 1,
                                 phase: "launched",
                                 runId: launched.run,
+                                runStateDir: typeof launched.state_dir === "string" ? launched.state_dir : undefined,
                                 updatedAt: now().toISOString(),
                             });
                         }
@@ -459,6 +460,7 @@ export function createToolReviewScheduler(deps) {
                             reviewerInputPath: batch.reviewerInputPath,
                             reviewId: batch.reviewId,
                             runId: launched.run,
+                            ...(typeof launched.state_dir === "string" ? { runStateDir: launched.state_dir } : {}),
                             toolNames: batch.toolNames,
                             updatedAt: now().toISOString(),
                         });

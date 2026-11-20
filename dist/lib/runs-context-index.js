@@ -22,6 +22,10 @@ const EXPORTS = {
     stdout: ["stdout.log", "text/plain", true],
     stderr: ["stderr.log", "text/plain", true],
 };
+/** The complete compiler-owned evidence namespace, in role order; nothing else may claim these paths. */
+export function runContextExportPaths() {
+    return Object.freeze(Object.keys(EXPORTS).map(runContextExportPath));
+}
 export function runContextExportPath(role) {
     return "evidence/" + EXPORTS[role][0];
 }

@@ -57,6 +57,7 @@ const { createRunPrimaryTextPublisher, readRunCompletionTextSource, readRunPrima
 const { executeRegisteredTool } = await import("../lib/execution.ts");
 const { admitRunResultProducer, publishRunResult, withRunProducerEvidence, readRunProducerCapturedMetadata } = await import("../lib/runs-results.ts");
 const { claimRunStop } = await import("../lib/runs-control.ts");
+const { RUN_RETAINED_SOURCE_FILES } = await import("../lib/runs-outcomes.ts");
 const { readProcessIdentity } = await import("../lib/runs-process.ts");
 const { claimRunStateDirectory, RUN_STATE_OWNERSHIP_FILE } = await import("../lib/runs-ownership.ts");
 const { mutationLockPath, writeJsonAtomic } = await import("../lib/file-state.ts");
@@ -742,7 +743,7 @@ test("Primary tail recovery refuses missing/actor-result digests, partial persis
   }
 });
 
-test("Primary source bytes cannot change within a generation or silently follow a new generation", t => {
+test("Primary source bytes cannot change within a generation, and a new generation never follows old bytes without fresh-start cleanup", t => {
   const f = fixture(t); const a = primaryFixture(f, "AA🌍"); a.publisher.select(a.result);
   const first = a.publisher.snapshot(); assert.ok(first.output);
   a.publisher.select(a.result); assert.deepEqual(a.publisher.snapshot(), first);
@@ -752,11 +753,20 @@ test("Primary source bytes cannot change within a generation or silently follow 
   writeJsonAtomic(f.metaPath, { ...f.meta, run_instance_id: "generation-b" });
   assert.throws(() => createRunPrimaryTextPublisher(f.stateDir, f.producer), /generation changed/);
   const next = admitRunResultProducer(f.stateDir).producer;
+  const stale = createRunPrimaryTextPublisher(f.stateDir, next);
+  stale.observe(b.result, { commandId: "command-001", attempts: [{ attempt: 1, result: b.result }], session: false });
+  // The fixed per-execution name refuses the earlier generation's bytes instead of adopting them.
+  assert.throws(() => stale.select(b.result), /different bytes/);
+  assert.equal(readFileSync(first.output.source.path, "utf8"), "AA🌍");
+  // Fresh-start preparation removes the previous generation's retained sources before work.
+  for (const file of RUN_RETAINED_SOURCE_FILES) rmSync(join(f.stateDir, file), { force: true });
   const publisher = createRunPrimaryTextPublisher(f.stateDir, next);
   publisher.observe(b.result, { commandId: "command-001", attempts: [{ attempt: 1, result: b.result }], session: false });
   publisher.select(b.result); const replacement = publisher.snapshot(); assert.ok(replacement.output);
-  assert.notEqual(replacement.output.source.path, first.output.source.path);
-  assert.equal(readFileSync(first.output.source.path, "utf8"), "AA🌍");
+  assert.equal(replacement.output.source.path, join(f.stateDir, "evidence", "primary.txt"));
+  assert.equal(replacement.output.source.run_instance_id, "generation-b");
+  assert.notEqual(replacement.output.source.run_instance_id, first.output.source.run_instance_id);
+  assert.equal(readFileSync(replacement.output.source.path, "utf8"), "BB🌍");
 });
 
 test("Primary export EIO is explicit unavailability without an invented command failure; admission refusal remains exact", async t => {
@@ -1252,7 +1262,7 @@ test("Artifact inventory source and bounded view failures preserve exact errors,
     const outcome = readFileSync(join(f.stateDir, "result.json")); const write = fs.writeFileSync; const rename = fs.renameSync;
     const primary = Object.assign(new Error(`injected artifact ${effect} EIO`), { code: "EIO" }); let path = "";
     fs.writeFileSync = ((target, ...args) => {
-      if (typeof target === "string" && /^artifact-inventory-[a-f0-9]{64}\.json$/.test(basename(target))) {
+      if (typeof target === "string" && /^artifact-inventory\.json$/.test(basename(target))) {
         path = target; if (effect === "source") { write(target, "partial", { flag: "wx" }); throw primary; }
       }
       return Reflect.apply(write, fs, [target, ...args]);
@@ -1287,7 +1297,7 @@ test("Artifact inventory replacement during retention leaves only an unpublished
   const producer = admitRunResultProducer(f.stateDir).producer; const write = fs.writeFileSync; let path = "";
   fs.writeFileSync = ((target, ...args) => {
     const result = Reflect.apply(write, fs, [target, ...args]);
-    if (typeof target === "string" && /^artifact-inventory-[a-f0-9]{64}\.json$/.test(basename(target))) {
+    if (typeof target === "string" && /^artifact-inventory\.json$/.test(basename(target))) {
       path = target; writeJsonAtomic(f.metaPath, { ...f.meta, run_instance_id: "replacement" });
     }
     return result;
@@ -1325,7 +1335,7 @@ test("Ordinary artifact source/index I/O records exact preparation failure witho
   for (const effect of ["source", "index"]) {
     const f = fixture(t); f.declare({ report: "report.bin" }); const producer = admitRunResultProducer(f.stateDir).producer;
     const primary = Object.assign(new Error(`artifact preparation ${effect} EIO`), { code: "EIO" }); const write = fs.writeFileSync; const rename = fs.renameSync;
-    fs.writeFileSync = ((path, ...args) => { if (effect === "source" && typeof path === "string" && /^artifact-inventory-[a-f0-9]{64}\.json$/u.test(basename(path))) { write(path, "partial", { flag: "wx" }); throw primary; } return Reflect.apply(write, fs, [path, ...args]); }) as typeof fs.writeFileSync;
+    fs.writeFileSync = ((path, ...args) => { if (effect === "source" && typeof path === "string" && /^artifact-inventory\.json$/u.test(basename(path))) { write(path, "partial", { flag: "wx" }); throw primary; } return Reflect.apply(write, fs, [path, ...args]); }) as typeof fs.writeFileSync;
     fs.renameSync = ((from, to) => { if (effect === "index" && String(to) === join(f.stateDir, "context-index.json")) throw primary; return rename(from, to); }) as typeof fs.renameSync;
     syncBuiltinESMExports(); let prepared;
     try { prepared = prepareRunArtifactInventoryPublication(f.stateDir, producer); }
@@ -1650,7 +1660,7 @@ function selectedSources(t: TestContext, overrides: Record<string, unknown> = {}
     updated_at: new Date().toISOString(), status: "running", active_subagents: 0, commands: [{ id: "command-001", status: "running", attempts: [], session_files: [session] }] });
   const key = createHash("sha256").update(JSON.stringify([f.meta.run, f.meta.run_instance_id, f.meta.ownerId ?? null])).digest("hex");
   return { ...f, secret, capture, primary, raw, observe, sessionPath, execution, query: { kind: "session", command_id: "command-001", path: session },
-    sourcePaths: [join(f.stateDir, "evidence", `primary-${key}.txt`), join(f.stateDir, "evidence", `artifact-inventory-${key}.json`)],
+    sourcePaths: [join(f.stateDir, "evidence", "primary.txt"), join(f.stateDir, "evidence", "artifact-inventory.json")],
     targets: [artifacts.operational, "/work/" + artifacts.withheld] };
 }
 function withoutTargetProbes<T>(paths: readonly string[], callback: () => T): T {
@@ -3388,7 +3398,7 @@ function fixture(t: TestContext, generation = "generation-a", overrides: Record<
 function body(path: string) { return JSON.parse(readFileSync(path, "utf8")); }
 function diagnosticPath(f: { stateDir: string; meta: { run: string; run_instance_id: string; ownerId?: string } }) {
   const key = createHash("sha256").update(JSON.stringify([f.meta.run, f.meta.run_instance_id, f.meta.ownerId ?? null])).digest("hex");
-  return join(f.stateDir, "evidence", `result-diagnostics-${key}.json`);
+  return join(f.stateDir, "evidence", "result-diagnostics.json");
 }
 
 function retainedDiagnostics(t: TestContext, fields: Record<string, string> = { command: "recorded command", error: "recorded error", failure_reason: "recorded reason" }) {
@@ -3502,7 +3512,7 @@ test("New complete-text policy refuses unsafe fixed orphan sources without overw
     const f = fixture(t, "generation-a", { values: { api_key: opaque } });
     fs.mkdirSync(join(f.stateDir, "evidence"));
     const key = createHash("sha256").update(JSON.stringify([f.meta.run, f.meta.run_instance_id, f.meta.ownerId])).digest("hex");
-    const sourcePath = role === "primary" ? join(f.stateDir, "evidence", `primary-${key}.txt`) : diagnosticPath(f);
+    const sourcePath = role === "primary" ? join(f.stateDir, "evidence", "primary.txt") : diagnosticPath(f);
     const unsafe = role === "primary" ? opaque : prospectiveDiagnosticContent(f.meta, opaque); writeFileSync(sourcePath, unsafe);
     if (role === "primary") {
       const primary = createRunPrimaryTextPublisher(f.stateDir, f.producer), path = join(f.stateDir, "captures", "command-001", "attempt-001", "stdout.log");
@@ -4512,7 +4522,7 @@ function fixture(t: TestContext, overrides: Record<string, unknown> = {}, prepar
   const expected = { run: producer.run, run_instance_id: producer.runInstanceId, ...(producer.ownerId === undefined ? {} : { ownerId: producer.ownerId }) };
   const key = createHash("sha256").update(JSON.stringify([meta.run, meta.run_instance_id, meta.ownerId ?? null])).digest("hex");
   return { root, stateDir, meta, metaPath, producer, expected, resultPath: join(stateDir, "result.json"), viewPath: join(stateDir, "evidence", "result.json"),
-    sourcePath: join(stateDir, "evidence", `result-diagnostics-${key}.json`) };
+    sourcePath: join(stateDir, "evidence", "result-diagnostics.json") };
 }
 
 function noRetainedProbes(f: ReturnType<typeof fixture>, action: () => void) {
@@ -4529,7 +4539,7 @@ function diagnosticPlan(meta: Record<string, unknown>, fields: Record<string, st
     content_scope: "canonical_outcome_diagnostic_strings", privacy_scope: "producer_admission", primary_text: "not_included",
     coverage: { truncated: false, redacted: true }, fields }, null, 2) + "\n";
   const key = createHash("sha256").update(JSON.stringify([meta.run, meta.run_instance_id, meta.ownerId ?? null])).digest("hex");
-  return { content, source: { path: join(String(meta.state_dir), "evidence", `result-diagnostics-${key}.json`),
+  return { content, source: { path: join(String(meta.state_dir), "evidence", "result-diagnostics.json"),
     run_instance_id: meta.run_instance_id, sha256: createHash("sha256").update(content).digest("hex") } };
 }
 
@@ -4758,7 +4768,7 @@ test("Result whole original publication rejects same-size semantic/header/descri
     if (field === "code") changed.outcome.code = 8;
     if (field === "flags") changed.outcome.producer_flags = { reported_killed: false, reported_truncated: true };
     if (field === "hash") changed.diagnostics.source.sha256 = "a".repeat(64);
-    if (field === "path") changed.diagnostics.source.path = changed.diagnostics.source.path.replace("result-diagnostics-", "result-diagnosticX-");
+    if (field === "path") changed.diagnostics.source.path = changed.diagnostics.source.path.replace("result-diagnostics", "result-diagnosticX");
     if (field === "counts") changed.diagnostics.fields.error.chars_total++;
     if (field === "preview") changed.outcome.error = "X" + changed.outcome.error.slice(1);
     if (field === "coverage") changed.coverage.redacted = false;

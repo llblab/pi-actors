@@ -202,7 +202,7 @@ export function createRuntimeToolDefinition(
   }
   if (isAsyncRecipe && !isSingletonRecipe)
     paramSchema.run_id = Schema.stringSchema(
-      "Optional run id override for this async template recipe invocation.",
+      "Optional exact Run name, single-use within this session; omit it to get <recipe>-<ordinal>.",
     );
   if (isAsyncRecipe) {
     paramSchema.transport_context = Schema.looseObjectSchema(
@@ -245,11 +245,12 @@ export function createRuntimeToolDefinition(
           const input = params as Record<string, unknown>;
           const { run_id, transport_context, ...values } = input;
           const base = cfg.recipe ? cfg.recipe : { file: String(cfg.template) };
+          // Without an explicit run_id the session allocator names the Run `<recipe>-<ordinal>`, exactly as a direct spawn.
           const runId = isSingletonRecipe
             ? undefined
             : typeof run_id === "string" && run_id.trim()
               ? run_id.trim()
-              : `${cfg.name}-${Date.now()}`;
+              : undefined;
           const startParams: AsyncRuns.AsyncRunStartParams = {
             ...base,
             launch_source: "tool",

@@ -871,9 +871,11 @@ for (const mode of candidate ? ["tools"] : ["tools", "final", "overflow", "prima
   const companionName = index => rowLimitMode ? `${mode}-${String(index).padStart(2, "0")}` : `${mode}-second`;
   // Compact JSON references no longer carry the old padded technical blocks. A bounded public alias
   // forces byte overflow through actual encoded identity/reference rows, not command/source length.
-  const overflowSuffix = "encoded-row-witness-".repeat(5).slice(0, 95);
-  assert.equal(overflowSuffix.length, 95, "Overflow alias suffix stays within its fixture bound");
-  const overflowName = index => `${mode}-${index}-${overflowSuffix}`;
+  // Fixed retained-source names (evidence/primary.txt) no longer add 64-hex filenames, so the alias carries that pressure.
+  // Every overflow alias has the same total length, independent of mode/index digits, and stays below the Run name bound.
+  const overflowNameLength = 140, overflowSuffix = "encoded-row-witness-".repeat(8);
+  const overflowName = index => { const head = `${mode}-${index}-`; return head + overflowSuffix.slice(0, overflowNameLength - head.length); };
+  assert.equal(overflowName(63).length, overflowNameLength, "Overflow alias stays within its fixture bound");
   const completionRequest = candidate ? 2 : overflowMode ? overflowCount + 2 : lossMode ? 4 : 3;
   const stateDirs = overflowMode ? [] : [undefined, ...Array.from({ length: companionCount }, (_, i) => join(agentDir, "tmp", "pi-actors", "runs", companionName(i + 1)))];
   const generations = overflowMode ? [] : [undefined, ...Array.from({ length: companionCount }, (_, i) => `${mode}-generation-${i + 1}`)];

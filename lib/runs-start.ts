@@ -14,7 +14,7 @@ import {
 } from "./file-state.ts";
 import { assertNoRetainedDescendantLaunchScope } from "./runs-descendant-launches.ts";
 import { assertNoRetainedNativeLaunchScope } from "./runs-native-launches.ts";
-import { isRunStopResultCapture, readRunStopClaim, RUN_STOP_CLAIM_FILE } from "./runs-outcomes.ts";
+import { isRunStopResultCapture, readRunStopClaim, RUN_RETAINED_SOURCE_FILES, RUN_STOP_CLAIM_FILE } from "./runs-outcomes.ts";
 import { RUN_STATE_OWNERSHIP_FILE } from "./runs-ownership.ts";
 import {
   isAlive,
@@ -149,6 +149,8 @@ export function prepareStateDirForStart(
     "terminal-delivery-failure.json",
     "terminal-handled.json",
     "trace.jsonl",
+    // Retained sources carry a fixed name per execution; the previous generation's copies lose their binding with its result.
+    ...RUN_RETAINED_SOURCE_FILES,
   ]) {
     rmSync(join(stateDir, file), { force: true });
   }

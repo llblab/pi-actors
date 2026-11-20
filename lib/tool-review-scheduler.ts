@@ -50,6 +50,8 @@ export interface ToolReviewAdmissionState {
   reviewerInputPath: string;
   reviewId: string;
   runId?: string;
+  /** Exact Run directory captured at launch: processing reads it without guessing the current session. */
+  runStateDir?: string;
   toolNames: string[];
   transactionEvidencePath?: string;
   updatedAt: string;
@@ -58,7 +60,7 @@ export interface ToolReviewAdmissionState {
 export interface ToolReviewSchedulerDeps extends CaptureToolReviewOptions {
   delayMs?: number;
   hasActiveActors(): boolean;
-  launch(batch: ToolReviewBatch): { run: string };
+  launch(batch: ToolReviewBatch): { run: string; state_dir?: string };
   process?(state: ToolReviewAdmissionState): ToolReviewProcessResult;
 }
 
@@ -283,7 +285,7 @@ export function processToolReviewResult(
   }
   let status: Record<string, unknown>;
   try {
-    status = deps.getRunStatus(state.runId);
+    status = deps.getRunStatus(state.runStateDir ?? state.runId);
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : String(error),
@@ -547,7 +549,7 @@ export function createToolReviewScheduler(
             : "failed",
           ...(processed.outcome === "processing_failed"
             ? { processingAttempts: (existing.processingAttempts ?? 0) + 1 }
-            : { runId: undefined }),
+            : { runId: undefined, runStateDir: undefined }),
           updatedAt: now().toISOString(),
         } satisfies ToolReviewAdmissionState);
         return;
@@ -569,6 +571,7 @@ export function createToolReviewScheduler(
             attempts: existing.attempts + 1,
             phase: "launched",
             runId: launched.run,
+            runStateDir: typeof launched.state_dir === "string" ? launched.state_dir : undefined,
             updatedAt: now().toISOString(),
           } satisfies ToolReviewAdmissionState);
         } catch (error) {
@@ -602,6 +605,7 @@ export function createToolReviewScheduler(
           reviewerInputPath: batch.reviewerInputPath,
           reviewId: batch.reviewId,
           runId: launched.run,
+          ...(typeof launched.state_dir === "string" ? { runStateDir: launched.state_dir } : {}),
           toolNames: batch.toolNames,
           updatedAt: now().toISOString(),
         } satisfies ToolReviewAdmissionState);

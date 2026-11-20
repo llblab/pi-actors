@@ -26,6 +26,8 @@ import {
 import * as AsyncRuns from "./async-runs.ts";
 import * as Paths from "./paths.ts";
 import * as Limits from "./limits.ts";
+import { isRetentionContainerName } from "./runs-retention.ts";
+import { RUN_NAME_LEDGER_DIR } from "./runs-naming.ts";
 import * as RunsTrace from "./runs-trace.ts";
 import type { RunCompletionBatchMember } from "./run-delivery.ts";
 import { readRunCompletionTextSource, readRunResultArtifactInventory, readRunResultDiagnosticOutcome } from "./runs-context-exports.ts";
@@ -362,12 +364,25 @@ export function createRunStateWatcher(input: {
         record("attach_failed", "root", stateRoot, error);
       }
     }
-    let stateDirs: string[];
+    let children: string[];
     try {
-      stateDirs = listDirectories(stateRoot);
+      children = listDirectories(stateRoot);
     } catch (error) {
       record("attach_failed", "root", stateRoot, error);
       return;
+    }
+    // Runs live one level below their session namespace: watch the namespace for new Runs and each Run for its
+    // own file writes. The name ledger and retention containers hold no live Run; a pre-layout flat Run has none nested.
+    const stateDirs: string[] = [];
+    for (const child of children) {
+      const name = basename(child);
+      if (name === RUN_NAME_LEDGER_DIR || isRetentionContainerName(name)) continue;
+      stateDirs.push(child);
+      if (pathExists(join(child, "run.json"))) continue;
+      let nested: string[];
+      try { nested = listDirectories(child); }
+      catch (error) { record("attach_failed", "run", child, error); continue; }
+      for (const runDir of nested) if (!isRetentionContainerName(basename(runDir))) stateDirs.push(runDir);
     }
     const present = new Set(stateDirs);
     for (const [stateDir, watcher] of runDirWatchers) {
@@ -541,6 +556,7 @@ function scanRunStateDirs(
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const child = join(stateRoot, entry.name);
+    if (isRetentionContainerName(entry.name)) continue;
     if (existsSync(join(child, "run.json"))) result.push(child);
     if (depth + 1 < RUN_STATE_DISCOVERY_MAX_DEPTH)
       result.push(...scanRunStateDirs(child, depth + 1, seen));

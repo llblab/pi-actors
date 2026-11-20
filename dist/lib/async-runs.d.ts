@@ -38,6 +38,8 @@ export interface AsyncRunStartParams {
     };
     name?: string;
     ownerId?: string;
+    /** Internal per-work-item identity that may re-enter its own Run name after a terminal generation. */
+    reenter?: boolean;
     run_id?: string;
     singleton?: boolean;
     singleton_run_id?: string;
@@ -148,7 +150,7 @@ export interface AsyncRunStartOptions {
 export declare function startRun(params: AsyncRunStartParams, cwd: string, options?: AsyncRunStartOptions): AsyncRunMeta;
 /** Kernel-only prepare path: real generation creation, but no native process, workload, launch receipt, or membership authority. */
 export declare function prepareDescendantRunGeneration(parentStateDir: string, producer: RunResultProducer, params: AsyncRunStartParams, cwd: string, options?: AsyncRunStartOptions): Readonly<RunDescendantLaunchIntent>;
-export declare function getRunStatus(runOrDir: string): Record<string, unknown>;
+export declare function getRunStatus(runOrDir: string, session?: string): Record<string, unknown>;
 /** Internal inventory acquisition; direct status and lifecycle readers remain independently scalar. */
 export declare function getRunInventoryStatuses(stateDirs: readonly string[]): (Record<string, unknown> | undefined)[];
 export type { RunStateIndexEntry } from "./runs-index.ts";
@@ -163,7 +165,7 @@ export interface ParentRunsTeardownSummaryResult extends RunsParentTeardown.Pare
 export declare function teardownRunsOwnedByParent(ownerId: string | undefined, stateRoot?: string, options?: {
     trigger?: string;
 }): ParentRunsTeardownSummaryResult;
-export declare function tailRun(runOrDir: string, lines?: number): string;
+export declare function tailRun(runOrDir: string, lines?: number, session?: string): string;
 export type { DeliverRunControlOptions, DeliverRunControlRequest, } from "./runs-control-delivery.ts";
 export interface SendRunControlOptions extends DeliverRunControlOptions {
     ownerId?: string;

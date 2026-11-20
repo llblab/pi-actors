@@ -16,6 +16,7 @@ import * as Limits from "./limits.ts";
 import { decodeRunDirectoryNavigation, type RunDirectoryNavigation } from "./runs-index.ts";
 import { formatInspectNextAction, formatLiteralBlock, formatMarkdownField, formatRunFileNavigationHandoff } from "./tools-response.ts";
 import { decodeRunCompletionText, projectRunCompletionText, type RunCompletionText, decodeRunPrimaryTextBinding, decodeRunArtifactInventoryBinding, decodeRunResultDiagnosticsBinding, decodeRunResultDiagnosticExcerpt, type RunResultDiagnosticsReference, type RunResultDiagnosticPacketExcerpt, type RunPrimaryTextBinding, type RunArtifactInventoryReference } from "./runs-outcomes.ts";
+import { RUN_NAME_MAX_LENGTH } from "./runs-naming.ts";
 
 export type RunCompletionDeliveryStatus = "done" | "failed" | "killed" | "exited";
 export type RunDeliveryPhase = "pending" | "queued" | "presented";
@@ -372,7 +373,7 @@ function parseMember(value: unknown): RunCompletionBatchMember {
   const parsedArtifacts = artifacts(record.artifacts);
   const parentRun = record.parent_run === undefined
     ? undefined
-    : boundedString(record.parent_run, "Completion batch member parent_run", 120);
+    : boundedString(record.parent_run, "Completion batch member parent_run", RUN_NAME_MAX_LENGTH);
   const parentRunInstanceId = record.parent_run_instance_id === undefined
     ? undefined
     : boundedString(
@@ -421,7 +422,7 @@ function parseMember(value: unknown): RunCompletionBatchMember {
           parent_state_dir: parentStateDir!,
         }
       : {}),
-    run: boundedString(record.run, "Completion batch member run", 120),
+    run: boundedString(record.run, "Completion batch member run", RUN_NAME_MAX_LENGTH),
     run_instance_id: generation,
     state_dir: stateDir,
     status: completionStatus(record.status),
@@ -674,7 +675,7 @@ function parseSteer(value: unknown): RunSteerEnvelope {
     phase,
     ...(presentedAt ? { presented_at: presentedAt } : {}),
     ...(queuedAt ? { queued_at: queuedAt } : {}),
-    run: boundedString(record.run, "Urgent steer run", 120),
+    run: boundedString(record.run, "Urgent steer run", RUN_NAME_MAX_LENGTH),
     run_instance_id: boundedString(
       record.run_instance_id,
       "Urgent steer run_instance_id",

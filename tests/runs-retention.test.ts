@@ -110,6 +110,33 @@ test("Run retention journal keeps a bounded valid tail", async () => {
     for (const name of ["archived", "preserved-artifacts", "unowned"]) assert.equal(fs.existsSync(join(root, name, "run.json")), true);
   });
 
+  test("Session-scoped Runs are cleaned while the name ledger survives", async (t) => {
+    const { root } = fixture(t);
+    const session = "session-a";
+    const stale = join(root, session, "package-review-0");
+    const ledger = join(root, "names", `${session}.json`);
+    claimRunStateDirectory(stale, "package-review-0");
+    fs.mkdirSync(join(root, "names"), { recursive: true });
+    writeJsonAtomic(join(stale, "run.json"), { run: "package-review-0", run_instance_id: "g1", ownerId: session, state_dir: stale, pid: FIXTURE_PID });
+    writeJsonAtomic(join(stale, "result.json"), { run_instance_id: "g1", completedAt: new Date().toISOString(), code: 0 });
+    fs.writeFileSync(ledger, JSON.stringify({ schema: "run-names-v1", names: { "package-review-0": { recipe: "package-review", reserved_at: "t" } } }));
+    age(stale); age(join(root, "names")); age(ledger);
+    assert.equal(await cleanupStaleRunEntries(root, TTL), 1);
+    assert.equal(fs.existsSync(stale), false);
+    assert.equal(fs.existsSync(ledger), true, "A reservation is not a Run and must survive cleanup");
+    assert.equal(fs.existsSync(join(root, "names")), true);
+    for (const container of ["archived", "preserved-artifacts"]) {
+      const retired = join(root, session, container, "package-review-1");
+      fs.mkdirSync(retired, { recursive: true });
+      fs.writeFileSync(join(retired, "run.json"), JSON.stringify({ run: "package-review-1", run_instance_id: "g2", ownerId: session, state_dir: retired, pid: FIXTURE_PID }));
+      fs.writeFileSync(join(retired, "result.json"), JSON.stringify({ run_instance_id: "g2", completedAt: new Date().toISOString(), code: 0 }));
+      age(retired);
+    }
+    assert.equal(await cleanupStaleRunEntries(root, TTL), 0, "Retention containers are not candidates");
+    for (const container of ["archived", "preserved-artifacts"])
+      assert.equal(fs.existsSync(join(root, session, container, "package-review-1", "run.json")), true);
+  });
+
   test("Alive or unknown PID cannot authorize cleanup even beside a terminal-looking result", async (t) => {
     const { root, add } = fixture(t);
     const dir = add();

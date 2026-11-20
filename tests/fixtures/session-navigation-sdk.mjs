@@ -627,7 +627,7 @@ if (input.phase === "initial") {
     mapRuns, selectRun: input.registeredRun, genuine: true }, SessionManager.open(input.sessionFile));
   assert.deepEqual(fs.readFileSync(join(catalog, "index.json")), before);
   await journey({ owner: input.sessions[0], allowed: successfulRuns, mapRuns, selectRun: input.compositionRun, genuine: true, entrypoint: true,
-    commandCodes: [[0], [0]], captureCommand: 2, captureStream: "stderr", captureText: "finite SDK composition second stderr 😀", launchReference: "sdk-lifetime-async" }, SessionManager.open(input.sessionFile));
+    commandCodes: [[0], [0]], captureCommand: 2, captureStream: "stderr", captureText: "finite SDK composition second stderr 😀", launchReference: "l-async" }, SessionManager.open(input.sessionFile));
   assert.deepEqual(fs.readFileSync(join(catalog, "index.json")), before);
   await journey({ owner: input.sessions[0], allowed: successfulRuns, mapRuns, selectRun: input.entrypointRun, genuine: true, entrypoint: true,
     captureText: "finite SDK entrypoint launch fixture", launchReference: input.entrypointRun }, SessionManager.open(input.sessionFile));

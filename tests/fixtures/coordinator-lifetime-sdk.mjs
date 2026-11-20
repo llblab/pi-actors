@@ -25,6 +25,7 @@ const entrypointPath = join(packageDir, layout === "source" ? "index.ts" : JSON.
 const actorsSkill = join(packageDir, layout === "source" ? "skills" : "dist/skills", "actors", "SKILL.md");
 const { createActorExtensionRuntime } = await import(modulePath("extension-runtime"));
 const { getRunStateRoot } = await import(modulePath("paths"));
+const { sessionComponent } = await import(modulePath("runs-naming"));
 const { readProcessIdentity } = await import(modulePath("runs-process"));
 fs.mkdirSync(agentDir, { recursive: true });
 const manifestPath = join(agentDir, "fixture-processes.json");
@@ -134,7 +135,12 @@ function active(scope, spec) {
   return reading;
 }
 function makeSpec(run, route, codes = [0], commandCount = 1, entrypoint = false, parallel = false, commandCodes, piSession = false) {
-  const spec = { run, route, codes, entrypoint, parallel, workloads: [], stateDir: join(getRunStateRoot(), run), commands: [] };
+  // A Run directory belongs to its logical session; the owner is only known when the launch hook runs.
+  const spec = { run, route, codes, entrypoint, parallel, workloads: [], commands: [] };
+  let stateDirOverride;
+  Object.defineProperty(spec, "stateDir", { enumerable: true,
+    get: () => stateDirOverride ?? join(getRunStateRoot(), sessionComponent(spec.ownerId), run),
+    set: value => { stateDirOverride = value; } });
   specs.push(spec);
   for (let ordinal = 1; ordinal <= commandCount; ordinal++) {
     const base = join(agentDir, `${run}.command-${ordinal}`), command = { ordinal, codes: commandCodes?.[ordinal - 1] ?? codes, script: `${base}.${piSession ? "js" : "cjs"}`, gate: `${base}.release`, ready: `${base}.ready.json` };
@@ -355,6 +361,8 @@ async function entrypointJourney(runtime, scope, spec, finishWork = true) {
       const details = scope.publicReceipt;
       scope.launch.receipt = { run: details?.run, run_instance_id: details?.run_instance_id, pid: details?.pid,
         ownerId: details?.ownerId, state_dir: details?.state_dir, launch_kind: details?.launch_kind };
+      // The receipt is the only truthful source for a session-scoped directory.
+      if (typeof details?.state_dir === "string") { spec.stateDir = details.state_dir; if (spec.runner) spec.runner.state_dir = details.state_dir; }
       launching = false; persist();
     }
   });
@@ -464,7 +472,7 @@ let primaryError;
 try {
   if (scenario === "shutdown") await shutdownJourney();
   else {
-  const first = makeSpec("sdk-lifetime-spawn", "spawn"); nextSpec = first;
+  const first = makeSpec("l-spawn", "spawn"); nextSpec = first;
   const manager = SessionManager.create(agentDir, join(agentDir, "sessions"));
   const runtime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: manager }); runtimes.push(runtime);
   const alpha = await bind(runtime); await journey(runtime, alpha, first);
@@ -483,7 +491,7 @@ try {
   assert.throws(() => foreignHook(forbidden), /coordinator admission is unavailable or changed/);
   await probe.dispose(); runtimes.splice(runtimes.indexOf(probe), 1);
   assert.deepEqual(alpha.kernel.observeRunSnapshot(expected(first), new Date().toISOString()), { state: "unavailable", reason: "timing_unproven" });
-  const second = makeSpec("sdk-lifetime-async", "async_tool"); nextSpec = second;
+  const second = makeSpec("l-async", "async_tool"); nextSpec = second;
   assert.deepEqual(await runtime.switchSession(sessionFile), { cancelled: false });
   const beta = await bind(runtime); assert.equal(beta.startManager.getSessionId(), alpha.startManager.getSessionId());
   assert.notEqual(beta.startManager, alpha.startManager);
@@ -494,34 +502,34 @@ try {
   await runtime.dispose(); runtimes.splice(runtimes.indexOf(runtime), 1);
   assert.deepEqual(beta.shutdowns, ["quit"]); assert.throws(() => beta.startContext.sessionManager, /stale/);
   assert.throws(() => beta.hook(forbidden), /coordinator admission is unavailable or changed/);
-  const third = makeSpec("sdk-lifetime-failure", "spawn", [7]); nextSpec = third;
+  const third = makeSpec("l-failure", "spawn", [7]); nextSpec = third;
   const failureRuntime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: SessionManager.open(sessionFile) }); runtimes.push(failureRuntime);
   const gamma = await bind(failureRuntime); await journey(failureRuntime, gamma, third);
   assert.equal(gamma.startManager.getSessionId(), manager.getSessionId()); assert.deepEqual(clock(), originalClock);
   await failureRuntime.dispose(); runtimes.splice(runtimes.indexOf(failureRuntime), 1); assert.deepEqual(gamma.shutdowns, ["quit"]);
   const failedResult = JSON.parse(fs.readFileSync(join(third.stateDir, "result.json"), "utf8"));
   const failedAttempt = JSON.parse(fs.readFileSync(join(third.stateDir, "execution.json"), "utf8")).commands[0].attempts[0];
-  const fourth = makeSpec("sdk-lifetime-retry", "spawn", [7, 0]); nextSpec = fourth;
+  const fourth = makeSpec("l-retry", "spawn", [7, 0]); nextSpec = fourth;
   const retryRuntime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: SessionManager.open(sessionFile) }); runtimes.push(retryRuntime);
   const delta = await bind(retryRuntime); await journey(retryRuntime, delta, fourth);
   assert.equal(delta.startManager.getSessionId(), manager.getSessionId()); assert.deepEqual(clock(), originalClock);
   await retryRuntime.dispose(); runtimes.splice(runtimes.indexOf(retryRuntime), 1); assert.deepEqual(delta.shutdowns, ["quit"]);
   const retryResult = JSON.parse(fs.readFileSync(join(fourth.stateDir, "result.json"), "utf8"));
   const retryAttempts = JSON.parse(fs.readFileSync(join(fourth.stateDir, "execution.json"), "utf8")).commands[0].attempts;
-  const fifth = makeSpec("sdk-lifetime-composition", "spawn", [0], 2); nextSpec = fifth;
+  const fifth = makeSpec("l-composition", "spawn", [0], 2); nextSpec = fifth;
   const compositionRuntime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: SessionManager.open(sessionFile) }); runtimes.push(compositionRuntime);
   const epsilon = await bind(compositionRuntime); await journey(compositionRuntime, epsilon, fifth);
   assert.equal(epsilon.startManager.getSessionId(), manager.getSessionId()); assert.deepEqual(clock(), originalClock);
   await compositionRuntime.dispose(); runtimes.splice(runtimes.indexOf(compositionRuntime), 1); assert.deepEqual(epsilon.shutdowns, ["quit"]);
   const compositionResult = JSON.parse(fs.readFileSync(join(fifth.stateDir, "result.json"), "utf8"));
   const compositionCommands = JSON.parse(fs.readFileSync(join(fifth.stateDir, "execution.json"), "utf8")).commands;
-  const sixth = makeSpec("sdk-lifetime-entrypoint", "spawn", [0], 1, true); nextSpec = sixth;
+  const sixth = makeSpec("l-entrypoint", "spawn", [0], 1, true); nextSpec = sixth;
   const entrypointRuntime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: SessionManager.open(sessionFile) }); runtimes.push(entrypointRuntime);
   const zeta = await bind(entrypointRuntime); await entrypointJourney(entrypointRuntime, zeta, sixth);
   assert.deepEqual(clock(), originalClock);
   await entrypointRuntime.dispose(); runtimes.splice(runtimes.indexOf(entrypointRuntime), 1); assert.deepEqual(zeta.errors, []);
   sixth.launch.runtime_disposed = true; persist();
-  const seventh = makeSpec("sdk-lifetime-parallel", "spawn", [0], 2, true, true); nextSpec = seventh;
+  const seventh = makeSpec("l-parallel", "spawn", [0], 2, true, true); nextSpec = seventh;
   const parallelRuntime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: SessionManager.open(sessionFile) }); runtimes.push(parallelRuntime);
   const eta = await bind(parallelRuntime); await entrypointJourney(parallelRuntime, eta, seventh);
   assert.deepEqual(clock(), originalClock);
@@ -529,7 +537,7 @@ try {
   seventh.launch.runtime_disposed = true; persist();
   const parallelResult = JSON.parse(fs.readFileSync(join(seventh.stateDir, "result.json"), "utf8"));
   const parallelCommands = JSON.parse(fs.readFileSync(join(seventh.stateDir, "execution.json"), "utf8")).commands;
-  const eighth = makeSpec("sdk-lifetime-degraded", "spawn", [0], 2, true, true, [[7], [0]]); nextSpec = eighth;
+  const eighth = makeSpec("l-degraded", "spawn", [0], 2, true, true, [[7], [0]]); nextSpec = eighth;
   const degradedRuntime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: SessionManager.open(sessionFile) }); runtimes.push(degradedRuntime);
   const theta = await bind(degradedRuntime); await entrypointJourney(degradedRuntime, theta, eighth);
   assert.deepEqual(clock(), originalClock);
@@ -537,7 +545,7 @@ try {
   eighth.launch.runtime_disposed = true; persist();
   const degradedResult = JSON.parse(fs.readFileSync(join(eighth.stateDir, "result.json"), "utf8"));
   const degradedCommands = JSON.parse(fs.readFileSync(join(eighth.stateDir, "execution.json"), "utf8")).commands;
-  const ninth = makeSpec("sdk-lifetime-unusable", "spawn", [7], 2, true, true); ninth.template.failure = "branch"; nextSpec = ninth;
+  const ninth = makeSpec("l-unusable", "spawn", [7], 2, true, true); ninth.template.failure = "branch"; nextSpec = ninth;
   const unusableRuntime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: SessionManager.open(sessionFile) }); runtimes.push(unusableRuntime);
   const iota = await bind(unusableRuntime); await entrypointJourney(unusableRuntime, iota, ninth);
   assert.deepEqual(clock(), originalClock);
@@ -545,7 +553,7 @@ try {
   ninth.launch.runtime_disposed = true; persist();
   const unusableResult = JSON.parse(fs.readFileSync(join(ninth.stateDir, "result.json"), "utf8"));
   const unusableCommands = JSON.parse(fs.readFileSync(join(ninth.stateDir, "execution.json"), "utf8")).commands;
-  const tenth = makeSpec("sdk-lifetime-actor-session", "spawn", [0], 1, true, false, undefined, true); nextSpec = tenth;
+  const tenth = makeSpec("l-actor-session", "spawn", [0], 1, true, false, undefined, true); nextSpec = tenth;
   const actorRuntime = await createAgentSessionRuntime(factory, { cwd: agentDir, agentDir, sessionManager: SessionManager.create(agentDir, join(agentDir, "sessions")) }); runtimes.push(actorRuntime);
   const kappa = await bind(actorRuntime); await entrypointJourney(actorRuntime, kappa, tenth);
   await actorRuntime.dispose(); runtimes.splice(runtimes.indexOf(actorRuntime), 1); assert.deepEqual(kappa.errors, []);

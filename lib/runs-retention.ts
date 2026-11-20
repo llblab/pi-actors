@@ -5,7 +5,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, lstatSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -13,6 +13,7 @@ import { acquireFileMutationLock, writeJsonAtomic, writeTextAtomic } from "./fil
 import * as Limits from "./limits.ts";
 import { readJsonFileResilient, readJsonlFileResilient } from "./state-readers.ts";
 import { readRunContextIdentity, RUN_CONTEXT_SOURCE_METADATA_MAX_BYTES } from "./runs-context-index.ts";
+import { RUN_NAME_LEDGER_DIR, RUN_RETENTION_CONTAINER_NAMES } from "./runs-naming.ts";
 import { readProcessLiveness } from "./runs-process.ts";
 import { acquireStateStartLock, assertNoActiveRunState } from "./runs-start.ts";
 import {
@@ -90,6 +91,13 @@ export function retainRun(
   throw new AggregateError(failures, RETIREMENT_FAILURE_MESSAGE, { cause: failures[0] });
 }
 
+/** Retention containers hold already-retired evidence; age cleanup and inventory must never treat their children as live Runs. */
+const RUN_RETENTION_CONTAINERS = new Set(RUN_RETENTION_CONTAINER_NAMES);
+
+export function isRetentionContainerName(name: string): boolean {
+  return RUN_RETENTION_CONTAINERS.has(name);
+}
+
 /** Filesystem age selects candidates; it grants neither retirement nor native scope authority. */
 export async function cleanupStaleRunEntries(
   runsDir: string,
@@ -107,9 +115,21 @@ export async function cleanupStaleRunEntries(
     if (reading.diagnostics.length) throw new Error("Run retirement metadata is unavailable.");
     return reading.value;
   };
+  // A Run lives inside its session namespace, so candidates are depth one or two; a ledger directory holds no Run.
+  const candidates: string[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const stateDir = join(root, entry.name);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const directory = join(root, entry.name);
+    if (existsSync(join(directory, "run.json"))) candidates.push(directory);
+    else if (RUN_RETENTION_CONTAINERS.has(entry.name) || entry.name === RUN_NAME_LEDGER_DIR) continue;
+    else {
+      try {
+        for (const child of await readdir(directory, { withFileTypes: true }))
+          if (child.isDirectory() && !child.isSymbolicLink()) candidates.push(join(directory, child.name));
+      } catch { /* Unreadable namespaces retain their candidates. */ }
+    }
+  }
+  for (const stateDir of candidates) {
     try {
       const selected = lstatSync(stateDir);
       if (now - Math.min(selected.birthtimeMs || selected.mtimeMs, selected.mtimeMs) <= maxAgeMs) continue;

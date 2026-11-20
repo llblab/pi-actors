@@ -24,6 +24,8 @@ export interface ToolReviewAdmissionState {
     reviewerInputPath: string;
     reviewId: string;
     runId?: string;
+    /** Exact Run directory captured at launch: processing reads it without guessing the current session. */
+    runStateDir?: string;
     toolNames: string[];
     transactionEvidencePath?: string;
     updatedAt: string;
@@ -33,6 +35,7 @@ export interface ToolReviewSchedulerDeps extends CaptureToolReviewOptions {
     hasActiveActors(): boolean;
     launch(batch: ToolReviewBatch): {
         run: string;
+        state_dir?: string;
     };
     process?(state: ToolReviewAdmissionState): ToolReviewProcessResult;
 }

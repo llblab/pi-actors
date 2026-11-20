@@ -31,7 +31,7 @@ Each Run persists:
 - captured Recipe/template/values;
 - model and thinking policy provenance.
 
-Inspection, Control, cancellation, kill, retirement, and teardown filter by owner. Public Run-specific `actors_inspect` and `actors_control_apply` also require a current coordinator session whose id exactly matches the persisted non-empty owner; possession of `run:<id>` alone grants no access. Missing coordinator identity, ownerless state, and cross-owner state fail closed. `actors_inspect target=runtime view=runs` returns only the current session's exact-owner inventory and is the supported diagnostic when a remembered Run is inaccessible. Lifecycle mutations additionally revalidate generation, state, and process identity under the canonical lock.
+Inspection, Control, cancellation, kill, retirement, and teardown filter by owner. Public Run-specific `actors_inspect` and `actors_control_apply` also require a current coordinator session whose id exactly matches the persisted non-empty owner; possession of `run:<id>` alone grants no access. A Run directory is `<run-state-root>/<session-key>/<run>`, so a bare `run:<name>` resolves only inside the caller's session — the runtime never scans other sessions to disambiguate a remembered name, and a name that two sessions share is not addressable without that session. Missing coordinator identity, ownerless state, and cross-owner state fail closed. `actors_inspect target=runtime view=runs` returns only the current session's exact-owner inventory and is the supported diagnostic when a remembered Run is inaccessible. Lifecycle mutations additionally revalidate generation, state, and process identity under the canonical lock.
 
 ## State Files
 

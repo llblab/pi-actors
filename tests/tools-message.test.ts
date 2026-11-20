@@ -193,7 +193,7 @@ test("AX owned Control guard bounds admit whole targets and option sequences or 
 
 test("Public message compact refusals explain a completed Run without object coercion", async () => {
   const run = `message-done-${randomUUID()}`;
-  const stateDir = join(getRunStateRoot(), run);
+  const stateDir = join(getRunStateRoot(), "session-A", run);
   mkdirSync(getRunStateRoot(), { recursive: true });
   claimRunStateDirectory(stateDir, run);
   writeJsonAtomic(join(stateDir, "run.json"), { run, state_dir: stateDir, run_instance_id: "generation-A", ownerId: "session-A", pid: 0 });
@@ -272,7 +272,7 @@ test("Public retirement receipts describe completed operations rather than accep
   const ctx = { sessionManager: { getSessionId: () => "session-A" } };
   for (const action of ["archive", "prune"]) {
     const run = `message-${action}-${randomUUID()}`;
-    const stateDir = join(getRunStateRoot(), run);
+    const stateDir = join(getRunStateRoot(), "session-A", run);
     claimRunStateDirectory(stateDir, run);
     writeJsonAtomic(join(stateDir, "run.json"), { run, state_dir: stateDir, run_instance_id: "generation-A", ownerId: "session-A", pid: 0 });
     writeJsonAtomic(join(stateDir, "result.json"), { code: 0, completedAt: new Date().toISOString() });
@@ -305,7 +305,7 @@ test("Raw Control detail remains explicit rather than default context", async ()
 test("Public identity-change refusals preserve action facts without disclosing replacement state", async () => {
   for (const action of ["kill", "archive", "prune"]) for (const change of ["generation", "owner"]) {
     const run = `message-changed-${randomUUID()}`;
-    const stateDir = join(getRunStateRoot(), run);
+    const stateDir = join(getRunStateRoot(), "session-A", run);
     claimRunStateDirectory(stateDir, run);
     writeJsonAtomic(join(stateDir, "run.json"), { run, state_dir: stateDir, run_instance_id: change === "generation" ? "generation-B" : "generation-A", ownerId: change === "owner" ? "session-B" : "session-A", pid: 0,
       values: { private_token: "REPLACEMENT_PRIVATE_VALUE" }, cwd: "/replacement-private-cwd" });
@@ -408,7 +408,7 @@ test("Actor-local failure projection withholds correlation across awaited contex
   try {
     for (const change of ["stable", "session", "ABA", "manager", "generation", "owner"]) for (const verbose of [false, true]) {
       const run = `message-await-${randomUUID()}`;
-      const stateDir = join(getRunStateRoot(), run);
+      const stateDir = join(getRunStateRoot(), "session-A", run);
       claimRunStateDirectory(stateDir, run);
       const meta = { run, state_dir: stateDir, ownerId: "session-A", run_instance_id: "generation-A", pid, process_identity: identity, control: ["pause"] };
       writeJsonAtomic(join(stateDir, "run.json"), meta);

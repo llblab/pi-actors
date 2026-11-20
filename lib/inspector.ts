@@ -10,6 +10,7 @@ import { join } from "node:path";
 
 import { projectRunRecipe, type RunRecipeView } from "./recipe-projection.ts";
 import { safeRunId } from "./runs-identity.ts";
+import * as RunsNaming from "./runs-naming.ts";
 import { readJsonFileResilient } from "./state-readers.ts";
 import { formatMarkdownField } from "./tools-response.ts";
 
@@ -28,16 +29,30 @@ function matchesOwner(stateDir: string, ownerId: string): boolean {
   return meta.ownerId === ownerId;
 }
 
+/**
+ * Owned Runs live inside the owner's session namespace, so the Inspector lists and reads only that
+ * directory. Pre-layout flat Run directories under the root are ignored, never reconstructed.
+ */
+export function actorInspectorSessionRoot(stateRoot: string, ownerId: string): string {
+  return join(stateRoot, RunsNaming.sessionComponent(ownerId));
+}
+
+/** One listed Run's directory; the name comes from the owner's own session listing. */
+export function actorInspectorRunStateDir(stateRoot: string, ownerId: string, run: string): string {
+  return join(actorInspectorSessionRoot(stateRoot, ownerId), run);
+}
+
 export function readActorInspectorRuns(
   stateRoot: string,
   ownerId: string,
 ): ActorInspectorRunItem[] {
+  const sessionRoot = actorInspectorSessionRoot(stateRoot, ownerId);
   try {
     return fs
-      .readdirSync(stateRoot, { withFileTypes: true })
+      .readdirSync(sessionRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .flatMap((entry) => {
-        const stateDir = path.join(stateRoot, entry.name);
+        const stateDir = path.join(sessionRoot, entry.name);
         if (!matchesOwner(stateDir, ownerId)) return [];
         const runMeta = readJsonFileResilient<Record<string, unknown>>(
           path.join(stateDir, "run.json"),
@@ -134,7 +149,7 @@ export function killOwnedRunFromInspector(
 ): ActorInspectorKillResult {
   let stateDir: string;
   try {
-    stateDir = join(stateRoot, safeRunId(run));
+    stateDir = actorInspectorRunStateDir(stateRoot, ownerId, safeRunId(run));
   } catch (error) {
     return {
       ok: false,

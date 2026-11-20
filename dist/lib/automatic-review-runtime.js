@@ -69,12 +69,13 @@ export function createAutomaticReviewRuntime(deps) {
                         notification_policy: "silent",
                         ownerId: deps.getRunOwnerId(ctx),
                         policy_values: policyValues(ctx),
+                        reenter: true,
                         run_id: DraftSleep.draftSleepRunId(batch.batchId),
                         values: { input_path: batch.reviewerInputPath },
                     }, ctx.cwd, { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT, onSupervisionClockCaptured });
                 },
                 process: (state) => DraftSleep.processDraftSleepReview(state, {
-                    getRunStatus: AsyncRuns.getRunStatus,
+                    getRunStatus: (runId) => AsyncRuns.getRunStatus(runId, deps.getRunOwnerId(ctx)),
                     recipeRoot: Paths.getRecipeRoot(),
                 }),
             });
@@ -90,12 +91,13 @@ export function createAutomaticReviewRuntime(deps) {
                         notification_policy: "silent",
                         ownerId: deps.getRunOwnerId(ctx),
                         policy_values: policyValues(ctx),
+                        reenter: true,
                         run_id: ToolReviewScheduler.toolReviewRunId(batch.reviewId),
                         values: { input_path: batch.reviewerInputPath },
                     }, ctx.cwd, { skillContext: PACKAGE_RECIPE_MEMORY_CONTEXT, onSupervisionClockCaptured });
                 },
                 process: (state) => ToolReviewScheduler.processToolReviewResult(state, {
-                    getRunStatus: AsyncRuns.getRunStatus,
+                    getRunStatus: (runId) => AsyncRuns.getRunStatus(runId, deps.getRunOwnerId(ctx)),
                     recipeRoot: Paths.getRecipeRoot(),
                 }),
             });

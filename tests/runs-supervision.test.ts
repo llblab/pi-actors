@@ -861,7 +861,7 @@ const { renderRunSnapshot } = await import("../lib/tools-response.ts");
 const { createActorExtensionRuntime } = await import("../lib/extension-runtime.ts");
 const { getRunStateRoot } = await import("../lib/paths.ts");
 function fixture(t: TestContext, ownedStateDir?: string, runId = "admission-clock") {
-  const root = fs.mkdtempSync(join(agentDir, "case-")); const stateDir = ownedStateDir ?? join(root, "state"); const gate = join(root, "release"); const ready = join(root, "ready"); const pids = new Set<number>();
+  const root = fs.mkdtempSync(join(agentDir, "case-")); let stateDir = ownedStateDir ?? join(root, "state"); const gate = join(root, "release"); const ready = join(root, "ready"); const pids = new Set<number>();
   const captureWork = () => {
     if (!fs.existsSync(ready)) return false;
     const work = JSON.parse(fs.readFileSync(ready, "utf8"));
@@ -886,7 +886,7 @@ function fixture(t: TestContext, ownedStateDir?: string, runId = "admission-cloc
     }
     for (const pid of pids) assert.equal(readProcessLiveness(pid), "dead", "Captured fixture runner exit remains unproven; retaining state");
   };
-  t.after(async () => { fs.writeFileSync(gate, "release"); await settle(); if (ownedStateDir) fs.rmSync(ownedStateDir, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true }); });
+  t.after(async () => { fs.writeFileSync(gate, "release"); await settle(); if (ownedStateDir) fs.rmSync(ownedStateDir, { recursive: true, force: true }); if (stateDir !== ownedStateDir) fs.rmSync(stateDir, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true }); });
   const script = join(root, "gated.cjs");
   fs.writeFileSync(script, `const fs=require('node:fs');fs.writeFileSync(process.argv[3]+'.tmp',JSON.stringify({pid:process.pid}));fs.renameSync(process.argv[3]+'.tmp',process.argv[3]);
     const deadline=Date.now()+15000;const t=setInterval(()=>{if(fs.existsSync(process.argv[2])){clearInterval(t);console.log('released')}
@@ -899,7 +899,7 @@ function fixture(t: TestContext, ownedStateDir?: string, runId = "admission-cloc
     syncBuiltinESMExports(); try { return start(); } finally { childProcess.spawn = spawn; syncBuiltinESMExports(); }
   };
   const start = (...args: Parameters<typeof startRun>) => captureNative(() => startRun(...args));
-  return { root, stateDir, gate, ready, params, start, settle, waitReady, captureWork, captureNative, capturedPids: () => [...pids] };
+  return { root, get stateDir() { return stateDir; }, setStateDir: (next: string) => { stateDir = next; }, gate, ready, params, start, settle, waitReady, captureWork, captureNative, capturedPids: () => [...pids] };
 }
 
 function coordinatorHarness(enabled = true) {
@@ -937,7 +937,7 @@ test("Opt-in real coordinator retains original wrapped spawn/async-tool admissio
       }
       const pending = f.captureNative(() => definition.execute("coordinator-launch", args, undefined, undefined, active.ctx));
       assert.equal(f.capturedPids().length, 1, "Capture the positive runner PID before awaiting the tool");
-      const response = await pending; const meta = response.details; const expected = { run: meta.run, run_instance_id: meta.run_instance_id, ownerId: meta.ownerId };
+      const response = await pending; const meta = response.details; f.setStateDir(String(meta.state_dir)); const expected = { run: meta.run, run_instance_id: meta.run_instance_id, ownerId: meta.ownerId };
       assert.equal(meta.ownerId, `owner-${route}`); assert.equal(Object.hasOwn(meta, "snapshot_references"), false); assert.equal(Object.hasOwn(meta, "origin"), false);
       assert.equal(Object.hasOwn(meta, "onSupervisionClockCaptured"), false);
       await f.waitReady();

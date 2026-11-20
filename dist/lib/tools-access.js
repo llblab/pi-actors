@@ -55,5 +55,6 @@ export function assertRunStatusAccessibleToContext(runId, status, ctx) {
     return status;
 }
 export function assertRunAccessibleToContext(runId, ctx) {
-    return assertRunStatusAccessibleToContext(runId, AsyncRuns.getRunStatus(runId), ctx);
+    const sessionId = requireContextSessionId(ctx, `run:${runId}`);
+    return assertRunStatusAccessibleToContext(runId, AsyncRuns.getRunStatus(runId, sessionId), ctx);
 }

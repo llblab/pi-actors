@@ -12,9 +12,31 @@ import {
   openSync,
   readSync,
 } from "node:fs";
-import { isAbsolute, sep } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 
 import { substituteCommandTemplateToken } from "./command-templates.ts";
+
+/** Files a Run owns at its root; a declared output may not impersonate one of them. */
+export const RUN_CANONICAL_ROOT_FILES = [
+  ".pi-actors-run-state.json",
+  "context-index.json",
+  "execution.json",
+  "progress.json",
+  "result.json",
+  "run.json",
+  "stderr.log",
+  "stdout.log",
+  "terminal-handled.json",
+  "trace.jsonl",
+] as const;
+
+/** One declaration may name an external output or its own subdirectory, never a canonical record. */
+export function shadowsCanonicalRunFile(path: string, stateDir: string, cwd: string, published: readonly string[] = []): boolean {
+  // Windows and macOS default to case-insensitive filesystems, where `Result.json` is the canonical record too.
+  const fold = (value: string): string => process.platform === "win32" || process.platform === "darwin" ? value.toLowerCase() : value;
+  const declared = fold(resolve(cwd, path));
+  return [...RUN_CANONICAL_ROOT_FILES, ...published].some(name => declared === fold(resolve(stateDir, name)));
+}
 
 export type RunArtifactDeclaration =
   | string

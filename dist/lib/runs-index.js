@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { acquireFileMutationLock, writeTextAtomic } from "./file-state.js";
 import { observeRunContextExportLocation, readRunContextIdentity, runContextExportPath, RUN_CONTEXT_SOURCE_METADATA_MAX_BYTES } from "./runs-context-index.js";
 import { RUN_DELIVERY_MODEL_MAX_BYTES } from "./limits.js";
+import { isRetentionContainerName } from "./runs-retention.js";
 import { readJsonFileResilient } from "./state-readers.js";
 function matchesStatusFilter(status, filter) {
     if (!filter || filter === "all")
@@ -39,6 +40,8 @@ export function discoverRunStateDirs(stateRoot, maxDepth = 8) {
             if (!entry.isDirectory())
                 continue;
             const child = join(directory, entry.name);
+            if (isRetentionContainerName(entry.name))
+                continue;
             if (existsSync(join(child, "run.json")))
                 stateDirs.push(child);
             if (depth + 1 < maxDepth)

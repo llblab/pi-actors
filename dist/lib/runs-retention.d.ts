@@ -16,6 +16,7 @@ export interface RunRetentionExpectation {
 export declare function retainRun(stateDir: string, action: RunRetentionAction, expected: RunRetentionExpectation, readStatus: (stateDir: string) => Record<string, unknown>, options?: {
     preserveArtifacts?: boolean;
 }): Record<string, unknown>;
+export declare function isRetentionContainerName(name: string): boolean;
 /** Filesystem age selects candidates; it grants neither retirement nor native scope authority. */
 export declare function cleanupStaleRunEntries(runsDir: string, maxAgeMs?: number, now?: number): Promise<number>;
 export declare function appendRunRetentionEvidence(status: Record<string, unknown>, action: RunRetentionAction, outcome: RunRetentionOutcome, options?: {

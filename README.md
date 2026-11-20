@@ -11,12 +11,6 @@ Run = Recipe + Trace + Control
 
 An **actor** is any runnable local capability: a script, tool, service, pipeline, or subagent. A **Recipe** is its reusable executable definition. `actors_run_spawn` creates a **Run**—one concrete actor instance—which captures its Recipe, appends observable **Trace**, and may consume actor-local **Control**.
 
-## Agent Experience (AX)
-
-pi-actors adopts **AX — Agent Experience** as a project-wide design standard: give the agent visible, structured context for its next decision while keeping the same facts easy for a person to read. The adopted form is typed block-YAML runtime metadata with opaque authored content, not Markdown-list pseudo-objects. Inspector, tool results/errors and agent-bound outcomes should follow that direction as their owned rollout proceeds.
-
-The [AX standard](docs/agent-experience.md) adopts JSON structured inputs → block-YAML runtime-output metadata, with Actor-authored text/Markdown preserved outside the header. This includes tool/spawn/status/Control/inspect output, not only completion results. It is an adopted direction, not a claim that current mixed-format emitters already conform; [BACKLOG.md](BACKLOG.md) tracks rollout. Machine protocols, privacy/source permissions and immutable saved messages remain separate. Current completion indices are packet-local; independent native owner-loss supervision, execution deadlines and public session completion streams are not enabled. The future contracts do not strengthen the existing stop/closure guarantees.
-
 ## Local Coordinator Model
 
 Multi-instance systems commonly put instance creation and routing in an external gateway. pi-actors supports a different topology: the current Pi instance remains the coordinator, companion extensions such as Telegram provide presence, and explicit Runs perform bounded delegated work. The coordinator receives high-level outcomes, decomposes them, stays available for decisions, and owns integration plus final validation instead of becoming another undifferentiated worker.
@@ -219,11 +213,13 @@ Supported transports are Unix FIFO and Windows named pipe. Every actor-local Con
 
 ## Run State
 
-Owned state lives under:
+Owned state lives under one directory per Run, inside the logical Pi session that launched it:
 
 ```text
-~/.pi/agent/tmp/pi-actors/runs/<run>/
+~/.pi/agent/tmp/pi-actors/runs/<session-key>/<run>/
 ```
+
+A Run name is allocated per session as `<recipe>-<ordinal>` (or used exactly as the caller requests), and an exact name is refused once it has been used in that session. Names are reserved in `<runs>/names/<session-key>.json`, which is not a Run directory. Archived Runs move into the session's own `archived/` directory; `archived`, `preserved-artifacts`, Windows device aliases and names ending in a dot cannot be used as Run names. Without a resolvable session a launch uses the `_unowned` bucket; resolving a bare `run:<name>` also requires the owning session. Run directories created before this layout (`runs/<run>/`) are not migrated: they stay reachable by path only and age out through ordinary retention.
 
 Core files:
 

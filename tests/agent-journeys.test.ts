@@ -6,7 +6,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { CommandTemplateExecResult } from "../lib/command-templates.ts";
-import { getRunStateRoot } from "../lib/paths.ts";
 import {
   createRecipeResolutionContext,
 } from "../lib/recipes-context.ts";
@@ -83,8 +82,8 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
   const fixture = await journeyFixture();
   const oneOffRun = `journey-one-off-${process.pid}-${Date.now()}`;
   const toolRun = `journey-tool-${process.pid}-${Date.now()}`;
-  const oneOffState = join(getRunStateRoot(), oneOffRun);
-  const toolState = join(getRunStateRoot(), toolRun);
+  let oneOffState = "";
+  let toolState = "";
   try {
     // Journey A: the maintained capability is spawned once; no persistent tool appears.
     const spawn = createSpawnToolDefinition();
@@ -99,6 +98,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
       undefined,
       { cwd: fixture.root, recipeResolutionContext: fixture.context },
     );
+    oneOffState = String(oneOff.details.state_dir);
     assert.equal(oneOff.details.launch_kind, "spawn");
     assert.equal(
       oneOff.details.recipe_file,
@@ -167,6 +167,7 @@ test("Agent Journeys A-D preserve one-off, persistent, degraded, and unavailable
       undefined,
       { cwd: fixture.root },
     );
+    toolState = String(invocation.details.state_dir);
     assert.equal(invocation.details.launch_kind, "tool");
     await waitForFile(join(toolState, "result.json"));
     assert.equal(runtime.getToolStatus("music_player")?.tool_calls, 1);

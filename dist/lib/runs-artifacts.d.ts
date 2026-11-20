@@ -3,6 +3,10 @@
  * Owns: artifact path expansion, captured-reference validation, body-free metadata observation and explicit hashing.
  * Excludes: generation admission, export publication, directory scans and production/immutable-content proof.
  */
+/** Files a Run owns at its root; a declared output may not impersonate one of them. */
+export declare const RUN_CANONICAL_ROOT_FILES: readonly [".pi-actors-run-state.json", "context-index.json", "execution.json", "progress.json", "result.json", "run.json", "stderr.log", "stdout.log", "terminal-handled.json", "trace.jsonl"];
+/** One declaration may name an external output or its own subdirectory, never a canonical record. */
+export declare function shadowsCanonicalRunFile(path: string, stateDir: string, cwd: string, published?: readonly string[]): boolean;
 export type RunArtifactDeclaration = string | {
     path: string;
     kind?: string;

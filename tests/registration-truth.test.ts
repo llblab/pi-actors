@@ -201,7 +201,8 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
   const runId = `registration-truth-${process.pid}-${Date.now()}`;
   const wrapperRunId = `${runId}-wrapper`;
   const toolRunId = `${runId}-tool`;
-  const runStateDir = join(getRunStateRoot(), runId);
+  /** Session-scoped directories come from the launch itself; a test must not re-derive the layout. */
+  const launchDirs: string[] = [];
   let dispatchEntered = false, cleanupProven = false;
   try {
     markTiming("registration_launch");
@@ -249,7 +250,8 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
       undefined,
       { recipeResolutionContext, cwd: root },
     );
-    joins.push({ birth: bindFixtureBirth(capture.births, spawnResult.details.pid), path: join(runStateDir, "result.json") });
+    launchDirs.push(String(spawnResult.details.state_dir));
+    joins.push({ birth: bindFixtureBirth(capture.births, spawnResult.details.pid), path: join(String(spawnResult.details.state_dir), "result.json") });
     assert.equal(spawnResult.details.recipe_file, join(mediaDir, "recipes", "playback.json"));
     const tools = new Map<string, RegisteredTool>();
     const registered: RegisteredTool[] = [];
@@ -410,7 +412,8 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
       undefined,
       { recipeResolutionContext, cwd: root },
     );
-    joins.push({ birth: bindFixtureBirth(capture.births, wrapperSpawn.details.pid), path: join(getRunStateRoot(), wrapperRunId, "result.json") });
+    launchDirs.push(String(wrapperSpawn.details.state_dir));
+    joins.push({ birth: bindFixtureBirth(capture.births, wrapperSpawn.details.pid), path: join(String(wrapperSpawn.details.state_dir), "result.json") });
     const toolInvocation = await toolDefinition.execute(
       "registration-truth-tool-call",
       { command: "status", run_id: toolRunId },
@@ -422,7 +425,8 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
         sessionManager: { getSessionId: () => "registration-truth-session" },
       },
     );
-    joins.push({ birth: bindFixtureBirth(capture.births, toolInvocation.details.pid), path: join(getRunStateRoot(), toolRunId, "result.json") });
+    launchDirs.push(String(toolInvocation.details.state_dir));
+    joins.push({ birth: bindFixtureBirth(capture.births, toolInvocation.details.pid), path: join(String(toolInvocation.details.state_dir), "result.json") });
     assert.equal(capture.births.length, 3);
     assert.equal(new Set(joins.map(({ birth }) => birth)).size, 3);
     assert.equal(wrapperSpawn.details.launch_kind, "spawn");
@@ -481,10 +485,9 @@ test("0.46.1 registration truth journey closes the live Skill-wrapper contradict
     try { timing.finish(); } catch (error) { errors.push(error); }
     if (errors.length === 0 && (!dispatchEntered || cleanupProven)) {
       try {
-        const stateDirs = [runStateDir, join(getRunStateRoot(), wrapperRunId), join(getRunStateRoot(), toolRunId)];
         for (const [index, { birth }] of joins.entries()) {
           requireFreshFixtureAbsence(birth);
-          await rm(stateDirs[index], { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+          await rm(launchDirs[index]!, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
         }
         for (const { birth } of joins) requireFreshFixtureAbsence(birth);
         await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });

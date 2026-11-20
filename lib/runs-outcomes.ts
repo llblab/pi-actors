@@ -14,6 +14,16 @@ import { runProcessIdentityDigest } from "./runs-process.ts";
 import { readJsonFileResilient } from "./state-readers.ts";
 
 export const RUN_PRIMARY_TEXT_PROTOCOL = "run-primary-text-v1";
+/** Fixed retained sources of one execution, relative to its Run directory; a fresh generation removes them before work. */
+export const RUN_PRIMARY_SOURCE_FILE = "evidence/primary.txt";
+export const RUN_RESULT_DIAGNOSTICS_SOURCE_FILE = "evidence/result-diagnostics.json";
+export const RUN_ARTIFACT_INVENTORY_SOURCE_FILE = "evidence/artifact-inventory.json";
+export const RUN_RETAINED_SOURCE_FILES: readonly string[] = Object.freeze([RUN_PRIMARY_SOURCE_FILE, RUN_RESULT_DIAGNOSTICS_SOURCE_FILE, RUN_ARTIFACT_INVENTORY_SOURCE_FILE]);
+/** New writers use the fixed name; saved bindings and packets keep their original generation-keyed spelling for exact replay. */
+function retainedSourceName(path: string, fixed: string, legacy: RegExp): boolean {
+  const leaf = basename(path);
+  return leaf === basename(fixed) || legacy.exec(leaf)?.[0] === leaf;
+}
 export const RUN_ARTIFACT_INVENTORY_PROTOCOL = "run-artifact-inventory-v1";
 export const RUN_RESULT_DIAGNOSTICS_PROTOCOL = "run-result-diagnostics-v1";
 export const RUN_RESULT_DIAGNOSTIC_FIELDS = ["command", "error", "failure_reason"] as const;
@@ -117,7 +127,7 @@ export function decodeRunPrimaryTextBinding(stateDir: string, generation: string
   if ((output.text_basis !== undefined && output.text_basis !== "actor_response") ||
     (output.text_basis === "actor_response" ? typeof output.upstream_truncated !== "boolean" : output.upstream_truncated !== undefined) ||
     !source || typeof source.path !== "string" || !isAbsolute(source.path) || resolve(source.path) !== source.path ||
-    dirname(source.path) !== join(stateDir, "evidence") || /^primary-[a-f0-9]{64}\.txt$/.exec(basename(source.path))?.[0] !== basename(source.path) || source.run_instance_id !== generation ||
+    dirname(source.path) !== join(stateDir, "evidence") || !retainedSourceName(source.path, RUN_PRIMARY_SOURCE_FILE, /^primary-[a-f0-9]{64}\.txt$/u) || source.run_instance_id !== generation ||
     typeof source.sha256 !== "string" || source.sha256.length !== 64 || !/^[a-f0-9]{64}$/.test(source.sha256) || !range ||
     ![bytes, total, shown, omitted, range.start, range.end].every(number => typeof number === "number" && Number.isSafeInteger(number) && number >= 0) ||
     Number(range.start) > Number(range.end) || Number(range.end) > Number(bytes) || typeof preview !== "string" || Buffer.byteLength(preview) !== Number(range.end) - Number(range.start) ||
@@ -152,7 +162,7 @@ export function decodeRunArtifactInventoryBinding(stateDir: string, generation: 
   }
   const inventory = primaryData(input?.artifact_inventory); const source = primaryData(inventory?.source);
   if (!inventory || !source || typeof source.path !== "string" || !isAbsolute(source.path) || resolve(source.path) !== source.path ||
-    dirname(source.path) !== join(stateDir, "evidence") || /^artifact-inventory-[a-f0-9]{64}\.json$/u.exec(basename(source.path))?.[0] !== basename(source.path) ||
+    dirname(source.path) !== join(stateDir, "evidence") || !retainedSourceName(source.path, RUN_ARTIFACT_INVENTORY_SOURCE_FILE, /^artifact-inventory-[a-f0-9]{64}\.json$/u) ||
     source.run_instance_id !== generation || typeof source.sha256 !== "string" || source.sha256.length !== 64 || !/^[a-f0-9]{64}$/u.test(source.sha256) ||
     typeof inventory.bytes_total !== "number" || !Number.isSafeInteger(inventory.bytes_total) || inventory.bytes_total <= 0 ||
     typeof inventory.declarations_total !== "number" || !Number.isSafeInteger(inventory.declarations_total) || inventory.declarations_total <= 0 || inventory.declarations_total > inventory.bytes_total) {
@@ -177,7 +187,7 @@ export function decodeRunResultDiagnosticsBinding(stateDir: string, generation: 
     Number.isSafeInteger(list.length?.value) && list.length!.value > 0 && list.length!.value <= RUN_RESULT_DIAGNOSTIC_FIELDS.length
     ? Array.from({ length: list.length!.value as number }, (_, index) => list[String(index)]?.value) : undefined;
   if (!reference || !source || typeof source.path !== "string" || !isAbsolute(source.path) || resolve(source.path) !== source.path ||
-    dirname(source.path) !== join(stateDir, "evidence") || /^result-diagnostics-[a-f0-9]{64}\.json$/u.exec(basename(source.path))?.[0] !== basename(source.path) ||
+    dirname(source.path) !== join(stateDir, "evidence") || !retainedSourceName(source.path, RUN_RESULT_DIAGNOSTICS_SOURCE_FILE, /^result-diagnostics-[a-f0-9]{64}\.json$/u) ||
     source.run_instance_id !== generation || typeof source.sha256 !== "string" || source.sha256.length !== 64 || !/^[a-f0-9]{64}$/u.test(source.sha256) ||
     typeof reference.bytes_total !== "number" || !Number.isSafeInteger(reference.bytes_total) || reference.bytes_total <= 0 || !fields ||
     fields.some((field, index) => !RUN_RESULT_DIAGNOSTIC_FIELDS.includes(field as RunResultDiagnosticField) || fields.indexOf(field) !== index) ||

@@ -5,8 +5,28 @@
  */
 import { createHash } from "node:crypto";
 import { closeSync, fstatSync, lstatSync, openSync, readSync, } from "node:fs";
-import { isAbsolute, sep } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 import { substituteCommandTemplateToken } from "./command-templates.js";
+/** Files a Run owns at its root; a declared output may not impersonate one of them. */
+export const RUN_CANONICAL_ROOT_FILES = [
+    ".pi-actors-run-state.json",
+    "context-index.json",
+    "execution.json",
+    "progress.json",
+    "result.json",
+    "run.json",
+    "stderr.log",
+    "stdout.log",
+    "terminal-handled.json",
+    "trace.jsonl",
+];
+/** One declaration may name an external output or its own subdirectory, never a canonical record. */
+export function shadowsCanonicalRunFile(path, stateDir, cwd, published = []) {
+    // Windows and macOS default to case-insensitive filesystems, where `Result.json` is the canonical record too.
+    const fold = (value) => process.platform === "win32" || process.platform === "darwin" ? value.toLowerCase() : value;
+    const declared = fold(resolve(cwd, path));
+    return [...RUN_CANONICAL_ROOT_FILES, ...published].some(name => declared === fold(resolve(stateDir, name)));
+}
 /** Captured paths only: no placeholder/environment expansion, directory discovery or fallback to this process's cwd. */
 export function describeRunArtifactReferences(artifacts, cwd) {
     if (artifacts === undefined)

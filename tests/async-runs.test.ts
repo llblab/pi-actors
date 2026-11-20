@@ -57,6 +57,7 @@ import {
   teardownRunsOwnedByParent,
   sendRunControl,
 } from "../lib/async-runs.ts";
+import { runContextExportPaths } from "../lib/runs-context-index.ts";
 import {
   createRunUiObservationState,
   executeRunRetirements,
@@ -282,6 +283,103 @@ test("Async runs reject reuse of an active run state", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("An exact Run name is refused after use unless the caller declares re-entry", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-names-"));
+  const session = `names-${randomUUID()}`;
+  const first = startRun({ run_id: "named", ownerId: session, template: `${JSON.stringify(process.execPath)} -e "console.log('first')"` }, process.cwd());
+  try {
+    assert.equal(first.run, "named");
+    assert.equal(first.state_dir, join(getRunStateRoot(), session, "named"));
+    await waitForStatus(first.state_dir, "done", 80);
+    for (let i = 0; i < 200 && readProcessLiveness(first.pid) !== "dead"; i += 1) await new Promise(resolve => setTimeout(resolve, 25));
+    await waitForStatus(first.state_dir, "done", 80);
+    assert.throws(
+      () => startRun({ run_id: "named", ownerId: session, template: `${JSON.stringify(process.execPath)} -e "console.log('second')"` }, process.cwd()),
+      (error: Error) => /was already used in this session/u.test(error.message) &&
+        error.message.includes("run:named") && error.message.includes(String(first.run_instance_id)) &&
+        /generation/u.test(error.message) && /done/u.test(error.message),
+    );
+    assert.throws(() => startRun({ run_id: "archived", ownerId: session, template: `${JSON.stringify(process.execPath)} -e "0"` }, process.cwd()),
+      /Run name archived is reserved by the runtime/u);
+    assert.equal(existsSync(join(getRunStateRoot(), session, "archived")), false, "A refused reserved name creates no directory");
+    const reentered = startRun({ run_id: "named", ownerId: session, reenter: true,
+      template: `${JSON.stringify(process.execPath)} -e "console.log('again')"` }, process.cwd());
+    try {
+      assert.equal(reentered.run, "named");
+      assert.notEqual(reentered.run_instance_id, first.run_instance_id);
+      await waitForStatus(reentered.state_dir, "done", 80);
+    } finally { if (reentered.pid > 0) cancelRun(reentered.state_dir); }
+    const allocated = startRun({ ownerId: session, template: `${JSON.stringify(process.execPath)} -e "console.log('auto')"` }, process.cwd());
+    try { assert.match(allocated.run, /^run-\d+$/u); assert.equal(allocated.state_dir, join(getRunStateRoot(), session, allocated.run)); await waitForStatus(allocated.state_dir, "done", 80); }
+    finally { if (allocated.pid > 0) cancelRun(allocated.state_dir); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
+});
+
+test("A singleton Recipe refuses a second service from another logical session", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-singleton-cross-"));
+  const skillDir = join(root, "cross-service");
+  const recipeDir = join(skillDir, "recipes");
+  const recipe = join(recipeDir, "service.json");
+  const ready = join(root, "ready");
+  const workload = "const fs=require('node:fs'),p=process.argv[1],tmp=p+'.'+process.pid; fs.writeFileSync(tmp,String(process.pid)); fs.renameSync(tmp,p); setTimeout(() => {}, Number(process.argv[2]));";
+  await mkdir(recipeDir, { recursive: true });
+  await writeFile(join(skillDir, "SKILL.md"), "---\nname: cross-service\ndescription: Test singleton exclusivity.\n---\n");
+  await writeFile(recipe, JSON.stringify({ async: true, singleton: true, args: ["source:string"], defaults: { source: "x" }, control: ["stop"],
+    template: `${JSON.stringify(process.execPath)} -e ${JSON.stringify(workload)} ${JSON.stringify(ready)} 10000` }));
+  const spawn = childProcess.spawn; const births: { pid?: number; close?: boolean; meta?: ReturnType<typeof startRun> }[] = [];
+  t.mock.method(childProcess, "spawn", (...args: any[]) => {
+    const child: childProcess.ChildProcess = Reflect.apply(spawn, childProcess, args);
+    const birth: { pid?: number; close?: boolean; meta?: ReturnType<typeof startRun> } = { pid: child.pid };
+    births.push(birth); child.once("close", () => { birth.close = true; }); return child;
+  });
+  syncBuiltinESMExports();
+  await withFixtureCleanup(async () => {
+    const first = startRun({ file: recipe, ownerId: "session-a" }, process.cwd());
+    births[0]!.meta = first;
+    await waitForFile(ready);
+    await waitForStatus(first.state_dir, "running");
+    assert.equal(first.ownerId, "session-a");
+    assert.throws(() => startRun({ file: recipe, ownerId: "session-b" }, process.cwd()),
+      /already running for another logical session/u);
+    const sibling = startRun({ file: recipe, ownerId: "session-a" }, process.cwd());
+    assert.equal(sibling.reused, true);
+    assert.equal(sibling.run_instance_id, first.run_instance_id);
+    // A singleton keeps its own session-local address across a restart, with a new generation, instead of being refused as a used exact name.
+    cancelRun(first.state_dir);
+    const firstBirth = births[0]!;
+    for (let i = 0; i < 200 && !(firstBirth.close && readProcessLiveness(firstBirth.pid!) === "dead"); i += 1) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(firstBirth.close, true, `Stopped singleton runner close remains unproven; retaining ${root}`);
+    await rm(ready, { force: true });
+    const restarted = startRun({ file: recipe, ownerId: "session-a" }, process.cwd());
+    const restartBirth = births.find(birth => birth.pid === restarted.pid && birth.meta === undefined);
+    assert.ok(restartBirth, `Restarted singleton has no captured birth; retaining ${root}`);
+    restartBirth.meta = restarted;
+    await waitForFile(ready);
+    assert.equal(restarted.run, first.run);
+    assert.equal(restarted.state_dir, first.state_dir);
+    assert.equal(restarted.state_dir, join(getRunStateRoot(), "session-a", "cross-service"));
+    assert.notEqual(restarted.run_instance_id, first.run_instance_id);
+    // A runner that died without finalizing leaves a recorded "running" phase; provable absence must not lock out other sessions.
+    signalOwnedRunProcess(restarted.pid, "SIGKILL", restarted.process_identity!);
+    for (let i = 0; i < 200 && !(restartBirth.close && readProcessLiveness(restarted.pid) === "dead"); i += 1) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(restartBirth.close, true, `Killed singleton runner close remains unproven; retaining ${root}`);
+    assert.equal(JSON.parse(await readFile(join(restarted.state_dir, "progress.json"), "utf8")).phase, "running");
+    await rm(ready, { force: true });
+    const other = startRun({ file: recipe, ownerId: "session-b" }, process.cwd());
+    const otherBirth = births.find(birth => birth.pid === other.pid && birth.meta === undefined);
+    assert.ok(otherBirth, `Other-session singleton has no captured birth; retaining ${root}`);
+    otherBirth.meta = other;
+    await waitForFile(ready);
+    assert.equal(other.state_dir, join(getRunStateRoot(), "session-b", "cross-service"));
+    for (const birth of births) {
+      assert.ok(Number.isSafeInteger(birth.pid) && (birth.pid ?? 0) > 0);
+      if (birth.meta?.process_identity && readProcessLiveness(birth.pid!) !== "dead") signalOwnedRunProcess(birth.pid!, "SIGKILL", birth.meta.process_identity);
+      for (let i = 0; i < 200 && !birth.close; i += 1) await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(birth.close, true, `Captured runner close remains unproven; retaining ${root}`);
+    }
+  }, async () => { await rm(root, { recursive: true, maxRetries: 10, retryDelay: 50 }); });
 });
 
 test("Singleton Skill Recipes reuse one compatible active Run and reject conflicting identity or values", async (t) => {
@@ -861,6 +959,51 @@ test("Async lifecycle status files preserve terminal semantics", async () => {
   }
 });
 
+test("A declaration cannot impersonate a canonical Run file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-shadow-"));
+  const stateDir = join(root, "shadowed");
+  try {
+    assert.throws(
+      () => startRun({
+        run_id: "shadowed",
+        state_dir: stateDir,
+        artifacts: { summary: "{state_dir}/result.json", log: "{state_dir}/stdout.log" },
+        template: `${JSON.stringify(process.execPath)} -e "console.log('x')"`,
+      }, process.cwd()),
+      /shadows a canonical Run file/,
+    );
+    assert.throws(
+      () => startRun({
+        state_dir: join(root, "shadowed-execution"),
+        artifacts: { outcome: join(root, "shadowed-execution", "execution.json") },
+        template: `${JSON.stringify(process.execPath)} -e "console.log('x')"`,
+      }, process.cwd()),
+      /shadows a canonical Run file/,
+    );
+    assert.throws(
+      () => startRun({
+        state_dir: join(root, "shadowed-evidence"),
+        artifacts: { copy: join(root, "shadowed-evidence", "evidence", "result.json") },
+        template: `${JSON.stringify(process.execPath)} -e "console.log('x')"`,
+      }, process.cwd()),
+      /shadows a canonical Run file/,
+    );
+    for (const exported of runContextExportPaths()) {
+      const target = join(root, "shadowed-every", exported);
+      assert.throws(() => startRun({ state_dir: join(root, "shadowed-every"), artifacts: { copy: target },
+        template: `${JSON.stringify(process.execPath)} -e "console.log('x')"` }, process.cwd()), /shadows a canonical Run file/, exported);
+    }
+    assert.ok(runContextExportPaths().includes("evidence/recipe.json"));
+    assert.equal(existsSync(join(root, "shadowed-every")), false);
+    assert.equal(existsSync(stateDir), false);
+    assert.doesNotThrow(() => startRun({
+      state_dir: stateDir,
+      artifacts: { report: "{state_dir}/reports/review.md" },
+      template: `${JSON.stringify(process.execPath)} -e "console.log('x')"`,
+    }, process.cwd()));
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
+});
+
 test("Async runs emit command completion Trace events", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-runs-"));
   const stateDir = join(root, "command-trace");
@@ -873,7 +1016,7 @@ test("Async runs emit command completion Trace events", async () => {
         defaults: { report_path: "{state_dir}/report.md" },
         artifacts: {
           report: "{report_path}",
-          summary: "{state_dir}/result.json",
+          summary: "{state_dir}/summary.md",
         },
         template: `${JSON.stringify(process.execPath)} -e "console.log('artifact')" ${longArg}`,
       },
@@ -890,7 +1033,7 @@ test("Async runs emit command completion Trace events", async () => {
     const status = getRunStatus(stateDir);
     assert.deepEqual(status.artifacts, {
       report: `${stateDir}/report.md`,
-      summary: `${stateDir}/result.json`,
+      summary: `${stateDir}/summary.md`,
     });
     assert.equal(commandDone.kind, "command.done");
     assert.equal(Object.hasOwn(commandDone, "type"), false);
@@ -2191,23 +2334,23 @@ test("Real ordinary primary publication joins full UTF-8 source, classifies expo
         import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; import { createHash } from "node:crypto"; import { join } from "node:path";
         const rename = fs.renameSync; const link = fs.linkSync; const stat = fs.lstatSync; const write = fs.writeFileSync; let attempts = 0; let refused = false;
         fs.writeFileSync = function(path, ...args) {
-          if (${JSON.stringify(mode)} === "artifact_eio" && /artifact-inventory-[a-f0-9]{64}\\.json$/.test(String(path))) {
+          if (${JSON.stringify(mode)} === "artifact_eio" && /artifact-inventory\\.json$/.test(String(path))) {
             Reflect.apply(write, fs, [path, "partial", {flag:"wx"}]); throw Object.assign(Error("fixture artifact source EIO"), {code:"EIO"});
           }
-          if (${JSON.stringify(mode)}.startsWith("diagnostics_") && ${JSON.stringify(mode)} !== "diagnostics_refusal" && /result-diagnostics-[a-f0-9]{64}\\.json$/.test(String(path))) {
+          if (${JSON.stringify(mode)}.startsWith("diagnostics_") && ${JSON.stringify(mode)} !== "diagnostics_refusal" && /result-diagnostics\\.json$/.test(String(path))) {
             Reflect.apply(write, fs, [path, "partial", {flag:"wx"}]); throw Object.assign(Error("fixture diagnostic source EIO"), {code:"EIO"});
           }
           return Reflect.apply(write, fs, [path, ...args]);
         };
         fs.lstatSync = function(path, ...args) {
-          if (${JSON.stringify(mode)} === "diagnostics_refusal" && /result-diagnostics-[a-f0-9]{64}\\.json$/.test(String(path)) && !refused) {
+          if (${JSON.stringify(mode)} === "diagnostics_refusal" && /result-diagnostics\\.json$/.test(String(path)) && !refused) {
             refused = true; fs.writeFileSync(path,"foreign diagnostic bytes");
           }
           if (${JSON.stringify(mode)} === "source_refusal" && String(path) === ${JSON.stringify(join(stateDir, "evidence"))} && !refused) {
             refused = true; fs.mkdirSync(path, {recursive:true});
             const meta = JSON.parse(fs.readFileSync(${JSON.stringify(join(stateDir, "run.json"))}, "utf8"));
             const identity = createHash("sha256").update(JSON.stringify([meta.run, meta.run_instance_id, meta.ownerId ?? null])).digest("hex");
-            fs.writeFileSync(join(path, "primary-" + identity + ".txt"), "foreign bytes");
+            fs.writeFileSync(join(path, "primary.txt"), "foreign bytes");
           }
           return Reflect.apply(stat, fs, [path, ...args]);
         };
@@ -2241,7 +2384,7 @@ test("Real ordinary primary publication joins full UTF-8 source, classifies expo
       } else if (mode === "result_eio") {
         assert.equal(existsSync(join(stateDir, "result.json")), false);
         assert.equal(await readFile(attemptsPath, "utf8"), "1", "No fallback synthetic result after precommit failure");
-        assert.equal((await readdir(join(stateDir, "evidence"))).filter(name => /^primary-.*\.txt$/.test(name)).length, 1);
+        assert.equal((await readdir(join(stateDir, "evidence"))).filter(name => name === "primary.txt").length, 1);
       } else if (mode === "workload_failure" || mode === "diagnostics_failure_eio") {
         const result = JSON.parse(await readFile(join(stateDir, "result.json"), "utf8"));
         assert.equal(result.code, 7); assert.equal(result.terminal_acceptance, "natural"); assert.equal(await readFile(attemptsPath, "utf8"), "1");

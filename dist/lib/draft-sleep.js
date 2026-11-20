@@ -215,7 +215,7 @@ export function processDraftSleepReview(state, deps) {
     }
     let status;
     try {
-        status = deps.getRunStatus(state.runId);
+        status = deps.getRunStatus(state.runStateDir ?? state.runId);
     }
     catch (error) {
         return {
@@ -404,6 +404,7 @@ export function createDraftSleepScheduler(deps) {
                             nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"draft\"}",
                             phase: "failed",
                             runId: undefined,
+                            runStateDir: undefined,
                             updatedAt: now().toISOString(),
                         });
                         return;
@@ -431,6 +432,7 @@ export function createDraftSleepScheduler(deps) {
                             phase: "launched",
                             reviewerInputPath: batch.reviewerInputPath,
                             runId: launched.run,
+                            ...(typeof launched.state_dir === "string" ? { runStateDir: launched.state_dir } : {}),
                             sourcePaths: batch.sourcePaths,
                             updatedAt: now().toISOString(),
                         });

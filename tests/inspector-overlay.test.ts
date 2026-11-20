@@ -62,8 +62,8 @@ function compactPopupText(lines: readonly string[]): string {
 
 async function fixture(status = "done"): Promise<{ root: string; stateDir: string }> {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-actor-inspector-"));
-  const stateDir = join(root, "demo");
-  await mkdir(stateDir);
+  const stateDir = join(root, "owner", "demo");
+  await mkdir(stateDir, { recursive: true });
   await writeFile(
     join(stateDir, "run.json"),
     JSON.stringify({
@@ -638,7 +638,7 @@ async function runIdentityFixture() {
   const original = JSON.parse(await readFile(join(stateDir, "run.json"), "utf8"));
   const names = ["run_" + "a".repeat(59) + "x", "run_" + "a".repeat(59) + "y"];
   for (const [index, run] of names.entries()) {
-    const dir = join(root, run); await mkdir(dir);
+    const dir = join(root, "owner", run); await mkdir(dir);
     await writeFile(join(dir, "run.json"), JSON.stringify({ ...original, run, state_dir: dir, run_instance_id: "identity-generation-" + index,
       recipe_context_records: original.recipe_context_records.map((record: { recipe: Record<string, unknown> }) => ({ ...record, recipe: { ...record.recipe, selected_run_id: "AUTHORED_SELECTED_RUN_ID" } })),
     }));
@@ -684,9 +684,9 @@ test("AX Run control and selector mark real native-column gaps without changing 
 
 test("AX selected Run identity is whole and read-only in existing Recipe and Control documents at phone widths", async () => {
   const { root, names, records } = await runIdentityFixture();
-  const before = await readFile(join(root, names[1]!, "run.json"), "utf8");
+  const before = await readFile(join(root, "owner", names[1]!, "run.json"), "utf8");
   try {
-    assert.match(JSON.stringify(Inspector.readActorInspectorRecipe(join(root, names[1]!))), /AUTHORED_SELECTED_RUN_ID/);
+    assert.match(JSON.stringify(Inspector.readActorInspectorRecipe(join(root, "owner", names[1]!))), /AUTHORED_SELECTED_RUN_ID/);
     for (const rows of [10, 12, 30]) for (const width of [24, 52, 90, 140]) {
       let reads = 0, actions = 0;
       const { instance } = overlay(root, () => { actions++; throw Error("Identity reading must not act"); }, undefined,
@@ -720,7 +720,7 @@ test("AX selected Run identity is whole and read-only in existing Recipe and Con
         assert.equal(reads, 1); assert.equal(actions, 0);
       } finally { instance.dispose(); }
     }
-    assert.equal(await readFile(join(root, names[1]!, "run.json"), "utf8"), before);
+    assert.equal(await readFile(join(root, "owner", names[1]!, "run.json"), "utf8"), before);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

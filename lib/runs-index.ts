@@ -10,6 +10,7 @@ import { join, resolve } from "node:path";
 import { acquireFileMutationLock, writeTextAtomic } from "./file-state.ts";
 import { observeRunContextExportLocation, readRunContextIdentity, runContextExportPath, RUN_CONTEXT_SOURCE_METADATA_MAX_BYTES, type RunContextIndexIdentity } from "./runs-context-index.ts";
 import { RUN_DELIVERY_MODEL_MAX_BYTES } from "./limits.ts";
+import { isRetentionContainerName } from "./runs-retention.ts";
 import { readJsonFileResilient } from "./state-readers.ts";
 
 export interface RunStateIndexEntry {
@@ -66,6 +67,7 @@ export function discoverRunStateDirs(
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const child = join(directory, entry.name);
+      if (isRetentionContainerName(entry.name)) continue;
       if (existsSync(join(child, "run.json"))) stateDirs.push(child);
       if (depth + 1 < maxDepth) visit(child, depth + 1);
       else {

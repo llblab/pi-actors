@@ -1172,6 +1172,15 @@ test("Packaged controlled services declare only actor-local actions", () => {
   ]);
 });
 
+test("Packaged locker snapshot addresses the locker's directory, never its own runtime-owned state_dir", () => {
+  const snapshot = readPackageRecipe(join(packageRoot, "skills", "actors", "recipes", "resource-locker-snapshot.json"));
+  assert.ok(snapshot?.args?.includes("locker_dir:path"));
+  assert.equal(snapshot?.args?.some((arg: string) => arg.startsWith("state_dir:")), false);
+  assert.equal(Object.hasOwn(snapshot?.defaults ?? {}, "locker_dir"), false, "The locker directory is caller-supplied, not a hard-coded Run path");
+  assert.match(JSON.stringify(snapshot?.template), /--state-dir \{locker_dir\}/u);
+  assert.doesNotMatch(JSON.stringify(snapshot?.template), /\{state_dir\}/u);
+});
+
 test("Template recipe rejects oversized files before parsing", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-actors-recipes-"));
   try {

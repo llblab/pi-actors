@@ -11,6 +11,30 @@ Task IDs name bounded work, not execution order. The operator authorizes autonom
 - **Explicit gates:** U1 requires authorized loaded-host observation/reload; N1.2p needs actual Windows profile evidence, N1.3 an asset-distribution decision, and N1.6 separate activation admission. Original-clock/native-scope, macOS research and composition decisions retain their own B/C/T gates. Existing release permission does not adopt them.
 - **Evidence reuse:** Reuse the accepted three-OS SOURCE/PACKED quit witnesses for B2.4; extend only the missing descendants/triggers/same-ID/crash cases. N1.9 stays a gated unresolved risk, not an instruction to repeat the completed ownership inquiry.
 
+## 1. Run records and completion redesign — implementation
+
+Outcome: the approved [new-format contract](docs/run-record-and-completion.md) replaces the current Run layout and completion card, with no migration, no dual readers and no compatibility period. Session-scoped naming, the name ledger, cross-session singleton refusal and the canonical-file shadowing guard shipped in 1.0.0; pre-layout flat Run directories are left untouched and ignored (path-only, never name-resolvable). The current-implementation inventory and the privacy/persistence delta are recorded in that document; keep them truthful as slices land. Because 1.0.0 is the published stable baseline, the remaining no-migration format cut (R2/R3.2) is a breaking change and ships as a major version.
+
+### R1 — Session-scoped naming and namespaces
+
+Exit: A logical Pi session owns its Run names (`<recipe>-<ordinal>` from zero, exact explicit names never reused), and the name ledger is the only allocator truth. Names are allocated, and a bare name now resolves only inside an explicit owning session.
+
+- [ ] **R1.4 — Decide the singleton execution address.** Exclusivity is now enforced across sessions (`assertSingletonNotOwnedByAnotherSession`): a second session is refused while the service runs. Remaining and user-facing: `run:music-player` is still both the service locator and the execution name, derived from the Skill name (`lib/recipes-references.ts:1425`). Moving to `run:<recipe>-<ordinal>` per execution touches `skills/music-player/SKILL.md` (3 documented calls), the maintained Generative App, `tests/skills.test.ts:279`, `tests/async-runs.test.ts:468` and `tests/installed.scripts.test.ts:3605,3646`. Decide whether the service keeps a stable locator plus a per-execution address, or the documented literal changes. `resource-locker-snapshot` now takes an explicit `locker_dir`; callers pass the locker's directory.
+
+### R2 — Canonical Run records
+
+Exit: One canonical outcome record with projected diagnostics persisted before storage, a fixed set of retained sources, and each surviving saved view justified by an independent guarantee.
+
+- [ ] **R2.1 — Decide what a canonical outcome may store raw.** The specification now records the five persisted representations and what each one guarantees. The decision needed: whether the root `result.json` may keep the workload's recorded `output`/`command`/`error` strings unprojected (today it does, and projection happens only at export), or whether admission projection must move to the persistence boundary. The second option changes what a restored or hand-read Run shows when the privacy proof is unavailable, so it needs an explicit answer before implementation. Verify whichever direction with the privacy properties for encoded, nested, numeric and ambiguous scalars.
+- [ ] **R2.2 — Retire or justify duplicated outcome representations.** The specification now justifies the published view (publication, coverage, previews and the diagnostic descriptor) and the three retained sources (size and scope). Remaining work follows from the R2.1 answer: if the canonical record holds projected diagnostics, the view carries descriptors only; it never re-derives privacy from live metadata.
+
+### R3 — Completion card and cutover
+
+Exit: The delivered card uses one rooted `files` list, preserves the 48 KiB envelope and replayed text, and the cutover leaves old state and old messages untouched.
+
+- [ ] **R3.2 — Finish the root and layout cutover.** Run/session layout, name reservations and the declaration guards are in place inside the existing root; the specification records the inventory of untouched owners (delivery journal, review roots, retention, inspector defaults) and the observed divergence where a pre-upgrade flat directory is discovered but not name-resolvable. Pre-layout flat directories stay discoverable by path and are otherwise ignored (decided for 1.0.0; no scanner change). Settle old active work and shared service/review ownership, then verify with the source/packed lifecycle journeys plus the specification's acceptance witnesses. A fresh sibling root is optional, not required to separate layouts.
+- [ ] **R3.3 — Update the operating surfaces for R2/R3.2.** The `actors` Skill and Runs reference describe the 1.0.0 naming contract; bring them, maintained service adapters and the music-player singleton guidance (R1.4) in line again when the canonical record and cutover land.
+
 ## 2. Uniform runtime presentation — adopted, expectations owned; acceptance pending
 
 Outcome: JSON structured inputs, block-YAML runtime-output metadata and unchanged selected authored text/Markdown, as defined by [the AX contract](docs/agent-experience.md#json-input-yaml-output-opaque-content). This includes tool/spawn receipts, not only Actor results. Owned projections are migrated; this checkpoint does not imply loaded-host acceptance, native continuation, package publication or a service-carrier change. Registry notice text and runtime startup warnings retain their earlier flat layout. Existing machine/input/source/history contracts remain separate.
@@ -20,6 +44,12 @@ Outcome: JSON structured inputs, block-YAML runtime-output metadata and unchange
 Exit: New owned runtime projections use YAML without pseudo-records or serialized JSON objects: bare when metadata-only, `---`-delimited headers only when a separate text body follows. Literal content, meaning, source/privacy bounds and saved messages remain intact. Service-carrier adoption has its own evidence gate; do not delete current framing to simulate completion.
 
 - [ ] **F1.7 — Accept the rollout on a loaded host.** Source/headless audit is done: one shared framing owner keeps exactly one host-separation blank line on migrated paths, no runtime-authored object dump or pseudo-record remains in the migrated set, history/literal bodies are unchanged, and source/compiled/package parity passes. Remainder is the permitted loaded terminal/phone observation of one rollout candidate, including compact selected launch paths and direct files-group completion references/status, conditional Read first plus exact file-line continuation and no post-Markdown runtime footer, which needs the same separate authorization as U1; keep capture codecs and live claims distinct and claim no automatic default activation.
+
+### I1 — Meaningful Inspector Control tab
+
+Exit: The Control tab earns its place for a human operator. Today it is a read-only actor-local Control diagnostic (declared actions, endpoint readiness, queue capacity, recent request statuses) and is empty for the many Runs that declare no Control. The operator reports it is not user-friendly; choose a direction before implementation.
+
+- [ ] **I1.1 — Decide the tab's shape.** Options: (a) hide the tab when a Run declares no actor-local action; (b) add explicit action buttons for controlled services, modelled on Kill — confirmation popup, exact owner/generation fencing, and honest delivered-is-not-handled feedback; this is new UI actuation authority and needs its own contract, not a relaxation of "Enter navigates only"; (c) fold the Control summary into the Recipe tab and the request history into Trace. Verify against real controlled services (`music-player/playback`, `actors/resource-locker`) and a Run with no Control.
 
 ### U1 — Loaded UI/AX acceptance
 

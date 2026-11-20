@@ -57,8 +57,12 @@ function collectRunSummary(rootValue) {
     const runDir = dirname(file);
     const progress = readJson(join(runDir, "progress.json"));
     const result = readJson(join(runDir, "result.json"));
+    // A Run lives inside its session namespace (<session>/<run>); a pre-layout flat Run has no session segment.
+    const segments = relative(root, runDir).split(sep);
+    const session = segments.length === 2 ? segments[0] : undefined;
     rows.push({
-      run: run.run_id ?? run.run ?? relative(root, file).split(sep)[0],
+      run: run.run_id ?? run.run ?? segments.at(-1),
+      ...(session === undefined ? {} : { session }),
       status: getRunStatus(run, progress, result),
       recipe: run.recipe ?? run.recipe_file ?? "",
       updated:
@@ -69,9 +73,21 @@ function collectRunSummary(rootValue) {
         run.started_at ??
         "",
     });
+    Object.defineProperty(rows.at(-1), "dir", { value: runDir, enumerable: false });
   }
-  rows.sort((a, b) => `${a.status}:${a.run}`.localeCompare(`${b.status}:${b.run}`));
+  rows.sort((a, b) => `${a.status}:${a.run}:${a.session ?? ""}`.localeCompare(`${b.status}:${b.run}:${b.session ?? ""}`));
   return rows;
+}
+
+/** Locate one Run's Trace by exact `<session>/<run>` or a bare name that only one session uses; never guess. */
+function locateRunTrace(root, runs, inspectedRun) {
+  const [sessionPart, namePart] = inspectedRun.includes("/") ? inspectedRun.split("/", 2) : [undefined, inspectedRun];
+  const matches = runs.filter((row) => row.run === namePart && (sessionPart === undefined || row.session === sessionPart));
+  if (matches.length === 1) return { file: join(matches[0].dir, "trace.jsonl") };
+  if (matches.length > 1) {
+    return { unavailable: "ambiguous_run_name", sessions: matches.map((row) => row.session ?? null) };
+  }
+  return { file: join(root, inspectedRun, "trace.jsonl") };
 }
 
 function tailJsonl(fileValue, linesValue = "80") {
@@ -114,6 +130,7 @@ function runOpsSnapshot(
       return [{
         run: run.run,
         reason: "running-stale",
+        ...(run.session === undefined ? {} : { session: run.session }),
         suggested_inspect: { target: `run:${run.run}`, view: "control" },
       }];
     }
@@ -121,15 +138,18 @@ function runOpsSnapshot(
       return [{
         run: run.run,
         reason: `terminal-${run.status}`,
+        ...(run.session === undefined ? {} : { session: run.session }),
         suggested_inspect: { target: `run:${run.run}`, view: "trace" },
       }];
     }
     return [];
   });
+  const located = locateRunTrace(root, runs, inspectedRun);
   console.log(JSON.stringify({
     runs,
     inspectedRun,
-    trace: tailJsonl(join(root, inspectedRun, "trace.jsonl"), linesValue),
+    trace: located.file ? tailJsonl(located.file, linesValue) : [],
+    ...(located.unavailable ? { trace_unavailable: located.unavailable, trace_candidate_sessions: located.sessions } : {}),
     recommendations,
   }, null, 2));
 }

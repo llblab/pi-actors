@@ -10,6 +10,13 @@ export interface ActorInspectorRunItem {
     status: string;
     updatedAt?: string;
 }
+/**
+ * Owned Runs live inside the owner's session namespace, so the Inspector lists and reads only that
+ * directory. Pre-layout flat Run directories under the root are ignored, never reconstructed.
+ */
+export declare function actorInspectorSessionRoot(stateRoot: string, ownerId: string): string;
+/** One listed Run's directory; the name comes from the owner's own session listing. */
+export declare function actorInspectorRunStateDir(stateRoot: string, ownerId: string, run: string): string;
 export declare function readActorInspectorRuns(stateRoot: string, ownerId: string): ActorInspectorRunItem[];
 export declare function readActorInspectorRecipe(stateDir: string): RunRecipeView;
 export interface ActorInspectorKillResult {

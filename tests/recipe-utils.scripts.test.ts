@@ -45,8 +45,9 @@ async function writeRun(
   root: string,
   run: string,
   phase: string,
+  session?: string,
 ): Promise<void> {
-  const dir = join(root, run);
+  const dir = session === undefined ? join(root, run) : join(root, session, run);
   await mkdir(dir, { recursive: true });
   await writeFile(
     join(dir, "run.json"),
@@ -173,6 +174,34 @@ test("actor run-utils snapshot combines Runs, Trace, and recommendations", async
       ),
       true,
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("actor run-utils snapshot resolves Runs inside session namespaces without guessing a shared name", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-actors-recipe-utils-"));
+  try {
+    await writeRun(root, "solo", "running", "session-a");
+    await writeRun(root, "review-0", "failed", "session-a");
+    await writeRun(root, "review-0", "done", "session-b");
+    const trace = (session: string, run: string, kind: string) =>
+      writeFile(join(root, session, run, "trace.jsonl"), `${JSON.stringify({ id: kind, kind, summary: kind, ts: new Date().toISOString() })}\n`);
+    await trace("session-a", "solo", "solo-event");
+    await trace("session-b", "review-0", "b-event");
+    const rows = JSON.parse((await runActorScriptAsync(["run-summary", root])).stdout);
+    assert.deepEqual(rows.map((row: { run: string; session?: string }) => `${row.session}/${row.run}`).sort(),
+      ["session-a/review-0", "session-a/solo", "session-b/review-0"]);
+    const solo = JSON.parse((await runActorScriptAsync(["run-ops-snapshot", root, "solo", "5", "1"])).stdout);
+    assert.equal(solo.trace[0].kind, "solo-event");
+    const shared = JSON.parse((await runActorScriptAsync(["run-ops-snapshot", root, "review-0", "5", "1"])).stdout);
+    assert.deepEqual(shared.trace, []);
+    assert.equal(shared.trace_unavailable, "ambiguous_run_name");
+    assert.deepEqual([...shared.trace_candidate_sessions].sort(), ["session-a", "session-b"]);
+    const exact = JSON.parse((await runActorScriptAsync(["run-ops-snapshot", root, "session-b/review-0", "5", "1"])).stdout);
+    assert.equal(exact.trace[0].kind, "b-event");
+    assert.equal(shared.recommendations.some((item: { session?: string; reason: string }) =>
+      item.session === "session-a" && item.reason === "terminal-failed"), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

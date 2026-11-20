@@ -15,8 +15,9 @@ async function writeRun(
   root: string,
   run: string,
   ownerId: string,
+  namespace = ownerId,
 ): Promise<string> {
-  const stateDir = join(root, run);
+  const stateDir = join(root, namespace, run);
   await mkdir(stateDir, { recursive: true });
   await writeFile(
     join(stateDir, "run.json"),
@@ -34,6 +35,12 @@ test("inspector rejects stale cross-session run selections", async () => {
   try {
     await writeRun(root, "foreign", "old-owner");
     await writeRun(root, "owned", "new-owner");
+    // Directory position is not ownership: a foreign Run planted inside this session's namespace stays hidden.
+    await writeRun(root, "planted", "old-owner", "new-owner");
+    // A pre-layout flat directory directly under the root is ignored, even when its recorded owner matches.
+    const legacy = join(root, "legacy-flat");
+    await mkdir(legacy, { recursive: true });
+    await writeFile(join(legacy, "run.json"), JSON.stringify({ ownerId: "new-owner", run: "legacy-flat" }));
     const runs = readActorInspectorRuns(root, "new-owner");
     assert.deepEqual(runs.map((item) => item.run), ["owned"]);
   } finally {
@@ -291,8 +298,8 @@ test("Inspector kill routes exact owner and generation through canonical control
   });
   assert.deepEqual(result, { ok: true, message: "Killed run:demo." });
   assert.deepEqual(calls, [
-    `status:${join("/runs", "demo")}`,
-    `kill:${join("/runs", "demo")}:session-a:${INSTANCE_A}`,
+    `status:${join("/runs", "session-a", "demo")}`,
+    `kill:${join("/runs", "session-a", "demo")}:session-a:${INSTANCE_A}`,
   ]);
 });
 

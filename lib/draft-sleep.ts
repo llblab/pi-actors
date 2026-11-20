@@ -49,6 +49,8 @@ export interface DraftSleepState {
   processingAttempts?: number;
   reviewerInputPath: string;
   runId?: string;
+  /** Exact Run directory captured at launch: processing reads it without guessing the current session. */
+  runStateDir?: string;
   sourcePaths: string[];
   updatedAt: string;
 }
@@ -68,7 +70,7 @@ export interface DraftSleepSchedulerDeps {
   delayMs?: number;
   draftRoot?: string;
   hasActiveActors(): boolean;
-  launch(batch: DraftSleepBatch): { run: string };
+  launch(batch: DraftSleepBatch): { run: string; state_dir?: string };
   now?(): Date;
   process?(state: DraftSleepState): DraftSleepProcessResult;
   recipeRoot?: string;
@@ -325,7 +327,7 @@ export function processDraftSleepReview(
   }
   let status: Record<string, unknown>;
   try {
-    status = deps.getRunStatus(state.runId);
+    status = deps.getRunStatus(state.runStateDir ?? state.runId);
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : String(error),
@@ -511,6 +513,7 @@ export function createDraftSleepScheduler(
           nextAction: "actors_control_apply target=runtime action=review.retry input={\"scope\":\"draft\"}",
           phase: "failed",
           runId: undefined,
+          runStateDir: undefined,
           updatedAt: now().toISOString(),
         });
         return;
@@ -541,6 +544,7 @@ export function createDraftSleepScheduler(
           phase: "launched",
           reviewerInputPath: batch.reviewerInputPath,
           runId: launched.run,
+          ...(typeof launched.state_dir === "string" ? { runStateDir: launched.state_dir } : {}),
           sourcePaths: batch.sourcePaths,
           updatedAt: now().toISOString(),
         } satisfies DraftSleepState);

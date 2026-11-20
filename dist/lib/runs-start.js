@@ -8,7 +8,7 @@ import { basename, join } from "node:path";
 import { acquireFileMutationLock, mutationLockPath, } from "./file-state.js";
 import { assertNoRetainedDescendantLaunchScope } from "./runs-descendant-launches.js";
 import { assertNoRetainedNativeLaunchScope } from "./runs-native-launches.js";
-import { isRunStopResultCapture, readRunStopClaim, RUN_STOP_CLAIM_FILE } from "./runs-outcomes.js";
+import { isRunStopResultCapture, readRunStopClaim, RUN_RETAINED_SOURCE_FILES, RUN_STOP_CLAIM_FILE } from "./runs-outcomes.js";
 import { RUN_STATE_OWNERSHIP_FILE } from "./runs-ownership.js";
 import { isAlive, verifyRunProcessIdentity, } from "./runs-process.js";
 function assertNoPendingStop(stateDir, meta) {
@@ -103,6 +103,8 @@ export function prepareStateDirForStart(stateDir, readJson, _runnerPath) {
         "terminal-delivery-failure.json",
         "terminal-handled.json",
         "trace.jsonl",
+        // Retained sources carry a fixed name per execution; the previous generation's copies lose their binding with its result.
+        ...RUN_RETAINED_SOURCE_FILES,
     ]) {
         rmSync(join(stateDir, file), { force: true });
     }
